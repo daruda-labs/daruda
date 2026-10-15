@@ -825,6 +825,38 @@ fn a_running_cli_run_is_left_to_its_tracker_on_restart() {
 }
 
 #[test]
+fn the_cli_tracker_can_reconcile_a_run_only_after_it_confirms_ownership_was_lost() {
+    for process in [
+        CliProcessState::Unknown,
+        CliProcessState::ExitConfirmed { ended_at: at(8) },
+    ] {
+        let mut book = running_book(Source::Cli, RUN);
+        commit(
+            &mut book,
+            TaskEvent::CliProcessObserved {
+                exec: exec(),
+                process,
+                at: at(8),
+            },
+        );
+        commit(
+            &mut book,
+            TaskEvent::Reconciled {
+                exec: exec(),
+                at: at(9),
+            },
+        );
+        assert!(matches!(
+            task(&book).lifecycle,
+            Lifecycle::Interrupted {
+                cause: InterruptCause::AppRestart,
+                ..
+            }
+        ));
+    }
+}
+
+#[test]
 fn reconciling_before_a_lane_exists_is_undelivered_without_a_worktree() {
     let mut book = TasksBook::default();
     commit(&mut book, TaskEvent::Created { spec: spec() });

@@ -1,52 +1,9 @@
-//! PTY-tracker event pump — bridges the GPUI-free `daruda_agent::pty_tracker`
-//! channel into the GPUI Workspace entity.
-//!
-//! The tracker emits `BindingChanged` / `SessionProcessExited` events over an
-//! `mpsc::Receiver`. GPUI tasks can't block on a std channel, so a 100 ms
-//! timer drains every queued event per tick — a burst (e.g. tab close) would
-//! lag a single read-per-tick.
+//! Window projections of events from the process-owned PTY tracker.
 
-use std::sync::mpsc::{Receiver, TryRecvError};
-use std::time::Duration;
-
-use gpui::{Context, Task};
+use gpui::Context;
 
 use crate::workspace::Workspace;
 use daruda_agent::pty_tracker::PtyTrackerEvent;
-
-/// 100 ms: visible state (sub-row badges, active outline) snaps without
-/// perceptible lag, without waking the background executor gratuitously.
-const POLL_INTERVAL: Duration = Duration::from_millis(100);
-
-/// Spawn the long-lived task that pulls events from `pty_rx` and
-/// applies them to the Workspace via [`Workspace::apply_pty_tracker_event`].
-///
-/// The returned task is held by Workspace as `_pty_event_pump`;
-/// dropping it (Workspace teardown) drops the receiver, so the tracker
-/// thread's next `send` fails and it shuts down cleanly.
-pub(in crate::workspace) fn spawn(
-    pty_rx: Receiver<PtyTrackerEvent>,
-    cx: &mut Context<Workspace>,
-) -> Task<()> {
-    cx.spawn(async move |this, cx| {
-        'outer: loop {
-            cx.background_executor().timer(POLL_INTERVAL).await;
-            loop {
-                let ev = match pty_rx.try_recv() {
-                    Ok(e) => e,
-                    Err(TryRecvError::Empty) => break,
-                    Err(TryRecvError::Disconnected) => break 'outer,
-                };
-                if this
-                    .update(cx, |ws, cx| ws.apply_pty_tracker_event(ev, cx))
-                    .is_err()
-                {
-                    break 'outer;
-                }
-            }
-        }
-    })
-}
 
 impl Workspace {
     /// Apply one tracker event. Updates `pty_claude_bindings` and the owning
@@ -57,7 +14,12 @@ impl Workspace {
         match event {
             PtyTrackerEvent::BindingChanged { pane_id, binding } => {
                 if let Some(binding) = &binding {
-                    self.record_task_cli_binding(pane_id, binding, cx);
+                    let transcript = self
+                        .claude_sessions
+                        .status
+                        .get(&binding.session_id)
+                        .and_then(|file| file.transcript_path.clone());
+                    self.record_task_cli_transcript(&binding.session_id, transcript.as_deref(), cx);
                 }
                 let changed = match binding {
                     Some(new) => {
@@ -81,9 +43,8 @@ impl Workspace {
             }
             PtyTrackerEvent::SessionProcessExited {
                 session_id,
-                claude_pid,
+                claude_pid: _,
             } => {
-                self.record_task_cli_exit(&session_id, claude_pid, cx);
                 self.claude_sessions
                     .last_pushed_notification
                     .remove(&session_id);

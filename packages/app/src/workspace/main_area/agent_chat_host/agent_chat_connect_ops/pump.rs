@@ -32,6 +32,30 @@ impl Workspace {
         resume: Option<String>,
         cx: &mut Context<Self>,
     ) {
+        #[cfg(test)]
+        if let Some(probes) = cx
+            .try_global::<super::TestAgentConnections>()
+            .map(|connections| connections.0.clone())
+        {
+            if let Some(view) = self.agent_chat_view(pane_id).cloned() {
+                let (handle, probe) = daruda_acp::AcpSessionHandle::detached_for_test();
+                probes.borrow_mut().push(probe);
+                view.update(cx, |view, _| view.attach_handle(handle));
+                self.fold_agent_chat_event(
+                    pane_id,
+                    daruda_acp::AcpEvent::Connected {
+                        session_id: format!("test-session-{pane_id}"),
+                        modes: None,
+                        config_options: Vec::new(),
+                        capabilities: Default::default(),
+                        login_methods: Vec::new(),
+                        program: None,
+                    },
+                    cx,
+                );
+            }
+            return;
+        }
         let load_intent = self
             .agent_chat_view(pane_id)
             .and_then(|view| view.read(cx).load_intent());
@@ -54,7 +78,10 @@ impl Workspace {
             return;
         }
 
-        if strict_restore && let Some(view) = self.agent_chat_view(pane_id).cloned() {
+        if (strict_restore
+            || crate::runs::RunsHost::pane_execution(self.run_pane(pane_id), cx).is_some())
+            && let Some(view) = self.agent_chat_view(pane_id).cloned()
+        {
             let chat = view.read(cx);
             let account = self
                 .main_area
@@ -70,13 +97,21 @@ impl Workspace {
                     )
                 });
                 self.notify_status_docks(cx);
-                self.fail_agent_chat_task(pane_id, cx);
+                self.fail_agent_chat_start(
+                    pane_id,
+                    daruda_store::tasks::machine::StartFailure::AgentMissing,
+                    cx,
+                );
                 return;
             }
         }
 
         let Some(plan) = self.prepare_agent_chat_connection(pane_id, &cwd, cx) else {
-            self.fail_agent_chat_task(pane_id, cx);
+            self.fail_agent_chat_start(
+                pane_id,
+                daruda_store::tasks::machine::StartFailure::ConnectUnavailable,
+                cx,
+            );
             return;
         };
         let AgentChatConnectionPlan {
@@ -327,6 +362,7 @@ impl Workspace {
                     // to surface the failure on.
                     // SILENT-OK: workspace/window dropped before connect resolved
                     let _ = this.update(cx, |ws, cx| {
+                        ws.fail_agent_chat_task(pane_id, cx);
                         if let Some(view) = ws.agent_chat_view(pane_id).cloned() {
                             let (syntax_theme, is_light) = ws.agent_chat_theme_params(cx);
                             let effect = view.update(cx, |v, cx| {
@@ -343,7 +379,6 @@ impl Workspace {
                             // Connecting badge doesn't linger after the pulse
                             // stops.
                             ws.notify_status_docks(cx);
-                            ws.fail_agent_chat_task(pane_id, cx);
                         }
                         let report =
                             ErrorReport::new(crate::surface::strings::error::acp_connect_failed())
@@ -406,7 +441,17 @@ impl Workspace {
         } else if failed_to_start_prompt {
             // Startup can fail before a task's buffered prompt starts a turn;
             // there is no activity completion edge in that case.
-            self.fail_agent_chat_task(pane_id, cx);
+            if let Some(exec) =
+                crate::runs::RunsHost::pane_execution(self.run_pane(pane_id), cx).cloned()
+            {
+                crate::runs::RunsHost::delivery_failed(
+                    exec,
+                    crate::runs::DeliveryFailure::Dropped(
+                        daruda_store::tasks::machine::UndeliveredReason::ConnectFailed,
+                    ),
+                    cx,
+                );
+            }
         }
         self.notify_status_docks(cx);
     }

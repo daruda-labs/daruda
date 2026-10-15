@@ -177,7 +177,19 @@ fn check_payload(record: &TaskRecord, event: &TaskEvent) -> Result<(), TaskRejec
             Err(TaskRejected::NotCliExecution { id: id() })
         }
         TaskEvent::Reconciled { .. }
-            if record.lifecycle.kind() == LifecycleKind::Running && is_cli =>
+            if record.lifecycle.kind() == LifecycleKind::Running
+                && is_cli
+                && !record
+                    .execution
+                    .as_ref()
+                    .and_then(|run| run.source.cli_process())
+                    .is_some_and(|process| {
+                        matches!(
+                            process,
+                            crate::tasks::CliProcessState::Unknown
+                                | crate::tasks::CliProcessState::ExitConfirmed { .. }
+                        )
+                    }) =>
         {
             Err(TaskRejected::CliRunOwnedByTracker { id: id() })
         }

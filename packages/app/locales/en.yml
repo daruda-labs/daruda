@@ -340,6 +340,7 @@ task:
   # Task error messages shown in the status tooltip and error dialog.
   error_lane_gone: "worktree gone"
   error_prompt_undelivered: "prompt could not reach the pane (pane closed)"
+  error_remote_lane: "Tasks cannot run in remote worktrees. Choose a local worktree."
   error_session_failed: "session error"
   # Escalation wording — why daruda ended the task itself. Keeps the ACP stop
   # reason verbatim so it still matches what the adapter reported.

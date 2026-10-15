@@ -388,7 +388,7 @@ fn close_active_project_releases_pane_tracking(cx: &mut TestAppContext) {
                 .collect();
             assert!(!pane_ids.is_empty(), "tab spawns at least one pane");
             for id in &pane_ids {
-                ws.claude_sessions.pty_tracker.register(*id, 4242);
+                crate::runs::RunsHost::register_terminal(ws.run_pane(*id), 4242, cx);
                 ws.claude_sessions.pty_bindings.insert(
                     *id,
                     daruda_agent::pty_tracker::PtyBinding {
@@ -407,7 +407,12 @@ fn close_active_project_releases_pane_tracking(cx: &mut TestAppContext) {
                 "closed project's pane bindings must be dropped"
             );
             assert!(
-                ws.claude_sessions.pty_tracker.tracked_pane_ids().is_empty(),
+                pane_ids
+                    .iter()
+                    .all(
+                        |id| crate::runs::RunsHost::tracked_terminal(ws.run_pane(*id), cx)
+                            .is_none()
+                    ),
                 "closed project's panes must be unregistered from the tracker"
             );
             assert!(

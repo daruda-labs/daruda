@@ -211,6 +211,7 @@ async fn task_stop_answers_after_the_projection_changes(cx: &mut gpui::TestAppCo
 #[gpui::test]
 async fn an_approved_start_answers_with_its_worktree_and_chat(cx: &mut gpui::TestAppContext) {
     let fixture = workspace_with_agent_chat(cx);
+    let _connections = cx.update(crate::workspace::Workspace::fake_agent_connections_for_test);
     let (workspace, lane) = fixture
         .workspace
         .read_with(cx, |ws, _| (ws.uuid(), ws.control_active_lane()));
@@ -240,8 +241,6 @@ async fn an_approved_start_answers_with_its_worktree_and_chat(cx: &mut gpui::Tes
     assert_eq!(started, task);
     assert_eq!(handle, LaneHandle::new(workspace, lane));
     assert_eq!(chat.workspace, workspace);
-    // It ran: the test agent's session then fails, which is the task's own
-    // later lifecycle, not this answer's.
     cx.update(|cx| {
         let task = cx.global::<GlobalTasks>().get(&task).unwrap();
         assert_ne!(task.lifecycle, Lifecycle::Backlog);

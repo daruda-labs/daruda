@@ -101,7 +101,9 @@ enum Access {
 /// The process-wide owner of the task log.
 pub(crate) struct RunsHost {
     access: Access,
-    effects: Option<Rc<dyn RunsEffects>>,
+    pub(super) delivery: super::delivery::Delivery,
+    pub(super) cli: Option<super::cli::CliTracker>,
+    pub(super) effects: Option<Rc<dyn RunsEffects>>,
     /// Closes once the newest proposal has reached the projection; the next
     /// proposal waits on it, so projections apply in proposal order.
     tail: smol::channel::Receiver<()>,
@@ -195,6 +197,8 @@ impl RunsHost {
         OpenedRuns {
             host: RunsHost {
                 access,
+                delivery: Default::default(),
+                cli: None,
                 effects: None,
                 tail: settled_tail(),
                 legacy: LegacyMirror::new(legacy_dir),
@@ -373,6 +377,7 @@ impl RunsHost {
     pub(crate) fn install(opened: OpenedRuns, cx: &mut App) {
         cx.set_global(opened.projection);
         cx.set_global(opened.host);
+        Self::install_cli_tracker(cx);
     }
 
     /// Install a host when none was: a test gets a scratch log, anything
@@ -460,6 +465,11 @@ impl RunsHost {
     pub(crate) fn is_writable(cx: &App) -> bool {
         matches!(cx.global::<RunsHost>().access, Access::Writable(_))
     }
+
+    #[cfg(test)]
+    pub(crate) fn sequence_for_test(cx: &App) -> u64 {
+        cx.global::<GlobalTasks>().seq
+    }
 }
 
 impl OpenedRuns {
@@ -467,6 +477,8 @@ impl OpenedRuns {
         Self {
             host: RunsHost {
                 access: Access::Unavailable,
+                delivery: Default::default(),
+                cli: None,
                 effects: None,
                 tail: settled_tail(),
                 legacy: LegacyMirror::new(None),

@@ -12,7 +12,8 @@ use daruda_agent::pty_tracker::PtyTrackerEvent;
 use daruda_chat::view::{AgentSessionStatus, LoadIntent, PromptDispatch};
 use daruda_store::project::PaneCwd;
 use daruda_store::tasks::{
-    AgentChatAccess, SessionEndReason, TaskAgentSurface, TaskExecutionSource,
+    AgentChatAccess, SessionEndReason, TaskAgentSurface, TaskEvent, TaskExecution,
+    TaskExecutionSource,
 };
 use gpui::{AppContext as _, TestAppContext, Window};
 
@@ -64,9 +65,9 @@ fn start(
         cx,
     );
     let identity = ws
-        .bind_task_cli_execution(&exec, pane, cwd)
+        .bind_task_cli_execution(&exec, pane, cwd, cx)
         .expect("a terminal takes the run");
-    ws.track_task_cli_execution(pane, identity.account_id);
+    ws.track_task_cli_execution(pane, identity.account_id, cx);
     commit_now(
         vec![
             TaskEvent::LanePrepared {
@@ -110,6 +111,21 @@ fn rerun(ws: &mut Workspace, id: &str, pane: PaneId, cx: &mut Context<Workspace>
     start(ws, id, pane, &std::env::temp_dir(), None, cx)
 }
 
+fn apply_tracker_event(ws: &mut Workspace, event: PtyTrackerEvent, cx: &mut Context<Workspace>) {
+    match &event {
+        PtyTrackerEvent::BindingChanged {
+            pane_id,
+            binding: Some(binding),
+        } => ws.record_task_cli_binding(*pane_id, binding, cx),
+        PtyTrackerEvent::SessionProcessExited {
+            session_id,
+            claude_pid,
+        } => ws.record_task_cli_exit(session_id, *claude_pid, cx),
+        PtyTrackerEvent::BindingChanged { binding: None, .. } => {}
+    }
+    ws.apply_pty_tracker_event(event, cx);
+}
+
 fn lifecycle(id: &str, cx: &gpui::App) -> daruda_store::tasks::Lifecycle {
     cx.global::<GlobalTasks>()
         .get(id)
@@ -141,7 +157,8 @@ fn process(id: &str, cx: &gpui::App) -> CliProcessState {
 }
 
 fn bind(ws: &mut Workspace, pane: PaneId, pid: u32, session: &str, cx: &mut Context<Workspace>) {
-    ws.apply_pty_tracker_event(
+    apply_tracker_event(
+        ws,
         PtyTrackerEvent::BindingChanged {
             pane_id: pane,
             binding: Some(PtyBinding {
@@ -164,7 +181,8 @@ fn exit(ws: &mut Workspace, pid: u32, session: &str, cx: &mut Context<Workspace>
         .map(|(pane, _)| *pane)
         .collect();
     for pane_id in bound {
-        ws.apply_pty_tracker_event(
+        apply_tracker_event(
+            ws,
             PtyTrackerEvent::BindingChanged {
                 pane_id,
                 binding: None,
@@ -172,7 +190,8 @@ fn exit(ws: &mut Workspace, pid: u32, session: &str, cx: &mut Context<Workspace>
             cx,
         );
     }
-    ws.apply_pty_tracker_event(
+    apply_tracker_event(
+        ws,
         PtyTrackerEvent::SessionProcessExited {
             session_id: session.into(),
             claude_pid: pid,
@@ -249,24 +268,27 @@ fn start_creates_a_run_owned_by_the_pane_before_any_session(cx: &mut TestAppCont
             let pane = terminal_panes(ws)[0];
             // A stub pane has no shell to register; a spawned one is
             // registered before any task can be dispatched into it.
-            ws.claude_sessions.pty_tracker.register(pane, 4242);
+            RunsHost::register_terminal(ws.run_pane(pane), 4242, cx);
             start(ws, &id, pane, &cwd, None, cx);
             let execution = run(&id, cx);
             assert_eq!(execution.session_id, None);
             assert_eq!(process(&id, cx), CliProcessState::Discovering);
             assert!(!execution.chat_available());
             let owner = ws.active_runtime().panes.iter().find(|p| p.id == pane);
-            let PaneContent::Terminal(terminal) = &owner.unwrap().content else {
+            let PaneContent::Terminal(_) = &owner.unwrap().content else {
                 panic!("terminal pane");
             };
             assert_eq!(
-                terminal.task_run,
+                RunsHost::pane_execution(ws.run_pane(pane), cx).cloned(),
                 Some(ExecutionRef {
                     task_id: id.clone(),
                     execution_id: execution.id
                 })
             );
-            assert!(ws.claude_sessions.pty_tracker.awaits_binding(pane));
+            assert!(
+                RunsHost::cli_tracker(cx)
+                    .awaits_binding(RunsHost::tracked_terminal(ws.run_pane(pane), cx).unwrap())
+            );
         })
     })
     .unwrap();
@@ -349,20 +371,14 @@ fn late_events_never_reach_a_rerun(cx: &mut TestAppContext) {
             assert_eq!(run(&id, cx).id, rerun);
 
             // A binding still held against the replaced run id is ignored.
-            let PaneContent::Terminal(terminal) = &mut ws
-                .active_runtime_mut()
-                .panes
-                .iter_mut()
-                .find(|p| p.id == pane)
-                .unwrap()
-                .content
-            else {
-                panic!("terminal pane");
-            };
-            terminal.task_run = Some(ExecutionRef {
-                task_id: id.clone(),
-                execution_id: "replaced-run".into(),
-            });
+            RunsHost::bind_execution(
+                ws.run_pane(pane),
+                ExecutionRef {
+                    task_id: id.clone(),
+                    execution_id: "replaced-run".into(),
+                },
+                cx,
+            );
             bind(ws, pane, 12, "stale-session", cx);
             assert_eq!(run(&id, cx).session_id, None);
         })
@@ -426,7 +442,8 @@ fn only_the_observed_pid_leaving_the_os_confirms_exit(cx: &mut TestAppContext) {
             assert_eq!(process(&id, cx), CliProcessState::Running { pid: 10 });
 
             // Detaching the pane is not an exit either.
-            ws.apply_pty_tracker_event(
+            apply_tracker_event(
+                ws,
                 PtyTrackerEvent::BindingChanged {
                     pane_id: pane,
                     binding: None,
@@ -505,7 +522,7 @@ fn continue_needs_the_session_to_be_idle_everywhere(cx: &mut TestAppContext) {
             assert!(ws.cli_run_may_continue(&run, "cli-session", cx));
 
             let dir = tempfile::tempdir().unwrap();
-            ws.claude_sessions.pty_tracker.track_session(
+            RunsHost::cli_tracker(cx).track_session(
                 "cli-session".into(),
                 std::process::id(),
                 dir.path().to_path_buf(),
@@ -544,15 +561,11 @@ fn restart_rearms_tracking_for_running_pids_only(cx: &mut TestAppContext) {
             let orphan = set("orphan-session", CliProcessState::Discovering, cx);
             ws.restore_task_cli_tracking(cx);
             assert_eq!(
-                ws.claude_sessions
-                    .pty_tracker
-                    .known_process("running-session"),
+                RunsHost::cli_tracker(cx).known_process("running-session"),
                 Some(4242)
             );
             assert_eq!(
-                ws.claude_sessions
-                    .pty_tracker
-                    .known_process("ended-session"),
+                RunsHost::cli_tracker(cx).known_process("ended-session"),
                 None
             );
             // Its pane did not survive the restart, so nothing will bind it.
@@ -625,7 +638,7 @@ fn cli_snapshot_refuses_every_input_path(cx: &mut TestAppContext) {
                 ),
                 before
             );
-            assert!(ws.task_chat_owner(id, cx).is_none());
+            assert!(ws.task_chat_execution(id, cx).is_none());
             assert!(ws.requires_exact_resume(id, cx));
         });
     })
@@ -713,7 +726,7 @@ fn continue_waits_for_confirmed_exit_and_a_completed_load(cx: &mut TestAppContex
             assert_eq!(live.drain(), (1, false));
             let v = view.read(cx);
             assert_eq!(v.session_id(), Some("cli-session"));
-            assert!(ws.task_chat_owner(id, cx).is_none());
+            assert!(ws.task_chat_execution(id, cx).is_none());
             assert_eq!(lifecycle(&task, cx), state);
         });
     })
@@ -839,7 +852,16 @@ fn open_chat_marks_a_cli_run_read_only_and_restore_keeps_it(cx: &mut TestAppCont
                 .unwrap();
             assert_eq!(chat.view.read(cx).access(), expected);
             assert_eq!(chat.agent_id, ws.mirrors.agents[0].id);
-            assert!(chat.task_run.is_none());
+            assert!(
+                !ws.main_area
+                    .runtimes
+                    .values()
+                    .flat_map(|rt| &rt.panes)
+                    .filter(|pane| pane
+                        .agent_chat_content()
+                        .is_some_and(|content| content.view == chat.view))
+                    .any(|pane| RunsHost::pane_execution(ws.run_pane(pane.id), cx).is_some())
+            );
         });
     })
     .unwrap();

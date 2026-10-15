@@ -27,6 +27,8 @@ pub enum PromptOrigin {
 /// a "queued" notice is owed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PromptDispatch {
+    /// The connected session stopped accepting prompt commands.
+    Unavailable,
     ReadOnly,
     SentNow,
     Queued,

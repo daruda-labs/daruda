@@ -24,7 +24,6 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use daruda_store::project::PaneCwd;
-use daruda_store::tasks::ExecutionRef;
 use daruda_terminal::view::{TerminalInput, TerminalLayout, TerminalView};
 use daruda_terminal::{TerminalDims, TerminalSession};
 use futures::StreamExt as _;
@@ -85,9 +84,6 @@ pub(in crate::workspace) enum PaneContent {
 /// title / cwd that OSC 0/2 + OSC 7 scanners feed back to the workspace
 /// for tab strip + status bar rendering.
 pub(in crate::workspace) struct TerminalContent {
-    /// The task run this terminal was opened for: the first `claude` bound
-    /// here is that run's session.
-    pub(in crate::workspace) task_run: Option<ExecutionRef>,
     pub(in crate::workspace) view: Entity<TerminalView>,
     /// `None` when the pane was created via stub (test builds).
     pub(super) master: Option<Arc<dyn MasterPty + Send>>,
@@ -104,9 +100,9 @@ pub(in crate::workspace) struct TerminalContent {
     /// gated by `[notifications]` config. Dropped with the pane.
     pub(super) _view_event_subscription: Subscription,
     /// Outgoing channel into the PTY's writer thread, cloned from `stdin_tx`
-    /// so `Workspace::send_to_pane` (skills, macros) can write into the same
+    /// so task dispatch can write into the same
     /// channel as the user's keystrokes. `None` for stub panes.
-    pub(super) pty_input_tx: Option<mpsc::Sender<Vec<u8>>>,
+    pub(super) pty_input_tx: Option<daruda_terminal::pty::PtyInput>,
     /// Wakes the stdout poll out of its idle backoff (see
     /// `stdout_poll_interval`) so output following a PTY write is
     /// drained at the fast interval. Poked by the keyboard path
@@ -166,8 +162,6 @@ pub(in crate::workspace) struct FileContent {
 /// via `cx` instead, the same way `Pane::is_dirty` / `Pane::can_save` already
 /// read `f.editor_state` / `te.title_input` live for File / TaskEdit content.
 pub(in crate::workspace) struct AgentChatContent {
-    /// Only the pane that dispatched this execution can finish its task.
-    pub(in crate::workspace) task_run: Option<ExecutionRef>,
     /// The self-owned chat view entity. Embedded by the pane walker via
     /// `AnyView::cached(..)`, so its `cx.notify()` dirties only its subtree.
     pub(in crate::workspace) view: Entity<AgentChatView>,
@@ -374,28 +368,17 @@ impl Pane {
         }
     }
 
-    /// Write `bytes` directly to the pane's PTY stdin. Returns `true`
-    /// when the channel accepted the buffer; `false` for non-terminal
-    /// panes, stub panes (no `pty_input_tx`), or a writer thread that
-    /// has already shut down. Used by `Workspace::send_to_pane` to
-    /// dispatch task-level commands (e.g. `claude --dangerously-skip-permissions`)
-    /// and skill invocations.
-    pub(in crate::workspace) fn send_input(&self, bytes: &[u8]) -> bool {
-        match &self.content {
-            PaneContent::Terminal(t) => match &t.pty_input_tx {
-                Some(tx) => {
-                    let sent = tx.send(bytes.to_vec()).is_ok();
-                    if sent {
-                        // Wake the stdout poll so the write's output is
-                        // drained at the fast interval.
-                        let _ = t.poke_tx.unbounded_send(());
-                    }
-                    sent
-                }
-                None => false,
-            },
-            PaneContent::File(_) | PaneContent::AgentChat(_) => false,
-        }
+    /// Resolve after the PTY writer accepts the bytes, not after enqueueing.
+    pub(in crate::workspace) fn write_confirmed_input(
+        &self,
+        bytes: Vec<u8>,
+    ) -> Option<mpsc::Receiver<Result<(), daruda_terminal::pty::PtyError>>> {
+        let PaneContent::Terminal(terminal) = &self.content else {
+            return None;
+        };
+        let written = terminal.pty_input_tx.as_ref()?.write_confirmed(bytes);
+        let _ = terminal.poke_tx.unbounded_send(());
+        Some(written)
     }
 
     /// Immutable accessor for the file-viewer state.

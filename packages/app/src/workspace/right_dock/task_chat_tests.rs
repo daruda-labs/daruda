@@ -198,14 +198,7 @@ fn task_chat_history_has_no_completion_ownership(cx: &mut TestAppContext) {
                 let pane = pane(ws, window, cx);
                 let id = task(cx);
                 bind(ws, &id, pane, cx);
-                ws.active_runtime_mut()
-                    .panes
-                    .iter_mut()
-                    .find(|p| p.id == pane)
-                    .unwrap()
-                    .agent_chat_content_mut()
-                    .unwrap()
-                    .task_run = None;
+                RunsHost::unbind_execution(ws.run_pane(pane), cx);
                 assert!(ws.is_task_chat_restore(pane, cx));
                 ws.settle_agent_chat_task(pane, ended(SessionEndReason::Error), cx);
                 id
@@ -332,7 +325,16 @@ fn task_chat_disk_restore_preserves_missing_agent_and_account(cx: &mut TestAppCo
                 .unwrap();
             assert_eq!(chat.agent_id, "removed-agent");
             assert_eq!(chat.account.to_persisted(), Some(account));
-            assert!(chat.task_run.is_none());
+            assert!(
+                !ws.main_area
+                    .runtimes
+                    .values()
+                    .flat_map(|rt| &rt.panes)
+                    .filter(|pane| pane
+                        .agent_chat_content()
+                        .is_some_and(|content| content.view == chat.view))
+                    .any(|pane| RunsHost::pane_execution(ws.run_pane(pane.id), cx).is_some())
+            );
             assert!(chat.view.read(cx).any_handle().is_none());
             assert!(matches!(
                 cx.global::<GlobalTasks>().get(&id).unwrap().lifecycle,
@@ -469,7 +471,16 @@ fn task_chat_closed_pane_reopens_exact_session_without_execution_ownership(
                     .agent_chat_content()
                     .unwrap();
                 assert_eq!(chat.view.read(cx).session_id(), Some("task-session"));
-                assert!(chat.task_run.is_none());
+                assert!(
+                    !ws.main_area
+                        .runtimes
+                        .values()
+                        .flat_map(|rt| &rt.panes)
+                        .filter(|pane| pane
+                            .agent_chat_content()
+                            .is_some_and(|content| content.view == chat.view))
+                        .any(|pane| RunsHost::pane_execution(ws.run_pane(pane.id), cx).is_some())
+                );
                 assert!(ws.is_task_chat_restore(reopened, cx));
                 let count = ws.active_runtime().panes.len();
                 ws.open_task_chat(&id, window, cx);
@@ -481,7 +492,13 @@ fn task_chat_closed_pane_reopens_exact_session_without_execution_ownership(
         })
         .unwrap();
     cx.run_until_parked();
-    assert!(matches!(lifecycle(&id, cx), Lifecycle::Running { .. }));
+    assert!(matches!(
+        lifecycle(&id, cx),
+        Lifecycle::Error {
+            cause: daruda_store::tasks::machine::ErrorCause::SessionFailed,
+            ..
+        }
+    ));
 }
 
 /// Opening answers with the pane it brought up, or why it could not.

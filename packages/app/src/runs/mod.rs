@@ -5,6 +5,8 @@
 //! the read-only projection every window renders from. Window effects (open
 //! a lane, deliver text, find a pane) stay with the Workspace that asks.
 
+mod cli;
+mod delivery;
 mod effects;
 mod intent;
 mod legacy;
@@ -12,6 +14,8 @@ mod legacy;
 pub(crate) mod seed;
 mod tasks;
 
+pub(crate) use cli::sessions_dir as cli_sessions_dir;
+pub(crate) use delivery::{DeliveryFailure, RunPane, TerminalDispatchError};
 pub(crate) use effects::RunsEffects;
 pub(crate) use intent::TaskIntent;
 pub(crate) use tasks::{GlobalTasks, RunsHost, TaskCommitError, no_hook};

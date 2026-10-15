@@ -35,6 +35,12 @@ impl PromptQueue {
 }
 
 impl AgentChatView {
+    pub fn discard_pending_prompts(&mut self, reason: PromptDropReason, cx: &mut Context<Self>) {
+        let dropped = self.queue.discard_all();
+        self.report_dropped(dropped, reason, cx);
+        cx.notify();
+    }
+
     /// Test-only hook: mark a prompt turn in flight (as `send_prompt_text`
     /// does) — `Turn` is module-private, so tests drive it through this.
     #[cfg(any(test, feature = "test-support"))]
@@ -67,8 +73,9 @@ impl AgentChatView {
         &mut self,
         cx: &mut Context<Self>,
     ) -> Option<String> {
-        self.drain_next_queued_prompt(cx)
-            .map(|drained| drained.text)
+        let prompt = self.take_next_queued_prompt(cx)?;
+        self.activate_queued_prompt(&prompt, cx);
+        Some(prompt.text)
     }
 
     /// Test-only hook: arm the phone turn without needing a live ACP handle.
@@ -184,8 +191,13 @@ impl AgentChatView {
             // same string — see [`Self::wire_text`]. Resolved before the handle
             // is borrowed, because taking the briefing needs `&mut self`.
             let wire = self.wire_text(&text);
-            if let Some(handle) = self.live_handle() {
-                handle.send_prompt_with_attachments(wire, attachments.clone());
+            if !self.live_handle().is_some_and(|handle| {
+                handle
+                    .try_send_prompt_with_attachments(wire, attachments.clone())
+                    .is_ok()
+            }) {
+                self.fail_prompt_handoff(task, cx);
+                return PromptDispatch::Unavailable;
             }
             self.report_sent(task, cx);
             self.start_dispatched_turn();
@@ -214,7 +226,13 @@ impl AgentChatView {
     /// Called right after the handle send on both dispatch paths.
     fn report_sent(&self, task: Option<ExecutionRef>, cx: &mut Context<Self>) {
         if let Some(task) = task {
-            cx.emit(AgentChatEvent::PromptSent { task });
+            self.emit_task_event(
+                AgentChatEvent::PromptSent {
+                    task,
+                    session_id: self.session_id.clone(),
+                },
+                cx,
+            );
         }
     }
 
@@ -227,8 +245,16 @@ impl AgentChatView {
         cx: &mut Context<Self>,
     ) {
         if !tasks.is_empty() {
-            cx.emit(AgentChatEvent::PromptsDropped { tasks, reason });
+            self.emit_task_event(AgentChatEvent::PromptsDropped { tasks, reason }, cx);
         }
+    }
+
+    fn emit_task_event(&self, event: AgentChatEvent, cx: &mut Context<Self>) {
+        let emitter = cx.entity().clone();
+        cx.emit(event);
+        // SAFETY: GPUI releases dropped emitters before queued events. Retain
+        // this emitter through delivery to the process-owned task subscriber.
+        cx.defer(move |_| drop(emitter));
     }
 
     /// Mark a prompt that just reached the wire as the turn in flight. A new
@@ -523,9 +549,8 @@ impl AgentChatView {
         }
     }
 
-    /// Move the next queued prompt into the active-turn model and return what
-    /// should be sent over ACP. No-op while a turn or cancel is active.
-    fn drain_next_queued_prompt(&mut self, cx: &mut Context<Self>) -> Option<QueuedPrompt> {
+    /// Take the next deliverable prompt without starting its turn yet.
+    fn take_next_queued_prompt(&mut self, cx: &mut Context<Self>) -> Option<QueuedPrompt> {
         if !self.queue.turn.can_dispatch() || self.queue.pending_prompts.is_empty() {
             return None;
         }
@@ -551,10 +576,13 @@ impl AgentChatView {
         if self.queue.editing_prompt == Some(qp.id) {
             self.queue.editing_prompt = None;
         }
-        self.start_dispatched_turn();
-        self.echo_attached_prompt(qp.text.clone(), &qp.attachments, cx);
-        self.arm_phone_turn_if(qp.origin);
         Some(qp)
+    }
+
+    fn activate_queued_prompt(&mut self, prompt: &QueuedPrompt, cx: &mut Context<Self>) {
+        self.start_dispatched_turn();
+        self.echo_attached_prompt(prompt.text.clone(), &prompt.attachments, cx);
+        self.arm_phone_turn_if(prompt.origin);
     }
 
     /// Send the next buffered prompt iff connected and idle. Pops the FRONT of
@@ -569,17 +597,34 @@ impl AgentChatView {
         if !matches!(self.status, AgentSessionStatus::Connected) || self.live_handle().is_none() {
             return;
         };
-        let Some(drained) = self.drain_next_queued_prompt(cx) else {
+        let Some(drained) = self.take_next_queued_prompt(cx) else {
             return;
         };
-        // `drain_next_queued_prompt` already echoed the text; the wire gets the
-        // briefed form, which is why the two are separate strings.
+        // The wire gets the briefed form; echo only after the handoff succeeds.
         let wire = self.wire_text(&drained.text);
-        if let Some(handle) = self.live_handle() {
-            handle.send_prompt_with_attachments(wire, drained.attachments);
+        if !self.live_handle().is_some_and(|handle| {
+            handle
+                .try_send_prompt_with_attachments(wire, drained.attachments.clone())
+                .is_ok()
+        }) {
+            self.fail_prompt_handoff(drained.task, cx);
+            return;
         }
+        self.activate_queued_prompt(&drained, cx);
         self.report_sent(drained.task, cx);
         cx.notify();
+    }
+
+    fn fail_prompt_handoff(&mut self, task: Option<ExecutionRef>, cx: &mut Context<Self>) {
+        let mut tasks: Vec<_> = task.into_iter().collect();
+        tasks.extend(self.queue.discard_all());
+        self.report_dropped(tasks, PromptDropReason::StartFailed, cx);
+        self.detach_handle();
+        self.set_error(
+            crate::strings::agent_chat::transport_closed(),
+            daruda_acp::Remedy::Retry,
+            cx,
+        );
     }
 
     /// What actually goes on the wire for `text`.

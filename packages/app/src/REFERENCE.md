@@ -69,6 +69,9 @@ follows its durable commit and foreground projection update. `GlobalTasks`
 exposes the resulting `TasksBook` through read-only accessors, and windows
 observe it instead of reloading task files. The desktop installs `RunsEffects`
 callbacks for pane operations; this module does not depend on Workspace.
+Execution bindings are process-owned and identify both workspace and pane.
+The process owns one CLI tracker and event pump; closing a window removes its
+pane registrations but retains observed processes until their exit is confirmed.
 The temporary legacy mirror serializes `tasks.json` writes, including the
 latest durable state at app quit, to support downgrades during the migration.
 

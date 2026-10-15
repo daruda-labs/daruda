@@ -148,13 +148,24 @@ impl Workspace {
         // and bind them back to its session_id. Stub
         // panes (no pty_pid) skip registration.
         if let Some(pid) = pty_pid {
-            self.claude_sessions.pty_tracker.register(pane_id, pid);
+            crate::runs::RunsHost::register_terminal(self.run_pane(pane_id), pid, cx);
         }
+        let tracked = self.run_pane(pane_id);
+        view.update(cx, |_, cx| {
+            cx.on_release(move |_, cx| {
+                crate::runs::RunsHost::release_execution(
+                    tracked,
+                    daruda_store::tasks::machine::UndeliveredReason::PaneClosed,
+                    cx,
+                );
+                crate::runs::RunsHost::unregister_terminal(tracked, cx);
+            })
+            .detach();
+        });
 
         Ok(Pane {
             id: pane_id,
             content: PaneContent::Terminal(TerminalContent {
-                task_run: None,
                 view,
                 master,
                 shell_pid: pty_pid,

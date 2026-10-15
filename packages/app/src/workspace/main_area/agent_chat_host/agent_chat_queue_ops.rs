@@ -45,10 +45,15 @@ impl Workspace {
         text: String,
         task: Option<ExecutionRef>,
         cx: &mut Context<Self>,
-    ) {
-        if let Some(PromptDispatch::QueueFull) =
-            self.send_agent_prompt_text_with_origin(pane_id, text, PromptOrigin::InApp, task, cx)
-        {
+    ) -> Option<PromptDispatch> {
+        let dispatch = self.send_agent_prompt_text_with_origin(
+            pane_id,
+            text,
+            PromptOrigin::InApp,
+            task.clone(),
+            cx,
+        );
+        if dispatch == Some(PromptDispatch::QueueFull) {
             self.report_error(
                 ErrorReport::new(s::agent_chat::queue_full())
                     .severity(ErrorSeverity::Warning)
@@ -58,6 +63,26 @@ impl Workspace {
                 cx,
             );
         }
+        if let Some(exec) = task {
+            use crate::runs::DeliveryFailure;
+            use daruda_store::tasks::machine::{StartFailure, UndeliveredReason};
+            let failure = match dispatch {
+                Some(PromptDispatch::QueueFull) => {
+                    Some(DeliveryFailure::Dropped(UndeliveredReason::QueueFull))
+                }
+                Some(PromptDispatch::Unavailable) => {
+                    Some(DeliveryFailure::Dropped(UndeliveredReason::StartFailed))
+                }
+                Some(PromptDispatch::ReadOnly) | None => {
+                    Some(DeliveryFailure::Start(StartFailure::PaneUnavailable))
+                }
+                Some(PromptDispatch::SentNow | PromptDispatch::Queued) => None,
+            };
+            if let Some(failure) = failure {
+                crate::runs::RunsHost::delivery_failed(exec, failure, cx);
+            }
+        }
+        dispatch
     }
 
     pub(super) fn relay_phone_ack_effect(
@@ -109,7 +134,11 @@ impl Workspace {
             );
             return Some(PromptDispatch::ReadOnly);
         }
-        let dispatch = classify_slash(&text);
+        let dispatch = if task.is_some() {
+            SlashDispatch::Forward
+        } else {
+            classify_slash(&text)
+        };
         match dispatch {
             SlashDispatch::Local(LocalSlashCommand::Clear) => {
                 self.reset_agent_chat_session(pane_id, cx);

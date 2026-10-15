@@ -112,13 +112,7 @@ impl Workspace {
         let ws_weak = cx.entity().downgrade();
         let toast_layer = cx.new(|_| toast_layer::ToastLayer::new(ws_weak.clone()));
 
-        // PTY tracker — single thread polls sysinfo every 3 s for
-        // claude descendants of registered panes. The tracker handle
-        // is shared with the Workspace (for register/unregister) and
-        // the receiver feeds an event-pump task that updates the
-        // bindings map. See `workspace/sync/pty.rs`.
-        let (pty_tracker, pty_rx) = daruda_agent::pty_tracker::PtyTracker::spawn();
-        let pty_event_pump = sync::pty::spawn(pty_rx, cx);
+        crate::runs::RunsHost::ensure_installed(cx);
 
         // Install the app-wide accounts Global from disk if this is the
         // first window (idempotent), then take the mirror from the Global —
@@ -177,9 +171,7 @@ impl Workspace {
                 hooks_installed: daruda_agent::hooks::installer::InstallerPaths::from_env()
                     .map(|p| daruda_agent::hooks::installer::is_installed(&p))
                     .unwrap_or(false),
-                pty_tracker,
                 pty_bindings: HashMap::new(),
-                _pty_event_pump: pty_event_pump,
                 _jsonl_watcher: None,
                 _jsonl_event_pump: None,
                 tool_use_failure_counts: HashMap::new(),
@@ -351,7 +343,6 @@ impl Workspace {
         // (and so never discards) task state.
         crate::runs::RunsHost::ensure_installed(cx);
         Self::install_task_effects(cx);
-        ws.restore_task_cli_tracking(cx);
         // The projection predates this window's `observe_global`, so start
         // the live tick for any run already active.
         ws.ensure_task_live_tick(cx);
@@ -413,6 +404,7 @@ impl Workspace {
         Self::refresh_dock_badge(cx);
         crate::keep_awake::refresh(cx);
         cx.on_release(move |ws: &mut Workspace, cx: &mut gpui::App| {
+            crate::runs::RunsHost::release_workspace(ws.uuid(), cx);
             // Before deregistering: a login this window owned can no longer be
             // finished by anyone, and the process-wide slot it holds would
             // block every other window until the login timed out.

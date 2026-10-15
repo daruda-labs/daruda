@@ -4,7 +4,7 @@
 //! Designed for testability: all PTY operations are grouped into
 //! [`PtyHandle`] which owns reader/writer channels.
 
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc;
@@ -14,6 +14,8 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 
 mod backend;
+mod input;
+pub use input::PtyInput;
 
 #[cfg(all(test, windows))]
 mod windows_input_tests;
@@ -104,7 +106,7 @@ impl Default for PtyConfig {
 /// PTY reference for resize operations.
 pub struct PtyHandle {
     /// Send bytes to the PTY's stdin.
-    pub stdin_tx: mpsc::Sender<Vec<u8>>,
+    pub stdin_tx: PtyInput,
     /// Receive bytes from the PTY's stdout.
     pub stdout_rx: mpsc::Receiver<Vec<u8>>,
     /// Fires once when the shell process exits. Disconnection of the
@@ -135,7 +137,7 @@ impl PtyHandle {
     pub fn into_parts(
         self,
     ) -> (
-        mpsc::Sender<Vec<u8>>,
+        PtyInput,
         mpsc::Receiver<Vec<u8>>,
         mpsc::Receiver<()>,
         mpsc::Receiver<ErrorReport>,
@@ -292,15 +294,15 @@ pub fn spawn_pty_with_args(
         .take_writer()
         .map_err(|e| PtyError::Io(e.to_string()))?;
 
-    let (stdin_tx, stdin_rx) = mpsc::channel::<Vec<u8>>();
+    let (stdin_tx, stdin_rx) = PtyInput::channel();
     let (stdout_tx, stdout_rx) = mpsc::sync_channel::<Vec<u8>>(OUTPUT_QUEUE_CHUNKS);
     let (error_tx, error_rx) = mpsc::channel::<ErrorReport>();
 
     // PTY writer thread: stdin channel → PTY
     let writer_error_tx = error_tx.clone();
     thread::spawn(move || {
-        while let Ok(bytes) = stdin_rx.recv() {
-            if let Err(e) = pty_writer.write_all(&bytes) {
+        while let Ok(input) = stdin_rx.recv() {
+            if let Err(e) = input.write_to(&mut pty_writer) {
                 // PTY closed under us (shell exited, kernel error).
                 // Surface to the workspace so debugging "why did my
                 // keystrokes stop reaching the shell" doesn't require a
@@ -316,7 +318,6 @@ pub fn spawn_pty_with_args(
                 );
                 break;
             }
-            let _ = pty_writer.flush();
         }
     });
 
@@ -375,15 +376,15 @@ pub fn spawn_pty(config: &PtyConfig) -> Result<PtyHandle, PtyError> {
 }
 
 /// Zero-cost stub for dependent crates' tests: live but silent channels and
-/// no subprocess. Every other channel end is leaked on purpose — a dropped
-/// exit sender reads as shell exit, a dropped stdin receiver fails writes.
+/// no subprocess. Input simulates successful writes; the output and exit
+/// senders stay alive so the pane remains available until its test closes it.
 #[cfg(any(test, feature = "test-support"))]
 pub fn spawn_pty_stub() -> Result<PtyHandle, PtyError> {
-    let (stdin_tx, stdin_rx) = mpsc::channel::<Vec<u8>>();
+    let stdin_tx = PtyInput::stub();
     let (stdout_tx, stdout_rx) = mpsc::channel::<Vec<u8>>();
     let (exit_tx, exit_rx) = mpsc::channel::<()>();
     let (error_tx, error_rx) = mpsc::channel::<ErrorReport>();
-    std::mem::forget((stdin_rx, stdout_tx, exit_tx, error_tx));
+    std::mem::forget((stdout_tx, exit_tx, error_tx));
     Ok(PtyHandle {
         stdin_tx,
         stdout_rx,

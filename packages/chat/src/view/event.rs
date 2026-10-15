@@ -35,7 +35,10 @@ pub enum AgentChatEvent {
     /// A task's prompt was just handed to the live session. Once per tagged
     /// prompt, whether it went out at once or drained from the queue; an
     /// untagged prompt reports nothing.
-    PromptSent { task: ExecutionRef },
+    PromptSent {
+        task: ExecutionRef,
+        session_id: Option<String>,
+    },
     /// Task prompts left the queue without ever being sent. Only tagged
     /// prompts are listed, and the event is skipped when none were dropped.
     PromptsDropped {
@@ -48,6 +51,8 @@ pub enum AgentChatEvent {
 /// a parked prompt can still be resumed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PromptDropReason {
+    /// The session stopped accepting a prompt before its turn started.
+    StartFailed,
     /// The session failed terminally, so nothing queued can be delivered.
     ConnectFailed,
     /// `/clear` or a reconnect replaced the session the prompts waited on.

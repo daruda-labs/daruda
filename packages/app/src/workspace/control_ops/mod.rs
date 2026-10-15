@@ -456,6 +456,7 @@ impl Workspace {
             Some(PromptDispatch::Queued) => Ok(SendDisposition::Queued),
             Some(PromptDispatch::QueueFull) => Err(ControlError::QueueFull),
             Some(PromptDispatch::ReadOnly) => Err(ControlError::TargetReadOnly),
+            Some(PromptDispatch::Unavailable) => Err(ControlError::TargetGone),
             None => Ok(SendDisposition::HandledLocally),
         }
     }

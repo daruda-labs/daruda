@@ -71,6 +71,40 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        let task = input.task.clone();
+        let delivered = self.deliver_pane_input(pane_id, input, window, cx);
+        if !delivered && let Some(exec) = task {
+            crate::runs::RunsHost::delivery_failed(
+                exec,
+                crate::runs::DeliveryFailure::Start(
+                    daruda_store::tasks::machine::StartFailure::PaneUnavailable,
+                ),
+                cx,
+            );
+        }
+        delivered
+    }
+
+    fn deliver_pane_input(
+        &mut self,
+        pane_id: PaneId,
+        input: PaneTextInput,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if let Some(exec) = &input.task
+            && (!matches!(input.intent, PaneTextIntent::Command { submit: true })
+                || input.body.trim().is_empty())
+        {
+            crate::runs::RunsHost::delivery_failed(
+                exec.clone(),
+                crate::runs::DeliveryFailure::Start(
+                    daruda_store::tasks::machine::StartFailure::PromptUndelivered,
+                ),
+                cx,
+            );
+            return false;
+        }
         let Some(pane) = self.active_runtime().panes.iter().find(|p| p.id == pane_id) else {
             return false;
         };
@@ -111,9 +145,16 @@ impl Workspace {
                     self.agent_empty_submit(pane_id, window, cx);
                     return true;
                 }
-                self.send_agent_task_prompt_text(pane_id, trimmed.to_string(), input.task, cx);
+                let dispatch =
+                    self.send_agent_task_prompt_text(pane_id, trimmed.to_string(), input.task, cx);
                 self.bump_activity(pane_id);
-                true
+                matches!(
+                    dispatch,
+                    Some(
+                        daruda_chat::view::PromptDispatch::SentNow
+                            | daruda_chat::view::PromptDispatch::Queued
+                    )
+                )
             } else {
                 // Non-submit: place the text in the shared bottom-dock
                 // input (where an agent-chat pane routes typing) without

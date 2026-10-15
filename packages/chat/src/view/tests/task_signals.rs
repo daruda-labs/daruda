@@ -57,7 +57,7 @@ fn observed(cx: &mut TestAppContext) -> (Entity<AgentChatView>, Rc<RefCell<Vec<S
     let sink = log.clone();
     cx.update(|cx| {
         cx.subscribe(&view, move |_, event: &AgentChatEvent, _| match event {
-            AgentChatEvent::PromptSent { task } => {
+            AgentChatEvent::PromptSent { task, .. } => {
                 sink.borrow_mut().push(Signal::Sent(task.clone()))
             }
             AgentChatEvent::PromptsDropped { tasks, reason } => {
@@ -93,6 +93,50 @@ fn a_tagged_prompt_sent_now_reports_sent_once(cx: &mut TestAppContext) {
     assert_eq!(dispatch, PromptDispatch::SentNow);
     assert_eq!(probe.drain(), (1, false), "the prompt went over the handle");
     assert_eq!(*log.borrow(), vec![Signal::Sent(run("t1"))]);
+}
+
+#[gpui::test]
+fn a_closed_prompt_channel_never_reports_sent(cx: &mut TestAppContext) {
+    let (view, log) = observed(cx);
+    drop(connect(&view, cx));
+    let dispatch = view.update(cx, |view, cx| {
+        view.send_task_prompt_text("go".into(), run("t1"), cx)
+    });
+    assert_eq!(dispatch, PromptDispatch::Unavailable);
+    assert_eq!(
+        *log.borrow(),
+        vec![Signal::Dropped(
+            vec![run("t1")],
+            PromptDropReason::StartFailed
+        )]
+    );
+    assert!(view.read_with(cx, |view, _| view.turn_is_idle()));
+}
+
+#[gpui::test]
+fn a_queued_prompt_losing_its_channel_is_dropped_without_a_phantom_turn(cx: &mut TestAppContext) {
+    let (view, log) = observed(cx);
+    let probe = connect(&view, cx);
+    view.update(cx, |view, cx| {
+        view.set_turn_in_flight();
+        assert_eq!(
+            view.send_task_prompt_text("go".into(), run("t1"), cx),
+            PromptDispatch::Queued
+        );
+    });
+    drop(probe);
+    view.update(cx, |view, cx| {
+        view.set_turn_idle();
+        view.pump_pending_prompt(cx);
+    });
+    assert_eq!(
+        *log.borrow(),
+        vec![Signal::Dropped(
+            vec![run("t1")],
+            PromptDropReason::StartFailed
+        )]
+    );
+    assert!(view.read_with(cx, |view, _| view.turn_is_idle()));
 }
 
 #[gpui::test]

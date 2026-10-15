@@ -26,6 +26,7 @@ use daruda_chat::view::AgentSessionStatus;
 /// Why a task did not start.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TaskStartError {
+    RemoteLane,
     NotFound,
     /// Only a Backlog task starts; any other has run already.
     NotBacklog,
@@ -60,7 +61,7 @@ pub(crate) enum TaskStartError {
     },
 }
 
-/// A task that is now running, and where.
+/// Where an accepted start handed the task's prompt to a pane.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TaskStarted {
     pub(crate) worktree: PathBuf,
@@ -78,7 +79,7 @@ impl TaskStartError {
     fn failure(&self) -> Option<StartFailure> {
         Some(match self {
             Self::NotFound => StartFailure::NotFound,
-            Self::NotBacklog | Self::NotRecorded { .. } => return None,
+            Self::NotBacklog | Self::NotRecorded { .. } | Self::RemoteLane => return None,
             Self::ProjectNotOpen => StartFailure::ProjectNotOpen,
             Self::NoGitRepo => StartFailure::NoGitRepo,
             Self::RepoBusy => StartFailure::RepoBusy,
@@ -97,6 +98,11 @@ impl TaskStartError {
     fn report(&self) -> Option<ErrorReport> {
         use crate::surface::strings::error;
         let (message, severity, dedup) = match self {
+            Self::RemoteLane => (
+                crate::surface::strings::task::error_remote_lane(),
+                ErrorSeverity::Info,
+                "tasks.remote_lane",
+            ),
             Self::NotFound
             | Self::NotBacklog
             | Self::PaneUnavailable
@@ -461,11 +467,11 @@ impl Workspace {
             .detach();
     }
 
-    /// Answer once `Dispatched` is committed, so the caller's next read sees
-    /// the task running; a failure is recorded and answered at once.
+    /// Answer after the preparation and delivery result is projected. Chat
+    /// queueing leaves the task Dispatching until its PromptSent arrives.
     fn answer_when_dispatched(
         &mut self,
-        started: Result<(TaskStarted, gpui::Task<Result<u64, TaskCommitError>>), TaskStartError>,
+        started: Result<(TaskStarted, gpui::Task<Result<u64, TaskStartError>>), TaskStartError>,
         exec: ExecutionRef,
         answer: Answer,
         cx: &mut Context<Self>,
@@ -480,9 +486,7 @@ impl Workspace {
         cx.spawn(async move |ws, cx| {
             let outcome = match dispatched.await {
                 Ok(_) => Ok(started),
-                Err(e) => Err(TaskStartError::NotRecorded {
-                    detail: e.to_string(),
-                }),
+                Err(e) => Err(e),
             };
             let finished = ws.update(cx, |ws, cx| {
                 ws.finish_task_start(outcome.clone(), None, &answer, cx)
@@ -497,8 +501,8 @@ impl Workspace {
 
     /// Bind `pane_id` to the run, record the pane's identity, and hand it the
     /// prompt: a `claude` command over a prompt file for a terminal, an ACP
-    /// turn for an Agent chat. Resolves the returned task once `Dispatched`
-    /// is committed.
+    /// turn for an Agent chat. Preparation is durable before delivery; only
+    /// a successful PTY write or tagged PromptSent records Dispatched.
     ///
     /// Takes `pane_id` rather than relying on `focused_pane_id` —
     /// `activate_lane` does call `focus_pane` on the happy path,
@@ -512,7 +516,7 @@ impl Workspace {
         pane_id: PaneId,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Result<gpui::Task<Result<u64, TaskCommitError>>, TaskStartError> {
+    ) -> Result<gpui::Task<Result<u64, TaskStartError>>, TaskStartError> {
         // A cancel that landed while the lane was made ends the start here.
         let task = cx
             .global::<GlobalTasks>()
@@ -520,14 +524,21 @@ impl Workspace {
             .filter(|task| matches!(&task.lifecycle, Lifecycle::Preparing { exec: current, .. } if current == exec))
             .cloned()
             .ok_or(TaskStartError::NotBacklog)?;
-        let identity = match task.spec.agent_surface {
+        let surface = match &task.lifecycle {
+            Lifecycle::Preparing {
+                source: TaskExecutionSource::AgentChat,
+                ..
+            } => TaskAgentSurface::AgentChat,
+            _ => TaskAgentSurface::Terminal,
+        };
+        let identity = match surface {
             TaskAgentSurface::Terminal => {
-                self.bind_task_cli_execution(exec, pane_id, worktree_path)
+                self.bind_task_cli_execution(exec, pane_id, worktree_path, cx)
             }
-            TaskAgentSurface::AgentChat => self.bind_task_chat_execution(exec, pane_id),
+            TaskAgentSurface::AgentChat => self.bind_task_chat_execution(exec, pane_id, cx),
         }
         .ok_or(TaskStartError::PaneUnavailable)?;
-        RunsHost::propose_fact(
+        let prepared = RunsHost::propose(
             TaskEvent::LanePrepared {
                 exec: exec.clone(),
                 worktree: worktree_path.to_path_buf(),
@@ -538,69 +549,116 @@ impl Workspace {
             },
             cx,
         );
-        let rendered = daruda_store::tasks::prompt_file::render_task_prompt(&task, branch);
-        // Whether the prompt reached the pane. Each surface reports it; a
-        // `false` (pane closed / kind can't receive) fails the start instead
-        // of leaving a run that would never be driven.
-        let delivered = match task.spec.agent_surface {
+        let exec = exec.clone();
+        let worktree = worktree_path.to_path_buf();
+        let branch = branch.to_owned();
+        Ok(cx.spawn_in(window, async move |ws, cx| {
+            let seq = prepared
+                .await
+                .map_err(|error| TaskStartError::NotRecorded {
+                    detail: error.to_string(),
+                })?;
+            let result = match ws.update_in(cx, |ws, window, cx| {
+                ws.deliver_prepared_task(
+                    &exec,
+                    &task,
+                    &worktree,
+                    &branch,
+                    pane_id,
+                    surface,
+                    identity.account_id,
+                    seq,
+                    window,
+                    cx,
+                )
+            }) {
+                Ok(Ok(dispatched)) => dispatched.await,
+                Ok(Err(error)) => Err(error),
+                Err(_) => Err(TaskStartError::WindowClosed),
+            };
+            if let Err(error) = &result {
+                gpui::AsyncApp::update(cx, |cx| fail_start(&exec, error, cx));
+            }
+            result
+        }))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn deliver_prepared_task(
+        &mut self,
+        exec: &ExecutionRef,
+        task: &TaskRecord,
+        worktree_path: &Path,
+        branch: &str,
+        pane_id: PaneId,
+        surface: TaskAgentSurface,
+        account_id: Option<daruda_store::accounts::AccountId>,
+        prepared_seq: u64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<gpui::Task<Result<u64, TaskStartError>>, TaskStartError> {
+        if !cx.global::<GlobalTasks>().get(&exec.task_id).is_some_and(|task| {
+        matches!(&task.lifecycle, Lifecycle::Dispatching { exec: current, .. } if current == exec)
+    }) {
+        return Err(TaskStartError::NotBacklog);
+    }
+        let rendered = daruda_store::tasks::prompt_file::render_task_prompt(task, branch);
+        let dispatched = match surface {
             TaskAgentSurface::Terminal => {
                 let prompt_path =
                     daruda_store::tasks::prompt_file::prompt_file_path(&task.spec, worktree_path);
-                if let Err(e) =
-                    daruda_store::tasks::prompt_file::write_prompt_file(&prompt_path, &rendered)
-                {
-                    return Err(TaskStartError::PromptUndelivered {
-                        detail: crate::surface::strings::task::error_write_prompt(e.to_string()),
-                    });
-                }
-                self.track_task_cli_execution(pane_id, identity.account_id);
-                let cmd = daruda_store::tasks::prompt_file::build_claude_command(
+                daruda_store::tasks::prompt_file::write_prompt_file(&prompt_path, &rendered)
+                    .map_err(|error| TaskStartError::PromptUndelivered {
+                        detail: crate::surface::strings::task::error_write_prompt(
+                            error.to_string(),
+                        ),
+                    })?;
+                self.track_task_cli_execution(pane_id, account_id, cx);
+                let command = daruda_store::tasks::prompt_file::build_claude_command(
                     &prompt_path,
                     task.spec.auto_execute,
                 );
-                self.send_to_pane(pane_id, cmd.as_bytes())
+                let Some(written) = self.write_task_input(pane_id, command.into_bytes()) else {
+                    RunsHost::delivery_failed(
+                        exec.clone(),
+                        crate::runs::DeliveryFailure::Dropped(
+                            daruda_store::tasks::machine::UndeliveredReason::PtyWriteFailed,
+                        ),
+                        cx,
+                    );
+                    return Err(TaskStartError::PromptUndelivered {
+                        detail: crate::surface::strings::task::error_prompt_undelivered(),
+                    });
+                };
+                let dispatched = RunsHost::terminal_dispatch(exec.clone(), written, cx);
+                cx.spawn(async move |_, _| {
+                    dispatched.await.map_err(|error| match error {
+                        crate::runs::TerminalDispatchError::Commit(error) => {
+                            TaskStartError::NotRecorded {
+                                detail: error.to_string(),
+                            }
+                        }
+                        crate::runs::TerminalDispatchError::Write(detail) => {
+                            TaskStartError::PromptUndelivered { detail }
+                        }
+                    })
+                })
             }
             TaskAgentSurface::AgentChat => {
-                let pane_in_error = self.agent_chat_view(pane_id).is_some_and(|view| {
+                let failed = self.agent_chat_view(pane_id).is_some_and(|view| {
                     matches!(view.read(cx).status(), AgentSessionStatus::Error { .. })
                 });
-                // The ACP session *is* the agent — there is no `claude …`
-                // CLI wrapper to build. Deliver the rendered prompt (the
-                // same text the Terminal path writes into `task-<id>.md`) as
-                // an ACP turn; the pane's pending-prompt queue buffers it
-                // until the session connects. `auto_execute` has no analogue
-                // here: a `submit: true` turn runs automatically.
-                !pane_in_error
-                    && self.deliver_text_to_pane(
-                        pane_id,
-                        crate::workspace::main_area::pane_input_ops::PaneTextInput {
-                            body: rendered,
-                            intent:
-                                crate::workspace::main_area::pane_input_ops::PaneTextIntent::Command {
-                                    submit: true,
-                                },
-                            task: None,
-                        },
-                        window,
-                        cx,
-                    )
+                if failed || !self.deliver_text_to_pane(pane_id, crate::workspace::main_area::pane_input_ops::PaneTextInput {
+            body: rendered,
+            intent: crate::workspace::main_area::pane_input_ops::PaneTextIntent::Command { submit: true },
+            task: Some(exec.clone()),
+        }, window, cx) {
+            RunsHost::delivery_failed(exec.clone(), crate::runs::DeliveryFailure::Dropped(daruda_store::tasks::machine::UndeliveredReason::StartFailed), cx);
+            return Err(TaskStartError::PromptUndelivered { detail: crate::surface::strings::task::error_prompt_undelivered() });
+        }
+                gpui::Task::ready(Ok(prepared_seq))
             }
         };
-        if !delivered {
-            return Err(TaskStartError::PromptUndelivered {
-                detail: crate::surface::strings::task::error_prompt_undelivered(),
-            });
-        }
-        // WORKAROUND: chat enqueue precedes wire delivery - Task 5b connects
-        // every tagged delivery path before recording this from PromptSent.
-        let dispatched = RunsHost::propose(
-            TaskEvent::Dispatched {
-                exec: exec.clone(),
-                session_id: None,
-                at: Utc::now(),
-            },
-            cx,
-        );
 
         // Dynamic install: for the Terminal surface, if the Task editor for
         // this task is open (the user clicked Start from its footer), the
@@ -648,14 +706,7 @@ fn source_for(surface: TaskAgentSurface) -> TaskExecutionSource {
 /// Record why a requested start did not dispatch.
 fn fail_start(exec: &ExecutionRef, e: &TaskStartError, cx: &mut App) {
     let Some(cause) = e.failure() else { return };
-    RunsHost::propose_fact(
-        TaskEvent::DispatchFailed {
-            exec: exec.clone(),
-            cause,
-            at: Utc::now(),
-        },
-        cx,
-    );
+    RunsHost::delivery_failed(exec.clone(), crate::runs::DeliveryFailure::Start(cause), cx);
 }
 
 /// The window closed under a recorded start: record it, then answer.

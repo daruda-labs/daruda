@@ -406,6 +406,10 @@ impl HandleProbe {
     }
 }
 
+#[derive(Clone, Copy, Debug, thiserror::Error)]
+#[error("the agent prompt channel is closed")]
+pub struct PromptSendError;
+
 #[cfg(any(test, feature = "test-support"))]
 impl AcpSessionHandle {
     /// A handle with no connection behind it, for host tests that need a
@@ -440,6 +444,17 @@ impl AcpSessionHandle {
         let _ = self
             .commands
             .unbounded_send(Command::Prompt(PromptInput { text, attachments }));
+    }
+
+    /// Report whether the live prompt loop accepted this handoff.
+    pub fn try_send_prompt_with_attachments(
+        &self,
+        text: String,
+        attachments: Vec<crate::PromptAttachment>,
+    ) -> Result<(), PromptSendError> {
+        self.commands
+            .unbounded_send(Command::Prompt(PromptInput { text, attachments }))
+            .map_err(|_| PromptSendError)
     }
 
     /// Request cancellation of the active turn via `session/cancel`. The agent

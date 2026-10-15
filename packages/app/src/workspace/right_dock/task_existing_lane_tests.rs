@@ -43,11 +43,14 @@ fn running_in(state: &Lifecycle) -> Option<&Path> {
     }
 }
 
-/// Where the run reached `Running`. A test agent chat has no adapter, so
-/// its connect fails right after dispatch and settles the run as a failed
-/// session — which only a running run can become.
-fn ran_in(state: &Lifecycle) -> Option<&Path> {
+/// The lane prepared for the run, even if its prompt never reached an adapter.
+fn prepared_in(state: &Lifecycle) -> Option<&Path> {
     match state {
+        Lifecycle::Undelivered {
+            worktree: Some(worktree),
+            ..
+        }
+        | Lifecycle::Dispatching { worktree, .. } => Some(worktree),
         Lifecycle::Error {
             worktree: Some(worktree),
             cause: daruda_store::tasks::machine::ErrorCause::SessionFailed,
@@ -91,7 +94,36 @@ fn existing_lane_start_opens_a_tab_there_instead_of_a_worktree(cx: &mut TestAppC
         assert_eq!(lane_count(ws), lanes, "no lane is created");
         assert_eq!(ws.active_runtime().tabs.len(), tabs + 1);
     });
-    assert_eq!(ran_in(&state(&id, cx)), Some(lane_path.as_path()));
+    assert_eq!(prepared_in(&state(&id, cx)), Some(lane_path.as_path()));
+}
+
+#[gpui::test]
+fn remote_lanes_are_refused_before_dispatch_requested(cx: &mut TestAppContext) {
+    let (_root, window, workspace) = project_workspace(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            let path = ws.active_lane().unwrap().path.clone();
+            ws.set_lane_session_host(
+                ws.active,
+                daruda_store::project::LaneSessionHost::Ssh {
+                    target: "test-host".into(),
+                    session_path: "/work".into(),
+                    registry_id: None,
+                },
+                cx,
+            );
+            let id = existing_lane_task(&path, TaskAgentSurface::AgentChat, cx);
+            let before = crate::runs::RunsHost::sequence_for_test(cx);
+            let result = ws.begin_task_start(&id, window, cx).try_recv();
+            assert_eq!(result, Ok(Err(super::TaskStartError::RemoteLane)));
+            assert_eq!(crate::runs::RunsHost::sequence_for_test(cx), before);
+            assert_eq!(
+                cx.global::<GlobalTasks>().get(&id).unwrap().lifecycle,
+                Lifecycle::Backlog
+            );
+        })
+    })
+    .unwrap();
 }
 
 #[gpui::test]
@@ -141,7 +173,7 @@ fn existing_lane_start_finds_a_lane_in_an_inactive_project(cx: &mut TestAppConte
         .unwrap();
     cx.run_until_parked();
     workspace.read_with(cx, |ws, _| assert_eq!(ws.active, owner));
-    assert!(ran_in(&state(&id, cx)).is_some());
+    assert!(prepared_in(&state(&id, cx)).is_some());
 }
 
 #[gpui::test]
@@ -218,7 +250,7 @@ fn retry_runs_again_in_the_lane_the_task_created(cx: &mut TestAppContext) {
         }
     );
     workspace.read_with(cx, |ws, _| assert_eq!(lane_count(ws), lanes));
-    assert_eq!(ran_in(&state(&id, cx)), Some(lane_path.as_path()));
+    assert_eq!(prepared_in(&state(&id, cx)), Some(lane_path.as_path()));
     cx.update(|cx| {
         let task = cx.global::<GlobalTasks>().get(&id).unwrap();
         assert_ne!(

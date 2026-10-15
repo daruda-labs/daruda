@@ -178,6 +178,9 @@ fn control_commit_error(e: TaskCommitError) -> ControlError {
 /// the model reading the result, not for a person, so they stay English.
 fn control_start_error(e: TaskStartError) -> ControlError {
     match e {
+        TaskStartError::RemoteLane => ControlError::TaskStartFailed {
+            detail: daruda_store::tasks::TaskRejected::RemoteLane.to_string(),
+        },
         TaskStartError::NotFound => ControlError::TaskNotFound,
         TaskStartError::NotBacklog => ControlError::TaskNotBacklog,
         TaskStartError::ProjectNotOpen => ControlError::TaskProjectNotOpen,

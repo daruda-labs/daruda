@@ -7,7 +7,7 @@ use gpui::{Context, Task};
 
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
-use daruda_agent::pty_tracker::{PtyBinding, PtyTracker};
+use daruda_agent::pty_tracker::PtyBinding;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
 
@@ -24,21 +24,10 @@ pub(in crate::workspace) struct ClaudeSessionState {
     /// restarts.
     pub(in crate::workspace) hooks_installed: bool,
 
-    /// PTY → claude session tracker. Polls sysinfo every 3 s to find
-    /// `claude` descendants of each registered Pane's shell PID and
-    /// resolves their session_id via `~/.claude/sessions/<pid>.json`.
-    pub(in crate::workspace) pty_tracker: PtyTracker,
-
     /// Last reported `(PaneId → claude session)` bindings from the
     /// tracker. Used by sub-row badges to highlight the focused tab's
     /// session and by `apply_pty_tracker_event` to detect dead sessions.
     pub(in crate::workspace) pty_bindings: HashMap<PaneId, PtyBinding>,
-
-    /// Keeps the tracker event-pump task alive for the Workspace
-    /// lifetime; dropped when Workspace is dropped, which lets the
-    /// tracker thread exit cleanly via the receiver-disconnect probe.
-    #[allow(dead_code)]
-    pub(in crate::workspace) _pty_event_pump: Task<()>,
 
     /// JSONL fallback watcher's shutdown half — engaged only when
     /// the user has not installed the hook integration. The watcher
@@ -145,7 +134,7 @@ impl Workspace {
                     // A session starting or ending is the moment its process
                     // may have appeared or gone; a tool call's update is not.
                     if matches!(file.last_event.as_str(), "SessionStart" | "SessionEnd") {
-                        self.claude_sessions.pty_tracker.poke();
+                        crate::runs::RunsHost::cli_tracker(cx).poke();
                     }
                     self.apply_task_session_changed(&file.session_id, cx);
                     if file.last_event == "PostToolUseFailure" {
@@ -211,7 +200,7 @@ impl Workspace {
                 }
             },
             StatusEvent::Removed { session_id, .. } => {
-                self.claude_sessions.pty_tracker.poke();
+                crate::runs::RunsHost::cli_tracker(cx).poke();
                 self.claude_sessions
                     .tool_use_failure_counts
                     .remove(&session_id);
@@ -354,7 +343,12 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         for id in pane_ids {
-            self.claude_sessions.pty_tracker.unregister(*id);
+            crate::runs::RunsHost::release_execution(
+                self.run_pane(*id),
+                daruda_store::tasks::machine::UndeliveredReason::PaneClosed,
+                cx,
+            );
+            crate::runs::RunsHost::unregister_terminal(self.run_pane(*id), cx);
             self.claude_sessions.pty_bindings.remove(id);
         }
         self.unseen_outcomes.forget(pane_ids);

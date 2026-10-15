@@ -16,6 +16,7 @@
 pub const ESC: u8 = 0x1b;
 /// `BEL` — terminates an OSC string (7-bit form).
 pub const BEL: u8 = 0x07;
+pub const INTERRUPT: u8 = 0x03;
 /// Final byte of the ST 2-byte terminator (`ESC \`). See [`ST`] for the
 /// full 2-byte slice when emitting.
 pub const ST_FINAL: u8 = b'\\';

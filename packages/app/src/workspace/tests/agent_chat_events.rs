@@ -235,7 +235,10 @@ fn the_host_ignores_task_prompt_delivery_signals(cx: &mut TestAppContext) {
                 let pane = ws.active_runtime().panes.last().expect("pane").id;
                 let view = ws.agent_chat_view(pane).expect("a chat pane").clone();
                 view.update(cx, |_, cx| {
-                    cx.emit(AgentChatEvent::PromptSent { task: run.clone() });
+                    cx.emit(AgentChatEvent::PromptSent {
+                        task: run.clone(),
+                        session_id: None,
+                    });
                     cx.emit(AgentChatEvent::PromptsDropped {
                         tasks: vec![run],
                         reason: PromptDropReason::SessionTornDown,

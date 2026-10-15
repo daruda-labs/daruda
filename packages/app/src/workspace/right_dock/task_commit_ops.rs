@@ -98,12 +98,23 @@ impl Workspace {
             .values()
             .flat_map(|runtime| runtime.panes.iter())
             .find_map(|pane| {
-                let chat = pane.agent_chat_content()?;
-                (chat.task_run.as_ref() == Some(exec)).then_some(pane.id)
+                (RunsHost::pane_execution(self.run_pane(pane.id), cx) == Some(exec))
+                    .then_some(pane.id)
             });
         let Some(pane_id) = pane_id else {
             return false;
         };
+        if let Some(view) = self
+            .main_area
+            .pane(pane_id)
+            .and_then(|pane| pane.terminal_view())
+            .cloned()
+        {
+            view.update(cx, |view, _| {
+                view.send_input(&[daruda_terminal::ansi::INTERRUPT])
+            });
+            return true;
+        }
         self.cancel_agent_turn(pane_id, cx);
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
             view.update(cx, |view, cx| view.clear_queue(cx));
@@ -124,6 +135,30 @@ fn report_commit_error(ws: &WeakEntity<Workspace>, e: &TaskCommitError, cx: &mut
 struct WorkspaceEffects;
 
 impl RunsEffects for WorkspaceEffects {
+    fn cli_event(
+        &self,
+        pane: Option<crate::runs::RunPane>,
+        event: daruda_agent::pty_tracker::PtyTrackerEvent,
+        cx: &mut App,
+    ) {
+        WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
+            use daruda_agent::pty_tracker::PtyTrackerEvent;
+            let event = match &event {
+                PtyTrackerEvent::BindingChanged { binding, .. } => {
+                    let Some(pane) = pane.filter(|pane| pane.workspace == ws.uuid()) else {
+                        return;
+                    };
+                    PtyTrackerEvent::BindingChanged {
+                        pane_id: pane.pane,
+                        binding: binding.clone(),
+                    }
+                }
+                event @ PtyTrackerEvent::SessionProcessExited { .. } => event.clone(),
+            };
+            ws.apply_pty_tracker_event(event, cx);
+        });
+    }
+
     fn stop_execution(&self, exec: &ExecutionRef, cx: &mut App) {
         let mut stopped = false;
         WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {

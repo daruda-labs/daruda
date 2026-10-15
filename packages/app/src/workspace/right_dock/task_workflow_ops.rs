@@ -17,9 +17,7 @@ use chrono::Utc;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::tasks::machine::{SettleOutcome, TodoItem as MergedTodo};
-use daruda_store::tasks::{
-    ExecutionRef, Lifecycle, TaskAgentSurface, TaskEvent, TaskRecord, new_task_id,
-};
+use daruda_store::tasks::{ExecutionRef, Lifecycle, TaskEvent, TaskRecord, new_task_id};
 use gpui::{Context, Window};
 use serde::Deserialize;
 
@@ -86,23 +84,16 @@ impl Workspace {
             })
     }
 
-    /// Direct PTY write into a specific pane by id. Returns `false`
-    /// when the id no longer exists (pane closed mid-flight) or the
-    /// pane isn't a terminal. Targeting by id — not by `focused_pane_id`
-    /// — guarantees the bytes land in the pane the caller intends,
-    /// which matters for task dispatch where focus may shift between
-    /// `finalize_create_lane` and the actual write.
-    pub(super) fn send_to_pane(
+    pub(super) fn write_task_input(
         &self,
         pane_id: crate::workspace::main_area::pane_tree::PaneId,
-        bytes: &[u8],
-    ) -> bool {
+        bytes: Vec<u8>,
+    ) -> Option<std::sync::mpsc::Receiver<Result<(), daruda_terminal::pty::PtyError>>> {
         self.active_runtime()
             .panes
             .iter()
-            .find(|p| p.id == pane_id)
-            .map(|p| p.send_input(bytes))
-            .unwrap_or(false)
+            .find(|pane| pane.id == pane_id)?
+            .write_confirmed_input(bytes)
     }
 
     /// User-initiated stop. Lane is preserved (D-1). The log records the
@@ -234,7 +225,10 @@ impl Workspace {
             .records()
             .filter(|task| {
                 matches!(task.lifecycle, Lifecycle::Running { .. })
-                    && task.spec.agent_surface == TaskAgentSurface::Terminal
+                    && task
+                        .execution
+                        .as_ref()
+                        .is_some_and(|run| run.source.cli_process().is_some())
                     && task.execution.as_ref().is_some_and(|run| {
                         run.source.cli_process().is_some()
                             && run.session_id.as_deref() == Some(session_id)
@@ -274,7 +268,9 @@ impl Workspace {
             .global::<GlobalTasks>()
             .records()
             .filter(|task| {
-                task.spec.agent_surface == TaskAgentSurface::Terminal
+                task.execution
+                    .as_ref()
+                    .is_some_and(|run| run.source.cli_process().is_some())
                     && task.session_ids.iter().any(|s| s == session_id)
             })
             .filter_map(running_exec)
@@ -298,54 +294,45 @@ impl Workspace {
         outcome: SettleOutcome,
         cx: &mut Context<Self>,
     ) {
-        let Some(owner) = self.task_chat_owner(pane_id, cx) else {
+        let Some(exec) = self.task_chat_execution(pane_id, cx) else {
             return;
         };
-        let Some(exec) = cx
-            .global::<GlobalTasks>()
-            .get(&owner)
-            .and_then(running_exec)
-        else {
-            return;
-        };
-        let event = TaskEvent::Settled {
-            exec,
-            outcome,
-            at: Utc::now(),
-        };
-        RunsHost::propose_fact(event, cx);
+        RunsHost::settle_execution(exec, outcome, cx);
     }
 
-    /// The pane that owns a task's run could not connect: a run already
-    /// under way fails, and one whose prompt never left fails to start.
+    pub(in crate::workspace) fn fail_agent_chat_start(
+        &mut self,
+        pane_id: crate::workspace::main_area::pane_tree::PaneId,
+        cause: daruda_store::tasks::machine::StartFailure,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(exec) = RunsHost::pane_execution(self.run_pane(pane_id), cx).cloned() {
+            RunsHost::delivery_failed(exec, crate::runs::DeliveryFailure::Start(cause), cx);
+            if let Some(view) = self.agent_chat_view(pane_id).cloned() {
+                view.update(cx, |view, cx| {
+                    view.discard_pending_prompts(
+                        daruda_chat::view::PromptDropReason::ConnectFailed,
+                        cx,
+                    )
+                });
+            }
+        }
+    }
+
     pub(in crate::workspace) fn fail_agent_chat_task(
         &mut self,
         pane_id: crate::workspace::main_area::pane_tree::PaneId,
         cx: &mut Context<Self>,
     ) {
-        let Some(owner) = self.task_chat_owner(pane_id, cx) else {
-            return;
-        };
-        let Some(task) = cx.global::<GlobalTasks>().get(&owner) else {
-            return;
-        };
-        let at = Utc::now();
-        let event = match &task.lifecycle {
-            Lifecycle::Running { exec, .. } => TaskEvent::Settled {
-                exec: exec.clone(),
-                outcome: SettleOutcome::Errored,
-                at,
-            },
-            Lifecycle::Preparing { exec, .. } | Lifecycle::Dispatching { exec, .. } => {
-                TaskEvent::DispatchFailed {
-                    exec: exec.clone(),
-                    cause: daruda_store::tasks::machine::StartFailure::ConnectUnavailable,
-                    at,
-                }
-            }
-            _ => return,
-        };
-        RunsHost::propose_fact(event, cx);
+        if let Some(exec) = RunsHost::pane_execution(self.run_pane(pane_id), cx).cloned() {
+            RunsHost::delivery_failed(
+                exec,
+                crate::runs::DeliveryFailure::Dropped(
+                    daruda_store::tasks::machine::UndeliveredReason::StartFailed,
+                ),
+                cx,
+            );
+        }
     }
 
     /// Map a single Claude `last_event` string → a daruda
@@ -405,7 +392,10 @@ impl Workspace {
     fn session_owned_by_running_task(session_id: &str, cx: &Context<Self>) -> bool {
         cx.global::<GlobalTasks>().records().any(|task| {
             matches!(task.lifecycle, Lifecycle::Running { .. })
-                && task.spec.agent_surface == TaskAgentSurface::Terminal
+                && task
+                    .execution
+                    .as_ref()
+                    .is_some_and(|run| run.source.cli_process().is_some())
                 && task.session_ids.iter().any(|s| s == session_id)
         })
     }

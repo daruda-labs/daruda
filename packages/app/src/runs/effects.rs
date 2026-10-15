@@ -3,6 +3,14 @@ use gpui::App;
 
 pub(crate) trait RunsEffects {
     fn stop_execution(&self, exec: &ExecutionRef, cx: &mut App);
+
+    fn cli_event(
+        &self,
+        _pane: Option<super::RunPane>,
+        _event: daruda_agent::pty_tracker::PtyTrackerEvent,
+        _cx: &mut App,
+    ) {
+    }
 }
 
 #[cfg(test)]

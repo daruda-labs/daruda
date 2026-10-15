@@ -39,7 +39,7 @@ impl Workspace {
                 self.relay_queue_full_notice_to_telegram(pane_id, cx)
             }
             Some(PromptDispatch::SentNow) => {}
-            Some(PromptDispatch::ReadOnly) => return false,
+            Some(PromptDispatch::ReadOnly | PromptDispatch::Unavailable) => return false,
             None => self.relay_first_response_fallback_to_telegram(pane_id, cx),
         }
         true

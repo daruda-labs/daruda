@@ -5,6 +5,8 @@ use crate::tasks::TaskId;
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum TaskRejected {
+    #[error("tasks cannot run in a remote lane")]
+    RemoteLane,
     #[error("no task {id}")]
     UnknownTask { id: TaskId },
     #[error("task {id} already exists")]

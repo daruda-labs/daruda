@@ -198,12 +198,20 @@ fn startup_reconciles_only_the_runs_the_process_lost(cx: &mut TestAppContext) {
         (SeedEnd::Running, SeedRun::chat("/chat").agent("codex")),
         (
             SeedEnd::Running,
-            SeedRun::cli("/cli", CliProcessState::Running { pid: 42 }),
+            SeedRun::cli("/cli", CliProcessState::Running { pid: 42 }).session("restart-cli"),
         ),
     ];
     let mut ids = Vec::new();
     for (end, run) in scenarios {
-        let spec = seed::spec(project, "restart");
+        let mut spec = seed::spec(project, "restart");
+        spec.agent_surface = if matches!(
+            run.source,
+            daruda_store::tasks::TaskExecutionSource::AgentChat
+        ) {
+            daruda_store::tasks::TaskAgentSurface::Terminal
+        } else {
+            daruda_store::tasks::TaskAgentSurface::AgentChat
+        };
         ids.push(spec.id.clone());
         let mut events = seed::created(spec);
         events.extend(seed::run(ids.last().unwrap(), &run, end));

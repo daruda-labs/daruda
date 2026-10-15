@@ -140,7 +140,6 @@ impl Workspace {
         Pane {
             id: pane_id,
             content: PaneContent::AgentChat(AgentChatContent {
-                task_run: None,
                 view,
                 cwd,
                 account,
@@ -344,7 +343,6 @@ impl Workspace {
         rt.panes.push(Pane {
             id: pane_id,
             content: PaneContent::AgentChat(AgentChatContent {
-                task_run: None,
                 view,
                 cwd,
                 account,

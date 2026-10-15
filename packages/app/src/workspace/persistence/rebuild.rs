@@ -80,22 +80,21 @@ impl Workspace {
                                     .global::<crate::runs::GlobalTasks>()
                                     .records()
                                     .any(|task| {
-                                        task.spec.agent_surface
-                                            == daruda_store::tasks::TaskAgentSurface::AgentChat
-                                            && task.execution.as_ref().is_some_and(|run| {
-                                                ac.agent_id.as_ref() == Some(&run.agent_id)
-                                                    && ac.session_id == run.session_id
-                                                    && ac.account_id == run.account_id
-                                                    && ac
-                                                        .cwd
-                                                        .as_ref()
-                                                        .and_then(PaneCwd::as_local)
-                                                        .is_some_and(|cwd| {
-                                                            daruda_core::path::same_path(
-                                                                cwd, &run.cwd,
-                                                            )
-                                                        })
-                                            })
+                                        task.execution.as_ref().is_some_and(|run| {
+                                            matches!(
+                                                run.source,
+                                                daruda_store::tasks::TaskExecutionSource::AgentChat
+                                            ) && ac.agent_id.as_ref() == Some(&run.agent_id)
+                                                && ac.session_id == run.session_id
+                                                && ac.account_id == run.account_id
+                                                && ac
+                                                    .cwd
+                                                    .as_ref()
+                                                    .and_then(PaneCwd::as_local)
+                                                    .is_some_and(|cwd| {
+                                                        daruda_core::path::same_path(cwd, &run.cwd)
+                                                    })
+                                        })
                                     });
                         // A task's conversation must never switch agent or account on restore.
                         let (agent_id, keep_session) = if task_chat {

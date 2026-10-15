@@ -39,6 +39,23 @@ struct AgentChatConnectionPlan {
     mcp_servers: Vec<daruda_acp::McpServer>,
 }
 
+#[cfg(test)]
+struct TestAgentConnections(std::rc::Rc<std::cell::RefCell<Vec<daruda_acp::HandleProbe>>>);
+
+#[cfg(test)]
+impl gpui::Global for TestAgentConnections {}
+
+#[cfg(test)]
+impl Workspace {
+    pub(crate) fn fake_agent_connections_for_test(
+        cx: &mut gpui::App,
+    ) -> std::rc::Rc<std::cell::RefCell<Vec<daruda_acp::HandleProbe>>> {
+        let probes = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        cx.set_global(TestAgentConnections(probes.clone()));
+        probes
+    }
+}
+
 /// The banner phase for a runtime-provisioning milestone, or `None` for
 /// milestones that shouldn't surface a banner (system node found, or a cache
 /// probe — both instant, so the plain "Connecting…" banner already fits).
@@ -82,7 +99,11 @@ fn fail_connect_account_prepare(
             ws.notify_status_docks(cx);
         }
         ws.report_error(report, cx);
-        ws.fail_agent_chat_task(pane_id, cx);
+        ws.fail_agent_chat_start(
+            pane_id,
+            daruda_store::tasks::machine::StartFailure::AccountUnavailable,
+            cx,
+        );
     }) {
         Ok(()) => {}
         // Window gone before the toast could land — keep the log record.
@@ -560,19 +581,11 @@ impl Workspace {
         let Some(cwd) = view.read(cx).cwd().cloned() else {
             return; // no cwd → never had a session
         };
-        for pane in self
-            .main_area
-            .runtimes
-            .values_mut()
-            .flat_map(|rt| rt.panes.iter_mut())
-        {
-            if pane.id == pane_id {
-                if let Some(chat) = pane.agent_chat_content_mut() {
-                    chat.task_run = None;
-                }
-                break;
-            }
-        }
+        crate::runs::RunsHost::release_execution(
+            self.run_pane(pane_id),
+            daruda_store::tasks::machine::UndeliveredReason::SessionTornDown,
+            cx,
+        );
         view.update(cx, |v, cx| v.reset_for_new_session(cx));
         self.mutate_durable(cx, |_, _| {});
         self.notify_status_docks(cx);
@@ -648,6 +661,73 @@ mod tests {
     use daruda_acp::Remedy;
     use daruda_agent::accounts::LoginTarget;
     use daruda_store::accounts::AccountRecipeId;
+
+    #[gpui::test]
+    fn account_preparation_failure_records_the_selected_account_was_unavailable(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use crate::runs::seed::{self, SeedEnd, SeedRun};
+        use crate::runs::{GlobalTasks, RunsHost};
+        use daruda_store::tasks::Lifecycle;
+        use daruda_store::tasks::machine::{ErrorCause, StartFailure};
+        use gpui::AppContext as _;
+        let (window, workspace) = crate::workspace::tests::build_workspace(cx);
+        let (pane, id) = cx
+            .update_window(window.into(), |_, window, cx| {
+                workspace.update(cx, |ws, cx| {
+                    let pane = ws.create_agent_chat_pane(
+                        Some(daruda_store::project::PaneCwd::Local(std::env::temp_dir())),
+                        None,
+                        ws.mirrors.agents[0].id.clone(),
+                        None,
+                        window,
+                        cx,
+                    );
+                    let pane_id = pane.id;
+                    ws.active_runtime_mut().panes.push(pane);
+                    let run = SeedRun::chat(std::env::temp_dir());
+                    let id = seed::task(
+                        seed::spec(Default::default(), "Account"),
+                        Some((&run, SeedEnd::Dispatching)),
+                        cx,
+                    );
+                    RunsHost::bind_execution(ws.run_pane(pane_id), run.exec(&id), cx);
+                    ws.send_agent_task_prompt_text(
+                        pane_id,
+                        "task prompt".into(),
+                        Some(run.exec(&id)),
+                        cx,
+                    );
+                    (pane_id, id)
+                })
+            })
+            .unwrap();
+        super::fail_connect_account_prepare(
+            &workspace.downgrade(),
+            pane,
+            "test preparation error".into(),
+            &mut cx.to_async(),
+        );
+        cx.run_until_parked();
+        workspace.read_with(cx, |ws, cx| {
+            assert!(
+                !ws.agent_chat_view(pane)
+                    .unwrap()
+                    .read(cx)
+                    .queue()
+                    .has_pending()
+            )
+        });
+        cx.update(|cx| {
+            assert!(matches!(
+                cx.global::<GlobalTasks>().get(&id).unwrap().lifecycle,
+                Lifecycle::Error {
+                    cause: ErrorCause::StartFailed(StartFailure::AccountUnavailable),
+                    ..
+                }
+            ))
+        });
+    }
 
     fn claude_system() -> LoginTarget {
         LoginTarget::System {

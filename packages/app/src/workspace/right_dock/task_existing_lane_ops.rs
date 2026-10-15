@@ -12,7 +12,7 @@ use daruda_store::tasks::{ExecutionRef, TaskAgentSurface, TaskRecord};
 use gpui::{Context, Window};
 
 use super::task_start::{TaskStartError, TaskStarted};
-use crate::runs::{GlobalTasks, TaskCommitError};
+use crate::runs::GlobalTasks;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -75,6 +75,25 @@ impl Workspace {
         if self.active_lane_is_inaccessible() {
             return Err(missing());
         }
+        let agent = self.open_agent_id(None);
+        let launch = self.agent_launch_for(&agent);
+        if self.active_lane().is_some_and(|lane| {
+            lane.remote_cwd.is_some()
+                || lane
+                    .session_host
+                    .as_ref()
+                    .is_some_and(daruda_store::project::LaneSessionHost::is_remote)
+                || launch.as_ref().is_some_and(|launch| {
+                    lane.effective_session_host(
+                        &launch.launch,
+                        &self.mirrors.session_hosts,
+                        &self.mirrors.session_host_tombstones,
+                    )
+                    .is_ok_and(|host| host.is_remote())
+                })
+        }) {
+            return Err(TaskStartError::RemoteLane);
+        }
         Ok(ExistingLaneStart { lane, root, branch })
     }
 
@@ -85,12 +104,21 @@ impl Workspace {
         start: ExistingLaneStart,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Result<(TaskStarted, gpui::Task<Result<u64, TaskCommitError>>), TaskStartError> {
+    ) -> Result<(TaskStarted, gpui::Task<Result<u64, TaskStartError>>), TaskStartError> {
         let ExistingLaneStart { lane, root, branch } = start;
         let surface = cx
             .global::<GlobalTasks>()
             .get(&exec.task_id)
-            .map(|task| task.spec.agent_surface)
+            .and_then(|task| match &task.lifecycle {
+                daruda_store::tasks::Lifecycle::Preparing { source, .. } => Some(
+                    if matches!(source, daruda_store::tasks::TaskExecutionSource::AgentChat) {
+                        TaskAgentSurface::AgentChat
+                    } else {
+                        TaskAgentSurface::Terminal
+                    },
+                ),
+                _ => None,
+            })
             .ok_or(TaskStartError::NotFound)?;
         // The lane may have closed while the start was recorded.
         if self.lane_for(lane).is_none() {
