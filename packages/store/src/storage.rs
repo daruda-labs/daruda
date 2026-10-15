@@ -90,6 +90,12 @@ impl StorageLayout {
         self.data.clone()
     }
 
+    /// The task run log's directory. Resolving it creates nothing; the
+    /// opener creates it.
+    pub(crate) fn task_log(&self) -> PathBuf {
+        self.data.join("task-log")
+    }
+
     pub(crate) fn node_install(&self) -> PathBuf {
         self.shared.join("node")
     }

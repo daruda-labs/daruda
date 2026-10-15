@@ -2005,11 +2005,13 @@ version = "0.2.18"
 dependencies = [
  "chrono",
  "daruda_core",
+ "daruda_runlog",
  "dirs 7.0.0",
  "enum-iterator",
  "insta",
  "serde",
  "serde_json",
+ "smol",
  "tempfile",
  "thiserror 2.0.21",
  "ulid",
