@@ -312,12 +312,12 @@ fn existing_lane_start_reports_a_registered_lane_whose_directory_is_gone(cx: &mu
 }
 
 /// A Retry whose Start stops early (here: no git repo) still leaves the task
-/// in Backlog in the log and in the `tasks.json` mirror an older build reads.
+/// in Backlog in the log without creating a legacy task file.
 #[gpui::test]
 fn retry_that_cannot_start_persists_the_backlog_state(cx: &mut TestAppContext) {
     let (window, workspace) = crate::workspace::tests::build_workspace(cx);
     let data_dir = workspace.read_with(cx, |ws, _| ws.data_dir.clone());
-    cx.update(|cx| crate::runs::RunsHost::seed_for_test(Some(data_dir.clone()), cx));
+    cx.update(crate::runs::RunsHost::seed_for_test);
     let id = cx
         .update_window(window.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
@@ -329,9 +329,5 @@ fn retry_that_cannot_start_persists_the_backlog_state(cx: &mut TestAppContext) {
         .unwrap();
     cx.run_until_parked();
     assert_eq!(state(&id, cx), Lifecycle::Backlog);
-    let saved = daruda_store::tasks::load_tasks_in(&data_dir).expect("tasks saved");
-    assert_eq!(
-        saved.tasks.iter().find(|t| t.id == id).map(|t| &t.state),
-        Some(&daruda_store::tasks::TaskState::Backlog)
-    );
+    assert!(!daruda_store::tasks::tasks_path_in(&data_dir).exists());
 }

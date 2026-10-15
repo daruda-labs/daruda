@@ -11,7 +11,7 @@ use daruda_store::tasks::machine::{
 use daruda_store::tasks::migrate::LEGACY_EXECUTION_ID;
 use daruda_store::tasks::{
     ExecutionRef, SessionEndReason, SubTask, Task, TaskEvent, TaskExecution, TaskState, TaskStore,
-    TasksState, save_tasks_in, tasks_path_in,
+    TasksState, tasks_path_in,
 };
 
 const BUILD: &str = "daruda_store-test";
@@ -98,11 +98,18 @@ fn legacy_file() -> TasksState {
     }
 }
 
+fn write_legacy_input(data_dir: &std::path::Path, rows: &TasksState) -> std::io::Result<()> {
+    std::fs::write(
+        tasks_path_in(data_dir),
+        serde_json::to_vec_pretty(rows).unwrap(),
+    )
+}
+
 #[test]
 fn a_v2_tasks_file_imports_once_and_running_becomes_interrupted() {
     let (logs, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let legacy = legacy_file();
-    save_tasks_in(data.path(), &legacy).unwrap();
+    write_legacy_input(data.path(), &legacy).unwrap();
 
     let store = open(logs.path(), data.path());
     let (book, events) = contents(&store);
@@ -180,7 +187,7 @@ fn a_v2_tasks_file_imports_once_and_running_becomes_interrupted() {
 #[test]
 fn import_leaves_the_source_file_byte_identical() {
     let (logs, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    save_tasks_in(data.path(), &legacy_file()).unwrap();
+    write_legacy_input(data.path(), &legacy_file()).unwrap();
     let path = tasks_path_in(data.path());
     let before = std::fs::read(&path).unwrap();
     let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
@@ -199,13 +206,13 @@ fn import_leaves_the_source_file_byte_identical() {
 #[test]
 fn a_second_open_does_not_import_again() {
     let (logs, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    save_tasks_in(data.path(), &legacy_file()).unwrap();
+    write_legacy_input(data.path(), &legacy_file()).unwrap();
     let first = contents(&open(logs.path(), data.path()));
 
     // The old build keeps writing the file until the app switches over.
     let mut grown = legacy_file();
     grown.add(legacy_task("later", TaskState::Backlog));
-    save_tasks_in(data.path(), &grown).unwrap();
+    write_legacy_input(data.path(), &grown).unwrap();
 
     let second = contents(&open(logs.path(), data.path()));
     assert_eq!(second, first);
@@ -215,7 +222,7 @@ fn a_second_open_does_not_import_again() {
 fn an_emptied_log_is_not_imported_again() {
     let (logs, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let legacy = legacy_file();
-    save_tasks_in(data.path(), &legacy).unwrap();
+    write_legacy_input(data.path(), &legacy).unwrap();
     let store = open(logs.path(), data.path());
     for task in &legacy.tasks {
         if task.state == TaskState::Backlog {
@@ -256,7 +263,7 @@ fn no_legacy_directory_opens_an_empty_store() {
 
 fn imported_book(legacy: &TasksState) -> (TaskStore, TasksBook) {
     let (logs, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    save_tasks_in(data.path(), legacy).unwrap();
+    write_legacy_input(data.path(), legacy).unwrap();
     let store = open(logs.path(), data.path());
     let book = contents(&store).0;
     // The tempdirs must outlive the store's use; leak them to the process.

@@ -30,13 +30,10 @@ pub(super) fn run() {
     };
     // Only the primary instance holds `desktop.lock`, the task log's single
     // writer guarantee; a forwarded launch returned above without opening it.
-    let runs = crate::runs::RunsHost::open(
-        daruda_store::tasks::TaskStore::open_current(
-            env!("CARGO_PKG_VERSION"),
-            crate::runs::no_hook(),
-        ),
-        Some(daruda_store::persistence::default_data_dir()),
-    );
+    let runs = crate::runs::RunsHost::open(daruda_store::tasks::TaskStore::open_current(
+        env!("CARGO_PKG_VERSION"),
+        crate::runs::no_hook(),
+    ));
     let app = bootstrap::new_application();
     app.run(move |cx: &mut App| {
         crate::workspace_storage::install(workspace_store, cx);

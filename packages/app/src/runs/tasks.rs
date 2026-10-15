@@ -4,7 +4,6 @@
 //! holds the committed state, and projections apply in proposal order with a
 //! `seq` guard, so an out-of-order completion never rolls state back.
 
-use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -16,7 +15,6 @@ use daruda_store::tasks::{
 };
 use gpui::{App, BorrowAppContext as _, Global};
 
-use super::legacy::{self, LegacyMirror};
 use super::{RunsEffects, TaskIntent};
 
 /// How long quitting waits for queued task commits to become durable.
@@ -33,10 +31,6 @@ pub(crate) struct GlobalTasks {
 impl Global for GlobalTasks {}
 
 impl GlobalTasks {
-    pub(super) fn seq(&self) -> u64 {
-        self.seq
-    }
-
     pub(crate) fn get(&self, id: &str) -> Option<&TaskRecord> {
         self.book.get(id)
     }
@@ -107,7 +101,6 @@ pub(crate) struct RunsHost {
     /// Closes once the newest proposal has reached the projection; the next
     /// proposal waits on it, so projections apply in proposal order.
     tail: smol::channel::Receiver<()>,
-    pub(super) legacy: LegacyMirror,
     #[cfg(any(test, feature = "screenshot"))]
     _scratch: Option<tempfile::TempDir>,
     /// Tests of what a task fact *does*, rather than of when it lands,
@@ -134,10 +127,7 @@ impl RunsHost {
     /// left active, once, and read the projection. A failed open, or a
     /// reconciliation an earlier start never finished, is reported and
     /// leaves the host unable to write rather than stopping the app.
-    pub(crate) fn open(
-        opened: Result<TaskStore, TaskStoreError>,
-        legacy_dir: Option<PathBuf>,
-    ) -> OpenedRuns {
+    pub(crate) fn open(opened: Result<TaskStore, TaskStoreError>) -> OpenedRuns {
         let store = match opened {
             Ok(store) => store,
             Err(e) => {
@@ -201,7 +191,6 @@ impl RunsHost {
                 cli: None,
                 effects: None,
                 tail: settled_tail(),
-                legacy: LegacyMirror::new(legacy_dir),
                 #[cfg(any(test, feature = "screenshot"))]
                 _scratch: None,
                 #[cfg(test)]
@@ -345,28 +334,20 @@ impl RunsHost {
         }
     }
 
-    /// Wait for queued commits on quit, then mirror the final projection.
+    /// Wait for every queued task commit to become durable before quitting.
     pub(crate) fn install_quit_flush(cx: &mut App) {
         cx.on_app_quit(|cx| {
-            let host = cx.global::<RunsHost>();
-            if let Access::Writable(store) = &host.access {
-                let result = store
-                    .flush(QUIT_FLUSH_DEADLINE)
-                    .map_err(|error| error.to_string())
-                    .and_then(|()| store.current().map_err(|error| error.to_string()));
-                match result {
-                    Ok((seq, book)) => host.legacy.write_now(seq, &book),
-                    Err(detail) => {
-                        LogWriter::log(
-                            ErrorReport::new("Task commits were still queued at quit")
-                                .severity(ErrorSeverity::Warning)
-                                .message(detail)
-                                .at(file!(), line!())
-                                .dedup("tasks.quit_flush")
-                                .build(),
-                        );
-                    }
-                }
+            if let Access::Writable(store) = &cx.global::<RunsHost>().access
+                && let Err(error) = store.flush(QUIT_FLUSH_DEADLINE)
+            {
+                LogWriter::log(
+                    ErrorReport::new("Task commits were still queued at quit")
+                        .severity(ErrorSeverity::Warning)
+                        .from_error(&error)
+                        .at(file!(), line!())
+                        .dedup("tasks.quit_flush")
+                        .build(),
+                );
             }
             async {}
         })
@@ -388,7 +369,7 @@ impl RunsHost {
         }
         #[cfg(test)]
         {
-            Self::install(Self::scratch(None, Vec::new()), cx);
+            Self::install(Self::scratch(Vec::new()), cx);
         }
         #[cfg(not(test))]
         {
@@ -404,9 +385,9 @@ impl RunsHost {
     }
 
     /// A log in a throwaway directory holding `records`; nothing reaches the
-    /// profile. `legacy_dir` receives the `tasks.json` mirror, if given.
+    /// profile data directory.
     #[cfg(any(test, feature = "screenshot"))]
-    fn scratch(legacy_dir: Option<PathBuf>, records: Vec<TaskRecord>) -> OpenedRuns {
+    fn scratch(records: Vec<TaskRecord>) -> OpenedRuns {
         let dir = tempfile::tempdir().expect("a scratch task-log directory");
         let store = TaskStore::in_directory(dir.path(), None, env!("CARGO_PKG_VERSION"), no_hook())
             .expect("a scratch task log opens");
@@ -414,7 +395,7 @@ impl RunsHost {
             smol::block_on(store.propose(TaskEvent::Imported { tasks: records }))
                 .expect("an empty scratch log takes the import");
         }
-        let mut opened = Self::open(Ok(store), legacy_dir);
+        let mut opened = Self::open(Ok(store));
         opened.host._scratch = Some(dir);
         opened
     }
@@ -424,15 +405,14 @@ impl RunsHost {
     #[cfg(any(test, feature = "screenshot"))]
     pub(crate) fn suspend_persistence(cx: &mut App) {
         let records = cx.global::<GlobalTasks>().records().cloned().collect();
-        let mut opened = Self::scratch(None, records);
-        opened.host.legacy.disable();
+        let opened = Self::scratch(records);
         Self::install(opened, cx);
     }
 
-    /// A writable scratch log whose `tasks.json` mirror goes to `legacy_dir`.
+    /// A writable task log in an isolated temporary directory.
     #[cfg(test)]
-    pub(crate) fn seed_for_test(legacy_dir: Option<PathBuf>, cx: &mut App) {
-        Self::install(Self::scratch(legacy_dir, Vec::new()), cx);
+    pub(crate) fn seed_for_test(cx: &mut App) {
+        Self::install(Self::scratch(Vec::new()), cx);
     }
 
     /// Commit `event` on this thread and project it at once: fixtures that
@@ -481,7 +461,6 @@ impl OpenedRuns {
                 cli: None,
                 effects: None,
                 tail: settled_tail(),
-                legacy: LegacyMirror::new(None),
                 #[cfg(any(test, feature = "screenshot"))]
                 _scratch: None,
                 #[cfg(test)]
@@ -534,7 +513,7 @@ fn reconcile(store: &TaskStore) -> Result<(), ReconcileBlocked> {
 }
 
 /// Replace the projection with a committed state no older than it, then let
-/// every window know and mirror it to `tasks.json`.
+/// every window know.
 fn apply_projection(seq: u64, state: TasksBook, cx: &mut App) {
     let newer = cx.global::<GlobalTasks>().seq < seq;
     if !newer {
@@ -546,7 +525,6 @@ fn apply_projection(seq: u64, state: TasksBook, cx: &mut App) {
         projection.seq = seq;
         projection.book = state;
     });
-    legacy::schedule(cx);
 }
 
 #[cfg(test)]

@@ -48,7 +48,7 @@ mod tests {
         let store = TaskStore::in_directory(dir.path(), None, "test", no_hook()).unwrap();
         let calls = Rc::new(RefCell::new(Vec::new()));
         cx.update(|cx| {
-            RunsHost::install(RunsHost::open(Ok(store.clone()), None), cx);
+            RunsHost::install(RunsHost::open(Ok(store.clone())), cx);
             RunsHost::install_effects(
                 Rc::new(RecordingEffects {
                     calls: calls.clone(),

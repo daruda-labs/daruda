@@ -35,7 +35,7 @@ impl Workspace {
 
     /// Test-only constructor that skips the heavy runtime systems:
     /// initial tab + PTY spawn, JSONL/skills/MCP filesystem watchers,
-    /// `restore_task_cli_tracking`, `persist_state`, macro-shortcut
+    /// `persist_state`, macro-shortcut
     /// registration, and `WindowRegistry` register. Tests that exercise
     /// any of those must opt in by calling the matching `refresh_*` /
     /// `add_tab` / `persist_state` method after construction.
@@ -304,7 +304,7 @@ impl Workspace {
         Self::observe_outcome_visibility(window, cx);
         // Test-only short-circuit: every line below this point spawns a
         // background thread (PTY, FS watchers) or performs sync disk I/O
-        // (persist_state, restore_task_cli_tracking). Tests that need
+        // (persist_state). Tests that need
         // any of these must invoke them explicitly after construction;
         // skipping them by default is what brings the suite under 30 s.
         if for_test {

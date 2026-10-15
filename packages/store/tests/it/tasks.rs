@@ -6,7 +6,7 @@ use chrono::Utc;
 
 use daruda_store::project::ProjectUuid;
 use daruda_store::tasks::branch::{branch_name_for, random_branch_name};
-use daruda_store::tasks::persistence::{load_tasks_in, save_tasks_in, tasks_path_in};
+use daruda_store::tasks::persistence::{load_tasks_in, tasks_path_in};
 use daruda_store::tasks::prompt_file::{
     PROMPT_DIR_NAME, build_claude_command, existing_prompt_file_path, prompt_file_path,
     render_task_prompt, write_prompt_file,
@@ -37,6 +37,13 @@ fn sample_task() -> Task {
         "Fix auth bug".to_string(),
         "Login flow drops the token on refresh.".to_string(),
         Some(PathBuf::from("/repo/main")),
+    )
+}
+
+fn write_legacy_input(data_dir: &std::path::Path, rows: &TasksState) -> std::io::Result<()> {
+    std::fs::write(
+        tasks_path_in(data_dir),
+        serde_json::to_vec_pretty(rows).unwrap(),
     )
 }
 
@@ -338,7 +345,7 @@ fn task_subtask_progress_counts_completed() {
 }
 
 #[test]
-fn task_with_subtasks_round_trips_through_disk() {
+fn legacy_input_preserves_subtask_identity_and_origin() {
     use tempfile::tempdir;
     let dir = tempdir().unwrap();
     let mut state = TasksState::default();
@@ -358,7 +365,7 @@ fn task_with_subtasks_round_trips_through_disk() {
     let task_id = t.id.clone();
     state.add(t);
 
-    save_tasks_in(dir.path(), &state).expect("save");
+    write_legacy_input(dir.path(), &state).expect("save");
     let loaded = load_tasks_in(dir.path()).expect("load");
     let back = loaded.get(&task_id).expect("task survives round-trip");
     assert_eq!(back.subtasks.len(), 2);
@@ -665,7 +672,7 @@ fn render_task_prompt_wraps_user_prompt_with_metadata() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn save_and_load_round_trip_preserves_state() {
+fn legacy_input_preserves_all_task_fields() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let mut state = TasksState::default();
     state.add(sample_task());
@@ -678,7 +685,7 @@ fn save_and_load_round_trip_preserves_state() {
         t
     });
 
-    save_tasks_in(tmp.path(), &state).expect("save");
+    write_legacy_input(tmp.path(), &state).expect("save");
     let loaded = load_tasks_in(tmp.path()).expect("load");
     assert_eq!(loaded, state);
     assert!(tasks_path_in(tmp.path()).exists());
@@ -738,24 +745,23 @@ fn load_drops_tasks_from_before_project_scoping() {
 }
 
 #[test]
-fn save_and_load_preserve_the_project() {
+fn legacy_input_preserves_the_project() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let task = sample_task();
     let project = task.project;
     let mut state = TasksState::default();
     state.add(task);
-    save_tasks_in(tmp.path(), &state).expect("save");
+    write_legacy_input(tmp.path(), &state).expect("save");
     let loaded = load_tasks_in(tmp.path()).expect("load");
     assert_eq!(loaded.tasks[0].project, project);
 }
 
 #[test]
-fn save_creates_data_dir_if_missing() {
+fn loading_legacy_input_never_creates_a_missing_directory() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let nested = tmp.path().join("nested").join("daruda");
-    let state = TasksState::default();
-    save_tasks_in(&nested, &state).expect("save creates dirs");
-    assert!(tasks_path_in(&nested).exists());
+    assert!(load_tasks_in(&nested).is_none());
+    assert!(!nested.exists());
 }
 
 #[test]

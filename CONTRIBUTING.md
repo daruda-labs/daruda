@@ -251,6 +251,17 @@ config directory (`daruda` for release, `daruda-debug` for debug, or
 `daruda-<profile>` for a named profile). Managed Node installations and resource
 locks also retain their existing shared locations.
 
+Task state uses the profile data directory:
+
+| Data | Location | Policy |
+|---|---|---|
+| Current tasks | `<data_dir>/task-log/` | TaskStore's single-writer run log, opened by the primary desktop process. |
+| Legacy tasks | `<data_dir>/tasks.json` | One-time migration input, preserved byte-for-byte and never rewritten. |
+
+Task edits and app-quit flushing write only the run log. Older builds still
+read the preserved, potentially stale legacy file; automatic downgrade
+synchronization is not supported.
+
 New logs use native local storage:
 
 | Platform | Default log directory |
@@ -538,7 +549,7 @@ Two more capture knobs (compose with everything above):
 - `--screenshot-size WxH` — fix the captured window size (e.g. `1280x800`) instead of the restored bounds; for stable doc / pixel-regression shots. The resize lands before `--screenshot-scenario` opens its overlay, so the overlay is laid out at the captured size.
 - `DARUDA_SCREENSHOT_SETTLE_MS=<ms>` — override the 2 s post-launch settle (raise on slow CI / big workspaces, lower for quick local shots).
 
-**Tier 2 — persisted state under `DARUDA_DATA_DIR` (layout & structure):** `state/workspace/workspaces/<uuid>.json` (`WorkspaceState`: dock open/size, window bounds, active project+lane, `active_dock_view`, `active_right_panel_view`, focused pane, groups), `state/workspace/projects/<uuid>.json` (`ProjectState`: lanes, tabs, pane split tree, file-pane path + view_mode), `panels.json` (macro grid), `tasks.json` (task list). (Schemas in `daruda_store::project::{WorkspaceState,ProjectState}`.) **Easiest seeding: set `DARUDA_DATA_DIR`, drive the app by hand to the scenario once, quit, re-run with `--screenshot` against the same dir** — no schema guessing.
+**Tier 2 — persisted state under `DARUDA_DATA_DIR` (layout & structure):** `state/workspace/workspaces/<uuid>.json` (`WorkspaceState`: dock open/size, window bounds, active project+lane, `active_dock_view`, `active_right_panel_view`, focused pane, groups), `state/workspace/projects/<uuid>.json` (`ProjectState`: lanes, tabs, pane split tree, file-pane path + view_mode), `panels.json` (macro grid), `task-log/` (current tasks; seed through the app or a screenshot scenario, not by editing the log), `tasks.json` (read-only legacy import input). (Schemas in `daruda_store::project::{WorkspaceState,ProjectState}`.) **Easiest seeding: set `DARUDA_DATA_DIR`, drive the app by hand to the scenario once, quit, re-run with `--screenshot` against the same dir** — no schema guessing.
 
 **Tier 3 - transient/live state:** restore recomputes it, so config or persisted
 state alone cannot reach it. `--screenshot-scenario <name>` applies a scenario

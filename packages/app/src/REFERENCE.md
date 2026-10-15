@@ -72,8 +72,9 @@ callbacks for pane operations; this module does not depend on Workspace.
 Execution bindings are process-owned and identify both workspace and pane.
 The process owns one CLI tracker and event pump; closing a window removes its
 pane registrations but retains observed processes until their exit is confirmed.
-The temporary legacy mirror serializes `tasks.json` writes, including the
-latest durable state at app quit, to support downgrades during the migration.
+`TaskStore` imports an existing `tasks.json` once and never rewrites it.
+Commands and the app-quit flush target only the task log; older builds read
+the preserved, potentially stale legacy file.
 
 ## `surface/`
 

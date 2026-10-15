@@ -84,9 +84,7 @@ fn a_refused_save_keeps_the_draft_open_and_dirty(cx: &mut TestAppContext) {
     )
     .unwrap();
     let _claim = store.begin_reconcile().unwrap();
-    cx.update(|cx| {
-        crate::runs::RunsHost::install(crate::runs::RunsHost::open(Ok(store), None), cx)
-    });
+    cx.update(|cx| crate::runs::RunsHost::install(crate::runs::RunsHost::open(Ok(store)), cx));
     let editor = cx
         .update_window(window.into(), |_, window, cx| {
             workspace.update(cx, |workspace, cx| {

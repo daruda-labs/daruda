@@ -11,8 +11,55 @@ use gpui::TestAppContext;
 use super::seed::{self, SeedEnd, SeedRun};
 use super::{GlobalTasks, RunsHost, TaskCommitError, TaskIntent, no_hook};
 
+fn write_legacy_input(data_dir: &Path, rows: &TasksState) -> std::io::Result<()> {
+    std::fs::write(
+        daruda_store::tasks::tasks_path_in(data_dir),
+        serde_json::to_vec_pretty(rows).unwrap(),
+    )
+}
+
 fn store_at(path: &Path, legacy: Option<&Path>) -> TaskStore {
     TaskStore::in_directory(path, legacy, "test", no_hook()).unwrap()
+}
+
+#[gpui::test]
+async fn the_tasks_file_is_never_written_after_import(cx: &mut TestAppContext) {
+    let log = tempfile::tempdir().unwrap();
+    let legacy = tempfile::tempdir().unwrap();
+    let task =
+        daruda_store::tasks::Task::new(ProjectUuid::new(), "legacy".into(), "prompt".into(), None);
+    let id = task.id.clone();
+    let rows = TasksState {
+        tasks: vec![task],
+        ..Default::default()
+    };
+    let path = daruda_store::tasks::tasks_path_in(legacy.path());
+    let original = serde_json::to_vec_pretty(&rows).unwrap();
+    std::fs::write(&path, &original).unwrap();
+    let store = store_at(log.path(), Some(legacy.path()));
+    cx.update(|cx| {
+        RunsHost::install(RunsHost::open(Ok(store.clone())), cx);
+        RunsHost::install_quit_flush(cx);
+    });
+    cx.update(|cx| {
+        RunsHost::task(
+            TaskIntent::Edit {
+                id: id.clone(),
+                edit: edit("changed in the log"),
+            },
+            cx,
+        )
+    })
+    .await
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    cx.quit();
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    assert_eq!(
+        store.current().unwrap().1.get(&id).unwrap().spec.title,
+        "changed in the log"
+    );
 }
 
 fn edit(title: &str) -> TaskEdit {
@@ -35,7 +82,7 @@ async fn a_reply_observes_its_committed_projection(cx: &mut TestAppContext) {
     let store = store_at(dir.path(), None);
     let spec = seed::spec(ProjectUuid::new(), "original");
     let id = spec.id.clone();
-    cx.update(|cx| RunsHost::install(RunsHost::open(Ok(store), None), cx));
+    cx.update(|cx| RunsHost::install(RunsHost::open(Ok(store)), cx));
     let created = cx.update(|cx| RunsHost::task(TaskIntent::Create { spec }, cx));
     created.await.unwrap();
     cx.update(|cx| {
@@ -68,7 +115,7 @@ async fn a_hundred_queued_commands_replay_in_order(cx: &mut TestAppContext) {
     let store = store_at(dir.path(), None);
     let spec = seed::spec(ProjectUuid::new(), "original");
     let id = spec.id.clone();
-    cx.update(|cx| RunsHost::install(RunsHost::open(Ok(store.clone()), None), cx));
+    cx.update(|cx| RunsHost::install(RunsHost::open(Ok(store.clone())), cx));
     cx.update(|cx| RunsHost::propose(TaskEvent::Created { spec }, cx))
         .await
         .unwrap();
@@ -90,7 +137,7 @@ async fn a_hundred_queued_commands_replay_in_order(cx: &mut TestAppContext) {
     }
     let projected = cx.update(|cx| cx.global::<GlobalTasks>().book().clone());
     assert_eq!(projected.get(&id).unwrap().spec.title, "99");
-    cx.update(|cx| RunsHost::seed_for_test(None, cx));
+    cx.update(RunsHost::seed_for_test);
     drop(store);
     let restored = store_at(dir.path(), None).current().unwrap().1;
     assert_eq!(restored, projected);
@@ -134,10 +181,7 @@ fn quit_flushes_commands_that_have_not_reached_the_projection(cx: &mut TestAppCo
     let spec = seed::spec(ProjectUuid::new(), "queued at quit");
     let id = spec.id.clone();
     cx.update(|cx| {
-        RunsHost::install(
-            RunsHost::open(Ok(store.clone()), Some(legacy.path().into())),
-            cx,
-        );
+        RunsHost::install(RunsHost::open(Ok(store.clone())), cx);
         RunsHost::install_quit_flush(cx);
         RunsHost::propose(TaskEvent::Created { spec }, cx).detach();
     });
@@ -146,9 +190,7 @@ fn quit_flushes_commands_that_have_not_reached_the_projection(cx: &mut TestAppCo
         store.current().unwrap().1.get(&id).unwrap().spec.title,
         "queued at quit"
     );
-    let mirrored = daruda_store::tasks::load_tasks_in(legacy.path()).unwrap();
-    assert_eq!(mirrored.tasks.len(), 1);
-    assert_eq!(mirrored.tasks[0].id, id);
+    assert!(!daruda_store::tasks::tasks_path_in(legacy.path()).exists());
 }
 
 #[gpui::test]
@@ -161,13 +203,10 @@ fn an_unfinished_reconciliation_is_read_only_and_preserves_legacy_bytes(cx: &mut
     smol::block_on(store.propose(TaskEvent::Created { spec })).unwrap();
     let _claim = store.begin_reconcile().unwrap();
     let path = daruda_store::tasks::tasks_path_in(legacy.path());
-    daruda_store::tasks::save_tasks_in(legacy.path(), &TasksState::default()).unwrap();
+    write_legacy_input(legacy.path(), &TasksState::default()).unwrap();
     let original = std::fs::read(&path).unwrap();
     cx.update(|cx| {
-        RunsHost::install(
-            RunsHost::open(Ok(store.clone()), Some(legacy.path().into())),
-            cx,
-        );
+        RunsHost::install(RunsHost::open(Ok(store.clone())), cx);
         RunsHost::install_quit_flush(cx);
         assert!(!RunsHost::is_writable(cx));
         assert!(cx.global::<GlobalTasks>().get(&id).is_some());
@@ -220,7 +259,7 @@ fn startup_reconciles_only_the_runs_the_process_lost(cx: &mut TestAppContext) {
         }
     }
     cx.update(|cx| {
-        RunsHost::install(RunsHost::open(Ok(store), None), cx);
+        RunsHost::install(RunsHost::open(Ok(store)), cx);
         let book = cx.global::<GlobalTasks>();
         assert!(matches!(
             book.get(&ids[0]).unwrap().lifecycle,
@@ -265,16 +304,11 @@ fn import_is_once_and_never_changes_the_input_file(cx: &mut TestAppContext) {
         tasks: vec![backlog, running, done],
         ..Default::default()
     };
-    daruda_store::tasks::save_tasks_in(legacy.path(), &tasks).unwrap();
+    write_legacy_input(legacy.path(), &tasks).unwrap();
     let path = daruda_store::tasks::tasks_path_in(legacy.path());
     let bytes = std::fs::read(&path).unwrap();
     let store = store_at(dir.path(), Some(legacy.path()));
-    cx.update(|cx| {
-        RunsHost::install(
-            RunsHost::open(Ok(store.clone()), Some(legacy.path().into())),
-            cx,
-        )
-    });
+    cx.update(|cx| RunsHost::install(RunsHost::open(Ok(store.clone())), cx));
     let initial = store.current().unwrap().1;
     assert_eq!(std::fs::read(&path).unwrap(), bytes);
     assert!(matches!(
@@ -289,7 +323,7 @@ fn import_is_once_and_never_changes_the_input_file(cx: &mut TestAppContext) {
         initial.get(&done_id).unwrap().lifecycle,
         Lifecycle::Done { .. }
     ));
-    cx.update(|cx| RunsHost::seed_for_test(None, cx));
+    cx.update(RunsHost::seed_for_test);
     store.flush(Duration::from_secs(2)).unwrap();
     drop(store);
     let restored = store_at(dir.path(), Some(legacy.path()))

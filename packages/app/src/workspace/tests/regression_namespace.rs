@@ -222,7 +222,7 @@ fn suspended_persistence_writes_nothing(cx: &mut TestAppContext) {
     };
     let before = listing();
     ws.update(cx, |ws, cx| {
-        crate::runs::RunsHost::seed_for_test(Some(ws.data_dir.clone()), cx);
+        crate::runs::RunsHost::seed_for_test(cx);
         ws.suspend_persistence_for_shot(cx);
         let project = ws.active_project().unwrap().uuid;
         crate::runs::seed::task(crate::runs::seed::spec(project, "Fixture"), None, cx);

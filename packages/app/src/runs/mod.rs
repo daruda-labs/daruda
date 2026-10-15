@@ -9,7 +9,6 @@ mod cli;
 mod delivery;
 mod effects;
 mod intent;
-mod legacy;
 #[cfg(any(test, feature = "screenshot"))]
 pub(crate) mod seed;
 mod tasks;

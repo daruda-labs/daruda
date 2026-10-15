@@ -76,8 +76,7 @@ pub(in crate::workspace) fn display_name(path: &Path, text: Option<&str>) -> Str
 /// Derived from the data directory the window was **given** rather than
 /// from a fresh `default_data_dir()`: production passes exactly that, and
 /// a test passes a temp one — resolving it again here would read the
-/// developer's own flows in a suite that thought it was isolated. Same
-/// reasoning as `right_dock::task_ops::save_tasks_dirty`.
+/// developer's own flows in a suite that thought it was isolated.
 pub(in crate::workspace) fn global_flows_dir(data_dir: &Path) -> PathBuf {
     data_dir.join(FLOWS_DIR)
 }
