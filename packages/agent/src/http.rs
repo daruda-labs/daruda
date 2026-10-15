@@ -94,8 +94,11 @@ pub fn get_json(url: &str, headers: &[Header<'_>]) -> Result<serde_json::Value, 
                 let status = response.status().as_u16();
                 if attempt + 1 < MAX_JSON_ATTEMPTS
                     && retryable_status(status)
-                    && let Some(delay) =
-                        retry_delay(header(&response, "retry-after"), attempt, chrono::Utc::now())
+                    && let Some(delay) = retry_delay(
+                        header(&response, "retry-after"),
+                        attempt,
+                        chrono::Utc::now(),
+                    )
                 {
                     thread::sleep(delay);
                     attempt += 1;
