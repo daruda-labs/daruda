@@ -612,7 +612,7 @@ pub struct AgentChatView {
     pub(super) render_count: std::cell::Cell<u32>,
 }
 
-pub use event::AgentChatEvent;
+pub use event::{AgentChatEvent, PromptDropReason};
 mod activity_types;
 pub(crate) use activity_types::{ActivitySpan, ToolSummaryStyle, TurnRecord};
 pub use activity_types::{ActivityState, ChatContentWidth, TurnOutcome};

@@ -428,10 +428,8 @@ impl AgentChatView {
                 // rather than leaving them to be pumped or shown with a Resume
                 // button that can't send (they were never echoed, so nothing
                 // dangles in the transcript).
-                self.queue.pending_prompts.clear();
-                self.queue.paused_prompts.clear();
-                self.queue.editing_prompt = None;
-                self.queue.resume_armed = false;
+                let dropped = self.queue.discard_all();
+                self.report_dropped(dropped, super::PromptDropReason::ConnectFailed, cx);
                 // Drop the now-dead handle. The connection task has ended (this
                 // `Error` is its terminal signal), so its command channel is
                 // closed — a lingering `Some(handle)` would let `send_prompt_text`

@@ -8,6 +8,7 @@
 use gpui::{Context, Window};
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
+use daruda_store::tasks::ExecutionRef;
 
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
@@ -18,21 +19,35 @@ use daruda_chat::view::{
 };
 
 impl Workspace {
-    /// Send `text` as a prompt to an Agent chat pane. Shim for the bottom-dock
-    /// input: routes into the view, which echoes the prompt locally, forwards it
-    /// over the session, and marks a turn in flight.
-    /// A refusal is toasted rather than swallowed: the composer clears on a
-    /// handled submit, so silence would look like the prompt was accepted.
-    /// The text is not restored — reaching the cap by hand means ten prompts
-    /// are already waiting, and the next turn frees a slot.
+    /// An untagged [`Self::send_agent_task_prompt_text`], the shorthand the
+    /// tests drive the composer path with.
+    #[cfg(test)]
     pub(in crate::workspace) fn send_agent_prompt_text(
         &mut self,
         pane_id: PaneId,
         text: String,
         cx: &mut Context<Self>,
     ) {
+        self.send_agent_task_prompt_text(pane_id, text, None, cx);
+    }
+
+    /// Send `text` as a prompt to an Agent chat pane. Shim for the bottom-dock
+    /// input: routes into the view, which echoes the prompt locally, forwards it
+    /// over the session, and marks a turn in flight. A `Some(task)` makes the
+    /// chat report when the prompt reaches the wire or is dropped unsent.
+    /// A refusal is toasted rather than swallowed: the composer clears on a
+    /// handled submit, so silence would look like the prompt was accepted.
+    /// The text is not restored — reaching the cap by hand means ten prompts
+    /// are already waiting, and the next turn frees a slot.
+    pub(in crate::workspace) fn send_agent_task_prompt_text(
+        &mut self,
+        pane_id: PaneId,
+        text: String,
+        task: Option<ExecutionRef>,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(PromptDispatch::QueueFull) =
-            self.send_agent_prompt_text_with_origin(pane_id, text, PromptOrigin::InApp, cx)
+            self.send_agent_prompt_text_with_origin(pane_id, text, PromptOrigin::InApp, task, cx)
         {
             self.report_error(
                 ErrorReport::new(s::agent_chat::queue_full())
@@ -72,7 +87,7 @@ impl Workspace {
         text: String,
         cx: &mut Context<Self>,
     ) -> Option<PromptDispatch> {
-        self.send_agent_prompt_text_with_origin(pane_id, text, PromptOrigin::Telegram, cx)
+        self.send_agent_prompt_text_with_origin(pane_id, text, PromptOrigin::Telegram, None, cx)
     }
 
     fn send_agent_prompt_text_with_origin(
@@ -80,6 +95,7 @@ impl Workspace {
         pane_id: PaneId,
         text: String,
         origin: PromptOrigin,
+        task: Option<ExecutionRef>,
         cx: &mut Context<Self>,
     ) -> Option<PromptDispatch> {
         if self.agent_chat_view(pane_id)?.read(cx).is_read_only() {
@@ -101,10 +117,16 @@ impl Workspace {
             }
             SlashDispatch::Forward => {
                 let view = self.agent_chat_view(pane_id).cloned()?;
-                let prompt_dispatch = if origin == PromptOrigin::Telegram {
-                    view.update(cx, |v, cx| v.send_prompt_text_for_telegram(text, cx))
-                } else {
-                    view.update(cx, |v, cx| v.send_prompt_text(text, cx))
+                let prompt_dispatch = match (origin, task) {
+                    (PromptOrigin::Telegram, _) => {
+                        view.update(cx, |v, cx| v.send_prompt_text_for_telegram(text, cx))
+                    }
+                    (PromptOrigin::InApp, Some(task)) => {
+                        view.update(cx, |v, cx| v.send_task_prompt_text(text, task, cx))
+                    }
+                    (PromptOrigin::InApp, None) => {
+                        view.update(cx, |v, cx| v.send_prompt_text(text, cx))
+                    }
                 };
                 // Open the activity span on the idle→busy edge (stamps the
                 // working-indicator elapsed anchor at send). A returned

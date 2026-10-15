@@ -524,6 +524,7 @@ fn cli_snapshot_refuses_every_input_path(cx: &mut TestAppContext) {
                 PaneTextInput {
                     body: "macro".into(),
                     intent: PaneTextIntent::Command { submit: true },
+                    task: None,
                 },
                 window,
                 cx,

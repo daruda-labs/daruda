@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use daruda_content::link_target::LinkTarget;
 use daruda_store::observability::error_report::ErrorReport;
+use daruda_store::tasks::ExecutionRef;
 use gpui::{Pixels, Point};
 
 pub enum AgentChatEvent {
@@ -31,6 +32,28 @@ pub enum AgentChatEvent {
         uri: String,
         mime: Option<String>,
     },
+    /// A task's prompt was just handed to the live session. Once per tagged
+    /// prompt, whether it went out at once or drained from the queue; an
+    /// untagged prompt reports nothing.
+    PromptSent { task: ExecutionRef },
+    /// Task prompts left the queue without ever being sent. Only tagged
+    /// prompts are listed, and the event is skipped when none were dropped.
+    PromptsDropped {
+        tasks: Vec<ExecutionRef>,
+        reason: PromptDropReason,
+    },
+}
+
+/// Why queued prompts were discarded unsent. Parking on Stop is not a drop:
+/// a parked prompt can still be resumed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PromptDropReason {
+    /// The session failed terminally, so nothing queued can be delivered.
+    ConnectFailed,
+    /// `/clear` or a reconnect replaced the session the prompts waited on.
+    SessionTornDown,
+    /// The user removed the prompt from the strip or cleared the queue.
+    RemovedByUser,
 }
 
 impl gpui::EventEmitter<AgentChatEvent> for super::AgentChatView {}

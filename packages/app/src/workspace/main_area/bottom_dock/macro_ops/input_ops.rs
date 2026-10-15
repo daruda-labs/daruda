@@ -85,6 +85,7 @@ impl Workspace {
             PaneTextInput {
                 body: trimmed.to_string(),
                 intent: PaneTextIntent::Command { submit: true },
+                task: None,
             },
             window,
             cx,

@@ -215,3 +215,39 @@ fn the_host_pushes_its_preferred_editor_into_the_chat(cx: &mut TestAppContext) {
         assert_eq!(view.read(cx).preferred_editor(), "cursor");
     });
 }
+
+/// A task prompt's delivery signals reach the host, which does nothing with
+/// them yet: no report, no pane change.
+#[gpui::test]
+fn the_host_ignores_task_prompt_delivery_signals(cx: &mut TestAppContext) {
+    use daruda_chat::view::PromptDropReason;
+    use daruda_store::tasks::ExecutionRef;
+
+    let run = ExecutionRef {
+        task_id: "task".into(),
+        execution_id: "exec".into(),
+    };
+    let (window, workspace) = build_workspace(cx);
+    let panes_before = cx
+        .update_window(window.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_pane(window, cx);
+                let pane = ws.active_runtime().panes.last().expect("pane").id;
+                let view = ws.agent_chat_view(pane).expect("a chat pane").clone();
+                view.update(cx, |_, cx| {
+                    cx.emit(AgentChatEvent::PromptSent { task: run.clone() });
+                    cx.emit(AgentChatEvent::PromptsDropped {
+                        tasks: vec![run],
+                        reason: PromptDropReason::SessionTornDown,
+                    });
+                });
+                ws.active_runtime().panes.len()
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+    workspace.read_with(cx, |ws, _| {
+        assert!(ws.error_history().is_empty());
+        assert_eq!(ws.active_runtime().panes.len(), panes_before);
+    });
+}

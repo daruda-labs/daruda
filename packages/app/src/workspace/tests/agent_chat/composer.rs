@@ -178,6 +178,7 @@ async fn deliver_text_to_pane_routes_by_kind(cx: &mut TestAppContext) {
                     PaneTextInput {
                         body: "  do the thing  ".to_string(),
                         intent: PaneTextIntent::Command { submit: true },
+                        task: None,
                     },
                     window,
                     cx,
@@ -202,6 +203,7 @@ async fn deliver_text_to_pane_routes_by_kind(cx: &mut TestAppContext) {
                     PaneTextInput {
                         body: "   \n  ".to_string(),
                         intent: PaneTextIntent::Command { submit: true },
+                        task: None,
                     },
                     window,
                     cx,
@@ -228,6 +230,7 @@ async fn deliver_text_to_pane_routes_by_kind(cx: &mut TestAppContext) {
                     PaneTextInput {
                         body: "x".to_string(),
                         intent: PaneTextIntent::Command { submit: true },
+                        task: None,
                     },
                     window,
                     cx,
@@ -502,6 +505,7 @@ async fn queued_prompt_edit_exit_paths_clear_state(cx: &mut TestAppContext) {
                 PaneTextInput {
                     body: "   ".into(),
                     intent: PaneTextIntent::Command { submit: true },
+                    task: None,
                 },
                 window,
                 cx,

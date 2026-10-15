@@ -58,6 +58,8 @@ impl Workspace {
                 uri: uri.clone(),
                 mime: mime.clone(),
             }),
+            // Task wiring arrives with the task-log host; until then the host ignores these.
+            AgentChatEvent::PromptSent { .. } | AgentChatEvent::PromptsDropped { .. } => {}
         }
     }
 }

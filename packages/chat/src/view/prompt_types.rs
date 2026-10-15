@@ -68,6 +68,10 @@ pub struct QueuedPrompt {
     pub(crate) text: String,
     pub(crate) attachments: Vec<daruda_acp::PromptAttachment>,
     pub(crate) origin: PromptOrigin,
+    /// The task run this prompt delivers, reported to the host when it
+    /// reaches the wire or is dropped unsent. Separate from `origin`: a task
+    /// prompt is in-app, and the Telegram watch keys on `origin` alone.
+    pub(crate) task: Option<daruda_store::tasks::ExecutionRef>,
 }
 
 impl QueuedPrompt {

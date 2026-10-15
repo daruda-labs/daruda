@@ -396,6 +396,7 @@ impl Workspace {
                             crate::workspace::main_area::pane_input_ops::PaneTextIntent::Command {
                                 submit: true,
                             },
+                        task: None,
                     },
                     window,
                     cx,

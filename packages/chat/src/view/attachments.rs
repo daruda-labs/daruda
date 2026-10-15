@@ -101,7 +101,8 @@ impl AgentChatView {
         // Editing can start after the draft was built; validate the merged prompt now.
         self.check_attachment_budget(&[])?;
         let attachments = std::mem::take(&mut self.draft_attachments);
-        let dispatch = self.send_prompt_content(text, attachments.clone(), PromptOrigin::InApp, cx);
+        let dispatch =
+            self.send_prompt_content(text, attachments.clone(), PromptOrigin::InApp, None, cx);
         if matches!(
             dispatch,
             PromptDispatch::QueueFull | PromptDispatch::ReadOnly

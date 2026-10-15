@@ -512,6 +512,7 @@ impl Workspace {
                         intent: PaneTextIntent::Command {
                             submit: btn.auto_enter,
                         },
+                        task: None,
                     },
                     window,
                     cx,

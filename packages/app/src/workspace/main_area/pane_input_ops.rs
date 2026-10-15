@@ -6,8 +6,9 @@
 //!
 //! Per-type logic lives outside the dispatch: terminal byte conversion in
 //! the pure [`to_terminal_bytes`] helper, agent submit in the existing
-//! `send_agent_prompt_text` shim. The funnel only matches and delegates.
+//! `send_agent_task_prompt_text` shim. The funnel only matches and delegates.
 
+use daruda_store::tasks::ExecutionRef;
 use gpui::{Context, SharedString, Window};
 
 use super::pane_tree::PaneId;
@@ -28,6 +29,9 @@ pub(in crate::workspace) enum PaneTextIntent {
 pub(in crate::workspace) struct PaneTextInput {
     pub body: String,
     pub intent: PaneTextIntent,
+    /// The task run an agent-chat submit delivers, so the chat can report
+    /// when it reaches the wire or is dropped. Terminals ignore it.
+    pub task: Option<ExecutionRef>,
 }
 
 /// Convert a [`PaneTextInput`] into the raw bytes a terminal PTY expects.
@@ -59,7 +63,7 @@ impl Workspace {
     ///
     /// The single place "deliver text to a pane" is decided; the per-type
     /// work is delegated (terminal bytes via [`to_terminal_bytes`], agent
-    /// submit via `send_agent_prompt_text`).
+    /// submit via `send_agent_task_prompt_text`).
     pub(in crate::workspace) fn deliver_text_to_pane(
         &mut self,
         pane_id: PaneId,
@@ -107,7 +111,7 @@ impl Workspace {
                     self.agent_empty_submit(pane_id, window, cx);
                     return true;
                 }
-                self.send_agent_prompt_text(pane_id, trimmed.to_string(), cx);
+                self.send_agent_task_prompt_text(pane_id, trimmed.to_string(), input.task, cx);
                 self.bump_activity(pane_id);
                 true
             } else {
@@ -190,6 +194,7 @@ impl Workspace {
             PaneTextInput {
                 body: text.to_string(),
                 intent: PaneTextIntent::Literal,
+                task: None,
             },
             window,
             cx,

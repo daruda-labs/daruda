@@ -14,6 +14,7 @@ mod projection;
 mod queue;
 mod session;
 mod stop;
+mod task_signals;
 mod transitions;
 
 fn assistant_text_item(text: &str) -> daruda_acp::ChatItem {
@@ -138,6 +139,7 @@ pub(super) fn queued(id: u64, text: &str) -> super::QueuedPrompt {
         text: text.to_string(),
         attachments: Vec::new(),
         origin: super::PromptOrigin::InApp,
+        task: None,
     }
 }
 

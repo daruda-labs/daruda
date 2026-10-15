@@ -41,6 +41,7 @@ strings_gen = { workspace = true }
 
 [dev-dependencies]
 agent-client-protocol = { workspace = true }
+daruda_acp = { workspace = true, features = ["test-support"] }
 daruda_ui = { workspace = true, features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
 strings_gen = { workspace = true }

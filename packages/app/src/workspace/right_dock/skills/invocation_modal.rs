@@ -151,6 +151,7 @@ impl SkillInvocationModal {
                 PaneTextInput {
                     body,
                     intent: PaneTextIntent::Command { submit: true },
+                    task: None,
                 },
                 window,
                 cx,

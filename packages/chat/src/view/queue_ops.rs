@@ -5,15 +5,34 @@
 //! need `items`.
 
 use daruda_acp::ChatItem;
+use daruda_store::tasks::ExecutionRef;
 use gpui::Context;
 
 use super::super::agent_chat_helpers::fold_context;
 use super::super::fold::FoldKey;
 use super::super::phone_turn::PhoneTurn;
 use super::{
-    AgentChatView, AgentSessionStatus, EmptySubmitOutcome, EscapeOutcome, FirstResponseOutcome,
-    PhoneAckEffect, PromptDispatch, PromptId, PromptOrigin, QueuedPrompt,
+    AgentChatEvent, AgentChatView, AgentSessionStatus, EmptySubmitOutcome, EscapeOutcome,
+    FirstResponseOutcome, PhoneAckEffect, PromptDispatch, PromptDropReason, PromptId, PromptOrigin,
+    PromptQueue, QueuedPrompt,
 };
+
+impl PromptQueue {
+    /// Empty the live and parked queues together with the edit/resume state
+    /// that only means something while they hold prompts, returning the task
+    /// runs among the discarded prompts (parked first, in queue order).
+    pub(super) fn discard_all(&mut self) -> Vec<ExecutionRef> {
+        let tasks = self
+            .paused_prompts
+            .drain(..)
+            .chain(self.pending_prompts.drain(..))
+            .filter_map(|q| q.task)
+            .collect();
+        self.editing_prompt = None;
+        self.resume_armed = false;
+        tasks
+    }
+}
 
 impl AgentChatView {
     /// Test-only hook: mark a prompt turn in flight (as `send_prompt_text`
@@ -48,7 +67,8 @@ impl AgentChatView {
         &mut self,
         cx: &mut Context<Self>,
     ) -> Option<String> {
-        self.drain_next_queued_prompt(cx).map(|(text, _)| text)
+        self.drain_next_queued_prompt(cx)
+            .map(|drained| drained.text)
     }
 
     /// Test-only hook: arm the phone turn without needing a live ACP handle.
@@ -73,7 +93,20 @@ impl AgentChatView {
     /// full queue refuses the prompt, and a caller that discarded that would
     /// tell the user it was sent.
     pub fn send_prompt_text(&mut self, text: String, cx: &mut Context<Self>) -> PromptDispatch {
-        self.send_prompt_text_inner(text, PromptOrigin::InApp, cx)
+        self.send_prompt_text_inner(text, PromptOrigin::InApp, None, cx)
+    }
+
+    /// Send `text` on behalf of the task run `task`. Behaves as
+    /// [`Self::send_prompt_text`], and additionally reports
+    /// [`AgentChatEvent::PromptSent`] when the prompt reaches the wire or
+    /// [`AgentChatEvent::PromptsDropped`] if it is discarded unsent.
+    pub fn send_task_prompt_text(
+        &mut self,
+        text: String,
+        task: ExecutionRef,
+        cx: &mut Context<Self>,
+    ) -> PromptDispatch {
+        self.send_prompt_text_inner(text, PromptOrigin::InApp, Some(task), cx)
     }
 
     /// Send `text` relayed from a phone-tapped Telegram reply. Sugar over
@@ -85,20 +118,22 @@ impl AgentChatView {
         text: String,
         cx: &mut Context<Self>,
     ) -> PromptDispatch {
-        self.send_prompt_text_inner(text, PromptOrigin::Telegram, cx)
+        self.send_prompt_text_inner(text, PromptOrigin::Telegram, None, cx)
     }
 
     /// Send `text`. When connected and idle, echo it and forward it over the
     /// session, marking a turn in flight. Otherwise enqueue it WITHOUT
     /// echoing — [`Self::pump_pending_prompt`] drains and echoes it later.
-    /// `origin` arms the Telegram watch at whichever point it dispatches.
+    /// `origin` arms the Telegram watch at whichever point it dispatches;
+    /// `task` is reported to the host when the prompt is sent or dropped.
     fn send_prompt_text_inner(
         &mut self,
         text: String,
         origin: PromptOrigin,
+        task: Option<ExecutionRef>,
         cx: &mut Context<Self>,
     ) -> PromptDispatch {
-        self.send_prompt_content(text, Vec::new(), origin, cx)
+        self.send_prompt_content(text, Vec::new(), origin, task, cx)
     }
 
     pub(super) fn send_prompt_content(
@@ -106,6 +141,7 @@ impl AgentChatView {
         text: String,
         attachments: Vec<daruda_acp::PromptAttachment>,
         origin: PromptOrigin,
+        task: Option<ExecutionRef>,
         cx: &mut Context<Self>,
     ) -> PromptDispatch {
         if self.is_read_only() {
@@ -116,8 +152,10 @@ impl AgentChatView {
         // entry. `.take()` clears the editing flag whether or not the target is
         // still queued; if it drained onto the wire while the user was editing,
         // the second `let` fails and we fall through to handle `text` as a
-        // brand-new prompt so nothing typed is lost.
+        // brand-new prompt so nothing typed is lost. A task's prompt is never
+        // the composer's edit, so it must not overwrite the slot being edited.
         if origin == PromptOrigin::InApp
+            && task.is_none()
             && let Some(id) = self.queue.editing_prompt.take()
             && let Some(qp) = self
                 .queue
@@ -149,6 +187,7 @@ impl AgentChatView {
             if let Some(handle) = self.live_handle() {
                 handle.send_prompt_with_attachments(wire, attachments.clone());
             }
+            self.report_sent(task, cx);
             self.start_dispatched_turn();
             self.echo_attached_prompt(text, &attachments, cx);
             self.arm_phone_turn_if(origin);
@@ -162,17 +201,34 @@ impl AgentChatView {
             // `pump_pending_prompt` (after `Connected`, on each `TurnEnded`, and
             // when the cancel window closes) and is echoed then. Do *not* mark
             // the turn in flight: nothing new is on the wire yet.
-            match if attachments.is_empty() {
-                self.enqueue_prompt(text, origin)
-            } else {
-                self.enqueue_attached_prompt(text, attachments, origin)
-            } {
+            match self.enqueue_attached_prompt(text, attachments, origin, task) {
                 Some(_) => PromptDispatch::Queued,
                 None => PromptDispatch::QueueFull,
             }
         };
         cx.notify();
         dispatch
+    }
+
+    /// Tell the host a task's prompt was just handed to the live session.
+    /// Called right after the handle send on both dispatch paths.
+    fn report_sent(&self, task: Option<ExecutionRef>, cx: &mut Context<Self>) {
+        if let Some(task) = task {
+            cx.emit(AgentChatEvent::PromptSent { task });
+        }
+    }
+
+    /// Tell the host which task prompts were discarded unsent. Silent when
+    /// none were tagged, so a human-typed queue emits nothing new.
+    pub(super) fn report_dropped(
+        &self,
+        tasks: Vec<ExecutionRef>,
+        reason: PromptDropReason,
+        cx: &mut Context<Self>,
+    ) {
+        if !tasks.is_empty() {
+            cx.emit(AgentChatEvent::PromptsDropped { tasks, reason });
+        }
     }
 
     /// Mark a prompt that just reached the wire as the turn in flight. A new
@@ -355,25 +411,29 @@ impl AgentChatView {
         self.queue.pending_prompts.len() + self.queue.paused_prompts.len()
     }
 
+    /// An untagged, attachment-free [`Self::enqueue_attached_prompt`] for
+    /// the tests and the capture seed.
+    #[cfg(any(test, feature = "screenshot"))]
+    pub(super) fn enqueue_prompt(
+        &mut self,
+        text: String,
+        origin: PromptOrigin,
+    ) -> Option<PromptId> {
+        self.enqueue_attached_prompt(text, Vec::new(), origin, None)
+    }
+
     /// Append a prompt, or refuse when the pane is already holding its limit.
     ///
     /// The cap lives here rather than only on the MCP path because every
     /// producer can outrun the drain: an agent's tool calls, a phone `/say`
     /// hammered from a pocket, and a person holding Enter all queue through
     /// this one function.
-    pub(super) fn enqueue_prompt(
-        &mut self,
-        text: String,
-        origin: PromptOrigin,
-    ) -> Option<PromptId> {
-        self.enqueue_attached_prompt(text, Vec::new(), origin)
-    }
-
     fn enqueue_attached_prompt(
         &mut self,
         text: String,
         attachments: Vec<daruda_acp::PromptAttachment>,
         origin: PromptOrigin,
+        task: Option<ExecutionRef>,
     ) -> Option<PromptId> {
         if self.queued_prompt_count() >= crate::QUEUE_DEPTH_MAX {
             return None;
@@ -385,6 +445,7 @@ impl AgentChatView {
             text,
             attachments,
             origin,
+            task,
         });
         Some(id)
     }
@@ -400,6 +461,7 @@ impl AgentChatView {
                 text: String::new(),
                 attachments: Vec::new(),
                 origin: PromptOrigin::InApp,
+                task: None,
             });
         }
     }
@@ -407,10 +469,21 @@ impl AgentChatView {
     /// Remove the queued prompt `id` from either the live or parked queue,
     /// since the strip renders the × on both. No-op when not present.
     pub fn remove_queued(&mut self, id: PromptId, cx: &mut Context<Self>) {
-        let before = self.queue.pending_prompts.len() + self.queue.paused_prompts.len();
-        self.queue.pending_prompts.retain(|q| q.id != id);
-        self.queue.paused_prompts.retain(|q| q.id != id);
-        if self.queue.pending_prompts.len() + self.queue.paused_prompts.len() != before {
+        let removed = [
+            &mut self.queue.pending_prompts,
+            &mut self.queue.paused_prompts,
+        ]
+        .into_iter()
+        .find_map(|prompts| {
+            let at = prompts.iter().position(|q| q.id == id)?;
+            Some(prompts.remove(at))
+        });
+        if let Some(removed) = removed {
+            self.report_dropped(
+                removed.task.into_iter().collect(),
+                PromptDropReason::RemovedByUser,
+                cx,
+            );
             // Deliberately does NOT clear `editing_prompt` if the removed row was
             // the edit target: `send_prompt_text` takes the flag and, finding the
             // id gone from both queues, falls through to enqueue the composer text
@@ -428,10 +501,8 @@ impl AgentChatView {
         if self.queue.pending_prompts.is_empty() && self.queue.paused_prompts.is_empty() {
             return;
         }
-        self.queue.pending_prompts.clear();
-        self.queue.paused_prompts.clear();
-        self.queue.editing_prompt = None;
-        self.queue.resume_armed = false;
+        let dropped = self.queue.discard_all();
+        self.report_dropped(dropped, PromptDropReason::RemovedByUser, cx);
         // Queue-only change: the transcript rows are unaffected, so notify
         // re-stages the strip without a transcript reproject.
         cx.notify();
@@ -452,12 +523,9 @@ impl AgentChatView {
         }
     }
 
-    /// Move the next queued prompt into the active-turn model and return the
-    /// text that should be sent over ACP. No-op while a turn or cancel is active.
-    fn drain_next_queued_prompt(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> Option<(String, Vec<daruda_acp::PromptAttachment>)> {
+    /// Move the next queued prompt into the active-turn model and return what
+    /// should be sent over ACP. No-op while a turn or cancel is active.
+    fn drain_next_queued_prompt(&mut self, cx: &mut Context<Self>) -> Option<QueuedPrompt> {
         if !self.queue.turn.can_dispatch() || self.queue.pending_prompts.is_empty() {
             return None;
         }
@@ -484,10 +552,9 @@ impl AgentChatView {
             self.queue.editing_prompt = None;
         }
         self.start_dispatched_turn();
-        let text = qp.text;
-        self.echo_attached_prompt(text.clone(), &qp.attachments, cx);
+        self.echo_attached_prompt(qp.text.clone(), &qp.attachments, cx);
         self.arm_phone_turn_if(qp.origin);
-        Some((text, qp.attachments))
+        Some(qp)
     }
 
     /// Send the next buffered prompt iff connected and idle. Pops the FRONT of
@@ -502,15 +569,16 @@ impl AgentChatView {
         if !matches!(self.status, AgentSessionStatus::Connected) || self.live_handle().is_none() {
             return;
         };
-        let Some((text, attachments)) = self.drain_next_queued_prompt(cx) else {
+        let Some(drained) = self.drain_next_queued_prompt(cx) else {
             return;
         };
-        // `drain_next_queued_prompt` already echoed `text`; the wire gets the
+        // `drain_next_queued_prompt` already echoed the text; the wire gets the
         // briefed form, which is why the two are separate strings.
-        let wire = self.wire_text(&text);
+        let wire = self.wire_text(&drained.text);
         if let Some(handle) = self.live_handle() {
-            handle.send_prompt_with_attachments(wire, attachments);
+            handle.send_prompt_with_attachments(wire, drained.attachments);
         }
+        self.report_sent(drained.task, cx);
         cx.notify();
     }
 

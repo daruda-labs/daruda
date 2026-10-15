@@ -371,16 +371,14 @@ impl AgentChatView {
     /// live handle and event pump, wipe the conversation model + every runtime
     /// cache. Does NOT touch `session_id`/`replay`/`status` — the two
     /// callers differ there (fresh conversation vs. resume via `session/load`).
-    fn teardown_transient_session_state(&mut self) {
+    fn teardown_transient_session_state(&mut self, cx: &mut Context<Self>) {
         cancel_pending_permission(self);
         self.detach_handle();
         self._event_pump = None;
         self.items.clear();
         self.overage_stop_markers.clear();
-        self.queue.pending_prompts.clear();
-        self.queue.paused_prompts.clear();
-        self.queue.editing_prompt = None;
-        self.queue.resume_armed = false;
+        let dropped = self.queue.discard_all();
+        self.report_dropped(dropped, super::PromptDropReason::SessionTornDown, cx);
         self.pending_permissions.clear();
         self.permissions_told_to_phone.clear();
         self.phone_turn_state = None;
@@ -413,7 +411,7 @@ impl AgentChatView {
         if self.is_read_only() {
             return;
         }
-        self.teardown_transient_session_state();
+        self.teardown_transient_session_state(cx);
         // Clear the persisted id so a restart resumes the fresh session, not
         // the cleared conversation (Connected re-persists the new id).
         self.session_id = None;
@@ -430,7 +428,7 @@ impl AgentChatView {
     /// rather than re-derived from `session_id` — the gate and the request it
     /// gates are then decided in one place, by the caller that owns both.
     pub fn retry_for_reconnect(&mut self, resume: Option<String>, cx: &mut Context<Self>) {
-        self.teardown_transient_session_state();
+        self.teardown_transient_session_state(cx);
         self.rebuild_rows();
         self.begin_connect(resume, cx);
     }
