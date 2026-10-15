@@ -278,11 +278,11 @@ fn run(
     // poke.
     let _watcher = spawn_sessions_watcher(&sessions_dir, wake_tx);
 
-    let refresh_kind = ProcessRefreshKind::new()
+    let refresh_kind = ProcessRefreshKind::nothing()
         .with_exe(UpdateKind::OnlyIfNotSet)
         .with_cmd(UpdateKind::OnlyIfNotSet);
     let system = RefCell::new(System::new_with_specifics(
-        RefreshKind::new().with_processes(refresh_kind),
+        RefreshKind::nothing().with_processes(refresh_kind),
     ));
 
     // Resolve once up front in case sessions already exist; panes

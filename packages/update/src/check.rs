@@ -49,19 +49,18 @@ pub fn check_latest_with_suffix(
     // TLS certificate validation, and the only value derived from the response —
     // the `asset_url` — is independently host-checked when `download_asset` fetches
     // it. Release notes render as plain text, so a tampered body cannot inject.
-    let agent = ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(30))
-        .build();
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(30)))
+        .proxy(None)
+        .build()
+        .into();
 
-    let response = agent
+    let body = agent
         .get(RELEASES_LATEST)
-        .set("User-Agent", "daruda-updater")
-        .set("Accept", "application/vnd.github+json")
+        .header("User-Agent", "daruda-updater")
+        .header("Accept", "application/vnd.github+json")
         .call()
-        .map_err(|e| UpdateError::Http(e.to_string()))?;
-
-    let body = response
-        .into_string()
+        .and_then(|mut response| response.body_mut().read_to_string())
         .map_err(|e| UpdateError::Http(e.to_string()))?;
 
     crate::release::parse_release_with_suffix(&body, current, suffix)
@@ -80,7 +79,7 @@ pub fn check_latest_with_suffix(
 fn download_asset(url: &str, dest: &Path) -> Result<(), UpdateError> {
     // Overall cap; large for a package download.
     let response = get_trusted(url, Duration::from_secs(300))?;
-    let mut reader = response.into_reader();
+    let mut reader = response.into_body().into_reader();
     let mut file = File::create(dest).map_err(|e| UpdateError::Io(e.to_string()))?;
     io::copy(&mut reader, &mut file).map_err(|e| UpdateError::Io(e.to_string()))?;
     Ok(())
@@ -107,6 +106,7 @@ fn fetch_checksums(url: &str) -> Result<String, UpdateError> {
     let response = get_trusted(url, Duration::from_secs(30))?;
     let mut sums = String::new();
     response
+        .into_body()
         .into_reader()
         .take(MAX_CHECKSUMS_BYTES)
         .read_to_string(&mut sums)
@@ -116,11 +116,16 @@ fn fetch_checksums(url: &str) -> Result<String, UpdateError> {
 
 /// GET `url`, following redirects by hand so every hop's host is checked
 /// against the allowlist before it is contacted.
-fn get_trusted(url: &str, timeout: Duration) -> Result<ureq::Response, UpdateError> {
-    let agent = ureq::AgentBuilder::new()
-        .redirects(0) // we follow manually so we can re-validate each hop
-        .timeout(timeout)
-        .build();
+fn get_trusted(
+    url: &str,
+    timeout: Duration,
+) -> Result<ureq::http::Response<ureq::Body>, UpdateError> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .max_redirects(0) // we follow manually so we can re-validate each hop
+        .timeout_global(Some(timeout))
+        .proxy(None)
+        .build()
+        .into();
 
     let mut current = url.to_string();
     for _ in 0..=MAX_REDIRECTS {
@@ -130,13 +135,17 @@ fn get_trusted(url: &str, timeout: Duration) -> Result<ureq::Response, UpdateErr
 
         let response = agent
             .get(&current)
-            .set("User-Agent", "daruda-updater")
+            .header("User-Agent", "daruda-updater")
             .call()
             .map_err(|e| UpdateError::Http(e.to_string()))?;
 
-        let status = response.status();
+        let status = response.status().as_u16();
         if (300..400).contains(&status) {
-            current = redirect_target(status, response.header("Location"))?;
+            let location = response
+                .headers()
+                .get("Location")
+                .and_then(|value| value.to_str().ok());
+            current = redirect_target(status, location)?;
             continue;
         }
 

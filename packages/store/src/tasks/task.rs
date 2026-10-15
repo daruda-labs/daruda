@@ -95,7 +95,7 @@ impl SubTask {
     /// without a `source_session_id`.
     pub fn new(title: String) -> Self {
         Self {
-            id: ulid::Ulid::new().to_string(),
+            id: ulid::Ulid::generate().to_string(),
             title,
             completed: false,
             created_at: Some(Utc::now()),
@@ -284,7 +284,7 @@ impl Task {
         base_worktree_path: Option<PathBuf>,
     ) -> Self {
         let now = Utc::now();
-        let id = ulid::Ulid::new().to_string();
+        let id = ulid::Ulid::generate().to_string();
         let branch_name = super::branch::branch_name_for(&id);
         Self {
             id,

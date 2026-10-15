@@ -61,14 +61,14 @@ impl From<Phase> for PhaseRecord {
 }
 
 fn lock(root: &Path) -> Result<std::fs::File, UpdateError> {
-    use fs4::fs_std::FileExt as _;
     let file = std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
         .write(true)
         .open(root.join(".daruda-update.lock"))
         .map_err(io)?;
-    file.try_lock_exclusive().map_err(io)?;
+    file.try_lock()
+        .map_err(|error| io(std::io::Error::from(error)))?;
     Ok(file)
 }
 

@@ -33,15 +33,15 @@ chrono = { workspace = true, default-features = true, features = ["serde"] }
 daruda_core = { workspace = true }
 daruda_store = { workspace = true }
 dirs = { workspace = true }
-fs4 = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+hex = { workspace = true }
 # Which process each pane runs, for `pty_tracker`.
 sysinfo = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
-ureq = { workspace = true, default-features = false, features = ["tls"] }
+ureq = { workspace = true, default-features = false, features = ["rustls"] }
 # A clear "claude not found" before a plugin install spawns it.
 which = { workspace = true }
 # Skill frontmatter, parsed losslessly.

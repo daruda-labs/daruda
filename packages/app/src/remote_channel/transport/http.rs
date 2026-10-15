@@ -1,6 +1,8 @@
 use super::{Result, TransportError};
 use serde_json::Value;
 use std::{io::Read, time::Duration};
+use ureq::Body;
+use ureq::http::Response;
 
 pub const MAX_BODY_BYTES: usize = 1024 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -41,26 +43,31 @@ fn call(
             "Network calls are disabled in tests".into(),
         ));
     }
-    let agent = ureq::AgentBuilder::new()
-        .timeout(timeout)
-        .redirects(0)
-        .build();
+    // Statuses come back as responses so a 429 can read its retry hint.
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(timeout))
+        .max_redirects(0)
+        .http_status_as_error(false)
+        .proxy(None)
+        .build()
+        .into();
     let mut attempt = 0;
     loop {
-        let mut request = agent.request(method, url);
-        if let Some(auth) = authorization {
-            request = request.set("Authorization", auth);
-        }
-        let response = if method == "GET" {
-            request.call()
-        } else {
-            request.send_json(payload.clone())
-        };
-        let response = match response {
+        let response = match send(&agent, method, url, authorization, payload) {
             Ok(response) => response,
-            Err(ureq::Error::Status(429, response)) if attempt < retries => {
+            // URLs can contain live Socket Mode tickets or interaction tokens.
+            Err(_) => {
+                return Err(TransportError::Message(
+                    "Remote API connection failed".into(),
+                ));
+            }
+        };
+        match response.status().as_u16() {
+            429 if attempt < retries => {
                 let header = response
-                    .header("Retry-After")
+                    .headers()
+                    .get("Retry-After")
+                    .and_then(|value| value.to_str().ok())
                     .and_then(|s| s.parse::<f64>().ok());
                 let body = read(response).unwrap_or(Value::Null);
                 let seconds = header
@@ -77,23 +84,18 @@ fn call(
             }
             // The budget is spent. Reported as such rather than as a bare
             // "HTTP 429", which reads as a single rejection.
-            Err(ureq::Error::Status(429, _)) => {
+            429 => {
                 return Err(TransportError::Message(
                     "Remote API retry limit reached".into(),
                 ));
             }
-            Err(ureq::Error::Status(status, _)) => {
+            status @ 400.. => {
                 return Err(TransportError::Message(format!(
                     "Remote API returned HTTP {status}"
                 )));
             }
-            // URLs can contain live Socket Mode tickets or interaction tokens.
-            Err(ureq::Error::Transport(_)) => {
-                return Err(TransportError::Message(
-                    "Remote API connection failed".into(),
-                ));
-            }
-        };
+            _ => {}
+        }
         if response.status() == 204 {
             return Ok(Value::Null);
         }
@@ -101,9 +103,33 @@ fn call(
     }
 }
 
-fn read(response: ureq::Response) -> Result<Value> {
+/// `GET` carries no body; every other method sends `payload` as JSON.
+fn send(
+    agent: &ureq::Agent,
+    method: &str,
+    url: &str,
+    authorization: Option<&str>,
+    payload: &Value,
+) -> std::result::Result<Response<Body>, ureq::Error> {
+    let mut request = ureq::http::Request::builder().method(method).uri(url);
+    if let Some(auth) = authorization {
+        request = request.header("Authorization", auth);
+    }
+    if method == "GET" {
+        return agent.run(request.body(())?);
+    }
+    let body = serde_json::to_vec(payload).map_err(std::io::Error::other)?;
+    agent.run(
+        request
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body(body)?,
+    )
+}
+
+fn read(response: Response<Body>) -> Result<Value> {
     let mut bytes = Vec::new();
     response
+        .into_body()
         .into_reader()
         .take((MAX_BODY_BYTES + 1) as u64)
         .read_to_end(&mut bytes)

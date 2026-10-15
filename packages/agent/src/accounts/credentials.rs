@@ -104,7 +104,7 @@ pub fn system_credentials_digest() -> Option<String> {
 #[cfg(any(test, target_os = "macos"))]
 fn secret_digest(secret: &[u8]) -> String {
     use sha2::{Digest, Sha256};
-    format!("{:x}", Sha256::digest(secret))
+    hex::encode(Sha256::digest(secret))
 }
 
 #[cfg(test)]

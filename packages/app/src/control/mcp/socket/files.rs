@@ -67,7 +67,6 @@ pub(crate) struct Ownership {
 impl Ownership {
     /// Take the lock and clear anything a previous run left behind.
     pub(crate) fn acquire(dir: &Path) -> Result<Self, SocketError> {
-        use fs4::fs_std::FileExt;
         // Owner-only because the socket inside is reachable by anyone who can
         // traverse the path, and a unix socket's mode *is* its access control.
         daruda_core::path::create_owner_only_dir(dir).map_err(SocketError::Io)?;
@@ -78,13 +77,12 @@ impl Ownership {
             .truncate(false)
             .open(lock_path(dir))
             .map_err(SocketError::Io)?;
-        // `try_lock_exclusive` answers with a *bool*, not by erroring: `false`
-        // means someone else holds it. Treating the `Ok(false)` as success
+        // `WouldBlock` means someone else holds it. Treating it as success
         // would let a second instance unlink the live socket below.
-        match FileExt::try_lock_exclusive(&file) {
-            Ok(true) => {}
-            Ok(false) => return Err(SocketError::AlreadyRunning),
-            Err(e) => return Err(SocketError::Io(e)),
+        match file.try_lock() {
+            Ok(()) => {}
+            Err(std::fs::TryLockError::WouldBlock) => return Err(SocketError::AlreadyRunning),
+            Err(std::fs::TryLockError::Error(e)) => return Err(SocketError::Io(e)),
         }
 
         let socket = socket_path(dir);

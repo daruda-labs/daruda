@@ -22,5 +22,5 @@ pub fn branch_name_for(ulid: &str) -> String {
 
 /// A name with a fresh random suffix, for a form that has no task id yet.
 pub fn random_branch_name() -> String {
-    branch_name_for(&ulid::Ulid::new().to_string())
+    branch_name_for(&ulid::Ulid::generate().to_string())
 }

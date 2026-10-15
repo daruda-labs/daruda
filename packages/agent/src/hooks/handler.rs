@@ -22,8 +22,6 @@ use std::fs::OpenOptions;
 use std::io::{self, Read};
 use std::path::Path;
 
-use fs4::fs_std::FileExt;
-
 use super::events::HookEvent;
 use super::fsm::{self, FsmAction};
 use super::status_file::{
@@ -121,7 +119,7 @@ impl SessionLock {
             .write(true)
             .truncate(false)
             .open(&path)?;
-        FileExt::lock_exclusive(&file)?;
+        file.lock()?;
         Ok(Self { file })
     }
 }
@@ -130,7 +128,7 @@ impl Drop for SessionLock {
     fn drop(&mut self) {
         // Best-effort unlock; release happens automatically on close
         // anyway, so an error here is informational.
-        let _ = FileExt::unlock(&self.file);
+        let _ = self.file.unlock();
     }
 }
 

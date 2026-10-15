@@ -9,7 +9,6 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use fs4::fs_std::FileExt;
 use serde_json::{Value, json};
 
 /// The hook event names daruda subscribes to.
@@ -215,7 +214,7 @@ where
         .write(true)
         .truncate(false)
         .open(&lock_path)?;
-    FileExt::lock_exclusive(&lock)?;
+    lock.lock()?;
     let result = (|| -> Result<(), InstallerError> {
         let mut value: Value = match fs::read(path) {
             Ok(bytes) if !bytes.is_empty() => match serde_json::from_slice(&bytes) {
@@ -241,7 +240,7 @@ where
         mutate(&mut value)?;
         write_atomic_json(path, &value)
     })();
-    let _ = FileExt::unlock(&lock);
+    let _ = lock.unlock();
     result
 }
 

@@ -95,7 +95,7 @@ fn ulid_burst_has_no_collisions() {
     // guaranteed by the 80-bit random suffix — this test asserts the
     // contract daruda actually depends on.
     let n = 256;
-    let mut ids: Vec<String> = (0..n).map(|_| ulid::Ulid::new().to_string()).collect();
+    let mut ids: Vec<String> = (0..n).map(|_| ulid::Ulid::generate().to_string()).collect();
     ids.sort();
     ids.dedup();
     assert_eq!(ids.len(), n, "ULIDs must not collide in a burst");

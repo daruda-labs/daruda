@@ -81,12 +81,12 @@ pub type WidgetId = String;
 
 /// Generate a fresh tab id.
 pub fn new_tab_id() -> TabId {
-    ulid::Ulid::new().to_string()
+    ulid::Ulid::generate().to_string()
 }
 
 /// Generate a fresh widget id.
 pub fn new_widget_id() -> WidgetId {
-    ulid::Ulid::new().to_string()
+    ulid::Ulid::generate().to_string()
 }
 
 /// Top-level state — the entire `panels.json` file deserializes into this.

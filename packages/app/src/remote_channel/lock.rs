@@ -83,8 +83,6 @@ pub(crate) struct CredentialLock {
 /// cannot be inferred from behaviour, since a bridge failing open looks
 /// exactly like one holding the bot.
 pub(crate) fn claim(dir: &Path, credential: &str) -> Claim {
-    use fs4::fs_std::FileExt;
-
     // Owner-only: the file name is a digest, but which bots a machine talks
     // to is still nobody else's business.
     if let Err(error) = daruda_core::path::create_owner_only_dir(dir) {
@@ -104,16 +102,15 @@ pub(crate) fn claim(dir: &Path, credential: &str) -> Claim {
             return Claim::Unavailable;
         }
     };
-    // `try_lock_exclusive` answers with a *bool*, not by erroring — the same
-    // shape `control::mcp::socket` reads, and for the same reason: treating
-    // `Ok(false)` as success is what would put two pollers on one bot.
-    match FileExt::try_lock_exclusive(&file) {
-        Ok(true) => Claim::Ours {
+    // `WouldBlock` is the same answer `control::mcp::socket` reads, and for
+    // the same reason: treating it as success would put two pollers on one bot.
+    match file.try_lock() {
+        Ok(()) => Claim::Ours {
             _lock: CredentialLock { _file: file },
             digest: digest_of(credential),
         },
-        Ok(false) => Claim::Theirs,
-        Err(error) => {
+        Err(std::fs::TryLockError::WouldBlock) => Claim::Theirs,
+        Err(std::fs::TryLockError::Error(error)) => {
             unavailable(&error, "remote.lock.flock");
             Claim::Unavailable
         }

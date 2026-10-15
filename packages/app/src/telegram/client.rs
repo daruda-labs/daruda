@@ -11,6 +11,8 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use serde::Deserialize;
+use ureq::Body;
+use ureq::http::Response;
 
 /// Failure surface for the Bot API calls, mirroring
 /// `daruda_agent::http::FetchError`'s transport-vs-parse split.
@@ -117,9 +119,11 @@ const IDLE_CONNECTIONS_PER_HOST: usize = 2;
 fn agent() -> &'static ureq::Agent {
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
     AGENT.get_or_init(|| {
-        ureq::AgentBuilder::new()
+        ureq::Agent::config_builder()
             .max_idle_connections_per_host(IDLE_CONNECTIONS_PER_HOST)
+            .proxy(None)
             .build()
+            .into()
     })
 }
 
@@ -130,19 +134,24 @@ fn post_json(
     token: &str,
     method: &str,
     payload: serde_json::Value,
-) -> Result<ureq::Response, ClientError> {
+) -> Result<Response<Body>, ClientError> {
     let url = base_url(token, method);
     let sent = match agent()
         .post(&url)
-        .timeout(REQUEST_TIMEOUT)
+        .config()
+        .timeout_global(Some(REQUEST_TIMEOUT))
+        .build()
         .send_json(payload.clone())
     {
-        Err(error) if is_dead_connection(&error) => ureq::AgentBuilder::new()
-            .max_idle_connections(0)
-            .build()
-            .post(&url)
-            .timeout(REQUEST_TIMEOUT)
-            .send_json(payload),
+        Err(error) if is_dead_connection(&error) => {
+            let fresh: ureq::Agent = ureq::Agent::config_builder()
+                .max_idle_connections(0)
+                .timeout_global(Some(REQUEST_TIMEOUT))
+                .proxy(None)
+                .build()
+                .into();
+            fresh.post(&url).send_json(payload)
+        }
         other => other,
     };
     sent.map_err(|e| http_error(token, e))
@@ -151,9 +160,7 @@ fn post_json(
 /// Whether a transport error says the socket was gone rather than slow. A
 /// timeout is excluded: the request may have landed, and a retry would repeat it.
 fn is_dead_connection(error: &ureq::Error) -> bool {
-    std::error::Error::source(error)
-        .and_then(|source| source.downcast_ref::<std::io::Error>())
-        .is_some_and(|io| is_dead_connection_kind(io.kind()))
+    matches!(error, ureq::Error::Io(io) if is_dead_connection_kind(io.kind()))
 }
 
 fn is_dead_connection_kind(kind: std::io::ErrorKind) -> bool {
@@ -205,7 +212,9 @@ pub fn get_updates(token: &str, offset: i64, timeout_s: u64) -> Result<Vec<Updat
     );
     let response = agent()
         .get(&url)
-        .timeout(Duration::from_secs(timeout_s) + LONG_POLL_MARGIN)
+        .config()
+        .timeout_global(Some(Duration::from_secs(timeout_s) + LONG_POLL_MARGIN))
+        .build()
         .call()
         .map_err(|e| http_error(token, e))?;
 
@@ -305,9 +314,10 @@ pub fn edit_message_text(
     parse_edit_message_response(&body)
 }
 
-fn read_body(response: ureq::Response) -> Result<String, ClientError> {
+fn read_body(response: Response<Body>) -> Result<String, ClientError> {
     let mut body = String::new();
     response
+        .into_body()
         .into_reader()
         .take(MAX_BODY_BYTES as u64)
         // No redaction hop here: a body-read failure is a local IO error and

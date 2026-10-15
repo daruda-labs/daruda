@@ -46,7 +46,6 @@ anyhow = { workspace = true }
 base64 = { workspace = true }
 chrono = { workspace = true, default-features = true, features = ["serde"] }
 dirs = { workspace = true }
-fs4 = { workspace = true }
 sha2 = { workspace = true }
 # Flow node cards say a timeout in the vocabulary the flow file uses.
 humantime = { workspace = true }
@@ -93,7 +92,7 @@ toml = { workspace = true }
 toml_edit = { workspace = true }
 unicode-segmentation = { workspace = true }
 url = { workspace = true }
-ureq = { workspace = true, default-features = false, features = ["tls", "json"] }
+ureq = { workspace = true, default-features = false, features = ["rustls", "json"] }
 tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
 uuid = { workspace = true, features = ["v4"] }
 open = "5.3.5"
@@ -126,8 +125,9 @@ notify = { workspace = true, default-features = false }
 [target.'cfg(target_os = "windows")'.dependencies]
 tray-icon = { version = "0.21.3", default-features = false }
 raw-window-handle = { workspace = true }
-windows_api = { package = "windows", version = "0.61.3", features = ["Data_Xml_Dom", "UI_Notifications", "Foundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_System_WinRT", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_Storage_EnhancedStorage", "Win32_Storage_FileSystem", "Win32_UI_WindowsAndMessaging"] }
+windows_api = { package = "windows", version = "0.62.2", features = ["Data_Xml_Dom", "UI_Notifications", "Foundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_System_WinRT", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_Storage_EnhancedStorage", "Win32_Storage_FileSystem", "Win32_UI_WindowsAndMessaging"] }
 uds_windows = "1.2.1"
+hex = { workspace = true }
 windows-sys = { workspace = true, features = [
     "Win32_Foundation", "Win32_Security_Authorization", "Win32_Security_Credentials",
     "Win32_Security_Cryptography", "Win32_Security_Cryptography_Catalog",

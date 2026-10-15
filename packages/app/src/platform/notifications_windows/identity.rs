@@ -95,10 +95,7 @@ fn shortcut_target(path: &std::path::Path) -> anyhow::Result<std::path::PathBuf>
 pub(super) fn register_identity() -> anyhow::Result<()> {
     initialize_apartment()?;
     let directory = daruda_store::persistence::default_data_dir();
-    let digest = format!(
-        "{:x}",
-        Sha256::digest(directory.as_os_str().as_encoded_bytes())
-    );
+    let digest = hex::encode(Sha256::digest(directory.as_os_str().as_encoded_bytes()));
     let id = format!("Daruda.Desktop.{}", &digest[..16]);
     let executable = std::env::current_exe()?;
     let programs = programs_directory()?;

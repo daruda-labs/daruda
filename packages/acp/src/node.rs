@@ -608,17 +608,22 @@ fn publish_extracted(
 /// GET `url` and return the body bytes (no size cap — the tarball is tens of MB).
 fn http_get_bytes(url: &str, context: &PreparationContext<'_>) -> Result<Vec<u8>, NodeError> {
     checkpoint(context)?;
-    let agent = ureq::AgentBuilder::new()
-        .timeout(DOWNLOAD_TIMEOUT)
-        .timeout_connect(DOWNLOAD_IO_TIMEOUT)
-        .timeout_read(DOWNLOAD_IO_TIMEOUT)
-        .build();
+    // WORKAROUND: ureq 3.4 has no per-read timeout, so a stalled body waits for
+    // DOWNLOAD_TIMEOUT instead of DOWNLOAD_IO_TIMEOUT - deferred until the release
+    // with `timeout_per_read` (ureq#1202), then set it to DOWNLOAD_IO_TIMEOUT here.
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(DOWNLOAD_TIMEOUT))
+        .timeout_connect(Some(DOWNLOAD_IO_TIMEOUT))
+        .timeout_recv_response(Some(DOWNLOAD_IO_TIMEOUT))
+        .proxy(None)
+        .build()
+        .into();
     let response = agent
         .get(url)
         .call()
         .map_err(|e| NodeError::Download(e.to_string()))?;
     let mut buf = Vec::new();
-    let mut reader = response.into_reader();
+    let mut reader = response.into_body().into_reader();
     let mut chunk = [0; DOWNLOAD_CHUNK];
     loop {
         checkpoint(context)?;

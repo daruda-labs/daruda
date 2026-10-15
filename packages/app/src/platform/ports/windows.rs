@@ -36,7 +36,7 @@ pub(super) fn scan() -> io::Result<Vec<super::ListeningPort>> {
     system.refresh_processes_specifics(
         ProcessesToUpdate::Some(&pids),
         true,
-        ProcessRefreshKind::new()
+        ProcessRefreshKind::nothing()
             .with_cwd(UpdateKind::Always)
             .with_cmd(UpdateKind::Always),
     );

@@ -3,8 +3,6 @@
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 
-use fs4::fs_std::FileExt as _;
-
 use crate::accounts::{AccountsState, SCHEMA_VERSION};
 use crate::observability::error_report::{ErrorReport, ErrorSeverity};
 use crate::observability::log_writer::LogWriter;
@@ -119,7 +117,7 @@ pub fn mutate_accounts_in<R>(
         .create(true)
         .truncate(false)
         .open(accounts_lock_path_in(data_dir))?;
-    lock_file.lock_exclusive()?;
+    lock_file.lock()?;
 
     let mut state = load_for_write(data_dir)?;
     let result = mutate(&mut state);

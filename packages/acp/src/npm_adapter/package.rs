@@ -100,7 +100,7 @@ pub(super) fn install(
 }
 
 fn digest(value: &str) -> String {
-    format!("{:x}", Sha256::digest(value.as_bytes()))
+    hex::encode(Sha256::digest(value.as_bytes()))
 }
 
 fn prepare_or_cached(

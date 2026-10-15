@@ -13,4 +13,4 @@ workspace = true
 anyhow.workspace = true
 serde_json.workspace = true
 tempfile = { workspace = true }
-toml = "0.9"
+toml.workspace = true

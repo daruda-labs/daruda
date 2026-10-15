@@ -6,7 +6,7 @@
 //! was itself replaced. Pure apart from reading the package file.
 
 use std::fs::File;
-use std::io;
+use std::io::{self, Read as _};
 use std::path::Path;
 
 use sha2::{Digest, Sha256};
@@ -47,9 +47,16 @@ fn listed_digest<'a>(sums: &'a str, asset_name: &str) -> Option<&'a str> {
 
 /// Hex SHA-256 of the file at `path`, streamed rather than loaded whole.
 fn file_digest(path: &Path) -> io::Result<String> {
+    let mut file = File::open(path)?;
     let mut hasher = Sha256::new();
-    io::copy(&mut File::open(path)?, &mut hasher)?;
-    Ok(format!("{:x}", hasher.finalize()))
+    let mut buffer = [0; 64 * 1024];
+    loop {
+        match file.read(&mut buffer)? {
+            0 => break,
+            read => hasher.update(&buffer[..read]),
+        }
+    }
+    Ok(hex::encode(hasher.finalize()))
 }
 
 #[cfg(test)]

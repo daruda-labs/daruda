@@ -73,30 +73,53 @@ pub type Header<'a> = (&'a str, &'a str);
 /// `5xx`, and transient transport failures) are retried before returning
 /// `FetchError::Http`; JSON-decode failures return `FetchError::Parse`.
 pub fn get_json(url: &str, headers: &[Header<'_>]) -> Result<serde_json::Value, FetchError> {
-    let agent = ureq::AgentBuilder::new().timeout(REQUEST_TIMEOUT).build();
+    // Statuses come back as responses so a retry can read `Retry-After`.
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(REQUEST_TIMEOUT))
+        .http_status_as_error(false)
+        .proxy(None)
+        .build()
+        .into();
 
     let mut attempt = 0;
     let response = loop {
         let mut req = agent.get(url);
         for (name, value) in headers {
-            req = req.set(name, value);
+            req = req.header(*name, *value);
         }
 
         match req.call() {
-            Ok(response) => break response,
-            Err(error) => {
-                if let Some(delay) = retry_delay_for_error(&error, attempt) {
+            Ok(response) if response.status().as_u16() < 400 => break response,
+            Ok(response) => {
+                let status = response.status().as_u16();
+                if attempt + 1 < MAX_JSON_ATTEMPTS
+                    && retryable_status(status)
+                    && let Some(delay) =
+                        retry_delay(header(&response, "retry-after"), attempt, chrono::Utc::now())
+                {
                     thread::sleep(delay);
                     attempt += 1;
                     continue;
                 }
-                return Err(http_error(error));
+                return Err(FetchError::Http(status_error_message(&response)));
+            }
+            Err(error) => {
+                if attempt + 1 < MAX_JSON_ATTEMPTS
+                    && retryable_transport_error(&error)
+                    && let Some(delay) = fallback_retry_delay(attempt)
+                {
+                    thread::sleep(delay);
+                    attempt += 1;
+                    continue;
+                }
+                return Err(FetchError::Http(error.to_string()));
             }
         }
     };
 
     let mut body = String::new();
     response
+        .into_body()
         .into_reader()
         .take(MAX_BODY_BYTES as u64)
         .read_to_string(&mut body)
@@ -105,34 +128,20 @@ pub fn get_json(url: &str, headers: &[Header<'_>]) -> Result<serde_json::Value, 
     serde_json::from_str(&body).map_err(|e| FetchError::Parse(e.to_string()))
 }
 
-fn retry_delay_for_error(error: &ureq::Error, attempt: usize) -> Option<Duration> {
-    if attempt + 1 >= MAX_JSON_ATTEMPTS {
-        return None;
-    }
-    match error {
-        ureq::Error::Status(status, response) if retryable_status(*status) => {
-            retry_delay(response.header("retry-after"), attempt, chrono::Utc::now())
-        }
-        ureq::Error::Transport(_) if retryable_transport_kind(error.kind()) => {
-            fallback_retry_delay(attempt)
-        }
-        _ => None,
-    }
-}
-
 fn retryable_status(status: u16) -> bool {
     status == 429 || (500..=599).contains(&status)
 }
 
-fn retryable_transport_kind(kind: ureq::ErrorKind) -> bool {
+/// DNS, connect, socket, timeout, and malformed-response failures can clear
+/// on a second try; URL, redirect, proxy-config, and TLS failures cannot.
+fn retryable_transport_error(error: &ureq::Error) -> bool {
     matches!(
-        kind,
-        ureq::ErrorKind::Dns
-            | ureq::ErrorKind::ConnectionFailed
-            | ureq::ErrorKind::BadStatus
-            | ureq::ErrorKind::BadHeader
-            | ureq::ErrorKind::Io
-            | ureq::ErrorKind::ProxyConnect
+        error,
+        ureq::Error::HostNotFound
+            | ureq::Error::ConnectionFailed
+            | ureq::Error::Protocol(_)
+            | ureq::Error::Io(_)
+            | ureq::Error::Timeout(_)
     )
 }
 
@@ -176,26 +185,23 @@ fn parse_retry_after(value: &str, now: chrono::DateTime<chrono::Utc>) -> Option<
     }
 }
 
-fn http_error(error: ureq::Error) -> FetchError {
-    match error {
-        ureq::Error::Status(status, response) => {
-            FetchError::Http(status_error_message(status, &response))
-        }
-        ureq::Error::Transport(transport) => FetchError::Http(transport.to_string()),
-    }
+fn header<'a>(response: &'a ureq::http::Response<ureq::Body>, name: &str) -> Option<&'a str> {
+    response.headers().get(name)?.to_str().ok()
 }
 
-fn status_error_message(status: u16, response: &ureq::Response) -> String {
+fn status_error_message(response: &ureq::http::Response<ureq::Body>) -> String {
+    use ureq::ResponseExt as _;
+    let status = response.status();
     let mut message = format!(
         "{}: status code {} {}",
-        response.get_url(),
-        status,
-        response.status_text()
+        response.get_uri(),
+        status.as_u16(),
+        status.canonical_reason().unwrap_or_default()
     );
-    if let Some(retry_after) = response.header("retry-after") {
+    if let Some(retry_after) = header(response, "retry-after") {
         message.push_str(&format!("; retry-after: {retry_after}"));
     }
-    if let Some(content_type) = response.header("content-type") {
+    if let Some(content_type) = header(response, "content-type") {
         message.push_str(&format!("; content-type: {content_type}"));
     }
     message
@@ -225,28 +231,25 @@ mod tests {
     }
 
     #[test]
-    fn retries_only_transient_transport_kinds() {
-        for kind in [
-            ureq::ErrorKind::Dns,
-            ureq::ErrorKind::ConnectionFailed,
-            ureq::ErrorKind::BadStatus,
-            ureq::ErrorKind::BadHeader,
-            ureq::ErrorKind::Io,
-            ureq::ErrorKind::ProxyConnect,
+    fn retries_only_transient_transport_errors() {
+        for error in [
+            ureq::Error::HostNotFound,
+            ureq::Error::ConnectionFailed,
+            ureq::Error::Io(std::io::Error::from(std::io::ErrorKind::ConnectionReset)),
+            ureq::Error::Timeout(ureq::Timeout::Global),
         ] {
-            assert!(retryable_transport_kind(kind), "{kind:?}");
+            assert!(retryable_transport_error(&error), "{error:?}");
         }
 
-        for kind in [
-            ureq::ErrorKind::InvalidUrl,
-            ureq::ErrorKind::UnknownScheme,
-            ureq::ErrorKind::InsecureRequestHttpsOnly,
-            ureq::ErrorKind::TooManyRedirects,
-            ureq::ErrorKind::InvalidProxyUrl,
-            ureq::ErrorKind::ProxyUnauthorized,
-            ureq::ErrorKind::HTTP,
+        for error in [
+            ureq::Error::BadUri("relative".into()),
+            ureq::Error::RequireHttpsOnly("http://example.com".into()),
+            ureq::Error::TooManyRedirects,
+            ureq::Error::InvalidProxyUrl,
+            ureq::Error::Tls("handshake"),
+            ureq::Error::StatusCode(500),
         ] {
-            assert!(!retryable_transport_kind(kind), "{kind:?}");
+            assert!(!retryable_transport_error(&error), "{error:?}");
         }
     }
 }

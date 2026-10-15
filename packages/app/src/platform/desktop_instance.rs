@@ -1,6 +1,6 @@
 //! One desktop process per data profile; later launches forward open requests.
 
-use std::fs::File;
+use std::fs::{File, TryLockError};
 use std::io::{Read as _, Write as _};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -12,7 +12,6 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, bail, ensure};
-use fs4::fs_std::FileExt as _;
 use serde::{Deserialize, Serialize};
 
 const LIMIT: u64 = 16 * 1024;
@@ -60,7 +59,7 @@ impl Drop for Instance {
         }
         // Forked children can retain the open file description after this File closes.
         // Release the lock explicitly, after removing the endpoint we own.
-        if let Err(error) = fs4::fs_std::FileExt::unlock(&self.lock) {
+        if let Err(error) = self.lock.unlock() {
             log_error("Desktop profile unlock failed", &error);
         }
     }
@@ -89,7 +88,12 @@ fn acquire(dir: &Path, request: Request, exclusive: bool) -> anyhow::Result<Laun
         .write(true)
         .open(dir.join("desktop.lock"))?;
     let endpoint = dir.join("desktop.json");
-    if !lock.try_lock_exclusive()? {
+    let locked = match lock.try_lock() {
+        Ok(()) => true,
+        Err(TryLockError::WouldBlock) => false,
+        Err(TryLockError::Error(error)) => return Err(error.into()),
+    };
+    if !locked {
         ensure!(
             !exclusive,
             "validation/replay requires an unused data profile; choose a separate {}",
