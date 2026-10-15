@@ -41,7 +41,6 @@ fn fixture(window: &mut Window, cx: &mut gpui::App) -> LeftDockSnapshot {
         agent_status_per_lane: std::collections::HashMap::new(),
         agent_per_session_per_lane: std::collections::HashMap::new(),
         agent_active_session_id: None,
-        agent_install_banner_visible: false,
         workspace: Handle(WeakEntity::new_invalid()),
     }
 }

@@ -157,7 +157,6 @@ welcome:
   title: "daruda"
   open_folder: "폴더 열기..."
   recent: "최근 프로젝트"
-  new_empty: "새 빈 창"
   no_recent: "최근 프로젝트 없음"
   shortcuts: "단축키"
   shortcut_open_folder: "프로젝트 폴더 열기"
@@ -647,11 +646,6 @@ project:
 
 # Claude integration
 claude:
-  banner_title: "Claude Code 연동이 비활성화되어 있습니다"
-  banner_hint: "클릭하여 정확한 세션 상태 활성화"
-  consent_title: "Claude Code 연동을 활성화할까요?"
-  consent_body: "daruda가 ~/.claude/settings.json에 훅 항목을 등록하여 Claude Code가 각 Worktree의 세션 상태(작업 중 / 확인 필요 / 유휴)를 보고할 수 있도록 합니다.\n\n다른 도구의 훅은 보존됩니다. 명령 팔레트(\"Claude: 훅 연동 제거\")를 통해 언제든지 비활성화할 수 있습니다."
-  consent_confirm: "활성화"
   badge_active_suffix: " (이 탭에서 활성)"
   sessions_label_suffix: " 세션:"
 

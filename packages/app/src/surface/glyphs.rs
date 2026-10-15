@@ -1,7 +1,5 @@
 //! Display glyphs that read the same in every locale, so they bypass i18n.
 
-/// Agent integration banner's leading icon.
-pub const AGENT_BANNER_ICON: &str = "ⓘ";
 /// Per-badge tooltip — appended after the session_id prefix to mark
 /// the truncation.
 pub const AGENT_BADGE_TOOLTIP_ELLIPSIS: &str = "…";
@@ -29,7 +27,6 @@ mod tests {
     #[test]
     fn glyphs_are_non_empty() {
         for g in [
-            AGENT_BANNER_ICON,
             AGENT_BADGE_TOOLTIP_ELLIPSIS,
             FILES_CHEVRON_PENDING,
             TASK_PILL_CHEVRON,

@@ -11,7 +11,6 @@ use gpui::{AnyElement, Context, IntoElement, div, prelude::*, px};
 use crate::surface::strings as surface_strings;
 use crate::workspace::layout::{Dock, GroupSnapshot, LeftDockSnapshot, ProjectSnapshot};
 
-use super::banner::agent_install_banner;
 use super::rows::{
     git_badge_for, group_header_row, non_git_placeholder, project_header_row, section_header,
     worktree_row,
@@ -38,13 +37,11 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
     // `_any_git` is unused inside `section_header` — pass `false` unconditionally.
     let header = section_header(false, snap, cx);
 
-    // Banner + header stay outside the scroll region so the section
+    // The header stays outside the scroll region so the section
     // actions remain reachable no matter where the tree is scrolled.
-    let mut body = crate::workspace::left_dock::left_panel_body().gap(px(theme::LANE_ROOT_GAP));
-    if snap.agent_install_banner_visible {
-        body = body.child(agent_install_banner(snap, cx));
-    }
-    body = body.child(header);
+    let mut body = crate::workspace::left_dock::left_panel_body()
+        .gap(px(theme::LANE_ROOT_GAP))
+        .child(header);
 
     if snap.projects.is_empty() {
         body = body.child(empty_state(cx));

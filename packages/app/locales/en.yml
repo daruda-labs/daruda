@@ -162,7 +162,6 @@ welcome:
   title: "daruda"
   open_folder: "Open Folder..."
   recent: "Recent Projects"
-  new_empty: "New Empty Window"
   no_recent: "No recent projects"
   # Heading over the Landing view's keyboard cheat sheet.
   shortcuts: "Shortcuts"
@@ -848,11 +847,6 @@ project:
 
 # Claude integration
 claude:
-  banner_title: "Claude Code integration disabled"
-  banner_hint: "Click to enable accurate session status"
-  consent_title: "Enable Claude Code integration?"
-  consent_body: "daruda will register hook entries in ~/.claude/settings.json so Claude Code can report session status (Working / Needs attention / Idle) for each worktree.\n\nOther tools' hooks are preserved. You can disable this anytime via the command palette (\"Claude: Uninstall Hook Integration\")."
-  consent_confirm: "Enable"
   # Suffix appended to the active session's badge tooltip to identify
   # the one that's bound to the focused tab. Empty for inactive
   # siblings.
