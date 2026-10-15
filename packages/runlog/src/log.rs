@@ -138,6 +138,16 @@ fn choose_generation<S: Default + serde::de::DeserializeOwned>(
 }
 
 impl<M: Machine, B: LogBackend> RunLog<M, B> {
+    /// Replay the last committed state without opening a writer, repairing
+    /// a torn tail, removing generations, or recording a new epoch.
+    pub fn read_only(backend: &B) -> Result<(u64, M::State), OpenError> {
+        let generations = backend.generations()?;
+        let (generation, base) = choose_generation::<M::State>(backend, &generations)?;
+        let log = backend.read(generation)?.log;
+        let replayed = replay::<M>(&log, base)?;
+        Ok((replayed.last_seq, replayed.state))
+    }
+
     /// Restore from `backend` and append an `opened` record. Nothing is
     /// written until the whole chosen generation has been read and accepted.
     pub fn open(mut backend: B, build: &str) -> Result<Self, OpenError> {
@@ -147,12 +157,12 @@ impl<M: Machine, B: LogBackend> RunLog<M, B> {
         let log = backend.read(generation)?.log;
         let replayed = replay::<M>(&log, base)?;
 
-        for &other in generations.iter().filter(|&&other| other != generation) {
-            backend.drop_generation(other)?;
-        }
         backend.select(generation)?;
         if replayed.torn {
             backend.truncate_tail(replayed.whole_len)?;
+        }
+        for &other in generations.iter().filter(|&&other| other != generation) {
+            backend.drop_generation(other)?;
         }
 
         let mut opened = Self {

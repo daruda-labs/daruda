@@ -9,8 +9,10 @@ use std::path::{Path, PathBuf};
 pub mod directories;
 mod identity;
 pub mod io_error;
+mod sync;
 
 pub use identity::{FileId, file_id};
+pub use sync::sync_file_entry;
 
 /// Make a path absolute without requiring it to exist or following symlinks.
 /// Resolves Windows drive-relative paths using the OS drive context as well.
@@ -131,7 +133,7 @@ pub fn open_owner_only(
 ///
 /// Windows: a no-op. A directory handle needs `GENERIC_WRITE` and
 /// `FILE_FLAG_BACKUP_SEMANTICS`, and Microsoft does not document that flushing
-/// it persists a rename; callers must stay correct without directory durability.
+/// it persists a rename. Publish files through [`sync_file_entry`] instead.
 pub fn sync_dir(dir: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {

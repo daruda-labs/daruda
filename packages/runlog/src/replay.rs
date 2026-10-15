@@ -41,7 +41,8 @@ pub(crate) fn replay<M: Machine>(
     let (lines, fragment) = split_lines(log);
     // A newer writer's records may not even share this envelope, so the
     // version is read before any line is trusted or anything is cut.
-    for (_, line) in &lines {
+    let fragment_line = fragment.map(|start| &log[start..]);
+    for line in lines.iter().map(|(_, line)| *line).chain(fragment_line) {
         if let Ok(probe) = serde_json::from_slice::<VersionProbe>(line)
             && probe.v > FORMAT_VERSION
         {

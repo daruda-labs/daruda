@@ -21,13 +21,16 @@ pub trait LogBackend {
     /// Generations with a snapshot or a log present, ascending.
     fn generations(&self) -> io::Result<Vec<u64>>;
     fn read(&self, generation: u64) -> io::Result<Generation>;
-    /// Make `generation`'s log the append target, creating it empty if absent.
+    /// Durably publish `generation`'s snapshot and log under their final names,
+    /// then select its log, creating it empty if absent. Existing paths must
+    /// also be published: an earlier failed publication may have left them.
     fn select(&mut self, generation: u64) -> io::Result<()>;
     fn append(&mut self, line: &[u8]) -> io::Result<()>;
     fn sync(&mut self) -> io::Result<()>;
     /// Cut the selected log to `len` bytes, durably.
     fn truncate_tail(&mut self, len: u64) -> io::Result<()>;
-    /// Atomically replace `generation`'s snapshot with `bytes`.
+    /// Atomically replace `generation`'s snapshot with `bytes` and durably
+    /// publish its final name before returning success.
     fn replace_snapshot(&mut self, generation: u64, bytes: &[u8]) -> io::Result<()>;
     fn drop_generation(&mut self, generation: u64) -> io::Result<()>;
 }
@@ -122,8 +125,15 @@ impl LogBackend for FileBackend {
     }
 
     fn select(&mut self, generation: u64) -> io::Result<()> {
+        if generation != 0 {
+            let snapshot = self.snapshot_path(generation);
+            match OpenOptions::new().write(true).open(&snapshot) {
+                Ok(file) => daruda_core::path::sync_file_entry(&file, &snapshot)?,
+                Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+                Err(err) => return Err(err),
+            }
+        }
         let path = self.log_path(generation);
-        let existed = path.exists();
         // Not append mode: on Windows it drops the write-data right that
         // flushing needs. One writer per log makes seek-to-end equivalent.
         let mut file = OpenOptions::new()
@@ -132,9 +142,7 @@ impl LogBackend for FileBackend {
             .truncate(false)
             .open(&path)?;
         file.seek(SeekFrom::End(0))?;
-        if !existed {
-            daruda_core::path::sync_dir(&self.dir)?;
-        }
+        daruda_core::path::sync_file_entry(&file, &path)?;
         self.selected = Some((generation, file));
         Ok(())
     }
@@ -164,7 +172,8 @@ impl LogBackend for FileBackend {
         file.sync_all()?;
         drop(file);
         std::fs::rename(&temp, &target)?;
-        daruda_core::path::sync_dir(&self.dir)
+        let file = OpenOptions::new().write(true).open(&target)?;
+        daruda_core::path::sync_file_entry(&file, &target)
     }
 
     fn drop_generation(&mut self, generation: u64) -> io::Result<()> {

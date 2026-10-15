@@ -54,8 +54,17 @@ impl Reconciling {
 /// Task persistence. Domain code holds this, never the log's directory.
 #[derive(Clone, Debug)]
 pub struct TaskStore {
-    committer: Committer<TaskMachine>,
+    access: TaskStoreAccess,
     log_dir: std::sync::Arc<PathBuf>,
+}
+
+#[derive(Clone, Debug)]
+enum TaskStoreAccess {
+    Writable(Committer<TaskMachine>),
+    ReadOnly {
+        seq: u64,
+        book: std::sync::Arc<TasksBook>,
+    },
 }
 
 impl TaskStore {
@@ -73,6 +82,8 @@ impl TaskStore {
 
     /// Open the log in `log_dir`; when it holds no events yet, import
     /// `tasks.json` from `legacy_data_dir`. The source file is only read.
+    /// An unfinished reconciliation opens a read-only snapshot, preserving
+    /// every recovery file and skipping import.
     /// The caller guarantees no other writer has `log_dir` open.
     pub fn in_directory(
         log_dir: impl Into<PathBuf>,
@@ -81,6 +92,16 @@ impl TaskStore {
         after_commit: AfterCommit<TaskMachine>,
     ) -> Result<Self, TaskStoreError> {
         let log_dir = log_dir.into();
+        if log_dir.join(RECONCILING_SENTINEL).try_exists()? {
+            let (seq, book) = RunLog::<TaskMachine, _>::read_only(&FileBackend::new(&log_dir))?;
+            return Ok(Self {
+                access: TaskStoreAccess::ReadOnly {
+                    seq,
+                    book: std::sync::Arc::new(book),
+                },
+                log_dir: std::sync::Arc::new(log_dir),
+            });
+        }
         std::fs::create_dir_all(&log_dir)?;
         let mut log = RunLog::<TaskMachine, _>::open(FileBackend::new(log_dir.clone()), build)?;
         // Committed before the committer exists, so the hook never sees the
@@ -93,14 +114,14 @@ impl TaskStore {
         }
         let committer = Committer::spawn(log, "task-log", after_commit)?;
         Ok(Self {
-            committer,
+            access: TaskStoreAccess::Writable(committer),
             log_dir: std::sync::Arc::new(log_dir),
         })
     }
 
     /// The last committed seq and the state it left, replayed from the log.
     pub fn current(&self) -> Result<(u64, TasksBook), SubscribeError> {
-        let (catch_up, _live) = self.committer.subscribe(0)?;
+        let (catch_up, _live) = self.subscribe(0)?;
         Ok(match catch_up {
             CatchUp::Snapshot { state, seq } => (seq, state),
             CatchUp::Records(records) => {
@@ -120,6 +141,9 @@ impl TaskStore {
     /// Claim the one startup reconciliation; refused while an earlier one's
     /// marker is still on disk.
     pub fn begin_reconcile(&self) -> Result<Reconciling, ReconcileBlocked> {
+        if matches!(self.access, TaskStoreAccess::ReadOnly { .. }) {
+            return Err(ReconcileBlocked::Unfinished);
+        }
         let sentinel = self.log_dir.join(RECONCILING_SENTINEL);
         match std::fs::OpenOptions::new()
             .write(true)
@@ -134,26 +158,54 @@ impl TaskStore {
         }
     }
 
-    /// Commit `event`; resolves once it is durable and published.
+    /// Commit `event`; resolves once it is durable and published. A read-only
+    /// recovery snapshot refuses every proposal with `CommitError::Closed`.
     pub fn propose(
         &self,
         event: TaskEvent,
     ) -> impl Future<Output = Result<Committed<TaskMachine>, CommitError<TaskRejected>>> + use<>
     {
-        self.committer.propose(event)
+        let commit = match &self.access {
+            TaskStoreAccess::Writable(committer) => Some(committer.propose(event)),
+            TaskStoreAccess::ReadOnly { .. } => None,
+        };
+        async move {
+            match commit {
+                Some(commit) => commit.await,
+                None => Err(CommitError::Closed),
+            }
+        }
     }
 
-    /// Everything after `after_seq`, then every later commit live.
+    /// Everything after `after_seq`, then every later commit live. A read-only
+    /// recovery snapshot supplies its state and an already-closed stream.
     pub fn subscribe(
         &self,
         after_seq: u64,
     ) -> Result<(CatchUp<TaskMachine>, Live), SubscribeError> {
-        self.committer.subscribe(after_seq)
+        match &self.access {
+            TaskStoreAccess::Writable(committer) => committer.subscribe(after_seq),
+            TaskStoreAccess::ReadOnly { seq, book } => {
+                let catch_up = if after_seq < *seq {
+                    CatchUp::Snapshot {
+                        state: book.as_ref().clone(),
+                        seq: *seq,
+                    }
+                } else {
+                    CatchUp::Records(Vec::new())
+                };
+                let (_, live) = smol::channel::unbounded();
+                Ok((catch_up, live))
+            }
+        }
     }
 
     /// Wait until every earlier proposal is answered.
     pub fn flush(&self, deadline: Duration) -> Result<(), FlushTimedOut> {
-        self.committer.flush(deadline)
+        match &self.access {
+            TaskStoreAccess::Writable(committer) => committer.flush(deadline),
+            TaskStoreAccess::ReadOnly { .. } => Ok(()),
+        }
     }
 }
 

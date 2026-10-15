@@ -1,3 +1,4 @@
+use std::io::Write as _;
 use std::path::Path;
 use std::time::Duration;
 
@@ -194,7 +195,7 @@ fn quit_flushes_commands_that_have_not_reached_the_projection(cx: &mut TestAppCo
 }
 
 #[gpui::test]
-fn an_unfinished_reconciliation_is_read_only_and_preserves_legacy_bytes(cx: &mut TestAppContext) {
+fn an_unfinished_reconciliation_reopens_read_only_and_preserves_files(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();
     let legacy = tempfile::tempdir().unwrap();
     let store = store_at(dir.path(), None);
@@ -202,11 +203,30 @@ fn an_unfinished_reconciliation_is_read_only_and_preserves_legacy_bytes(cx: &mut
     let id = spec.id.clone();
     smol::block_on(store.propose(TaskEvent::Created { spec })).unwrap();
     let _claim = store.begin_reconcile().unwrap();
+    let expected = store.current().unwrap();
+    drop(store);
+    let log_path = dir.path().join("log.0.jsonl");
+    let mut log = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&log_path)
+        .unwrap();
+    log.write_all(b"{\"v\":1,\"seq\":").unwrap();
+    log.sync_all().unwrap();
+    drop(log);
     let path = daruda_store::tasks::tasks_path_in(legacy.path());
     write_legacy_input(legacy.path(), &TasksState::default()).unwrap();
     let original = std::fs::read(&path).unwrap();
+    let marker = dir.path().join(".reconciling");
+    let original_files = [&log_path, &marker, &path].map(|path| {
+        (
+            std::fs::read(path).unwrap(),
+            std::fs::metadata(path).unwrap().modified().unwrap(),
+        )
+    });
+    let reopened = store_at(dir.path(), Some(legacy.path()));
+    assert_eq!(reopened.current().unwrap(), expected);
     cx.update(|cx| {
-        RunsHost::install(RunsHost::open(Ok(store.clone())), cx);
+        RunsHost::install(RunsHost::open(Ok(reopened)), cx);
         RunsHost::install_quit_flush(cx);
         assert!(!RunsHost::is_writable(cx));
         assert!(cx.global::<GlobalTasks>().get(&id).is_some());
@@ -223,7 +243,16 @@ fn an_unfinished_reconciliation_is_read_only_and_preserves_legacy_bytes(cx: &mut
     cx.run_until_parked();
     assert_eq!(smol::block_on(refused), Err(TaskCommitError::ReadOnly));
     cx.quit();
-    assert_eq!(std::fs::read(path).unwrap(), original);
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    assert_eq!(
+        [&log_path, &marker, &path].map(|path| {
+            (
+                std::fs::read(path).unwrap(),
+                std::fs::metadata(path).unwrap().modified().unwrap(),
+            )
+        }),
+        original_files
+    );
 }
 
 #[gpui::test]

@@ -40,9 +40,11 @@ and no subscriber sees a record the disk lacks. A rejection emits nothing.
 
 ## Fresh State Comes Only From Replay
 
-Construct state only through `RunLog::open`. Do not seed a machine's state
-from another file, a cache, or a default after a failed open: the log is the
-single source, and a second source drifts from it.
+Construct state only through `RunLog::open` or `RunLog::read_only`. The latter
+replays without writing an `opened` record, repairing a torn tail, or pruning
+generations, so recovery can preserve every file while exposing its state.
+Do not seed a machine's state from another file, a cache, or a default after
+a failed open: the log is the single source, and a second source drifts from it.
 
 ## Strict Replay
 
@@ -65,9 +67,15 @@ runs, the per-bot remote lock for the inbox. This crate does no locking.
 
 - `FileBackend` takes a directory the caller resolved through daruda's
   storage policy; it never resolves paths itself.
-- Correctness never depends on a directory fsync. `sync_dir` is an
-  optimisation (a no-op on Windows); the generation rules make any lost
-  rename, create, or delete reopen to a consistent generation.
+- Successful snapshot replacement and generation selection guarantee durable
+  publication under the final names, including existing paths left by a failed
+  publication. Unix flushes files and directory ancestors; Windows flushes the
+  final writable file handles, including their metadata. `sync_dir` remains a
+  no-op on Windows and is only an optimisation for old-generation cleanup.
+- Publication failures refuse the open or close the writer before another
+  event can be acknowledged. Recovery publishes the chosen generation before
+  deleting older ones. A lost old-generation deletion is harmless; a successful
+  commit must survive recovery, including after compaction.
 - Compaction writes the next generation's snapshot, switches to its empty
   log, then drops the old generation. Once the new snapshot may be on disk,
   a failure closes the log.

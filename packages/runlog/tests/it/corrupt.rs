@@ -50,6 +50,26 @@ fn a_newer_record_version_is_refused_and_left_untouched() {
 }
 
 #[test]
+fn a_complete_newer_record_without_its_newline_is_left_untouched() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut bytes = seeded(dir.path());
+    let newer = format!(
+        "{{\"v\":{},\"seq\":4,\"at_ms\":0,\"kind\":\"wholly_new\"}}",
+        FORMAT_VERSION + 1
+    );
+    bytes.extend_from_slice(newer.as_bytes());
+    std::fs::write(log_path(dir.path()), &bytes).unwrap();
+
+    let opened = RunLog::<Toy, _>::open(FileBackend::new(dir.path()), BUILD);
+    assert!(matches!(
+        opened,
+        Err(OpenError::TooNew { found, supported })
+            if found == FORMAT_VERSION + 1 && supported == FORMAT_VERSION
+    ));
+    assert_eq!(std::fs::read(log_path(dir.path())).unwrap(), bytes);
+}
+
+#[test]
 fn a_corrupt_middle_line_is_refused_with_its_line_number() {
     let dir = tempfile::tempdir().unwrap();
     let mut rows = lines(&seeded(dir.path()));

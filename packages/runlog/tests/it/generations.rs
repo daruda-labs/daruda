@@ -1,9 +1,75 @@
 use daruda_runlog::testing::{DirOp, FaultBackend};
-use daruda_runlog::{CatchUp, FileBackend, LogBackend, RunLog};
+use daruda_runlog::{CatchUp, CommitError, FileBackend, LogBackend, OpenError, RunLog};
+use std::io::Write as _;
 
-use crate::toy::{BUILD, Toy, ToyState, add, insert, ticket};
+use crate::toy::{BUILD, Toy, add, insert, ticket};
 
-fn compacted_log(lost_from: Option<DirOp>) -> (RunLog<Toy, FaultBackend>, ToyState) {
+#[test]
+fn read_only_replays_without_repairing_or_cleaning_any_files() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut log = RunLog::<Toy, _>::open(FileBackend::new(directory.path()), BUILD).unwrap();
+    log.commit(add(7)).unwrap();
+    let old_path = directory.path().join("log.0.jsonl");
+    let old_log = std::fs::read(&old_path).unwrap();
+    log.compact().unwrap();
+    log.commit(ticket()).unwrap();
+    let expected = (log.last_seq(), log.state().clone());
+    drop(log);
+    std::fs::write(&old_path, old_log).unwrap();
+    let mut tail = std::fs::OpenOptions::new()
+        .append(true)
+        .open(directory.path().join("log.1.jsonl"))
+        .unwrap();
+    tail.write_all(b"{\"v\":1,\"seq\":").unwrap();
+    tail.sync_all().unwrap();
+    drop(tail);
+    let files = || {
+        std::fs::read_dir(directory.path())
+            .unwrap()
+            .map(|entry| {
+                let path = entry.unwrap().path();
+                let bytes = std::fs::read(&path).unwrap();
+                let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+                (path, (bytes, modified))
+            })
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    let original = files();
+
+    let restored = RunLog::<Toy, _>::read_only(&FileBackend::new(directory.path())).unwrap();
+
+    assert_eq!(restored, expected);
+    assert_eq!(files(), original);
+}
+
+#[test]
+fn read_only_refuses_newer_fragments_without_changing_files() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut log = RunLog::<Toy, _>::open(FileBackend::new(directory.path()), BUILD).unwrap();
+    log.commit(add(7)).unwrap();
+    drop(log);
+    let path = directory.path().join("log.0.jsonl");
+    let mut tail = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap();
+    tail.write_all(b"{\"v\":99}").unwrap();
+    tail.sync_all().unwrap();
+    drop(tail);
+    let original = std::fs::read(&path).unwrap();
+    let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+
+    let restored = RunLog::<Toy, _>::read_only(&FileBackend::new(directory.path()));
+
+    assert!(matches!(restored, Err(OpenError::TooNew { found: 99, .. })));
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().modified().unwrap(),
+        modified
+    );
+}
+
+fn compacted_log(lost_from: Option<DirOp>) -> RunLog<Toy, FaultBackend> {
     let mut backend = FaultBackend::new();
     if let Some(op) = lost_from {
         backend = backend.lose_dir_ops_from(op);
@@ -11,22 +77,25 @@ fn compacted_log(lost_from: Option<DirOp>) -> (RunLog<Toy, FaultBackend>, ToySta
     let mut log = RunLog::<Toy, _>::open(backend, BUILD).unwrap();
     log.commit(add(3)).unwrap();
     log.commit(insert("a")).unwrap();
-    let before = log.state().clone();
-    log.compact().unwrap();
-    log.commit(ticket()).unwrap();
-    (log, before)
+    match log.compact() {
+        Ok(()) => {
+            log.commit(ticket()).unwrap();
+        }
+        Err(_) => assert!(matches!(log.commit(ticket()), Err(CommitError::Closed))),
+    }
+    log
 }
 
 #[test]
-fn a_lost_snapshot_rename_reopens_the_old_generation() {
-    let (log, before) = compacted_log(Some(DirOp::ReplaceSnapshot(1)));
+fn a_lost_snapshot_publication_preserves_every_acknowledged_event() {
+    let log = compacted_log(Some(DirOp::ReplaceSnapshot(1)));
     let reopened = RunLog::<Toy, _>::open(log.backend().crash(), BUILD).unwrap();
-    assert_eq!(reopened.state(), &before);
+    assert_eq!(reopened.state(), log.state());
 }
 
 #[test]
 fn a_lost_drop_reopens_the_new_generation_and_removes_the_old() {
-    let (log, _) = compacted_log(Some(DirOp::DropGeneration(0)));
+    let log = compacted_log(Some(DirOp::DropGeneration(0)));
     let disk = log.backend().crash();
     assert_eq!(disk.generations().unwrap(), vec![0, 1]);
     let reopened = RunLog::<Toy, _>::open(disk, BUILD).unwrap();
@@ -35,12 +104,72 @@ fn a_lost_drop_reopens_the_new_generation_and_removes_the_old() {
 }
 
 #[test]
-fn a_lost_log_creation_reopens_the_snapshot_with_an_empty_log() {
-    let (log, before) = compacted_log(Some(DirOp::CreateLog(1)));
+fn a_lost_log_publication_preserves_every_acknowledged_event() {
+    let log = compacted_log(Some(DirOp::CreateLog(1)));
     let disk = log.backend().crash();
     assert!(disk.read(1).unwrap().log.is_empty());
     let reopened = RunLog::<Toy, _>::open(disk, BUILD).unwrap();
-    assert_eq!(reopened.state(), &before);
+    assert_eq!(reopened.state(), log.state());
+}
+
+#[test]
+fn a_failed_first_log_publication_refuses_the_open_before_any_acknowledgment() {
+    let backend = FaultBackend::new().lose_dir_ops_from(DirOp::CreateLog(0));
+    let opened = RunLog::<Toy, _>::open(backend.clone(), BUILD);
+    assert!(matches!(opened, Err(OpenError::Io(_))));
+    assert!(backend.crash().generations().unwrap().is_empty());
+
+    let mut reopened = RunLog::<Toy, _>::open(backend.crash(), BUILD).unwrap();
+    reopened.commit(ticket()).unwrap();
+    let durable = RunLog::<Toy, _>::open(reopened.backend().crash(), BUILD).unwrap();
+    assert_eq!(durable.state(), reopened.state());
+}
+
+#[test]
+fn an_existing_log_left_by_failed_publication_must_be_published_on_restart() {
+    let backend = FaultBackend::new().lose_dir_ops_from(DirOp::CreateLog(0));
+    assert!(matches!(
+        RunLog::<Toy, _>::open(backend.clone(), BUILD),
+        Err(OpenError::Io(_))
+    ));
+    assert!(backend.file("log.0.jsonl").is_some());
+
+    let restarted = backend.restart().fail_publication();
+    assert!(matches!(
+        RunLog::<Toy, _>::open(restarted.clone(), BUILD),
+        Err(OpenError::Io(_))
+    ));
+    assert!(restarted.append_lens().is_empty());
+
+    let mut reopened = RunLog::<Toy, _>::open(restarted.restart(), BUILD).unwrap();
+    reopened.commit(ticket()).unwrap();
+    let durable = RunLog::<Toy, _>::open(reopened.backend().crash(), BUILD).unwrap();
+    assert_eq!(durable.state(), reopened.state());
+}
+
+#[test]
+fn a_snapshot_left_by_failed_publication_is_published_before_old_files_are_deleted() {
+    let backend = FaultBackend::new().lose_dir_ops_from(DirOp::ReplaceSnapshot(1));
+    let mut log = RunLog::<Toy, _>::open(backend.clone(), BUILD).unwrap();
+    log.commit(ticket()).unwrap();
+    let acknowledged = log.state().clone();
+    let old_log = backend.file("log.0.jsonl").unwrap();
+    assert!(log.compact().is_err());
+    drop(log);
+
+    let restarted = backend.restart().fail_publication();
+    assert!(matches!(
+        RunLog::<Toy, _>::open(restarted.clone(), BUILD),
+        Err(OpenError::Io(_))
+    ));
+    assert_eq!(restarted.file("log.0.jsonl").unwrap(), old_log);
+
+    let mut reopened = RunLog::<Toy, _>::open(restarted.restart(), BUILD).unwrap();
+    assert_eq!(reopened.state(), &acknowledged);
+    reopened.commit(ticket()).unwrap();
+    let durable = RunLog::<Toy, _>::open(reopened.backend().crash(), BUILD).unwrap();
+    assert_eq!(durable.state(), reopened.state());
+    assert_eq!(durable.state().tickets, vec![1, 2]);
 }
 
 #[test]

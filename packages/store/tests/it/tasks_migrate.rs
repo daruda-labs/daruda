@@ -1,17 +1,21 @@
 //! `TaskStore`'s one-time import of the legacy `tasks.json`.
 
+use std::collections::BTreeMap;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use daruda_runlog::{AfterCommit, Body, CatchUp, CommitError, Machine as _};
+use daruda_runlog::{
+    AfterCommit, Body, CatchUp, CommitError, FileBackend, Machine as _, OpenError, RunLog,
+};
 use daruda_store::project::ProjectUuid;
 use daruda_store::tasks::machine::{
     ErrorCause, InterruptCause, Lifecycle, TaskMachine, TaskRejected, TasksBook,
 };
 use daruda_store::tasks::migrate::LEGACY_EXECUTION_ID;
 use daruda_store::tasks::{
-    ExecutionRef, SessionEndReason, SubTask, Task, TaskEvent, TaskExecution, TaskState, TaskStore,
-    TasksState, tasks_path_in,
+    ExecutionRef, ReconcileBlocked, SessionEndReason, SubTask, Task, TaskEvent, TaskExecution,
+    TaskSpec, TaskState, TaskStore, TaskStoreError, TasksState, tasks_path_in,
 };
 
 const BUILD: &str = "daruda_store-test";
@@ -103,6 +107,131 @@ fn write_legacy_input(data_dir: &std::path::Path, rows: &TasksState) -> std::io:
         tasks_path_in(data_dir),
         serde_json::to_vec_pretty(rows).unwrap(),
     )
+}
+
+fn files_on_disk(directory: &Path) -> BTreeMap<PathBuf, (Vec<u8>, std::time::SystemTime)> {
+    std::fs::read_dir(directory)
+        .unwrap()
+        .map(|entry| {
+            let path = entry.unwrap().path();
+            let bytes = std::fs::read(&path).unwrap();
+            let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+            (path, (bytes, modified))
+        })
+        .collect()
+}
+
+#[test]
+fn an_unfinished_reconciliation_reopens_without_changing_recovery_files() {
+    let logs = tempfile::tempdir().unwrap();
+    let legacy = tempfile::tempdir().unwrap();
+    write_legacy_input(legacy.path(), &legacy_file()).unwrap();
+    let spec = TaskSpec::new(
+        ProjectUuid::new(),
+        "committed".into(),
+        String::new(),
+        None,
+        chrono::Utc::now(),
+    );
+    let task_id = spec.id.clone();
+    let mut log = RunLog::<TaskMachine, _>::open(FileBackend::new(logs.path()), BUILD).unwrap();
+    log.commit(TaskEvent::Created { spec }).unwrap();
+    let old_path = logs.path().join("log.0.jsonl");
+    let old_log = std::fs::read(&old_path).unwrap();
+    log.compact().unwrap();
+    log.commit(TaskEvent::SubtaskAdded {
+        id: task_id.clone(),
+        subtask: SubTask::new("committed checklist".into()),
+        at: chrono::Utc::now(),
+    })
+    .unwrap();
+    let expected = (log.last_seq(), log.state().clone());
+    drop(log);
+    std::fs::write(&old_path, old_log).unwrap();
+    let mut tail = std::fs::OpenOptions::new()
+        .append(true)
+        .open(logs.path().join("log.1.jsonl"))
+        .unwrap();
+    tail.write_all(b"{\"v\":1,\"seq\":").unwrap();
+    tail.sync_all().unwrap();
+    drop(tail);
+    std::fs::write(logs.path().join(".reconciling"), b"unfinished").unwrap();
+    let log_files = files_on_disk(logs.path());
+    let legacy_files = files_on_disk(legacy.path());
+
+    let store = open(logs.path(), legacy.path());
+    assert_eq!(store.current().unwrap(), expected);
+    assert_eq!(files_on_disk(logs.path()), log_files);
+    assert!(matches!(
+        smol::block_on(store.propose(TaskEvent::Deleted {
+            id: task_id,
+            at: chrono::Utc::now(),
+        })),
+        Err(CommitError::Closed)
+    ));
+    assert!(matches!(
+        store.begin_reconcile(),
+        Err(ReconcileBlocked::Unfinished)
+    ));
+    let (catch_up, live) = store.subscribe(0).unwrap();
+    match catch_up {
+        CatchUp::Snapshot { state, seq } => assert_eq!((seq, state), expected),
+        CatchUp::Records(_) => panic!("read-only recovery supplies a snapshot"),
+    }
+    assert!(live.is_closed());
+    for after_seq in [expected.0, expected.0 + 1] {
+        let (catch_up, live) = store.subscribe(after_seq).unwrap();
+        assert!(matches!(catch_up, CatchUp::Records(records) if records.is_empty()));
+        assert!(live.is_closed());
+    }
+    store.flush(Duration::from_secs(1)).unwrap();
+    drop(store);
+    assert_eq!(files_on_disk(logs.path()), log_files);
+    assert_eq!(files_on_disk(legacy.path()), legacy_files);
+}
+
+#[test]
+fn an_unfinished_reconciliation_does_not_import_a_legacy_file_into_an_empty_log() {
+    let logs = tempfile::tempdir().unwrap();
+    let legacy = tempfile::tempdir().unwrap();
+    write_legacy_input(legacy.path(), &legacy_file()).unwrap();
+    std::fs::write(logs.path().join(".reconciling"), b"unfinished").unwrap();
+    let log_files = files_on_disk(logs.path());
+    let legacy_files = files_on_disk(legacy.path());
+
+    let store = open(logs.path(), legacy.path());
+    assert_eq!(store.current().unwrap(), (0, TasksBook::default()));
+    drop(store);
+    assert_eq!(files_on_disk(logs.path()), log_files);
+    assert_eq!(files_on_disk(legacy.path()), legacy_files);
+}
+
+#[test]
+fn read_only_recovery_refuses_a_newer_task_log_without_changing_files() {
+    let logs = tempfile::tempdir().unwrap();
+    let legacy = tempfile::tempdir().unwrap();
+    write_legacy_input(legacy.path(), &legacy_file()).unwrap();
+    let log = RunLog::<TaskMachine, _>::open(FileBackend::new(logs.path()), BUILD).unwrap();
+    drop(log);
+    let mut tail = std::fs::OpenOptions::new()
+        .append(true)
+        .open(logs.path().join("log.0.jsonl"))
+        .unwrap();
+    tail.write_all(b"{\"v\":99}").unwrap();
+    tail.sync_all().unwrap();
+    drop(tail);
+    std::fs::write(logs.path().join(".reconciling"), b"unfinished").unwrap();
+    let log_files = files_on_disk(logs.path());
+    let legacy_files = files_on_disk(legacy.path());
+
+    let opened = TaskStore::in_directory(logs.path(), Some(legacy.path()), BUILD, no_hook());
+
+    assert!(matches!(
+        opened,
+        Err(TaskStoreError::Open(OpenError::TooNew { found: 99, .. }))
+    ));
+    assert_eq!(files_on_disk(logs.path()), log_files);
+    assert_eq!(files_on_disk(legacy.path()), legacy_files);
 }
 
 #[test]
