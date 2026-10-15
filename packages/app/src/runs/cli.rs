@@ -7,7 +7,8 @@ use daruda_agent::pty_tracker::{PtyBinding, PtyTracker, PtyTrackerEvent};
 use daruda_store::accounts::{AccountId, AccountRecipeId};
 use daruda_store::project::WorkspaceUuid;
 use daruda_store::tasks::{
-    CliProcessState, ExecutionRef, Lifecycle, TaskEvent, TaskExecution, TaskRecord,
+    CliProcessState, ExecutionRef, Lifecycle, SessionEndReason, TaskEvent, TaskExecution,
+    TaskRecord,
 };
 use gpui::{App, BorrowAppContext as _};
 
@@ -54,7 +55,21 @@ impl RunsHost {
             loop {
                 cx.background_executor().timer(POLL_INTERVAL).await;
                 while let Ok(event) = receiver.try_recv() {
-                    cx.update(|cx| Self::apply_cli_tracker_event(event, cx));
+                    let mut event = Some(event);
+                    loop {
+                        let pending = cx.update(|cx| {
+                            if Self::settled(cx) {
+                                if let Some(event) = event.take() {
+                                    Self::apply_cli_tracker_event(event, cx);
+                                }
+                                None
+                            } else {
+                                Some(Self::barrier(cx))
+                            }
+                        });
+                        let Some(pending) = pending else { break };
+                        pending.await;
+                    }
                 }
             }
         });
@@ -240,15 +255,39 @@ impl RunsHost {
     }
 
     pub(crate) fn record_cli_transcript(session: &str, path: &Path, cx: &mut App) {
-        let events: Vec<_> = cli_runs(cx.global::<GlobalTasks>(), |run| run.session_id.as_deref() == Some(session))
-            .filter(|(_, run, _)| !matches!(&run.source, daruda_store::tasks::TaskExecutionSource::ClaudeCli { transcript_path: Some(current), .. } if current == path))
-            .map(|(_, _, exec)| TaskEvent::CliTranscriptFound { exec, transcript_path: path.to_path_buf(), at: Utc::now() }).collect();
-        for event in events {
-            Self::propose_fact(event, cx);
-        }
+        let session = session.to_owned();
+        let path = path.to_path_buf();
+        Self::after_projection(
+            move |cx| {
+                let events: Vec<_> = cli_runs(cx.global::<GlobalTasks>(), |run| {
+                    run.session_id.as_deref() == Some(&session)
+                })
+                .filter(|(_, run, _)| {
+                    !matches!(&run.source, daruda_store::tasks::TaskExecutionSource::ClaudeCli { transcript_path: Some(current), .. } if current == &path)
+                })
+                .map(|(_, _, exec)| TaskEvent::CliTranscriptFound {
+                    exec,
+                    transcript_path: path.clone(),
+                    at: Utc::now(),
+                })
+                .collect();
+                for event in events {
+                    Self::propose_fact(event, cx);
+                }
+            },
+            cx,
+        );
     }
 
     pub(crate) fn record_cli_exit(session: &str, pid: u32, cx: &mut App) {
+        let session = session.to_owned();
+        Self::after_projection(
+            move |cx| Self::record_cli_exit_projected(&session, pid, cx),
+            cx,
+        );
+    }
+
+    fn record_cli_exit_projected(session: &str, pid: u32, cx: &mut App) {
         let now = Utc::now();
         let events: Vec<_> = cli_runs(cx.global::<GlobalTasks>(), |run| {
             run.session_id.as_deref() == Some(session)
@@ -269,6 +308,57 @@ impl RunsHost {
             Self::propose_fact(event, cx);
             Self::reconcile_lost_cli(exec, cx);
         }
+    }
+
+    pub(crate) fn attach_cli_session(session: &str, cx: &mut App) {
+        let session = session.to_owned();
+        Self::after_projection(
+            move |cx| {
+                let events: Vec<_> = cli_runs(cx.global::<GlobalTasks>(), |run| {
+                    run.session_id.as_deref() == Some(&session)
+                })
+                .filter(|(task, _, _)| {
+                    matches!(task.lifecycle, Lifecycle::Running { .. })
+                        && !task.session_ids.contains(&session)
+                })
+                .map(|(_, _, exec)| TaskEvent::SessionAttached {
+                    exec,
+                    session_id: session.clone(),
+                    at: Utc::now(),
+                })
+                .collect();
+                for event in events {
+                    Self::propose_fact(event, cx);
+                }
+            },
+            cx,
+        );
+    }
+
+    pub(crate) fn settle_cli_session(session: &str, reason: SessionEndReason, cx: &mut App) {
+        let session = session.to_owned();
+        Self::after_projection(
+            move |cx| {
+                let events: Vec<_> = cli_runs(cx.global::<GlobalTasks>(), |_| true)
+                    .filter(|(task, run, _)| {
+                        matches!(task.lifecycle, Lifecycle::Running { .. })
+                            && (run.session_id.as_deref() == Some(&session)
+                                || task.session_ids.contains(&session))
+                    })
+                    .map(|(_, _, exec)| TaskEvent::Settled {
+                        exec,
+                        outcome: daruda_store::tasks::machine::SettleOutcome::Completed {
+                            end_reason: reason,
+                        },
+                        at: Utc::now(),
+                    })
+                    .collect();
+                for event in events {
+                    Self::propose_fact(event, cx);
+                }
+            },
+            cx,
+        );
     }
 
     fn reconcile_lost_cli(exec: ExecutionRef, cx: &mut App) {
@@ -326,6 +416,58 @@ mod tests {
     use super::*;
     use crate::runs::seed::{self, SeedEnd, SeedRun};
     use gpui::TestAppContext;
+
+    #[gpui::test]
+    fn an_exit_after_a_pending_binding_is_recorded_durably(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let store = daruda_store::tasks::TaskStore::in_directory(
+            directory.path(),
+            None,
+            "test",
+            super::super::no_hook(),
+        )
+        .unwrap();
+        let id = cx.update(|cx| {
+            RunsHost::install(RunsHost::open(Ok(store.clone())), cx);
+            let run = SeedRun::cli("/cli", CliProcessState::Discovering);
+            let id = seed::task(
+                seed::spec(Default::default(), "CLI"),
+                Some((&run, SeedEnd::Running)),
+                cx,
+            );
+            let pane = RunPane {
+                workspace: WorkspaceUuid::new(),
+                pane: 1,
+            };
+            RunsHost::bind_execution(pane, run.exec(&id), cx);
+            RunsHost::record_cli_binding(
+                Some(pane),
+                &PtyBinding {
+                    claude_pid: 42,
+                    session_id: "session".into(),
+                },
+                None,
+                cx,
+            );
+            RunsHost::record_cli_exit("session", 42, cx);
+            id
+        });
+        cx.run_until_parked();
+        let durable = store.current().unwrap().1;
+        let process = durable
+            .get(&id)
+            .unwrap()
+            .execution
+            .as_ref()
+            .unwrap()
+            .source
+            .cli_process();
+        assert!(
+            matches!(process, Some(CliProcessState::ExitConfirmed { .. })),
+            "{process:?}"
+        );
+        cx.update(|cx| assert_eq!(cx.global::<GlobalTasks>().get(&id), durable.get(&id)));
+    }
 
     #[gpui::test]
     fn the_tracker_keeps_both_windows_panes_distinct(cx: &mut TestAppContext) {

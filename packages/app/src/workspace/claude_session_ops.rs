@@ -28,6 +28,7 @@ pub(in crate::workspace) struct ClaudeSessionState {
     /// tracker. Used by sub-row badges to highlight the focused tab's
     /// session and by `apply_pty_tracker_event` to detect dead sessions.
     pub(in crate::workspace) pty_bindings: HashMap<PaneId, PtyBinding>,
+    pub(in crate::workspace) task_hook_tail: smol::channel::Receiver<()>,
 
     /// JSONL fallback watcher's shutdown half — engaged only when
     /// the user has not installed the hook integration. The watcher
@@ -147,9 +148,6 @@ impl Workspace {
                         self.apply_todo_write(&file.session_id, input, cx);
                     }
                     if let Some(reason) = Self::classify_hook_end_reason(&file.last_event) {
-                        self.claude_sessions
-                            .tool_use_failure_counts
-                            .remove(&file.session_id);
                         self.apply_task_session_ended(&file.session_id, reason, cx);
                     }
                     // Blocking hook notifications surface as a one-shot
@@ -201,9 +199,6 @@ impl Workspace {
             },
             StatusEvent::Removed { session_id, .. } => {
                 crate::runs::RunsHost::cli_tracker(cx).poke();
-                self.claude_sessions
-                    .tool_use_failure_counts
-                    .remove(&session_id);
                 self.claude_sessions
                     .last_pushed_notification
                     .remove(&session_id);

@@ -37,6 +37,189 @@ fn cli_task(cx: &mut gpui::App) -> String {
     crate::runs::seed::task(spec, None, cx)
 }
 
+fn pending_cli_binding(ws: &mut Workspace, cx: &mut Context<Workspace>) -> String {
+    let run = SeedRun::cli("/cli", CliProcessState::Discovering);
+    let id = crate::runs::seed::task(
+        crate::runs::seed::spec(Default::default(), "CLI"),
+        Some((&run, SeedEnd::Running)),
+        cx,
+    );
+    let pane = ws.run_pane(4242);
+    RunsHost::bind_execution(pane, run.exec(&id), cx);
+    RunsHost::record_cli_binding(
+        Some(pane),
+        &PtyBinding {
+            claude_pid: 42,
+            session_id: "pending-session".into(),
+        },
+        None,
+        cx,
+    );
+    id
+}
+
+#[gpui::test]
+fn a_todo_write_waits_for_its_pending_binding(cx: &mut TestAppContext) {
+    let (_, workspace) = crate::workspace::tests::build_workspace(cx);
+    let id = workspace.update(cx, |ws, cx| {
+        let id = pending_cli_binding(ws, cx);
+        ws.apply_todo_write(
+            "pending-session",
+            &serde_json::json!({"todos": [{"content": "kept todo", "status": "pending"}]}),
+            cx,
+        );
+        ws.apply_todo_write(
+            "pending-session",
+            &serde_json::json!({"todos": [{"content": "kept todo", "status": "completed"}]}),
+            cx,
+        );
+        id
+    });
+    cx.run_until_parked();
+    cx.update(|cx| {
+        let task = cx.global::<GlobalTasks>().get(&id).unwrap();
+        assert_eq!(task.subtasks.len(), 1);
+        assert_eq!(task.subtasks[0].title, "kept todo");
+        assert!(task.subtasks[0].completed);
+    });
+}
+
+#[gpui::test]
+fn tool_failures_wait_for_their_pending_binding(cx: &mut TestAppContext) {
+    let (_, workspace) = crate::workspace::tests::build_workspace(cx);
+    let id = workspace.update(cx, |ws, cx| {
+        let id = pending_cli_binding(ws, cx);
+        for _ in 0..daruda_store::tasks::TASK_TOOL_USE_FAILURE_THRESHOLD {
+            ws.bump_tool_use_failure("pending-session", cx);
+        }
+        id
+    });
+    cx.run_until_parked();
+    cx.update(|cx| {
+        assert!(matches!(
+            cx.global::<GlobalTasks>().get(&id).unwrap().lifecycle,
+            daruda_store::tasks::Lifecycle::Error {
+                cause: daruda_store::tasks::machine::ErrorCause::ToolFailures,
+                ..
+            }
+        ))
+    });
+}
+
+fn pending_tool_failure_precedes_end(remove_status: bool, cx: &mut TestAppContext) {
+    use crate::hooks::watcher::StatusEvent;
+    use daruda_agent::hooks::status_file::{StatusFile, write_atomic};
+
+    let (_, workspace) = crate::workspace::tests::build_workspace(cx);
+    let id = workspace.update(cx, pending_cli_binding);
+    cx.run_until_parked();
+    let directory = tempfile::tempdir().unwrap();
+    let failure_path = directory.path().join("failure.json");
+    write_atomic(
+        &failure_path,
+        &StatusFile::new_hook(
+            "pending-session",
+            directory.path(),
+            daruda_agent::SessionStatus::Working,
+            "PostToolUseFailure",
+        ),
+    )
+    .unwrap();
+    let end_path = directory.path().join("end.json");
+    write_atomic(
+        &end_path,
+        &StatusFile::new_hook(
+            "pending-session",
+            directory.path(),
+            daruda_agent::SessionStatus::Idle,
+            "SessionEnd",
+        ),
+    )
+    .unwrap();
+    workspace.update(cx, |ws, cx| {
+        for _ in 0..daruda_store::tasks::TASK_TOOL_USE_FAILURE_THRESHOLD - 1 {
+            ws.apply_claude_status_event(StatusEvent::Changed(failure_path.clone()), cx);
+        }
+        assert_eq!(
+            ws.claude_sessions
+                .tool_use_failure_counts
+                .get("pending-session"),
+            Some(&(daruda_store::tasks::TASK_TOOL_USE_FAILURE_THRESHOLD - 1))
+        );
+        ws.record_task_cli_transcript("pending-session", Some(Path::new("/transcript.jsonl")), cx);
+        assert!(!RunsHost::settled(cx));
+        ws.apply_claude_status_event(StatusEvent::Changed(failure_path), cx);
+        let end = if remove_status {
+            StatusEvent::Removed {
+                session_id: "pending-session".into(),
+            }
+        } else {
+            StatusEvent::Changed(end_path)
+        };
+        ws.apply_claude_status_event(end, cx);
+    });
+    cx.run_until_parked();
+    cx.update(|cx| {
+        assert!(matches!(
+            cx.global::<GlobalTasks>().get(&id).unwrap().lifecycle,
+            daruda_store::tasks::Lifecycle::Error {
+                cause: daruda_store::tasks::machine::ErrorCause::ToolFailures,
+                ..
+            }
+        ));
+    });
+    workspace.read_with(cx, |ws, _| {
+        assert!(
+            !ws.claude_sessions
+                .tool_use_failure_counts
+                .contains_key("pending-session")
+        );
+    });
+}
+
+#[gpui::test]
+fn a_session_end_preserves_earlier_pending_tool_failures(cx: &mut TestAppContext) {
+    pending_tool_failure_precedes_end(false, cx);
+}
+
+#[gpui::test]
+fn status_removal_preserves_earlier_pending_tool_failures(cx: &mut TestAppContext) {
+    pending_tool_failure_precedes_end(true, cx);
+}
+
+#[gpui::test]
+fn a_session_end_waits_for_its_pending_binding(cx: &mut TestAppContext) {
+    let (_, workspace) = crate::workspace::tests::build_workspace(cx);
+    let id = workspace.update(cx, |ws, cx| {
+        let run = SeedRun::cli("/cli", CliProcessState::Discovering);
+        let id = crate::runs::seed::task(
+            crate::runs::seed::spec(Default::default(), "CLI"),
+            Some((&run, SeedEnd::Running)),
+            cx,
+        );
+        let pane = ws.run_pane(4242);
+        RunsHost::bind_execution(pane, run.exec(&id), cx);
+        RunsHost::record_cli_binding(
+            Some(pane),
+            &PtyBinding {
+                claude_pid: 42,
+                session_id: "pending-session".into(),
+            },
+            None,
+            cx,
+        );
+        ws.record_task_cli_transcript("pending-session", Some(Path::new("/transcript.jsonl")), cx);
+        ws.apply_task_session_ended("pending-session", SessionEndReason::Stop, cx);
+        id
+    });
+    cx.run_until_parked();
+    cx.update(|cx| {
+        let task = cx.global::<GlobalTasks>().get(&id).unwrap();
+        assert!(matches!(task.lifecycle, daruda_store::tasks::Lifecycle::Done { .. }), "{:?}", task.lifecycle);
+        assert!(matches!(&task.execution.as_ref().unwrap().source, TaskExecutionSource::ClaudeCli { transcript_path: Some(transcript), .. } if transcript == Path::new("/transcript.jsonl")));
+    });
+}
+
 /// Start task `id` in terminal `pane` the way a start does: request the
 /// run, bind the pane, record its identity, watch for its process, dispatch.
 fn start(

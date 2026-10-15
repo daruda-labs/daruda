@@ -6,7 +6,7 @@ use gpui::{Context, IntoElement, MouseButton, SharedString, div, prelude::*, px}
 
 use crate::surface::strings;
 use crate::ui::checkbox;
-use crate::ui::{self, theme};
+use crate::ui::{self, Disableable as _, theme};
 use crate::workspace::Workspace;
 
 use super::TaskEditorId;
@@ -43,6 +43,7 @@ pub(super) fn subtasks_section(
                     ui::icons::ADD,
                     cx,
                 )
+                .disabled(!te.checklist_editable())
                 .tooltip(strings::task::subtask_add_placeholder())
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.submit_new_subtask(editor_id, window, cx)
@@ -68,6 +69,7 @@ fn subtask_row(
         (),
     )
     .checked(sub.completed)
+    .disabled(!te.checklist_editable())
     .on_click(cx.listener(move |this, _checked: &bool, _w, cx| {
         this.toggle_editor_subtask(editor_id, &sub_id_for_toggle, cx);
     }));
@@ -95,18 +97,20 @@ fn subtask_row(
                 strong_color
             })
             .child(SharedString::from(title_text))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, ev, window, cx| {
-                    this.handle_task_subtask_mouse_down(
-                        editor_id,
-                        &sub_id_for_rename,
-                        ev,
-                        window,
-                        cx,
-                    )
-                }),
-            )
+            .when(te.checklist_editable(), |title| {
+                title.on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, ev, window, cx| {
+                        this.handle_task_subtask_mouse_down(
+                            editor_id,
+                            &sub_id_for_rename,
+                            ev,
+                            window,
+                            cx,
+                        )
+                    }),
+                )
+            })
             .into_any_element()
     };
 
@@ -121,6 +125,7 @@ fn subtask_row(
         SharedString::from(format!("subtask-remove-{}", sub.id)),
         cx,
     )
+    .disabled(!te.checklist_editable())
     .on_click(cx.listener(move |this, _ev: &gpui::ClickEvent, _w, cx| {
         this.delete_editor_subtask(editor_id, &sub_id_for_remove, cx);
     }));

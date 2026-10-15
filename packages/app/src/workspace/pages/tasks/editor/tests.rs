@@ -73,6 +73,132 @@ async fn an_async_save_keeps_later_edits_unsaved(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+async fn an_async_save_freezes_every_checklist_edit_until_it_finishes(cx: &mut TestAppContext) {
+    let fixture = crate::test_support::workspace_for_control(cx);
+    let (editor, id, saved, original) = cx
+        .update_window(fixture.window.into(), |_, window, cx| {
+            fixture.workspace.update(cx, |workspace, cx| {
+                workspace.open_task_editor(None, window, cx);
+                let editor = workspace.task_detail_id().unwrap();
+                let title = workspace.task_editor(editor).unwrap().title_input.clone();
+                title.update(cx, |input, cx| input.set_value("Checklist", window, cx));
+                let original = daruda_store::tasks::SubTask::new("original".into());
+                workspace
+                    .task_editor_mut(editor)
+                    .unwrap()
+                    .draft_subtasks
+                    .push(original.clone());
+                let (id, saved) = workspace.commit_task_editor(editor, window, cx).unwrap();
+                let content = workspace.task_editor(editor).unwrap();
+                assert!(content.new_subtask_input.read(cx).is_disabled());
+                assert!(content.editing_subtask_input.read(cx).is_disabled());
+                let input = content.new_subtask_input.clone();
+                input.update(cx, |input, cx| input.set_value("later", window, cx));
+                workspace.submit_new_subtask(editor, window, cx);
+                workspace.toggle_editor_subtask(editor, &original.id, cx);
+                workspace.enter_rename_subtask(editor, original.id.clone(), window, cx);
+                let rename = workspace
+                    .task_editor(editor)
+                    .unwrap()
+                    .editing_subtask_input
+                    .clone();
+                rename.update(cx, |input, cx| input.set_value("later rename", window, cx));
+                workspace.task_editor_mut(editor).unwrap().editing_subtask =
+                    Some(original.id.clone());
+                workspace.commit_rename_subtask(editor, cx);
+                workspace.delete_editor_subtask(editor, &original.id, cx);
+                let content = workspace.task_editor(editor).unwrap();
+                assert_eq!(content.draft_subtasks, vec![original.clone()]);
+                assert_eq!(content.new_subtask_input.read(cx).value().as_ref(), "later");
+                assert_eq!(
+                    content.editing_subtask_input.read(cx).value().as_ref(),
+                    "later rename"
+                );
+                (editor, id, saved, original)
+            })
+        })
+        .unwrap();
+    assert!(saved.await);
+    cx.update_window(fixture.window.into(), |_, window, cx| {
+        fixture.workspace.update(cx, |workspace, cx| {
+            let content = workspace.task_editor(editor).unwrap();
+            assert!(!content.new_subtask_input.read(cx).is_disabled());
+            assert!(!content.editing_subtask_input.read(cx).is_disabled());
+            assert_eq!(
+                cx.global::<GlobalTasks>().get(&id).unwrap().subtasks,
+                vec![original]
+            );
+            workspace.submit_new_subtask(editor, window, cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update(|cx| {
+        assert_eq!(
+            cx.global::<GlobalTasks>().get(&id).unwrap().subtasks.len(),
+            2
+        )
+    });
+}
+
+#[gpui::test]
+async fn a_failed_async_save_unlocks_the_checklist(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().unwrap();
+    let store = daruda_store::tasks::TaskStore::in_directory(
+        directory.path(),
+        None,
+        "test",
+        Box::new(|_, _| panic!("injected commit hook failure")),
+    )
+    .unwrap();
+    cx.update(|cx| crate::runs::RunsHost::install(crate::runs::RunsHost::open(Ok(store)), cx));
+    let fixture = crate::test_support::workspace_for_control(cx);
+    let (editor, saved) = cx
+        .update_window(fixture.window.into(), |_, window, cx| {
+            fixture.workspace.update(cx, |workspace, cx| {
+                workspace.open_task_editor(None, window, cx);
+                let editor = workspace.task_detail_id().unwrap();
+                workspace
+                    .task_editor(editor)
+                    .unwrap()
+                    .title_input
+                    .clone()
+                    .update(cx, |input, cx| input.set_value("Failed save", window, cx));
+                let (_, saved) = workspace.commit_task_editor(editor, window, cx).unwrap();
+                assert!(
+                    workspace
+                        .task_editor(editor)
+                        .unwrap()
+                        .new_subtask_input
+                        .read(cx)
+                        .is_disabled()
+                );
+                (editor, saved)
+            })
+        })
+        .unwrap();
+    assert!(!saved.await);
+    cx.update_window(fixture.window.into(), |_, window, cx| {
+        fixture.workspace.update(cx, |workspace, cx| {
+            let content = workspace.task_editor(editor).unwrap();
+            assert!(content.can_save(cx));
+            assert!(!content.new_subtask_input.read(cx).is_disabled());
+            assert!(!content.editing_subtask_input.read(cx).is_disabled());
+            content
+                .new_subtask_input
+                .clone()
+                .update(cx, |input, cx| input.set_value("kept draft", window, cx));
+            workspace.submit_new_subtask(editor, window, cx);
+            assert_eq!(
+                workspace.task_editor(editor).unwrap().draft_subtasks[0].title,
+                "kept draft"
+            );
+        });
+    })
+    .unwrap();
+}
+
+#[gpui::test]
 fn a_refused_save_keeps_the_draft_open_and_dirty(cx: &mut TestAppContext) {
     let (_project, window, workspace) = build_workspace_with_project(cx);
     let directory = tempfile::tempdir().unwrap();

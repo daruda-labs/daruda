@@ -20,6 +20,133 @@ fn task(project: ProjectUuid) -> TaskSpec {
     task
 }
 
+async fn dispatch_while_switching_lanes(
+    surface: TaskAgentSurface,
+    release: bool,
+    cx: &mut TestAppContext,
+) {
+    use crate::runs::{GlobalTasks, RunsHost};
+    use daruda_store::tasks::{ExecutionRef, Lifecycle, TaskEvent, TaskExecutionSource};
+    let root = tempfile::tempdir().unwrap();
+    let other = tempfile::tempdir().unwrap();
+    let project = daruda_store::project::Project::from_path(root.path());
+    let (window, workspace) =
+        build_workspace_with(cx, &daruda_config::Config::default(), Some(project));
+    let (id, pane, active, focused, dispatched, mut probe) = cx
+        .update_window(window.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let mut spec = task(ws.projects[0].uuid);
+                spec.agent_surface = surface;
+                let id = add(spec, cx);
+                let exec = ExecutionRef {
+                    task_id: id.clone(),
+                    execution_id: "delivery".into(),
+                };
+                crate::runs::seed::commit_now(
+                    vec![TaskEvent::DispatchRequested {
+                        id: id.clone(),
+                        execution_id: exec.execution_id.clone(),
+                        source: if surface == TaskAgentSurface::Terminal {
+                            TaskExecutionSource::ClaudeCli {
+                                transcript_path: None,
+                                process: Default::default(),
+                            }
+                        } else {
+                            TaskExecutionSource::AgentChat
+                        },
+                        at: chrono::Utc::now(),
+                    }],
+                    cx,
+                );
+                let (pane, probe) = if surface == TaskAgentSurface::Terminal {
+                    (ws.active_runtime().panes[0].id, None)
+                } else {
+                    let pane = ws.create_agent_chat_pane(
+                        Some(daruda_store::project::PaneCwd::Local(root.path().into())),
+                        None,
+                        ws.mirrors.agents[0].id.clone(),
+                        None,
+                        window,
+                        cx,
+                    );
+                    let pane_id = pane.id;
+                    let (handle, probe) = daruda_acp::AcpSessionHandle::detached_for_test();
+                    pane.agent_chat_view().unwrap().update(cx, |view, _| {
+                        view.attach_handle(handle);
+                        view.set_status_for_test(daruda_chat::view::AgentSessionStatus::Connected);
+                        view.set_session_id_for_test(Some("parked-session".into()));
+                    });
+                    ws.active_runtime_mut().panes.push(pane);
+                    (pane_id, Some(probe))
+                };
+                let dispatched = ws
+                    .dispatch_claude_for_task(&exec, root.path(), "main", pane, window, cx)
+                    .unwrap();
+                if release {
+                    RunsHost::release_execution(
+                        ws.run_pane(pane),
+                        daruda_store::tasks::machine::UndeliveredReason::SessionTornDown,
+                        cx,
+                    );
+                }
+            if !release {
+                ws.add_project(other.path().into(), window, cx);
+                assert!(!ws.deliver_text_to_pane(pane, crate::workspace::main_area::pane_input_ops::PaneTextInput {
+                    body: "manual input".into(),
+                    intent: crate::workspace::main_area::pane_input_ops::PaneTextIntent::Command { submit: true },
+                    task: None,
+                }, window, cx));
+            }
+                (
+                    id,
+                    pane,
+                    ws.active,
+                    ws.active_runtime().focused_pane_id,
+                    dispatched,
+                    probe,
+                )
+            })
+        })
+        .unwrap();
+    let result = dispatched.await;
+    cx.run_until_parked();
+    workspace.read_with(cx, |ws, cx| {
+        assert_eq!(ws.active, active);
+        assert_eq!(ws.active_runtime().focused_pane_id, focused);
+        assert!(ws.main_area.pane(pane).is_some());
+        let lifecycle = &cx.global::<GlobalTasks>().get(&id).unwrap().lifecycle;
+        if release {
+            assert!(result.is_err());
+            assert!(!matches!(lifecycle, Lifecycle::Running { .. }));
+            assert_eq!(probe.as_mut().unwrap().drain().0, 0);
+        } else {
+            assert!(result.is_ok(), "{result:?}");
+            assert!(
+                matches!(lifecycle, Lifecycle::Running { .. }),
+                "{lifecycle:?}"
+            );
+            if let Some(probe) = &mut probe {
+                assert_eq!(probe.drain().0, 1);
+            }
+        }
+    });
+}
+
+#[gpui::test]
+async fn a_terminal_task_reaches_its_pane_after_switching_lanes(cx: &mut TestAppContext) {
+    dispatch_while_switching_lanes(TaskAgentSurface::Terminal, false, cx).await;
+}
+
+#[gpui::test]
+async fn a_chat_task_reaches_its_pane_after_switching_lanes(cx: &mut TestAppContext) {
+    dispatch_while_switching_lanes(TaskAgentSurface::AgentChat, false, cx).await;
+}
+
+#[gpui::test]
+async fn a_task_unbound_during_preparation_never_reaches_the_chat(cx: &mut TestAppContext) {
+    dispatch_while_switching_lanes(TaskAgentSurface::AgentChat, true, cx).await;
+}
+
 /// A started task is refused before `begin_task_start` returns; every other
 /// refusal follows once earlier task commits have landed. None of them made
 /// a lane or recorded a start.

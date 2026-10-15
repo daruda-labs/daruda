@@ -181,6 +181,7 @@ impl ScreenshotScenario {
             "task-saved" => Some(Self::TaskSaved),
             "task-editor" => Some(Self::TaskEditor(TaskEditorShot::Form)),
             "task-editor-preview" => Some(Self::TaskEditor(TaskEditorShot::Preview)),
+            "task-editor-saving" => Some(Self::TaskEditor(TaskEditorShot::Saving)),
             "task-editor-running" => Some(Self::TaskEditor(TaskEditorShot::Running)),
             "task-editor-disk-copy" => Some(Self::TaskEditor(TaskEditorShot::DiskCopy)),
             NAME_ORCHESTRATOR_CHIP => Some(Self::OrchestratorChip),

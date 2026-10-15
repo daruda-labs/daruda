@@ -105,7 +105,18 @@ impl Workspace {
             );
             return false;
         }
-        let Some(pane) = self.active_runtime().panes.iter().find(|p| p.id == pane_id) else {
+        let pane = if let Some(exec) = &input.task {
+            if crate::runs::RunsHost::pane_execution(self.run_pane(pane_id), cx) != Some(exec) {
+                return false;
+            }
+            self.main_area.pane(pane_id)
+        } else {
+            self.active_runtime()
+                .panes
+                .iter()
+                .find(|pane| pane.id == pane_id)
+        };
+        let Some(pane) = pane else {
             return false;
         };
         if let Some(view) = pane.terminal_view().cloned() {

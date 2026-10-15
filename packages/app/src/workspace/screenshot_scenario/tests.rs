@@ -1,6 +1,14 @@
 use super::*;
 
 #[test]
+fn a_saving_task_editor_has_a_cli_name() {
+    assert_eq!(
+        ScreenshotScenario::from_cli_name("task-editor-saving"),
+        Some(ScreenshotScenario::TaskEditor(TaskEditorShot::Saving))
+    );
+}
+
+#[test]
 fn compaction_scenario_has_a_cli_name() {
     assert_eq!(
         ScreenshotScenario::from_cli_name("agent-chat-compaction"),

@@ -46,6 +46,49 @@ struct TodoWritePayload {
 }
 
 impl Workspace {
+    fn after_task_projection(
+        &mut self,
+        operation: impl FnOnce(&mut Self, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        if self.claude_sessions.task_hook_tail.is_closed() && RunsHost::settled(cx) {
+            operation(self, cx);
+            return;
+        }
+        let (done, next) = smol::channel::bounded(1);
+        let previous = std::mem::replace(&mut self.claude_sessions.task_hook_tail, next);
+        cx.spawn(async move |workspace, cx| {
+            // SILENT-OK: closure means the previous hook finished.
+            let _ = previous.recv().await;
+            let mut operation = Some(operation);
+            loop {
+                let pending = cx.update(|cx| {
+                    if RunsHost::settled(cx) {
+                        if let Some(operation) = operation.take()
+                            && let Err(error) = workspace.update(cx, operation)
+                        {
+                            LogWriter::log(
+                                ErrorReport::new("Task hook could not reach its workspace")
+                                    .severity(ErrorSeverity::Warning)
+                                    .message(error.to_string())
+                                    .at(file!(), line!())
+                                    .dedup("tasks.hook.workspace")
+                                    .build(),
+                            );
+                        }
+                        None
+                    } else {
+                        Some(RunsHost::barrier(cx))
+                    }
+                });
+                let Some(pending) = pending else { break };
+                pending.await;
+            }
+            drop(done);
+        })
+        .detach();
+    }
+
     // ------------------------------------------------------------------
     // Lifecycle (start / cancel / focus / reopen / retry)
     // ------------------------------------------------------------------
@@ -89,11 +132,7 @@ impl Workspace {
         pane_id: crate::workspace::main_area::pane_tree::PaneId,
         bytes: Vec<u8>,
     ) -> Option<std::sync::mpsc::Receiver<Result<(), daruda_terminal::pty::PtyError>>> {
-        self.active_runtime()
-            .panes
-            .iter()
-            .find(|pane| pane.id == pane_id)?
-            .write_confirmed_input(bytes)
+        self.main_area.pane(pane_id)?.write_confirmed_input(bytes)
     }
 
     /// User-initiated stop. Lane is preserved (D-1). The log records the
@@ -220,31 +259,11 @@ impl Workspace {
         session_id: &str,
         cx: &mut Context<Self>,
     ) {
-        let attach: Vec<ExecutionRef> = cx
-            .global::<GlobalTasks>()
-            .records()
-            .filter(|task| {
-                matches!(task.lifecycle, Lifecycle::Running { .. })
-                    && task
-                        .execution
-                        .as_ref()
-                        .is_some_and(|run| run.source.cli_process().is_some())
-                    && task.execution.as_ref().is_some_and(|run| {
-                        run.source.cli_process().is_some()
-                            && run.session_id.as_deref() == Some(session_id)
-                    })
-                    && !task.session_ids.iter().any(|s| s == session_id)
-            })
-            .filter_map(|task| task.current_exec().cloned())
-            .collect();
-        for exec in attach {
-            let event = TaskEvent::SessionAttached {
-                exec,
-                session_id: session_id.to_owned(),
-                at: Utc::now(),
-            };
-            RunsHost::propose_fact(event, cx);
-        }
+        let session_id = session_id.to_owned();
+        self.after_task_projection(
+            move |_, cx| RunsHost::attach_cli_session(&session_id, cx),
+            cx,
+        );
     }
 
     /// Settle every running CLI task that owns `session_id` as `Done` /
@@ -256,33 +275,17 @@ impl Workspace {
         reason: daruda_store::tasks::SessionEndReason,
         cx: &mut Context<Self>,
     ) {
-        // Cleanup any pending failure counter for this session
-        // unconditionally — once Claude reports the session ended,
-        // the counter is meaningless even if the task is already
-        // in a terminal state (e.g. user cancelled before
-        // SessionEnd arrived).
-        self.claude_sessions
-            .tool_use_failure_counts
-            .remove(session_id);
-        let settle: Vec<ExecutionRef> = cx
-            .global::<GlobalTasks>()
-            .records()
-            .filter(|task| {
-                task.execution
-                    .as_ref()
-                    .is_some_and(|run| run.source.cli_process().is_some())
-                    && task.session_ids.iter().any(|s| s == session_id)
-            })
-            .filter_map(running_exec)
-            .collect();
-        for exec in settle {
-            let event = TaskEvent::Settled {
-                exec,
-                outcome: SettleOutcome::Completed { end_reason: reason },
-                at: Utc::now(),
-            };
-            RunsHost::propose_fact(event, cx);
-        }
+        let session_id = session_id.to_owned();
+        self.after_task_projection(
+            move |workspace, cx| {
+                workspace
+                    .claude_sessions
+                    .tool_use_failure_counts
+                    .remove(&session_id);
+                RunsHost::settle_cli_session(&session_id, reason, cx);
+            },
+            cx,
+        );
     }
 
     /// Settle the task whose run `pane_id` owns, from that pane's activity
@@ -366,6 +369,14 @@ impl Workspace {
         session_id: &str,
         cx: &mut Context<Self>,
     ) {
+        let session_id = session_id.to_owned();
+        self.after_task_projection(
+            move |workspace, cx| workspace.bump_projected_tool_use_failure(&session_id, cx),
+            cx,
+        );
+    }
+
+    fn bump_projected_tool_use_failure(&mut self, session_id: &str, cx: &mut Context<Self>) {
         if !Self::session_owned_by_running_task(session_id, cx) {
             return;
         }
@@ -510,21 +521,27 @@ impl Workspace {
                 id: new_task_id(),
             })
             .collect();
-        let owners: Vec<String> = cx
-            .global::<GlobalTasks>()
-            .records()
-            .filter(|task| task.session_ids.iter().any(|s| s == session_id))
-            .map(|task| task.id().to_owned())
-            .collect();
-        for id in owners {
-            let event = TaskEvent::TodoMerged {
-                id,
-                session_id: session_id.to_owned(),
-                items: items.clone(),
-                at: Utc::now(),
-            };
-            RunsHost::propose_fact(event, cx);
-        }
+        let session_id = session_id.to_owned();
+        self.after_task_projection(
+            move |_, cx| {
+                let owners: Vec<String> = cx
+                    .global::<GlobalTasks>()
+                    .records()
+                    .filter(|task| task.session_ids.contains(&session_id))
+                    .map(|task| task.id().to_owned())
+                    .collect();
+                for id in owners {
+                    let event = TaskEvent::TodoMerged {
+                        id,
+                        session_id: session_id.to_owned(),
+                        items: items.clone(),
+                        at: Utc::now(),
+                    };
+                    RunsHost::propose_fact(event, cx);
+                }
+            },
+            cx,
+        );
     }
 }
 

@@ -172,6 +172,7 @@ impl Workspace {
                     .map(|p| daruda_agent::hooks::installer::is_installed(&p))
                     .unwrap_or(false),
                 pty_bindings: HashMap::new(),
+                task_hook_tail: smol::channel::bounded(1).1,
                 _jsonl_watcher: None,
                 _jsonl_event_pump: None,
                 tool_use_failure_counts: HashMap::new(),

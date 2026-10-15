@@ -138,9 +138,7 @@ impl Workspace {
             }
         };
 
-        if let Some(te) = self.task_editor_mut(editor_id) {
-            te.pending_save = Some(task_id.clone());
-        }
+        self.set_task_editor_pending_save(editor_id, Some(task_id.clone()), cx);
         let mut committed = Box::pin(futures::future::join_all(commits));
         if let Some(results) = committed.as_mut().now_or_never() {
             let success = results.iter().all(Result::is_ok);
@@ -189,20 +187,41 @@ impl Workspace {
         success: bool,
         cx: &mut Context<Self>,
     ) -> bool {
-        if let Some(editor) = self.task_editor_mut(editor_id) {
-            editor.pending_save = None;
-            if success {
-                editor.task_id = Some(task_id.to_owned());
-                editor.draft_subtasks.clear();
-                values.draft_subtasks.clear();
-                editor.saved_snapshot = values;
-            }
+        self.set_task_editor_pending_save(editor_id, None, cx);
+        if let Some(editor) = self.task_editor_mut(editor_id)
+            && success
+        {
+            editor.task_id = Some(task_id.to_owned());
+            editor.draft_subtasks.clear();
+            values.draft_subtasks.clear();
+            editor.saved_snapshot = values;
         }
         cx.notify();
         success
             && self
                 .task_editor(editor_id)
                 .is_some_and(|editor| !editor.is_dirty(cx))
+    }
+
+    pub(super) fn set_task_editor_pending_save(
+        &mut self,
+        editor_id: TaskEditorId,
+        task_id: Option<TaskId>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(editor) = self.task_editor_mut(editor_id) else {
+            return;
+        };
+        editor.pending_save = task_id;
+        let disabled = !editor.checklist_editable();
+        let inputs = [
+            editor.new_subtask_input.clone(),
+            editor.editing_subtask_input.clone(),
+        ];
+        for input in inputs {
+            input.update(cx, |input, cx| input.set_disabled(disabled, cx));
+        }
+        cx.notify();
     }
 
     /// The location a still-editable form commits to, or `None` when it is

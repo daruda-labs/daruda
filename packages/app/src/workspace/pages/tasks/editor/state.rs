@@ -208,6 +208,10 @@ impl TaskEditValues {
 }
 
 impl TaskEditContent {
+    pub(super) fn checklist_editable(&self) -> bool {
+        self.pending_save.is_none()
+    }
+
     /// What the editor is called — the task's title, or "New task".
     pub(in crate::workspace) fn title(&self) -> SharedString {
         self.cached_title.clone()

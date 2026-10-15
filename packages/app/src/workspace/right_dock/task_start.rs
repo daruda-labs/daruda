@@ -597,6 +597,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<gpui::Task<Result<u64, TaskStartError>>, TaskStartError> {
+        if RunsHost::pane_execution(self.run_pane(pane_id), cx) != Some(exec) {
+            return Err(TaskStartError::PaneUnavailable);
+        }
         if !cx.global::<GlobalTasks>().get(&exec.task_id).is_some_and(|task| {
         matches!(&task.lifecycle, Lifecycle::Dispatching { exec: current, .. } if current == exec)
     }) {

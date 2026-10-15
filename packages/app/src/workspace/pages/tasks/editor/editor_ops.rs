@@ -18,6 +18,7 @@ pub(crate) enum TaskEditorShot {
     Running,
     /// A conflict's disk version shown beside the prompt.
     DiskCopy,
+    Saving,
 }
 
 impl Workspace {
@@ -110,6 +111,9 @@ impl Workspace {
             let on_disk = format!("{}\n- Edited outside daruda", spec.prompt);
             self.show_prompt_disk_copy(editor_id, &on_disk, window, cx);
         }
+        if shot == TaskEditorShot::Saving {
+            self.set_task_editor_pending_save(editor_id, Some("saving-preview".into()), cx);
+        }
         cx.notify();
     }
 
@@ -123,6 +127,9 @@ impl Workspace {
         let Some(te) = self.task_editor(editor_id) else {
             return;
         };
+        if !te.checklist_editable() {
+            return;
+        }
         let task_id = te.task_id.clone();
         let text = te.new_subtask_input.read(cx).value().to_string();
         let input = te.new_subtask_input.clone();
@@ -155,6 +162,9 @@ impl Workspace {
         let Some(te) = self.task_editor(editor_id) else {
             return;
         };
+        if !te.checklist_editable() {
+            return;
+        }
         let input_entity = te.editing_subtask_input.clone();
         let subtasks = te
             .task_id
@@ -201,6 +211,9 @@ impl Workspace {
         let Some(te) = self.task_editor(editor_id) else {
             return;
         };
+        if !te.checklist_editable() {
+            return;
+        }
         let task_id = te.task_id.clone();
         let Some(subtask_id) = te.editing_subtask.clone() else {
             return;
@@ -229,6 +242,12 @@ impl Workspace {
         editor_id: TaskEditorId,
         cx: &mut Context<Self>,
     ) {
+        if self
+            .task_editor(editor_id)
+            .is_none_or(|editor| !editor.checklist_editable())
+        {
+            return;
+        }
         if let Some(te) = self.task_editor_mut(editor_id) {
             te.editing_subtask = None;
         }
@@ -384,6 +403,12 @@ impl Workspace {
         subtask_id: &str,
         cx: &mut Context<Self>,
     ) {
+        if self
+            .task_editor(editor_id)
+            .is_none_or(|editor| !editor.checklist_editable())
+        {
+            return;
+        }
         let task_id = self
             .task_editor(editor_id)
             .and_then(|te| te.task_id.clone());
@@ -403,6 +428,12 @@ impl Workspace {
         subtask_id: &str,
         cx: &mut Context<Self>,
     ) {
+        if self
+            .task_editor(editor_id)
+            .is_none_or(|editor| !editor.checklist_editable())
+        {
+            return;
+        }
         let task_id = self
             .task_editor(editor_id)
             .and_then(|te| te.task_id.clone());
