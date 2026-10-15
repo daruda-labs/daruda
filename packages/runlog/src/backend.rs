@@ -3,7 +3,7 @@
 
 use std::collections::BTreeSet;
 use std::fs::{File, OpenOptions};
-use std::io::{self, Write as _};
+use std::io::{self, Seek as _, SeekFrom, Write as _};
 use std::path::{Path, PathBuf};
 
 /// One generation as stored: generation 0 never has a snapshot, and a
@@ -124,7 +124,14 @@ impl LogBackend for FileBackend {
     fn select(&mut self, generation: u64) -> io::Result<()> {
         let path = self.log_path(generation);
         let existed = path.exists();
-        let file = OpenOptions::new().append(true).create(true).open(&path)?;
+        // Not append mode: on Windows it drops the write-data right that
+        // flushing needs. One writer per log makes seek-to-end equivalent.
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&path)?;
+        file.seek(SeekFrom::End(0))?;
         if !existed {
             daruda_core::path::sync_dir(&self.dir)?;
         }
@@ -141,14 +148,12 @@ impl LogBackend for FileBackend {
     }
 
     fn truncate_tail(&mut self, len: u64) -> io::Result<()> {
-        let generation = self.selected()?.0;
-        // An append-mode handle may lack the right to change the length on
-        // Windows, so the cut goes through a plain write handle.
-        let file = OpenOptions::new()
-            .write(true)
-            .open(self.log_path(generation))?;
+        let file = &mut self.selected()?.1;
         file.set_len(len)?;
-        file.sync_all()
+        // `set_len` leaves the cursor where it was; move it to the new end so
+        // the next append does not leave a hole.
+        file.seek(SeekFrom::End(0))?;
+        file.sync_data()
     }
 
     fn replace_snapshot(&mut self, generation: u64, bytes: &[u8]) -> io::Result<()> {
@@ -186,7 +191,7 @@ mod tests {
     }
 
     #[test]
-    fn append_sync_and_truncate_through_a_separate_handle() {
+    fn append_sync_and_truncate_through_one_write_handle() {
         let temp = tempfile::tempdir().unwrap();
         let mut backend = FileBackend::new(temp.path());
         backend.select(0).unwrap();
@@ -196,7 +201,7 @@ mod tests {
         assert_eq!(backend.read(0).unwrap().log, b"one\ntw");
 
         backend.truncate_tail(4).unwrap();
-        // The append handle keeps writing at the new end, not past a hole.
+        // The same handle keeps writing right after `len`, not past a hole.
         backend.append(b"two\n").unwrap();
         backend.sync().unwrap();
         assert_eq!(backend.read(0).unwrap().log, b"one\ntwo\n");
