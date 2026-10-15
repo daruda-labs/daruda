@@ -33,12 +33,19 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-  build-dmg:
-    name: Build macOS dmg
+  build-macos:
+    name: Build macOS ${{ matrix.arch }} app
     needs: metadata
-    runs-on: macos-latest  # Apple Silicon runner
-    timeout-minutes: 30
-
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: aarch64
+            runner: macos-latest
+          - arch: x86_64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -48,10 +55,52 @@ jobs:
       - name: Set up the build toolchain
         uses: ./.github/actions/setup-build
         with:
-          cache-key: release
+          cache-key: release-${{ matrix.arch }}
 
       - name: Build .app bundle
         run: ./scripts/build-app.sh
+
+      - name: Verify native app startup
+        run: |
+          data=$(mktemp -d)
+          DARUDA_DATA_DIR="$data" target/release/daruda.app/Contents/MacOS/daruda --smoke
+
+      - name: Archive native app
+        run: tar -czf macos-${{ matrix.arch }}.tar.gz -C target/release daruda.app
+
+      - name: Upload native app
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-macos-${{ matrix.arch }}
+          path: macos-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+
+  build-dmg:
+    name: Package universal macOS dmg
+    needs: [metadata, build-macos]
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download native apps
+        uses: actions/download-artifact@v8
+        with:
+          pattern: build-macos-*
+          merge-multiple: true
+
+      - name: Assemble and sign universal app
+        run: |
+          mkdir -p arm intel
+          tar -xzf macos-aarch64.tar.gz -C arm
+          tar -xzf macos-x86_64.tar.gz -C intel
+          cp -R arm/daruda.app daruda.app
+          lipo -create \
+            arm/daruda.app/Contents/MacOS/daruda \
+            intel/daruda.app/Contents/MacOS/daruda \
+            -output daruda.app/Contents/MacOS/daruda
+          lipo -verify_arch arm64 x86_64 daruda.app/Contents/MacOS/daruda
+          codesign --force --deep --sign - daruda.app
+          codesign --verify --deep --strict daruda.app
 
       - name: Install create-dmg
         run: brew install create-dmg
@@ -66,7 +115,7 @@ jobs:
             --app-drop-link 390 180 \
             --no-internet-enable \
             "daruda-${{ needs.metadata.outputs.version }}.dmg" \
-            "target/release/daruda.app"
+            "daruda.app"
 
       - name: Upload macOS package
         uses: actions/upload-artifact@v7
@@ -282,8 +331,8 @@ jobs:
           body: |
             ## macOS
 
-            Download `daruda-${{ needs.metadata.outputs.version }}.dmg`, open it,
-            and drag daruda.app to Applications.
+            Download `daruda-${{ needs.metadata.outputs.version }}.dmg` (Universal: Apple Silicon and Intel),
+            open it, and drag daruda.app to Applications.
             First launch: right-click daruda.app and select Open.
             If macOS still refuses, run `xattr -cr /Applications/daruda.app`.
 
