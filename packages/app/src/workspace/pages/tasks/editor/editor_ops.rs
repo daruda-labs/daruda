@@ -2,11 +2,8 @@
 
 use super::TaskEditorId;
 use crate::workspace::Workspace;
-#[cfg(feature = "screenshot")]
-use daruda_store::tasks::Task;
 use daruda_store::tasks::{SubTask, TaskAgentSurface};
-#[cfg(feature = "screenshot")]
-use gpui::BorrowAppContext as _;
+use futures::FutureExt as _;
 use gpui::{Context, Focusable as _, Window};
 
 /// Which state of the Task editor a capture shows.
@@ -52,36 +49,41 @@ impl Workspace {
         let Some(project) = self.active_project().map(|p| p.uuid) else {
             return;
         };
-        let mut task = Task::new(
+        let mut spec = daruda_store::tasks::TaskSpec::new(
             project,
             "Improve task creation and editing".into(),
             "## Goal\nMake task authoring feel clear and predictable.\n\n- Keep the prompt in focus\n- Preserve drafts when navigating\n- Verify save and start independently\n\n**Acceptance:** keyboard navigation and both themes work.".into(),
             None,
+            chrono::Utc::now(),
         );
-        task.subtasks = vec![
+        spec.agent_surface = TaskAgentSurface::AgentChat;
+        let mut subtasks = vec![
             SubTask::new("Compare Orca and Superset task flows".into()),
             SubTask::new("Verify narrow panes and keyboard navigation".into()),
         ];
-        task.subtasks[0].completed = true;
+        subtasks[0].completed = true;
         let Some(lane_path) = self.active_lane().map(|lane| lane.path.clone()) else {
             return;
         };
         let task_id = if running {
-            task.execution = Some(daruda_store::tasks::TaskExecution {
-                source: Default::default(),
-                id: "screenshot-task-run".into(),
-                agent_id: self.mirrors.agents[0].id.clone(),
-                account_id: None,
-                cwd: lane_path.clone(),
-                session_id: Some("screenshot-task-session".into()),
-            });
-            task.state = daruda_store::tasks::TaskState::Running {
-                worktree_path: lane_path,
-            };
-            let id = task.id.clone();
-            cx.update_global::<crate::agent::tasks_global::GlobalTasks, _>(|g, _| {
-                g.add(task.clone());
-            });
+            let id = spec.id.clone();
+            let mut events = crate::runs::seed::created(spec.clone());
+            events.extend(subtasks.iter().cloned().map(|subtask| {
+                daruda_store::tasks::TaskEvent::SubtaskAdded {
+                    id: id.clone(),
+                    subtask,
+                    at: chrono::Utc::now(),
+                }
+            }));
+            let run = crate::runs::seed::SeedRun::chat(lane_path)
+                .agent(self.mirrors.agents[0].id.clone())
+                .session("screenshot-task-session");
+            events.extend(crate::runs::seed::run(
+                &id,
+                &run,
+                crate::runs::seed::SeedEnd::Running,
+            ));
+            crate::runs::seed::commit_now(events, cx);
             Some(id)
         } else {
             None
@@ -93,19 +95,19 @@ impl Workspace {
         let te = self.task_editor(editor_id).unwrap();
         let title = te.title_input.clone();
         let prompt = te.prompt_state.clone();
-        title.update(cx, |s, cx| s.set_value(task.title, window, cx));
-        prompt.update(cx, |s, cx| s.set_value(task.prompt.clone(), window, cx));
+        title.update(cx, |s, cx| s.set_value(spec.title, window, cx));
+        prompt.update(cx, |s, cx| s.set_value(spec.prompt.clone(), window, cx));
         self.refresh_task_edit_title(editor_id, cx);
         let preview = shot == TaskEditorShot::Preview;
         if let Some(te) = self.task_editor_mut(editor_id) {
             te.preview_prompt = preview;
             te.settings_open = preview || running;
             if !running {
-                te.draft_subtasks = task.subtasks;
+                te.draft_subtasks = subtasks;
             }
         }
         if shot == TaskEditorShot::DiskCopy {
-            let on_disk = format!("{}\n- Edited outside daruda", task.prompt);
+            let on_disk = format!("{}\n- Edited outside daruda", spec.prompt);
             self.show_prompt_disk_copy(editor_id, &on_disk, window, cx);
         }
         cx.notify();
@@ -157,10 +159,7 @@ impl Workspace {
         let subtasks = te
             .task_id
             .as_deref()
-            .and_then(|id| {
-                cx.global::<crate::agent::tasks_global::GlobalTasks>()
-                    .get(id)
-            })
+            .and_then(|id| cx.global::<crate::runs::GlobalTasks>().get(id))
             .map(|task| &task.subtasks)
             .unwrap_or(&te.draft_subtasks);
         let title = subtasks
@@ -243,9 +242,43 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(id) = self.commit_task_editor(editor_id, window, cx) else {
+        let Some((id, mut saved)) = self.commit_task_editor(editor_id, window, cx) else {
             return;
         };
+        if let Some(success) = (&mut saved).now_or_never() {
+            if success {
+                self.after_task_editor_saved(editor_id, &id, start, window, cx);
+            }
+            return;
+        }
+        cx.spawn_in(window, async move |ws, cx| {
+            if !saved.await {
+                return;
+            }
+            // SILENT-OK: the window closed; there is no editor left to update.
+            let _ = ws.update_in(cx, |ws, window, cx| {
+                ws.after_task_editor_saved(editor_id, &id, start, window, cx)
+            });
+        })
+        .detach();
+    }
+
+    /// Show the saved task in the list, or start it from the editor.
+    fn after_task_editor_saved(
+        &mut self,
+        editor_id: TaskEditorId,
+        id: &str,
+        start: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .task_editor(editor_id)
+            .is_none_or(|editor| editor.is_dirty(cx))
+        {
+            return;
+        }
+        let id = id.to_owned();
         // The list is where a saved task is found again, so a plain save
         // closes its editor and shows the list.
         if !start {
@@ -254,9 +287,9 @@ impl Workspace {
             return;
         }
         let branch = cx
-            .global::<crate::agent::tasks_global::GlobalTasks>()
+            .global::<crate::runs::GlobalTasks>()
             .get(&id)
-            .map(|task| task.branch_name.clone());
+            .map(|task| task.spec.branch_name.clone());
         if let Some(branch) = branch
             && let Some(te) = self.task_editor(editor_id)
         {

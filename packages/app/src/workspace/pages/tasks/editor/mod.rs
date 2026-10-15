@@ -11,13 +11,13 @@ pub(super) mod task_edit_ops;
 #[cfg(test)]
 mod tests;
 
-use daruda_store::tasks::{TaskAgentSurface, TaskExecution, TaskState};
+use daruda_store::tasks::{Lifecycle, TaskAgentSurface, TaskExecution};
 use gpui::{Context, IntoElement, SharedString, div, prelude::*, px};
 
 use crate::workspace::Workspace;
 
 pub(in crate::workspace) use super::TaskEditorId;
-use crate::agent::tasks_global::GlobalTasks;
+use crate::runs::GlobalTasks;
 use crate::surface::strings;
 use crate::ui::{self, ButtonVariants as _, Disableable as _, theme};
 use crate::ui::{button, checkbox};
@@ -63,9 +63,9 @@ fn render(
         .task_id
         .as_deref()
         .and_then(|id| cx.global::<GlobalTasks>().get(id));
-    let state = task.map(|task| task.state.clone());
+    let state = task.map(|task| task.lifecycle.clone());
     let can_start = run_in_ops::not_started(task);
-    let has_worktree = state.as_ref().and_then(TaskState::worktree_path).is_some();
+    let has_worktree = state.as_ref().and_then(Lifecycle::worktree).is_some();
     let can_open_chat = task.is_some_and(|task| {
         task.execution
             .as_ref()
@@ -76,11 +76,16 @@ fn render(
         .unwrap_or_else(|| te.draft_subtasks.clone());
     let status = match state {
         None => strings::task::edit_new(),
-        Some(TaskState::Backlog) => strings::terminal::task_backlog(),
-        Some(TaskState::Running { .. }) => strings::terminal::task_running(),
-        Some(TaskState::Done { .. }) => strings::terminal::task_done_prefix(),
-        Some(TaskState::Error { .. }) => strings::task::edit_error(),
-        Some(TaskState::Cancelled { .. }) => strings::task::edit_cancelled(),
+        Some(Lifecycle::Backlog) => strings::terminal::task_backlog(),
+        Some(Lifecycle::Preparing { .. } | Lifecycle::Dispatching { .. }) => {
+            strings::task::state_starting()
+        }
+        Some(Lifecycle::Running { .. }) => strings::terminal::task_running(),
+        Some(Lifecycle::Done { .. }) => strings::terminal::task_done_prefix(),
+        Some(Lifecycle::Error { .. }) => strings::task::edit_error(),
+        Some(Lifecycle::Cancelled { .. }) => strings::task::edit_cancelled(),
+        Some(Lifecycle::Undelivered { .. }) => strings::task::state_undelivered(),
+        Some(Lifecycle::Interrupted { .. }) => strings::task::state_interrupted(),
     };
     let header = div()
         .flex()
@@ -621,13 +626,13 @@ fn run_in(
         let busy = (!lane.is_empty())
             .then(|| {
                 task_running_in(
-                    cx.global::<GlobalTasks>(),
+                    cx.global::<GlobalTasks>().book(),
                     std::path::Path::new(&lane),
                     te.task_id.as_deref(),
                 )
             })
             .flatten()
-            .map(|task| strings::task::edit_run_in_lane_busy(&task.title));
+            .map(|task| strings::task::edit_run_in_lane_busy(&task.spec.title));
         column = column.children(busy.map(|message| {
             div()
                 .text_size(px(theme::FONT_SIZE_SM))

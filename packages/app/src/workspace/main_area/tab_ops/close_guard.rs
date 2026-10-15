@@ -93,19 +93,23 @@ impl Workspace {
             let Ok(answer) = receiver.await else {
                 return;
             };
+            let saved = if answer == 0 {
+                let Ok(pending) = this.update_in(cx, |this, window, cx| {
+                    this.commit_dirty_items_with_failure_toast(&dirty, window, cx)
+                }) else {
+                    return;
+                };
+                pending.await
+            } else {
+                answer == 1
+            };
             // SILENT-OK: user may close window before save-dialog answer arrives
-            let _ = this.update_in(cx, |this, window, cx| match answer {
-                0 if this.commit_dirty_items_with_failure_toast(&dirty, window, cx) => {
+            let _ = this.update_in(cx, |this, window, cx| {
+                if saved {
                     for i in &indices {
                         this.close_tab_at(*i, window, cx);
                     }
                 }
-                1 => {
-                    for i in &indices {
-                        this.close_tab_at(*i, window, cx);
-                    }
-                }
-                _ => {} // Cancel
             });
         })
         .detach();
@@ -189,13 +193,21 @@ impl Workspace {
             let Ok(answer) = receiver.await else {
                 return;
             };
+            let saved = if answer == 0 {
+                let Ok(pending) = this.update_in(cx, |this, window, cx| {
+                    this.commit_dirty_items_with_failure_toast(&dirty, window, cx)
+                }) else {
+                    return;
+                };
+                pending.await
+            } else {
+                answer == 1
+            };
             // SILENT-OK: user may close window before save-dialog answer arrives
-            let _ = this.update_in(cx, |this, window, cx| match answer {
-                0 if this.commit_dirty_items_with_failure_toast(&dirty, window, cx) => {
+            let _ = this.update_in(cx, |this, window, cx| {
+                if saved {
                     this.close_tab_at(index, window, cx);
                 }
-                1 => this.close_tab_at(index, window, cx),
-                _ => {} // Cancel
             });
         })
         .detach();

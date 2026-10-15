@@ -34,6 +34,7 @@ pub use daruda_project::project;
 mod remote_channel;
 #[cfg(feature = "replay")]
 mod replay;
+mod runs;
 #[cfg(feature = "screenshot")]
 mod screenshot;
 pub mod settings_store;

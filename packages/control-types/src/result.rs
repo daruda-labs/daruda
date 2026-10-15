@@ -279,21 +279,31 @@ pub struct LaneEntry {
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
     Backlog,
+    Preparing,
+    Dispatching,
     Running,
     Done,
     Error,
     Cancelled,
+    /// The prompt never reached the agent.
+    Undelivered,
+    /// The run was stopped before it finished.
+    Interrupted,
 }
 
 impl TaskStatus {
-    pub fn of(state: &daruda_store::tasks::TaskState) -> Self {
-        use daruda_store::tasks::TaskState;
-        match state {
-            TaskState::Backlog => Self::Backlog,
-            TaskState::Running { .. } => Self::Running,
-            TaskState::Done { .. } => Self::Done,
-            TaskState::Error { .. } => Self::Error,
-            TaskState::Cancelled { .. } => Self::Cancelled,
+    pub fn of(lifecycle: &daruda_store::tasks::Lifecycle) -> Self {
+        use daruda_store::tasks::LifecycleKind as K;
+        match lifecycle.kind() {
+            K::Backlog => Self::Backlog,
+            K::Preparing => Self::Preparing,
+            K::Dispatching => Self::Dispatching,
+            K::Running => Self::Running,
+            K::Done => Self::Done,
+            K::Error => Self::Error,
+            K::Cancelled => Self::Cancelled,
+            K::Undelivered => Self::Undelivered,
+            K::Interrupted => Self::Interrupted,
         }
     }
 }
@@ -548,6 +558,10 @@ pub enum ControlError {
         detail: String,
     },
     TaskTitleEmpty,
+    /// daruda could not record the task change; `detail` says why.
+    TaskNotRecorded {
+        detail: String,
+    },
     /// The task has not run, or its run has not reported a session yet.
     TaskNoSession,
     /// The agent or account the task's run used is no longer configured.
@@ -590,6 +604,7 @@ impl std::fmt::Display for ControlError {
             Self::TaskProjectNotOpen => write!(f, "task's project is not open"),
             Self::TaskStartFailed { detail } => write!(f, "task did not start: {detail}"),
             Self::TaskTitleEmpty => write!(f, "task title is empty"),
+            Self::TaskNotRecorded { detail } => write!(f, "task change was not recorded: {detail}"),
             Self::TaskNoSession => write!(f, "task has no session to open"),
             Self::TaskAgentUnavailable => write!(f, "task's agent is no longer configured"),
         }

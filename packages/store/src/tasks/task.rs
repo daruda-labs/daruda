@@ -27,6 +27,12 @@ pub const TASK_TOOL_USE_FAILURE_THRESHOLD: u32 = 5;
 /// without coordination.
 pub type TaskId = String;
 
+/// A fresh ULID, for a task or a subtask row. The proposer picks ids, so
+/// replaying an event never generates one.
+pub fn new_task_id() -> TaskId {
+    ulid::Ulid::generate().to_string()
+}
+
 /// Mirrors Claude hook `SessionEnd.end_reason`. `Stop` is a separate
 /// hook event upstream but maps to the same task transition, so it
 /// shares this enum for ergonomic matching downstream.
@@ -352,10 +358,6 @@ impl TasksState {
     pub fn remove(&mut self, id: &str) {
         self.tasks.retain(|t| t.id != id);
     }
-
-    pub fn filter_by_state(&self, filter: TaskFilter) -> impl Iterator<Item = &Task> {
-        self.tasks.iter().filter(move |t| filter.matches(&t.state))
-    }
 }
 
 /// Which projects' tasks the tab lists. Default is the active project's.
@@ -368,13 +370,13 @@ pub enum TaskScope {
 }
 
 impl TaskScope {
-    /// `active` is `None` when the window has no project open, and then
-    /// no task is the active project's.
-    pub fn matches(self, task: &Task, active: Option<ProjectUuid>) -> bool {
+    /// Whether a task of `project` is listed. `active` is `None` when the
+    /// window has no project open, and then no task is the active project's.
+    pub fn matches(self, project: ProjectUuid, active: Option<ProjectUuid>) -> bool {
         match self {
-            Self::ActiveProject => active == Some(task.project),
+            Self::ActiveProject => active == Some(project),
             Self::AllProjects => true,
-            Self::Project(project) => task.project == project,
+            Self::Project(scoped) => project == scoped,
         }
     }
 
@@ -401,14 +403,18 @@ pub enum TaskFilter {
 }
 
 impl TaskFilter {
-    pub fn matches(self, state: &TaskState) -> bool {
+    /// Starting runs list as running; an undelivered prompt as failed; an
+    /// interrupted run as cancelled — the closest of the tab's five groups.
+    pub fn matches(self, lifecycle: &super::Lifecycle) -> bool {
+        use super::machine::LifecycleKind as K;
+        let kind = lifecycle.kind();
         match self {
             Self::All => true,
-            Self::Backlog => matches!(state, TaskState::Backlog),
-            Self::Running => matches!(state, TaskState::Running { .. }),
-            Self::Done => matches!(state, TaskState::Done { .. }),
-            Self::Failed => matches!(state, TaskState::Error { .. }),
-            Self::Cancelled => matches!(state, TaskState::Cancelled { .. }),
+            Self::Backlog => kind == K::Backlog,
+            Self::Running => matches!(kind, K::Preparing | K::Dispatching | K::Running),
+            Self::Done => kind == K::Done,
+            Self::Failed => matches!(kind, K::Error | K::Undelivered),
+            Self::Cancelled => matches!(kind, K::Cancelled | K::Interrupted),
         }
     }
 }

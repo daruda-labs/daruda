@@ -4,7 +4,6 @@
 //! same project root should not pollute each other's snapshot.
 
 use super::*;
-use gpui::BorrowAppContext as _;
 
 #[gpui::test]
 fn terminal_output_restore_uses_the_owning_project_and_profile(cx: &mut TestAppContext) {
@@ -223,17 +222,10 @@ fn suspended_persistence_writes_nothing(cx: &mut TestAppContext) {
     };
     let before = listing();
     ws.update(cx, |ws, cx| {
-        ws.persistence_suspended = true;
+        crate::runs::RunsHost::seed_for_test(Some(ws.data_dir.clone()), cx);
+        ws.suspend_persistence_for_shot(cx);
         let project = ws.active_project().unwrap().uuid;
-        cx.update_global::<crate::agent::tasks_global::GlobalTasks, _>(|tasks, _| {
-            tasks.add(daruda_store::tasks::Task::new(
-                project,
-                "Fixture".into(),
-                String::new(),
-                None,
-            ));
-        });
-        ws.save_tasks_dirty(cx);
+        crate::runs::seed::task(crate::runs::seed::spec(project, "Fixture"), None, cx);
     });
     ws.read_with(cx, |ws, cx| ws.persist_state(cx));
     cx.run_until_parked();

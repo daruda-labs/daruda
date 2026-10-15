@@ -1,7 +1,7 @@
 //! Aligned task columns; long metadata stays in the title or a tooltip.
 
 use daruda_core::age::{self, AgeBucket};
-use daruda_store::tasks::{Task, TaskAgentSurface, TaskScope, TaskState};
+use daruda_store::tasks::{Lifecycle, TaskAgentSurface, TaskRecord, TaskScope};
 use gpui::{AnyElement, App, Div, IntoElement, MouseButton, SharedString, div, prelude::*, px};
 
 use super::{TaskGrouping, list::TaskList};
@@ -85,29 +85,29 @@ fn header(layout: &ListTable<TaskColumn>, cx: &App) -> Div {
 }
 
 fn row(
-    task: &Task,
+    task: &TaskRecord,
     snap: &RightDockSnapshot,
     layout: &ListTable<TaskColumn>,
     cx: &App,
 ) -> AnyElement {
     let t = theme::current(cx);
     let workspace = snap.workspace.clone();
-    let id = task.id.clone();
+    let id = task.id().to_owned();
     layout
         .row(|column, cell| match column {
             TaskColumn::Indicator => cell
-                .child(super::indicator_cell(&task.state, *snap.now, cx))
+                .child(super::indicator_cell(&task.lifecycle, *snap.now, cx))
                 .into_any_element(),
             TaskColumn::Title => title(task, snap, cell, cx),
             TaskColumn::Project => {
                 let project = snap
                     .task_projects
-                    .name(task.project)
+                    .name(task.spec.project)
                     .map(str::to_owned)
                     .unwrap_or_else(strings::task::project_not_open);
                 cell.id("project")
                     .debug_selector({
-                        let id = task.id.clone();
+                        let id = task.id().to_owned();
                         move || format!("task-project-{id}")
                     })
                     .tooltip(tooltip::text(project.clone()))
@@ -120,8 +120,8 @@ fn row(
                 .child(super::status_pill::status_pill(
                     task,
                     snap,
-                    compact_status(&task.state).into(),
-                    super::state_label(&task.state),
+                    compact_status(&task.lifecycle).into(),
+                    super::state_label(&task.lifecycle),
                     cx,
                 ))
                 .into_any_element(),
@@ -142,9 +142,9 @@ fn row(
                     .into_any_element()
             }
         })
-        .id(SharedString::from(format!("task-row-{}", task.id)))
+        .id(SharedString::from(format!("task-row-{}", task.id())))
         .debug_selector({
-            let id = task.id.clone();
+            let id = task.id().to_owned();
             move || format!("task-row-{id}")
         })
         .hover(|style| style.bg(t.overlay_hover))
@@ -158,9 +158,9 @@ fn row(
         .into_any_element()
 }
 
-fn title(task: &Task, snap: &RightDockSnapshot, cell: Div, cx: &App) -> AnyElement {
+fn title(task: &TaskRecord, snap: &RightDockSnapshot, cell: Div, cx: &App) -> AnyElement {
     let t = theme::current(cx);
-    let metadata = strings::task::row_metadata(short_id(task), &task.branch_name);
+    let metadata = strings::task::row_metadata(short_id(task.id()), &task.spec.branch_name);
     cell.flex()
         .flex_col()
         .child(
@@ -168,7 +168,7 @@ fn title(task: &Task, snap: &RightDockSnapshot, cell: Div, cx: &App) -> AnyEleme
                 .w_full()
                 .truncate()
                 .text_color(t.text_body)
-                .child(task.title.clone()),
+                .child(task.spec.title.clone()),
         )
         .child(
             div()
@@ -181,7 +181,7 @@ fn title(task: &Task, snap: &RightDockSnapshot, cell: Div, cx: &App) -> AnyEleme
         .when(
             !task.session_ids.is_empty()
                 || !task.subtasks.is_empty()
-                || !matches!(task.state, TaskState::Backlog),
+                || task.lifecycle != Lifecycle::Backlog,
             |title| {
                 title.child(
                     div()
@@ -201,31 +201,39 @@ fn title(task: &Task, snap: &RightDockSnapshot, cell: Div, cx: &App) -> AnyEleme
         )
         .id("open")
         .debug_selector({
-            let id = task.id.clone();
+            let id = task.id().to_owned();
             move || format!("task-title-{id}")
         })
         .cursor_pointer()
         .tooltip(tooltip::text(format!(
             "{}\n{}\n{}",
-            task.title, task.id, task.branch_name
+            task.spec.title,
+            task.id(),
+            task.spec.branch_name
         )))
         .into_any_element()
 }
 
-fn compact_status(state: &TaskState) -> String {
+/// The pill's word: the status tab a state counts under, except where a
+/// state has a name of its own.
+fn compact_status(state: &Lifecycle) -> String {
     use daruda_store::tasks::TaskFilter;
     super::controls::filter_label(match state {
-        TaskState::Backlog => TaskFilter::Backlog,
-        TaskState::Running { .. } => TaskFilter::Running,
-        TaskState::Done { .. } => TaskFilter::Done,
-        TaskState::Error { .. } => TaskFilter::Failed,
-        TaskState::Cancelled { .. } => TaskFilter::Cancelled,
+        Lifecycle::Backlog => TaskFilter::Backlog,
+        Lifecycle::Preparing { .. } | Lifecycle::Dispatching { .. } => {
+            return strings::task::state_starting();
+        }
+        Lifecycle::Running { .. } => TaskFilter::Running,
+        Lifecycle::Done { .. } => TaskFilter::Done,
+        Lifecycle::Error { .. } => TaskFilter::Failed,
+        Lifecycle::Cancelled { .. } => TaskFilter::Cancelled,
+        Lifecycle::Undelivered { .. } => return strings::task::state_undelivered(),
+        Lifecycle::Interrupted { .. } => return strings::task::state_interrupted(),
     })
 }
 
-fn short_id(task: &Task) -> String {
-    task.id
-        .chars()
+fn short_id(id: &str) -> String {
+    id.chars()
         .rev()
         .take(6)
         .collect::<Vec<_>>()
@@ -243,7 +251,7 @@ fn updated_label(seconds: u64) -> String {
     }
 }
 
-fn agent_label(task: &Task, agents: &[daruda_config::AgentDefinition]) -> String {
+fn agent_label(task: &TaskRecord, agents: &[daruda_config::AgentDefinition]) -> String {
     if let Some(run) = &task.execution {
         return agents
             .iter()
@@ -253,9 +261,9 @@ fn agent_label(task: &Task, agents: &[daruda_config::AgentDefinition]) -> String
             .unwrap_or(&run.agent_id)
             .to_owned();
     }
-    match task.agent_surface {
+    match task.spec.agent_surface {
         TaskAgentSurface::Terminal => strings::task::agent_terminal(),
-        TaskAgentSurface::AgentChat if matches!(task.state, TaskState::Backlog) => {
+        TaskAgentSurface::AgentChat if task.lifecycle == Lifecycle::Backlog => {
             strings::task::agent_on_start()
         }
         TaskAgentSurface::AgentChat => strings::task::agent_unknown(),
@@ -266,6 +274,10 @@ fn agent_label(task: &Task, agents: &[daruda_config::AgentDefinition]) -> String
 mod tests {
     use super::*;
     use daruda_store::{project::ProjectUuid, tasks::TaskExecution};
+
+    fn blank() -> TaskRecord {
+        crate::runs::seed::record(ProjectUuid::new(), "", Lifecycle::Backlog)
+    }
 
     #[test]
     fn updated_labels_use_whole_age_units() {
@@ -278,8 +290,8 @@ mod tests {
 
     #[test]
     fn agent_identity_comes_from_execution_not_legacy_agent_type() {
-        let mut task = Task::new(ProjectUuid::new(), String::new(), String::new(), None);
-        task.agent_surface = TaskAgentSurface::AgentChat;
+        let mut task = blank();
+        task.spec.agent_surface = TaskAgentSurface::AgentChat;
         assert_eq!(agent_label(&task, &[]), strings::task::agent_on_start());
         task.execution = Some(TaskExecution::begin(
             Default::default(),
@@ -300,10 +312,7 @@ mod tests {
 
     #[test]
     fn id_uses_the_distinguishing_ulid_suffix() {
-        let mut task = Task::new(ProjectUuid::new(), String::new(), String::new(), None);
-        task.id = "01ABCDEFGHIJKLMNPQRST123456".into();
-        assert_eq!(short_id(&task), "123456");
-        task.id = "old".into();
-        assert_eq!(short_id(&task), "old");
+        assert_eq!(short_id("01ABCDEFGHIJKLMNPQRST123456"), "123456");
+        assert_eq!(short_id("old"), "old");
     }
 }

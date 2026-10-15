@@ -82,7 +82,7 @@ fn fail_connect_account_prepare(
             ws.notify_status_docks(cx);
         }
         ws.report_error(report, cx);
-        ws.apply_agent_chat_task_ended(pane_id, daruda_store::tasks::SessionEndReason::Error, cx);
+        ws.fail_agent_chat_task(pane_id, cx);
     }) {
         Ok(()) => {}
         // Window gone before the toast could land — keep the log record.

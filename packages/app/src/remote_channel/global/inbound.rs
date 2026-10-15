@@ -161,7 +161,9 @@ pub(super) fn spawn(mut receiver: UnboundedReceiver<WorkerEvent>, cx: &mut App) 
                 continue;
             };
             let action = dispatch::target::aim(routed, cx);
-            let effect = dispatch::handle(action, &dispatch::Target::Remote(event.id.clone()), cx);
+            let effect = dispatch::handle(action, &dispatch::Target::Remote(event.id.clone()), cx)
+                .settled()
+                .await;
             // Executed effects are remembered before sending their feedback; a
             // failed send must not re-run a command.
             remember(cx, &event.id, incoming.event_id).await;
@@ -280,6 +282,9 @@ fn feedback_for(effect: Effect, kind: IncomingKind) -> Feedback {
             label: s::remote_channel::stale_callback(),
         },
         (Effect::None, None) => Feedback::Nothing,
+        // The loop settles an effect before asking what it is owed; one that
+        // is still waiting has nothing to send yet.
+        (Effect::Later(_), _) => Feedback::Nothing,
     }
 }
 

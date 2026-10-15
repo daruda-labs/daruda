@@ -15,9 +15,12 @@
 //! | Done      | Reopen · Open lane · — · Edit · Delete                    |
 //! | Error     | Retry · Reopen · Open lane · View error · — · Edit · Delete |
 //! | Cancelled | Reopen · Open lane · — · Edit · Delete                    |
+//!
+//! Starting runs share Running's menu, an undelivered prompt Error's, and
+//! an interrupted run Cancelled's.
 
 use crate::ui::theme;
-use daruda_store::tasks::{Task, TaskState};
+use daruda_store::tasks::{Lifecycle, TaskRecord};
 use gpui::{Hsla, IntoElement, ParentElement as _, SharedString, Styled as _, px};
 
 use super::super::Workspace;
@@ -29,21 +32,21 @@ use crate::ui::{DropdownMenu as _, PopupMenu, PopupMenuItem};
 ///
 /// The state label and SVG chevron share the compact text-button chrome.
 pub(super) fn status_pill(
-    task: &Task,
+    task: &TaskRecord,
     snap: &RightDockSnapshot,
     state_label: SharedString,
     tooltip: SharedString,
     cx: &gpui::App,
 ) -> impl IntoElement {
-    let task_id = task.id.clone();
+    let task_id = task.id().to_owned();
     let workspace = snap.workspace.clone();
-    let state = task.state.clone();
+    let state = task.lifecycle.clone();
     let can_open_chat = task
         .execution
         .as_ref()
         .is_some_and(daruda_store::tasks::TaskExecution::chat_available);
 
-    let pill_id = SharedString::from(format!("task-pill-{}", task.id));
+    let pill_id = SharedString::from(format!("task-pill-{}", task.id()));
     let bg = pill_background(&state, cx);
 
     crate::ui::button_compact(pill_id, state_label)
@@ -65,14 +68,17 @@ pub(super) fn status_pill(
 
 /// State colour tinted with [`theme::RIGHT_PANEL_STATUS_PILL_BG_ALPHA`].
 /// The same hue powers the row's indicator, keeping the signal consistent.
-fn pill_background(state: &TaskState, cx: &gpui::App) -> Hsla {
+fn pill_background(state: &Lifecycle, cx: &gpui::App) -> Hsla {
     let t = theme::current(cx);
     let base = match state {
-        TaskState::Backlog => t.text_subtle,
-        TaskState::Running { .. } => t.right_panel_task_running_color,
-        TaskState::Done { .. } => t.text_muted,
-        TaskState::Error { .. } => theme::ERROR,
-        TaskState::Cancelled { .. } => t.text_subtle,
+        Lifecycle::Backlog | Lifecycle::Cancelled { .. } | Lifecycle::Interrupted { .. } => {
+            t.text_subtle
+        }
+        Lifecycle::Preparing { .. } | Lifecycle::Dispatching { .. } | Lifecycle::Running { .. } => {
+            t.right_panel_task_running_color
+        }
+        Lifecycle::Done { .. } => t.text_muted,
+        Lifecycle::Error { .. } | Lifecycle::Undelivered { .. } => theme::ERROR,
     };
     Hsla {
         a: theme::RIGHT_PANEL_STATUS_PILL_BG_ALPHA,
@@ -81,29 +87,30 @@ fn pill_background(state: &TaskState, cx: &gpui::App) -> Hsla {
 }
 
 fn build_state_menu(
-    state: &TaskState,
+    state: &Lifecycle,
     task_id: &str,
     workspace: &gpui::WeakEntity<Workspace>,
     menu: PopupMenu,
 ) -> PopupMenu {
     match state {
-        TaskState::Backlog => menu
+        Lifecycle::Backlog => menu
             .item(start_item(task_id, workspace))
             .item(edit_item(task_id, workspace))
             .item(delete_item(task_id, workspace)),
-        TaskState::Running { .. } => menu
-            .item(stop_item(task_id, workspace))
-            .item(open_item(task_id, workspace))
-            .separator()
-            .item(edit_item(task_id, workspace))
-            .item(delete_item(task_id, workspace)),
-        TaskState::Done { .. } => menu
+        Lifecycle::Preparing { .. } | Lifecycle::Dispatching { .. } | Lifecycle::Running { .. } => {
+            menu.item(stop_item(task_id, workspace))
+                .item(open_item(task_id, workspace))
+                .separator()
+                .item(edit_item(task_id, workspace))
+                .item(delete_item(task_id, workspace))
+        }
+        Lifecycle::Done { .. } => menu
             .item(reopen_item(task_id, workspace))
             .item(open_item(task_id, workspace))
             .separator()
             .item(edit_item(task_id, workspace))
             .item(delete_item(task_id, workspace)),
-        TaskState::Error { .. } => menu
+        Lifecycle::Error { .. } | Lifecycle::Undelivered { .. } => menu
             .item(retry_item(task_id, workspace))
             .item(reopen_item(task_id, workspace))
             .item(open_item(task_id, workspace))
@@ -111,7 +118,7 @@ fn build_state_menu(
             .separator()
             .item(edit_item(task_id, workspace))
             .item(delete_item(task_id, workspace)),
-        TaskState::Cancelled { .. } => menu
+        Lifecycle::Cancelled { .. } | Lifecycle::Interrupted { .. } => menu
             .item(reopen_item(task_id, workspace))
             .item(open_item(task_id, workspace))
             .separator()

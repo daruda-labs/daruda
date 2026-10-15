@@ -70,21 +70,13 @@ impl Workspace {
                     )
                 });
                 self.notify_status_docks(cx);
-                self.apply_agent_chat_task_ended(
-                    pane_id,
-                    daruda_store::tasks::SessionEndReason::Error,
-                    cx,
-                );
+                self.fail_agent_chat_task(pane_id, cx);
                 return;
             }
         }
 
         let Some(plan) = self.prepare_agent_chat_connection(pane_id, &cwd, cx) else {
-            self.apply_agent_chat_task_ended(
-                pane_id,
-                daruda_store::tasks::SessionEndReason::Error,
-                cx,
-            );
+            self.fail_agent_chat_task(pane_id, cx);
             return;
         };
         let AgentChatConnectionPlan {
@@ -351,11 +343,7 @@ impl Workspace {
                             // Connecting badge doesn't linger after the pulse
                             // stops.
                             ws.notify_status_docks(cx);
-                            ws.apply_agent_chat_task_ended(
-                                pane_id,
-                                daruda_store::tasks::SessionEndReason::Error,
-                                cx,
-                            );
+                            ws.fail_agent_chat_task(pane_id, cx);
                         }
                         let report =
                             ErrorReport::new(crate::surface::strings::error::acp_connect_failed())
@@ -418,11 +406,7 @@ impl Workspace {
         } else if failed_to_start_prompt {
             // Startup can fail before a task's buffered prompt starts a turn;
             // there is no activity completion edge in that case.
-            self.apply_agent_chat_task_ended(
-                pane_id,
-                daruda_store::tasks::SessionEndReason::Error,
-                cx,
-            );
+            self.fail_agent_chat_task(pane_id, cx);
         }
         self.notify_status_docks(cx);
     }

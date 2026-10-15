@@ -11,7 +11,7 @@
 //! git accepts.
 
 use daruda_store::project::{ProjectUuid, TaskDetailTarget};
-use daruda_store::tasks::{Task, TaskAgentSurface, TaskId, random_branch_name};
+use daruda_store::tasks::{TaskAgentSurface, TaskId, TaskRecord, random_branch_name};
 use gpui::{AppContext as _, Context, Focusable as _, SharedString, Window};
 
 use super::TaskEditorId;
@@ -79,11 +79,9 @@ impl Workspace {
             window,
             cx,
             move |ws, window, cx| {
-                let initial = task_id.as_deref().and_then(|id| {
-                    cx.global::<crate::agent::tasks_global::GlobalTasks>()
-                        .get(id)
-                        .cloned()
-                });
+                let initial = task_id
+                    .as_deref()
+                    .and_then(|id| cx.global::<crate::runs::GlobalTasks>().get(id).cloned());
                 let id = ws.mutate_durable_in(window, cx, |ws, window, cx| {
                     ws.install_task_editor(task_id, initial, draft_project, window, cx)
                 });
@@ -103,11 +101,7 @@ impl Workspace {
     ) {
         match target {
             TaskDetailTarget::Task { id } => {
-                let Some(task) = cx
-                    .global::<crate::agent::tasks_global::GlobalTasks>()
-                    .get(id)
-                    .cloned()
-                else {
+                let Some(task) = cx.global::<crate::runs::GlobalTasks>().get(id).cloned() else {
                     return;
                 };
                 self.install_task_editor(Some(id.clone()), Some(task), None, window, cx);
@@ -125,7 +119,7 @@ impl Workspace {
     fn install_task_editor(
         &mut self,
         task_id: Option<TaskId>,
-        initial: Option<Task>,
+        initial: Option<TaskRecord>,
         draft_project: Option<ProjectUuid>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -149,19 +143,19 @@ impl Workspace {
         &mut self,
         editor_id: TaskEditorId,
         task_id: Option<TaskId>,
-        initial: Option<Task>,
+        initial: Option<TaskRecord>,
         draft_project: Option<ProjectUuid>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> TaskEditContent {
         let (title, prompt, notes, branch_name, auto_execute, agent_surface) = match &initial {
             Some(t) => (
-                t.title.clone(),
-                t.prompt.clone(),
-                t.notes.clone(),
-                t.branch_name.clone(),
-                t.auto_execute,
-                t.agent_surface,
+                t.spec.title.clone(),
+                t.spec.prompt.clone(),
+                t.spec.notes.clone(),
+                t.spec.branch_name.clone(),
+                t.spec.auto_execute,
+                t.spec.agent_surface,
             ),
             // A draft opens with a usable branch already filled in.
             None => (
@@ -278,7 +272,7 @@ impl Workspace {
         // The task's own project when it is open here, else the active one.
         let project = initial
             .as_ref()
-            .map(|t| t.project)
+            .map(|t| t.spec.project)
             .or(draft_project)
             .filter(|uuid| self.project_by_uuid(*uuid).is_some())
             .or_else(|| self.active_project().map(|p| p.uuid));
@@ -303,7 +297,7 @@ impl Workspace {
         let base_options = base_lane_options(self, project);
         let base_initial: Option<SharedString> = initial
             .as_ref()
-            .and_then(|t| t.base_worktree_path.as_ref())
+            .and_then(|t| t.spec.base_worktree_path.as_ref())
             .and_then(|p| p.to_str())
             .map(|s| SharedString::from(s.to_string()));
         let base_select =
@@ -359,6 +353,7 @@ impl Workspace {
 
         let mut content = TaskEditContent {
             task_id,
+            pending_save: None,
             title_input,
             branch_input,
             branch_validation,

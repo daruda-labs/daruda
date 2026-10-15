@@ -10,6 +10,7 @@ use gpui::{App, Entity, FocusHandle, ScrollHandle, SharedString, Subscription, T
 /// `tasks.json` until the user presses `[Save Draft]` or `[Start]`.
 pub(in crate::workspace) struct TaskEditContent {
     pub(in crate::workspace) task_id: Option<TaskId>,
+    pub(super) pending_save: Option<TaskId>,
     pub(in crate::workspace) title_input: Entity<crate::ui::InputState>,
     pub(in crate::workspace) branch_input: Entity<crate::ui::InputState>,
     pub(in crate::workspace::pages::tasks) draft_subtasks: Vec<daruda_store::tasks::SubTask>,
@@ -262,6 +263,9 @@ impl TaskEditContent {
     }
 
     pub(in crate::workspace) fn can_save(&self, cx: &App) -> bool {
+        if self.pending_save.is_some() {
+            return false;
+        }
         let editable = super::run_in_ops::location_editable(self, cx.global());
         let located = !editable
             || match self.run_in {

@@ -3,10 +3,11 @@
 use daruda_store::accounts::AccountSelection;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::project::{LaneRef, PaneCwd};
-use daruda_store::tasks::{ExecutionRef, TaskAgentSurface, TaskExecution};
-use gpui::{BorrowAppContext as _, Context, Window};
+use daruda_store::tasks::{ExecutionRef, TaskAgentSurface, TaskEvent, TaskExecution};
+use gpui::{Context, Window};
 
-use crate::agent::tasks_global::GlobalTasks;
+use super::task_start::PaneIdentity;
+use crate::runs::{GlobalTasks, RunsHost};
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane::{AgentChatContent, Pane, TabEntry};
@@ -49,44 +50,83 @@ impl TaskChatError {
 }
 
 impl Workspace {
-    pub(in crate::workspace) fn bind_task_chat_execution(
+    /// Make `pane_id` the chat that runs `exec`, and read the identity the
+    /// run records. `None` when the pane cannot run it: not a chat, or its
+    /// directory is not local — a remote lane is refused at dispatch rather
+    /// than left with a run no local pane can settle.
+    pub(super) fn bind_task_chat_execution(
         &mut self,
-        task_id: &str,
+        exec: &ExecutionRef,
         pane_id: PaneId,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(chat) = self
+    ) -> Option<PaneIdentity> {
+        let chat = self
             .main_area
             .pane_mut(pane_id)
-            .and_then(Pane::agent_chat_content_mut)
-        else {
-            return;
-        };
-        let Some(cwd) = chat
+            .and_then(Pane::agent_chat_content_mut)?;
+        let cwd = chat
             .cwd
             .as_ref()
             .and_then(PaneCwd::as_local)
-            .map(std::path::Path::to_path_buf)
-        else {
-            return;
-        };
-        let mut execution = TaskExecution::begin(
-            Default::default(),
-            chat.agent_id.clone(),
-            chat.account.to_persisted(),
+            .map(std::path::Path::to_path_buf)?;
+        // A fresh pane has no session yet; `record_task_chat_session` names
+        // the run's once the pane connects.
+        chat.task_run = Some(exec.clone());
+        Some(PaneIdentity {
+            agent_id: chat.agent_id.clone(),
+            account_id: chat.account.to_persisted(),
             cwd,
+        })
+    }
+
+    /// Run task `id` in chat `pane` the way a start does: request the run,
+    /// bind the pane, record its identity, and dispatch. The pane's session,
+    /// if it has one, is the run's.
+    #[cfg(test)]
+    pub(in crate::workspace) fn run_task_in_chat_for_test(
+        &mut self,
+        id: &str,
+        pane: PaneId,
+        cx: &mut Context<Self>,
+    ) -> ExecutionRef {
+        let exec = ExecutionRef {
+            task_id: id.to_owned(),
+            execution_id: uuid::Uuid::new_v4().to_string(),
+        };
+        let at = chrono::Utc::now();
+        crate::runs::seed::commit_now(
+            vec![TaskEvent::DispatchRequested {
+                id: id.to_owned(),
+                execution_id: exec.execution_id.clone(),
+                source: daruda_store::tasks::TaskExecutionSource::AgentChat,
+                at,
+            }],
+            cx,
         );
-        execution.session_id = chat.view.read(cx).session_id().map(str::to_owned);
-        chat.task_run = Some(ExecutionRef {
-            task_id: task_id.to_string(),
-            execution_id: execution.id.clone(),
-        });
-        cx.update_global::<GlobalTasks, _>(|tasks, _| {
-            if let Some(task) = tasks.get_mut(task_id) {
-                task.execution = Some(execution);
-            }
-        });
-        self.save_tasks_dirty(cx);
+        let identity = self
+            .bind_task_chat_execution(&exec, pane)
+            .expect("a local chat pane takes the run");
+        let session_id = self
+            .agent_chat_view(pane)
+            .and_then(|view| view.read(cx).session_id().map(str::to_owned));
+        crate::runs::seed::commit_now(
+            vec![
+                TaskEvent::LanePrepared {
+                    exec: exec.clone(),
+                    worktree: identity.cwd.clone(),
+                    agent_id: identity.agent_id,
+                    account_id: identity.account_id,
+                    cwd: identity.cwd,
+                    at,
+                },
+                TaskEvent::Dispatched {
+                    exec: exec.clone(),
+                    session_id,
+                    at,
+                },
+            ],
+            cx,
+        );
+        exec
     }
 
     pub(in crate::workspace) fn task_chat_owner(
@@ -98,8 +138,8 @@ impl Workspace {
         let run = chat.task_run.as_ref()?;
         let tasks = cx.global::<GlobalTasks>();
         let task = tasks.get(&run.task_id)?;
-        let execution = run.resolve(tasks)?;
-        (task.agent_surface == TaskAgentSurface::AgentChat
+        let execution = run.resolve(tasks.book())?;
+        (task.spec.agent_surface == TaskAgentSurface::AgentChat
             && chat.agent_id == execution.agent_id
             && chat.account.to_persisted() == execution.account_id
             && chat
@@ -112,28 +152,6 @@ impl Workspace {
                 .as_ref()
                 .is_none_or(|id| chat.view.read(cx).session_id() == Some(id.as_str())))
         .then(|| run.task_id.clone())
-    }
-
-    pub(in crate::workspace) fn cancel_task_chat_execution(
-        &mut self,
-        task_id: &str,
-        cx: &mut Context<Self>,
-    ) {
-        let pane_id = self
-            .main_area
-            .runtimes
-            .values()
-            .flat_map(|runtime| runtime.panes.iter())
-            .find_map(|pane| {
-                (self.task_chat_owner(pane.id, cx).as_deref() == Some(task_id)).then_some(pane.id)
-            });
-        let Some(pane_id) = pane_id else {
-            return;
-        };
-        self.cancel_agent_turn(pane_id, cx);
-        if let Some(view) = self.agent_chat_view(pane_id).cloned() {
-            view.update(cx, |view, cx| view.clear_queue(cx));
-        }
     }
 
     pub(in crate::workspace) fn record_task_chat_session(
@@ -150,20 +168,24 @@ impl Workspace {
         else {
             return;
         };
-        let changed = cx.update_global::<GlobalTasks, _>(|tasks, _| {
-            let Some(execution) = tasks.get_mut(&id).and_then(|task| task.execution.as_mut())
-            else {
-                return false;
-            };
-            if execution.session_id.is_some() {
-                return false;
-            }
-            execution.session_id = Some(session_id);
-            true
-        });
-        if changed {
-            self.save_tasks_dirty(cx);
-        }
+        let Some(task) = cx.global::<GlobalTasks>().get(&id) else {
+            return;
+        };
+        let unbound = task
+            .execution
+            .as_ref()
+            .is_some_and(|execution| execution.session_id.is_none());
+        let Some(exec) = task.current_exec().cloned().filter(|_| unbound) else {
+            return;
+        };
+        RunsHost::propose_fact(
+            TaskEvent::ExecutionSessionBound {
+                exec,
+                session_id,
+                at: chrono::Utc::now(),
+            },
+            cx,
+        );
     }
 
     pub(in crate::workspace) fn is_task_chat_restore(
@@ -178,7 +200,7 @@ impl Workspace {
         else {
             return false;
         };
-        cx.global::<GlobalTasks>().tasks.iter().any(|task| {
+        cx.global::<GlobalTasks>().records().any(|task| {
             task.execution
                 .as_ref()
                 .is_some_and(|execution| matches_session(chat, execution, cx))
@@ -245,6 +267,7 @@ impl Workspace {
             .cloned()
             .ok_or(TaskChatError::NotFound)?;
         let execution = task.execution.ok_or(TaskChatError::NoSession)?;
+        let title = task.spec.title;
         let existing = self.main_area.runtimes.iter().find_map(|(lane, rt)| {
             rt.panes.iter().find_map(|pane| {
                 let chat = pane.agent_chat_content()?;
@@ -273,7 +296,7 @@ impl Workspace {
             Some(PaneCwd::Local(execution.cwd)),
             Some(session_id),
             execution.agent_id,
-            Some(task.title),
+            Some(title),
             window,
             cx,
         );

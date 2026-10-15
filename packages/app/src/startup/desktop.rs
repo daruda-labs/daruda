@@ -28,9 +28,21 @@ pub(super) fn run() {
             );
         }
     };
+    // Only the primary instance holds `desktop.lock`, the task log's single
+    // writer guarantee; a forwarded launch returned above without opening it.
+    let runs = crate::runs::RunsHost::open(
+        daruda_store::tasks::TaskStore::open_current(
+            env!("CARGO_PKG_VERSION"),
+            crate::runs::no_hook(),
+        ),
+        Some(daruda_store::persistence::default_data_dir()),
+    );
     let app = bootstrap::new_application();
     app.run(move |cx: &mut App| {
         crate::workspace_storage::install(workspace_store, cx);
+        // Before any Workspace: every window reads this one projection.
+        crate::runs::RunsHost::install(runs, cx);
+        crate::runs::RunsHost::install_quit_flush(cx);
         globals::init_all(cx);
         platform::desktop_instance::install(instance, cx);
         platform::notifications::install(cx);

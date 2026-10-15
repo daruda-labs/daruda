@@ -92,13 +92,18 @@ fn a_process_record_follows_only_what_its_own_pid_proves() {
 
 #[test]
 fn a_ref_resolves_only_the_run_it_names() {
-    let mut tasks = daruda_store::tasks::TasksState::default();
+    use daruda_runlog::Machine as _;
+    use daruda_store::tasks::{TaskEvent, TaskMachine, TasksBook};
     let mut task = daruda_store::tasks::Task::new(
         daruda_store::project::ProjectUuid::new(),
         "t".into(),
         "p".into(),
         None,
     );
+    task.state = daruda_store::tasks::TaskState::Done {
+        worktree_path: "/tmp".into(),
+        end_reason: daruda_store::tasks::SessionEndReason::Stop,
+    };
     task.execution = Some(daruda_store::tasks::TaskExecution::begin(
         TaskExecutionSource::AgentChat,
         "claude".into(),
@@ -113,9 +118,20 @@ fn a_ref_resolves_only_the_run_it_names() {
         execution_id: "earlier".into(),
         ..run.clone()
     };
-    tasks.add(task);
+    let mut tasks = TasksBook::default();
+    let import = daruda_store::tasks::migrate_legacy(&daruda_store::tasks::TasksState {
+        tasks: vec![task],
+        ..Default::default()
+    });
+    TaskMachine::apply(&mut tasks, &import);
     assert!(run.resolve(&tasks).is_some());
     assert!(stale.resolve(&tasks).is_none());
-    tasks.remove(&run.task_id);
+    TaskMachine::apply(
+        &mut tasks,
+        &TaskEvent::Deleted {
+            id: run.task_id.clone(),
+            at: chrono::Utc::now(),
+        },
+    );
     assert!(run.resolve(&tasks).is_none());
 }

@@ -4,7 +4,7 @@ use super::*;
 use crate::control::approval::{ApprovalChoice, resolve_only_pending_for_test};
 use crate::test_support::{ControlFixture, workspace_with_agent_chat};
 use daruda_store::project::ProjectUuid;
-use daruda_store::tasks::{Task, TaskRunIn, TaskState};
+use daruda_store::tasks::{Lifecycle, TaskRunIn};
 use gpui::BorrowAppContext as _;
 
 /// A bridge that can deliver an approval card, so a gated command waits.
@@ -33,14 +33,7 @@ fn project_of(
 }
 
 fn add_task(project: ProjectUuid, title: &str, cx: &mut gpui::TestAppContext) -> String {
-    cx.update(|cx| {
-        let task = Task::new(project, title.into(), "prompt".into(), None);
-        let id = task.id.clone();
-        cx.update_global::<GlobalTasks, _>(|g, _| {
-            g.add(task);
-        });
-        id
-    })
+    cx.update(|cx| crate::runs::seed::task(crate::runs::seed::spec(project, title), None, cx))
 }
 
 fn ready(dispatch: Dispatch) -> ControlOutcome {
@@ -118,10 +111,10 @@ async fn an_approved_create_adds_a_backlog_task_to_that_project(cx: &mut gpui::T
     };
     cx.update(|cx| {
         let created = cx.global::<GlobalTasks>().get(&task).unwrap();
-        assert_eq!(created.project, uuid);
-        assert_eq!(created.title, "Fix login");
-        assert_eq!(created.state, TaskState::Backlog);
-        assert_eq!(created.run_in, TaskRunIn::NewWorktree);
+        assert_eq!(created.spec.project, uuid);
+        assert_eq!(created.spec.title, "Fix login");
+        assert_eq!(created.lifecycle, Lifecycle::Backlog);
+        assert_eq!(created.spec.run_in, TaskRunIn::NewWorktree);
     });
 }
 
@@ -160,8 +153,8 @@ async fn a_refused_start_runs_nothing(cx: &mut gpui::TestAppContext) {
     );
     cx.update(|cx| {
         assert_eq!(
-            cx.global::<GlobalTasks>().get(&task).unwrap().state,
-            TaskState::Backlog
+            cx.global::<GlobalTasks>().get(&task).unwrap().lifecycle,
+            Lifecycle::Backlog
         );
     });
 }
@@ -171,17 +164,46 @@ async fn only_a_running_task_stops(cx: &mut gpui::TestAppContext) {
     let fixture = workspace_with_agent_chat(cx);
     let (uuid, _) = project_of(&fixture, cx);
     let task = add_task(uuid, "t", cx);
-    let outcome = cx.update(|cx| run(ResolvedCommand::TaskStop { task }, cx));
+    let outcome = cx.update(|cx| ready(run_waiting(ResolvedCommand::TaskStop { task }, cx)));
     assert_eq!(outcome, Err(ControlError::TaskNotRunning));
     let outcome = cx.update(|cx| {
-        run(
+        ready(run_waiting(
             ResolvedCommand::TaskStop {
                 task: "missing".into(),
             },
             cx,
-        )
+        ))
     });
     assert_eq!(outcome, Err(ControlError::TaskNotFound));
+}
+
+#[gpui::test]
+async fn task_stop_answers_after_the_projection_changes(cx: &mut gpui::TestAppContext) {
+    let fixture = workspace_with_agent_chat(cx);
+    let (project, _) = project_of(&fixture, cx);
+    let task = cx.update(|cx| {
+        let spec = crate::runs::seed::spec(project, "stop");
+        let run = crate::runs::seed::SeedRun::chat(fixture.root());
+        crate::runs::seed::task(spec, Some((&run, crate::runs::seed::SeedEnd::Running)), cx)
+    });
+    let immediate = cx.update(|cx| run(ResolvedCommand::TaskStop { task: task.clone() }, cx));
+    assert!(matches!(
+        immediate,
+        Err(ControlError::TaskNotRecorded { .. })
+    ));
+    let dispatch =
+        cx.update(|cx| run_waiting(ResolvedCommand::TaskStop { task: task.clone() }, cx));
+    let Dispatch::Deferred { outcome, .. } = dispatch else {
+        panic!("task_stop waits for its commit");
+    };
+    let answer = outcome.recv().await.unwrap().unwrap().unwrap();
+    assert_eq!(answer, ControlResult::TaskStopped { task: task.clone() });
+    cx.update(|cx| {
+        assert!(matches!(
+            cx.global::<GlobalTasks>().get(&task).unwrap().lifecycle,
+            Lifecycle::Cancelled { .. }
+        ))
+    });
 }
 
 /// An approved start answers once the task runs: the worktree it runs in,
@@ -192,10 +214,12 @@ async fn an_approved_start_answers_with_its_worktree_and_chat(cx: &mut gpui::Tes
     let (workspace, lane) = fixture
         .workspace
         .read_with(cx, |ws, _| (ws.uuid(), ws.control_active_lane()));
-    let task = fixture.workspace.update(cx, |ws, cx| {
+    let created = fixture.workspace.update(cx, |ws, cx| {
         ws.control_task_create(lane.project, "Here", "p".into(), Some(lane), cx)
             .expect("created")
     });
+    cx.run_until_parked();
+    let task = created.await.expect("recorded");
     let dispatch = cx.update(|cx| {
         pair_bridge(cx);
         run_gated(GatedCommand::TaskStart { task: task.clone() }, cx)
@@ -220,7 +244,7 @@ async fn an_approved_start_answers_with_its_worktree_and_chat(cx: &mut gpui::Tes
     // later lifecycle, not this answer's.
     cx.update(|cx| {
         let task = cx.global::<GlobalTasks>().get(&task).unwrap();
-        assert_ne!(task.state, TaskState::Backlog);
+        assert_ne!(task.lifecycle, Lifecycle::Backlog);
         assert!(task.execution.is_some(), "the run is bound to the task");
     });
 }

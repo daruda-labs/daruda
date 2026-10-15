@@ -7,7 +7,7 @@ use super::{
     ErrorCause, InterruptCause, Lifecycle, SettleOutcome, TaskEdit, TaskEvent, TaskRecord,
     TasksBook, TodoItem, UndeliveredReason,
 };
-use crate::tasks::{ExecutionRef, SessionEndReason, SubTask};
+use crate::tasks::{ExecutionRef, SessionEndReason, SubTask, TaskExecution, TaskExecutionSource};
 
 pub(super) fn apply(book: &mut TasksBook, event: &TaskEvent) {
     match event {
@@ -83,17 +83,42 @@ fn apply_to(record: &mut TaskRecord, event: &TaskEvent) {
                 record.updated_at = *at;
             }
         }
-        TaskEvent::DispatchRequested { id, execution, at } => {
+        TaskEvent::DispatchRequested {
+            id,
+            execution_id,
+            source,
+            at,
+        } => {
             record.lifecycle = Lifecycle::Preparing {
                 exec: ExecutionRef {
                     task_id: id.clone(),
-                    execution_id: execution.id.clone(),
+                    execution_id: execution_id.clone(),
                 },
+                source: source.clone(),
             };
-            record.execution = Some(execution.clone());
+            record.execution = None;
             record.updated_at = *at;
         }
-        TaskEvent::LanePrepared { exec, worktree, at } => {
+        TaskEvent::LanePrepared {
+            exec,
+            worktree,
+            agent_id,
+            account_id,
+            cwd,
+            at,
+        } => {
+            let source = match &record.lifecycle {
+                Lifecycle::Preparing { source, .. } => source.clone(),
+                _ => TaskExecutionSource::default(),
+            };
+            record.execution = Some(TaskExecution {
+                source,
+                id: exec.execution_id.clone(),
+                agent_id: agent_id.clone(),
+                account_id: *account_id,
+                cwd: cwd.clone(),
+                session_id: None,
+            });
             record.lifecycle = Lifecycle::Dispatching {
                 exec: exec.clone(),
                 worktree: worktree.clone(),

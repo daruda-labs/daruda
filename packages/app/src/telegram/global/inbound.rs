@@ -181,7 +181,11 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
                     {
                         log_unauthorized_inbound();
                     }
-                    let effect = dispatch::handle(aimed, &dispatch::Target::Telegram, cx);
+                    // A command that waits on a task commit is settled here,
+                    // so the next update sees what it changed.
+                    let effect = dispatch::handle(aimed, &dispatch::Target::Telegram, cx)
+                        .settled()
+                        .await;
                     // Queued, not awaited: this loop is the only thing listening
                     // for the next message, and one queue keeps the answers in
                     // the order the messages came.

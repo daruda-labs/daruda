@@ -20,8 +20,11 @@ async fn inline_flow_name_saves_without_moving_the_file(cx: &mut TestAppContext)
         1,
         "the title participates in close confirmation"
     );
-    ws.update_in(&mut vcx, |ws, window, cx| {
-        assert!(ws.commit_dirty_items_with_failure_toast(&dirty, window, cx));
+    let saved = ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.commit_dirty_items_with_failure_toast(&dirty, window, cx)
+    });
+    assert!(saved.await);
+    ws.update_in(&mut vcx, |ws, _window, cx| {
         assert!(ws.collect_dirty_items(cx).is_empty());
         ws.show_page(crate::workspace::pages::Page::Flows, cx);
         ws.flow_list_for_panel(cx);

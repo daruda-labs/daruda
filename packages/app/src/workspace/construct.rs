@@ -35,7 +35,7 @@ impl Workspace {
 
     /// Test-only constructor that skips the heavy runtime systems:
     /// initial tab + PTY spawn, JSONL/skills/MCP filesystem watchers,
-    /// `tasks_global::load_from_dir`, `persist_state`, macro-shortcut
+    /// `restore_task_cli_tracking`, `persist_state`, macro-shortcut
     /// registration, and `WindowRegistry` register. Tests that exercise
     /// any of those must opt in by calling the matching `refresh_*` /
     /// `add_tab` / `persist_state` method after construction.
@@ -285,7 +285,7 @@ impl Workspace {
                     // Right dock re-stages + diffs on this notify.
                     cx.notify();
                 }),
-                cx.observe_global::<crate::agent::tasks_global::GlobalTasks>(|ws, cx| {
+                cx.observe_global::<crate::runs::GlobalTasks>(|ws, cx| {
                     ws.ensure_task_live_tick(cx);
                     cx.notify();
                 }),
@@ -312,15 +312,14 @@ impl Workspace {
         Self::observe_outcome_visibility(window, cx);
         // Test-only short-circuit: every line below this point spawns a
         // background thread (PTY, FS watchers) or performs sync disk I/O
-        // (persist_state, tasks_global::load_from_dir). Tests that need
+        // (persist_state, restore_task_cli_tracking). Tests that need
         // any of these must invoke them explicitly after construction;
         // skipping them by default is what brings the suite under 30 s.
         if for_test {
-            // Render snapshots read `GlobalTasks`; registering an empty
-            // one here costs nothing and prevents
-            // "no state of type GlobalTasks exists" panics on the first
-            // `cx.notify()` triggered by any test mutation.
-            crate::agent::tasks_global::init(cx);
+            // Render snapshots read `GlobalTasks`; a test that installed no
+            // host gets a scratch task log here.
+            crate::runs::RunsHost::ensure_installed(cx);
+            Self::install_task_effects(cx);
             return ws;
         }
         // Seed the first tab only when there is a project to root it at.
@@ -347,15 +346,14 @@ impl Workspace {
         // Flow watcher: subscribes to the active lane's flow directories so a
         // graph and the Flows page follow an edit made outside the app.
         ws.respawn_flow_watcher(cx);
-        // Load the right-panel Tasks tab from this workspace's
-        // `data_dir`. Production paths all share the default
-        // `~/.config/daruda/`; tests inject a fresh per-test dir.
-        crate::agent::tasks_global::load_from_dir(cx, &ws.data_dir);
+        // Tasks are the process-wide projection `RunsHost` installed before
+        // any window; a window only reads it, so opening one never reloads
+        // (and so never discards) task state.
+        crate::runs::RunsHost::ensure_installed(cx);
+        Self::install_task_effects(cx);
         ws.restore_task_cli_tracking(cx);
-        // Kick off the pulse / duration tick if `load_from_dir`
-        // restored any `Running` task — the `GlobalTasks` observe
-        // subscription wouldn't fire here because the set_global call
-        // pre-dates the subscription registration above.
+        // The projection predates this window's `observe_global`, so start
+        // the live tick for any run already active.
         ws.ensure_task_live_tick(cx);
         // Background-detect `default_branch` for the bootstrapped project
         // (if any). `Project::bootstrap` sets it to `None` to avoid

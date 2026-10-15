@@ -13,6 +13,7 @@ pub(crate) mod target;
 pub(crate) use target::Aimed;
 use target::{dispatch_to_workspace, permission_feedback};
 
+#[derive(Clone)]
 pub enum Target {
     Telegram,
     Remote(String),
@@ -82,7 +83,23 @@ impl Target {
 pub enum Effect {
     None,
     Reply(RenderedReply),
-    Feedback { label: String, edit: Edit },
+    Feedback {
+        label: String,
+        edit: Edit,
+    },
+    /// A reply owed once the work it waits on has landed; the inbound loop
+    /// awaits it through [`Effect::settled`] before taking the next update.
+    Later(gpui::Task<Option<RenderedReply>>),
+}
+
+impl Effect {
+    /// The effect once any wait is over.
+    pub async fn settled(self) -> Self {
+        match self {
+            Self::Later(reply) => reply.await.map_or(Self::None, Self::Reply),
+            now => now,
+        }
+    }
 }
 
 #[derive(PartialEq, Eq)]
@@ -95,7 +112,7 @@ pub fn handle(aimed: Aimed, target: &Target, cx: &mut gpui::AsyncApp) -> Effect 
     let Aimed { action, adopted } = aimed;
     match action {
         InboundAction::RunCommand { command: requested } => {
-            command::run_command(requested, target, cx).map_or(Effect::None, Effect::Reply)
+            command::run_command(requested, target, cx)
         }
         InboundAction::ReportParseError { error } => {
             Effect::Reply(commands::render_parse_error(&error))
@@ -276,17 +293,20 @@ mod tests {
     }
 
     /// `/task` numbers the tasks, and `/task start <n>` starts the one at
-    /// that number. A task in an existing worktree needs no git, so its start
-    /// is answered in the same reply.
+    /// that number. The start is accepted at once and recorded in the task
+    /// log before anything opens, so a second start is refused as soon as
+    /// that lands.
     #[gpui::test]
     async fn task_start_runs_the_task_the_listing_numbered(cx: &mut gpui::TestAppContext) {
         use crate::control::spec::{ControlCommand, Ordinal, TaskCommand};
         let fixture = crate::test_support::workspace_with_agent_chat(cx);
-        let task = fixture.workspace.update(cx, |ws, cx| {
+        let created = fixture.workspace.update(cx, |ws, cx| {
             let lane = ws.control_active_lane();
             ws.control_task_create(lane.project, "Here", "p".into(), Some(lane), cx)
                 .expect("created")
         });
+        cx.run_until_parked();
+        let task = created.await.expect("recorded");
         cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
         let mut async_cx = cx.to_async();
         let mut run = |command| {
@@ -303,7 +323,22 @@ mod tests {
         let listing = run(ControlCommand::Task(TaskCommand::List));
         assert!(listing.contains("1. Here"), "{listing}");
         let started = run(ControlCommand::Task(TaskCommand::Start(Ordinal(1))));
-        assert_eq!(started, crate::surface::strings::control::task_started());
+        assert_eq!(
+            started,
+            crate::surface::strings::control::task_starting("Here")
+        );
+        cx.run_until_parked();
+        let mut async_cx = cx.to_async();
+        let mut run = |command| {
+            let aimed = super::Aimed {
+                action: InboundAction::RunCommand { command },
+                adopted: None,
+            };
+            match super::handle(aimed, &super::Target::Telegram, &mut async_cx) {
+                super::Effect::Reply(reply) => reply.text,
+                _ => panic!("a command is answered"),
+            }
+        };
         let again = run(ControlCommand::Task(TaskCommand::Start(Ordinal(1))));
         assert_eq!(
             again,
@@ -313,11 +348,11 @@ mod tests {
         );
         cx.update(|cx| {
             let state = &cx
-                .global::<crate::agent::tasks_global::GlobalTasks>()
+                .global::<crate::runs::GlobalTasks>()
                 .get(&task)
                 .unwrap()
-                .state;
-            assert_ne!(*state, daruda_store::tasks::TaskState::Backlog);
+                .lifecycle;
+            assert_ne!(*state, daruda_store::tasks::Lifecycle::Backlog);
         });
     }
 
@@ -348,15 +383,38 @@ mod tests {
             .workspace
             .update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes_for_test(cx));
         cx.run_until_parked();
-        let task = fixture.workspace.update(cx, |ws, cx| {
+        let created = fixture.workspace.update(cx, |ws, cx| {
             let project = ws.control_active_lane().project;
             ws.control_task_create(project, "Clash", "p".into(), None, cx)
                 .expect("created")
         });
+        cx.run_until_parked();
+        let task = created.await.expect("recorded");
         let mut outbound = cx.update(|cx| {
-            cx.update_global::<crate::agent::tasks_global::GlobalTasks, _>(|g, _| {
-                g.get_mut(&task).unwrap().branch_name = "main".into();
-            });
+            let spec = cx
+                .global::<crate::runs::GlobalTasks>()
+                .get(&task)
+                .unwrap()
+                .spec
+                .clone();
+            crate::runs::seed::commit_now(
+                vec![daruda_store::tasks::TaskEvent::Edited {
+                    id: task.clone(),
+                    edit: daruda_store::tasks::machine::TaskEdit {
+                        title: spec.title,
+                        prompt: spec.prompt,
+                        notes: spec.notes,
+                        auto_execute: spec.auto_execute,
+                        agent_surface: spec.agent_surface,
+                        base_worktree_path: spec.base_worktree_path,
+                        branch: Some("main".into()),
+                        run_in: None,
+                        project: None,
+                    },
+                    at: chrono::Utc::now(),
+                }],
+                cx,
+            );
             crate::settings_store::SettingsStore::init(cx);
             cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
                 store.set_user_for_testing(daruda_config::Config {

@@ -290,7 +290,7 @@ async fn closing_the_window_saves_a_dirty_pane_in_a_parked_lane(cx: &mut TestApp
             })
         })
         .unwrap();
-    assert!(saved);
+    assert!(saved.await);
     assert_eq!(disk(&temp), "mine", "Save all reaches the parked lane");
 }
 
@@ -355,7 +355,7 @@ async fn closing_the_window_saves_a_task_draft_left_behind_a_lane_switch(cx: &mu
         })
         .unwrap();
     assert!(
-        saved,
+        saved.await,
         "Save all reaches a task draft outside the active lane"
     );
 }

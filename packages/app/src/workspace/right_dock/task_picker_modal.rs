@@ -8,9 +8,9 @@
 //! | Action | Eligible task states                       |
 //! | ------ | ------------------------------------------ |
 //! | Start  | `Backlog`                                  |
-//! | Cancel | `Running`                                  |
-//! | Reopen | `Done` / `Cancelled` / `Error`             |
-//! | Retry  | `Error`                                    |
+//! | Cancel | `Preparing` / `Dispatching` / `Running`    |
+//! | Reopen | every ended run                            |
+//! | Retry  | `Error` / `Undelivered`                    |
 //! | Delete | every state                                |
 //!
 //! Cancellation routes through `ListEvent::Cancel` (Escape) and
@@ -28,6 +28,7 @@ use crate::ui::WindowExt as _;
 use crate::ui::list::{FilteredItem, FilteredListState, ListEvent, list, searchable_list_state};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
+use daruda_store::tasks::Lifecycle;
 
 /// Which action runs after the user picks a task.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -60,17 +61,20 @@ impl TaskPickAction {
 
     /// Whether `state` is eligible for this action. The same filter
     /// also drives empty-state messaging.
-    fn applies_to(self, state: &daruda_store::tasks::TaskState) -> bool {
+    fn applies_to(self, state: &Lifecycle) -> bool {
         match self {
-            Self::Start => matches!(state, daruda_store::tasks::TaskState::Backlog),
-            Self::Cancel => matches!(state, daruda_store::tasks::TaskState::Running { .. }),
-            Self::Reopen => matches!(
+            Self::Start => *state == Lifecycle::Backlog,
+            Self::Cancel => matches!(
                 state,
-                daruda_store::tasks::TaskState::Done { .. }
-                    | daruda_store::tasks::TaskState::Cancelled { .. }
-                    | daruda_store::tasks::TaskState::Error { .. }
+                Lifecycle::Preparing { .. }
+                    | Lifecycle::Dispatching { .. }
+                    | Lifecycle::Running { .. }
             ),
-            Self::Retry => matches!(state, daruda_store::tasks::TaskState::Error { .. }),
+            Self::Reopen => state.is_terminal(),
+            Self::Retry => matches!(
+                state,
+                Lifecycle::Error { .. } | Lifecycle::Undelivered { .. }
+            ),
             Self::Delete | Self::Edit => true,
         }
     }
@@ -110,23 +114,22 @@ impl TaskPickerModal {
     /// in scope — passing the result via [`Self::new`] avoids a
     /// re-entrant read from inside the modal's constructor.
     pub fn build_items(
-        state: &daruda_store::tasks::TasksState,
+        state: &daruda_store::tasks::TasksBook,
         action: TaskPickAction,
     ) -> Vec<TaskPickItem> {
-        let mut tasks: Vec<&daruda_store::tasks::Task> = state
-            .tasks
-            .iter()
-            .filter(|t| action.applies_to(&t.state))
+        let mut tasks: Vec<&daruda_store::tasks::TaskRecord> = state
+            .records()
+            .filter(|t| action.applies_to(&t.lifecycle))
             .collect();
-        tasks.sort_by_key(|t| std::cmp::Reverse(t.created_at));
+        tasks.sort_by_key(|t| std::cmp::Reverse(t.spec.created_at));
         tasks
             .into_iter()
             .map(|t| TaskPickItem {
-                id: t.id.clone(),
+                id: t.id().to_owned(),
                 label_text: SharedString::from(format!(
                     "{}  —  {}",
-                    t.title,
-                    state_label(&t.state),
+                    t.spec.title,
+                    state_label(&t.lifecycle),
                 )),
             })
             .collect()
@@ -203,13 +206,18 @@ impl TaskPickerModal {
 /// "Error") — the picker intentionally drops the suffix the right
 /// panel appends (e.g. "Done (Stop)"), so the `_PREFIX` name refers to
 /// the panel's usage, not this one.
-fn state_label(state: &daruda_store::tasks::TaskState) -> String {
+fn state_label(state: &Lifecycle) -> String {
     match state {
-        daruda_store::tasks::TaskState::Backlog => strings::terminal::task_backlog(),
-        daruda_store::tasks::TaskState::Running { .. } => strings::terminal::task_running(),
-        daruda_store::tasks::TaskState::Done { .. } => strings::terminal::task_done_prefix(),
-        daruda_store::tasks::TaskState::Error { .. } => strings::terminal::task_error_prefix(),
-        daruda_store::tasks::TaskState::Cancelled { .. } => strings::terminal::task_cancelled(),
+        Lifecycle::Backlog => strings::terminal::task_backlog(),
+        Lifecycle::Preparing { .. } | Lifecycle::Dispatching { .. } => {
+            strings::task::state_starting()
+        }
+        Lifecycle::Running { .. } => strings::terminal::task_running(),
+        Lifecycle::Done { .. } => strings::terminal::task_done_prefix(),
+        Lifecycle::Error { .. } => strings::terminal::task_error_prefix(),
+        Lifecycle::Cancelled { .. } => strings::terminal::task_cancelled(),
+        Lifecycle::Undelivered { .. } => strings::task::state_undelivered(),
+        Lifecycle::Interrupted { .. } => strings::task::state_interrupted(),
     }
 }
 

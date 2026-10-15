@@ -292,7 +292,7 @@ pub(crate) fn drive(
     window: &mut Window,
     cx: &mut App,
 ) {
-    workspace.update(cx, |ws, _| ws.suspend_persistence_for_shot());
+    workspace.update(cx, |ws, cx| ws.suspend_persistence_for_shot(cx));
     match scenario {
         ScreenshotScenario::AgentChatDiff => {
             workspace.update(cx, |ws, cx| ws.open_agent_chat_diff_for_shot(window, cx));

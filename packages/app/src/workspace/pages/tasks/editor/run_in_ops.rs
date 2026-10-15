@@ -4,12 +4,12 @@
 use std::path::Path;
 
 use daruda_store::project::{LaneKind, ProjectUuid};
-use daruda_store::tasks::{Task, TaskRunIn, TaskState};
+use daruda_store::tasks::{Lifecycle, TaskRecord, TaskRunIn, TasksBook};
 use gpui::{Context, SharedString};
 
 use super::TaskEditorId;
 use super::state::{BranchValidation, RunInChoice, TaskEditContent};
-use crate::agent::tasks_global::GlobalTasks;
+use crate::runs::GlobalTasks;
 use crate::ui::select::SelectOption;
 use crate::workspace::Workspace;
 
@@ -29,11 +29,11 @@ pub(super) fn lane_options(ws: &Workspace, project: Option<ProjectUuid>) -> Vec<
 /// The lane a draft or saved task preselects: its own, else the active one
 /// when that lane is in the task's project.
 pub(super) fn initial_lane(
-    task: Option<&Task>,
+    task: Option<&TaskRecord>,
     ws: &Workspace,
     project: Option<ProjectUuid>,
 ) -> Option<SharedString> {
-    let path = match task.map(|t| &t.run_in) {
+    let path = match task.map(|t| &t.spec.run_in) {
         Some(TaskRunIn::ExistingLane { path }) => path.clone(),
         _ if ws.active_project().map(|p| p.uuid) == project => ws.active_lane()?.path.clone(),
         _ => return None,
@@ -41,8 +41,8 @@ pub(super) fn initial_lane(
     path.to_str().map(|s| SharedString::from(s.to_string()))
 }
 
-pub(super) fn run_in_choice(task: Option<&Task>) -> RunInChoice {
-    match task.map(|t| &t.run_in) {
+pub(super) fn run_in_choice(task: Option<&TaskRecord>) -> RunInChoice {
+    match task.map(|t| &t.spec.run_in) {
         Some(TaskRunIn::ExistingLane { .. }) => RunInChoice::ExistingLane,
         _ => RunInChoice::NewWorktree,
     }
@@ -50,8 +50,8 @@ pub(super) fn run_in_choice(task: Option<&Task>) -> RunInChoice {
 
 /// Whether a form's task has yet to start — a draft (`None`) or a Backlog
 /// task — so where it runs, its branch and Start are still open to it.
-pub(in crate::workspace) fn not_started(task: Option<&Task>) -> bool {
-    task.is_none_or(|task| matches!(task.state, TaskState::Backlog))
+pub(in crate::workspace) fn not_started(task: Option<&TaskRecord>) -> bool {
+    task.is_none_or(|task| task.lifecycle == Lifecycle::Backlog)
 }
 
 /// [`not_started`] for the task `te` edits.
@@ -59,16 +59,18 @@ pub(in crate::workspace) fn location_editable(te: &TaskEditContent, tasks: &Glob
     not_started(te.task_id.as_deref().and_then(|id| tasks.get(id)))
 }
 
-/// Another task already running in `lane`, for the picker's warning.
+/// Another task already running (or handing its prompt over) in `lane`,
+/// for the picker's warning.
 pub(in crate::workspace) fn task_running_in<'a>(
-    tasks: &'a GlobalTasks,
+    tasks: &'a TasksBook,
     lane: &Path,
     except: Option<&str>,
-) -> Option<&'a Task> {
-    tasks.0.tasks.iter().find(|task| {
-        Some(task.id.as_str()) != except
-            && matches!(&task.state, TaskState::Running { worktree_path }
-                if daruda_core::path::same_path(worktree_path, lane))
+) -> Option<&'a TaskRecord> {
+    tasks.records().find(|task| {
+        Some(task.id()) != except
+            && matches!(&task.lifecycle,
+                Lifecycle::Dispatching { worktree, .. } | Lifecycle::Running { worktree, .. }
+                    if daruda_core::path::same_path(worktree, lane))
     })
 }
 
@@ -124,35 +126,33 @@ impl Workspace {
 mod tests {
     use std::path::PathBuf;
 
-    use daruda_store::tasks::{Task, TaskState, TasksState};
+    use daruda_store::tasks::{ExecutionRef, Lifecycle, TaskRecord};
 
     use super::task_running_in;
-    use crate::agent::tasks_global::GlobalTasks;
+    use crate::runs::seed::{book, record};
 
-    fn running(title: &str, lane: &str) -> Task {
-        let mut task = Task::new(
+    fn running(title: &str, lane: &str) -> TaskRecord {
+        record(
             daruda_store::project::ProjectUuid::default(),
-            title.into(),
-            String::new(),
-            None,
-        );
-        task.state = TaskState::Running {
-            worktree_path: PathBuf::from(lane),
-        };
-        task
+            title,
+            Lifecycle::Running {
+                exec: ExecutionRef {
+                    task_id: title.into(),
+                    execution_id: "run".into(),
+                },
+                worktree: PathBuf::from(lane),
+            },
+        )
     }
 
     #[test]
     fn a_running_task_in_the_lane_is_found_but_not_the_task_itself() {
-        let mut state = TasksState::default();
         let own = running("Own", "/repo/main");
-        let own_id = own.id.clone();
-        state.add(own);
-        state.add(running("Elsewhere", "/repo/other"));
-        let tasks = GlobalTasks(state);
+        let own_id = own.id().to_owned();
+        let tasks = book(vec![own, running("Elsewhere", "/repo/other")]);
         let lane = PathBuf::from("/repo/main");
         assert_eq!(
-            task_running_in(&tasks, &lane, None).map(|t| t.title.as_str()),
+            task_running_in(&tasks, &lane, None).map(|t| t.spec.title.as_str()),
             Some("Own")
         );
         assert!(task_running_in(&tasks, &lane, Some(&own_id)).is_none());

@@ -6,35 +6,18 @@
 //! - **Lifecycle** — `start_task` / `cancel_task` / `reopen_task` /
 //!   `retry_task` / `focus_task_lane`.
 //!
-//! Persistence routes through `save_tasks_dirty`, which always wraps the
-//! disk write in `cx.defer` (G9 + `lint-reentrant-reads.sh`) so the
-//! background-executor task is queued *after* the current update cycle
-//! finishes — never re-entering the workspace entity.
+//! Every change is a `TaskEvent` proposed to `RunsHost`; the projection
+//! the views read changes only when the log commits it.
 
-use crate::agent::tasks_global::GlobalTasks;
+use crate::runs::GlobalTasks;
+use crate::runs::TaskIntent;
 use crate::ui::dialog::ButtonVariant;
-use chrono::Utc;
-use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use gpui::{BorrowAppContext, Context, Window};
+use daruda_store::tasks::SubTask;
+use daruda_store::tasks::machine::{LifecycleKind, TaskEdit};
+use gpui::{Context, Window};
 
 use super::task_picker_modal::{TaskPickAction, TaskPickerModal};
 use crate::workspace::Workspace;
-
-/// The form-editable fields of a saved task, as `update_task` applies them.
-pub(in crate::workspace) struct TaskEdits {
-    pub(in crate::workspace) title: String,
-    pub(in crate::workspace) prompt: String,
-    pub(in crate::workspace) notes: String,
-    pub(in crate::workspace) auto_execute: bool,
-    pub(in crate::workspace) agent_surface: daruda_store::tasks::TaskAgentSurface,
-    pub(in crate::workspace) base_worktree_path: Option<std::path::PathBuf>,
-    /// Trimmed and validated; `None` keeps the current branch.
-    pub(in crate::workspace) branch: Option<String>,
-    /// `None` keeps where the task runs.
-    pub(in crate::workspace) run_in: Option<daruda_store::tasks::TaskRunIn>,
-    /// `None` keeps the task's project.
-    pub(in crate::workspace) project: Option<daruda_store::project::ProjectUuid>,
-}
 
 impl Workspace {
     // ------------------------------------------------------------------
@@ -156,13 +139,7 @@ impl Workspace {
     /// (the prior `gpui::Task` is dropped before the new one starts,
     /// mirroring the `_error_expire_sweep` pattern).
     pub(in crate::workspace) fn ensure_task_live_tick(&mut self, cx: &mut Context<Self>) {
-        let has_running = cx
-            .global::<GlobalTasks>()
-            .0
-            .tasks
-            .iter()
-            .any(|t| matches!(t.state, daruda_store::tasks::TaskState::Running { .. }));
-        if has_running {
+        if cx.global::<GlobalTasks>().any_active() {
             if self.pumps.task_live_tick.is_none() {
                 self.pumps.task_live_tick =
                     Some(crate::workspace::right_dock::task_workflow_ops::spawn_task_live_tick(cx));
@@ -170,64 +147,6 @@ impl Workspace {
         } else {
             self.pumps.task_live_tick = None;
         }
-    }
-
-    /// Persist `tasks` to `<data_dir>/tasks.json`. Always defers the
-    /// actual `cx.background_executor` spawn so the disk write can
-    /// never race with the active update cycle (lint-reentrant-reads).
-    ///
-    /// Routes through `self.data_dir` rather than
-    /// `daruda_store::persistence::default_data_dir()` so tests that
-    /// build the workspace with a fresh temp dir don't bleed into the
-    /// real `~/Library/Application Support/daruda/` — same pattern
-    /// as `main_area::bottom_dock::macro_ops::save_panels`.
-    pub(in crate::workspace) fn save_tasks_dirty(&self, cx: &mut Context<Self>) {
-        if self.persistence_suspended {
-            return;
-        }
-        let weak = cx.weak_entity();
-        cx.defer(move |cx| {
-            let weak_for_spawn = weak.clone();
-            weak.update(cx, |ws, cx| {
-                let snapshot = cx.global::<GlobalTasks>().0.clone();
-                let dir = ws.data_dir.clone();
-                cx.spawn(async move |_, cx| {
-                    let dir_for_async = dir.clone();
-                    let result = cx
-                        .background_executor()
-                        .spawn(async move {
-                            daruda_store::tasks::persistence::save_tasks_in(
-                                &dir_for_async,
-                                &snapshot,
-                            )
-                        })
-                        .await;
-                    if let Err(e) = result {
-                        use daruda_store::observability::system_info::redact_home;
-                        let report =
-                            ErrorReport::new(crate::surface::strings::error::tasks_save_failed())
-                                .severity(ErrorSeverity::Warning)
-                                .from_error(&e)
-                                .at(file!(), line!())
-                                .with_context("dir", redact_home(&dir))
-                                .dedup("tasks.save")
-                                .build();
-                        // `report_error` routes to toast + history + NDJSON;
-                        // fall back to a log-only write when the workspace
-                        // entity is already gone (window closing).
-                        if weak_for_spawn
-                            .update(cx, |ws, cx| ws.report_error(report.clone(), cx))
-                            .is_err()
-                        {
-                            use daruda_store::observability::log_writer::LogWriter;
-                            LogWriter::log(report);
-                        }
-                    }
-                })
-                .detach();
-            })
-            .ok();
-        });
     }
 
     // ------------------------------------------------------------------
@@ -239,53 +158,33 @@ impl Workspace {
     /// editable surface — that is driven by the workflow.
     ///
     /// Where the task runs is only consulted when a Backlog task starts, so
-    /// `edits.branch` applies to a Backlog task alone; once started, the
-    /// branch names the lane it created and stays fixed.
+    /// the machine applies `edit.branch` / `run_in` / `project` to a Backlog
+    /// task alone; once started, the branch names the lane it created.
     pub(in crate::workspace) fn update_task(
         &mut self,
         task_id: &str,
-        edits: TaskEdits,
+        edit: TaskEdit,
         cx: &mut Context<Self>,
-    ) {
-        cx.update_global::<GlobalTasks, _>(|g, _| {
-            if let Some(task) = g.get_mut(task_id) {
-                task.title = edits.title;
-                task.prompt = edits.prompt;
-                task.notes = edits.notes;
-                task.auto_execute = edits.auto_execute;
-                task.agent_surface = edits.agent_surface;
-                task.base_worktree_path = edits.base_worktree_path;
-                if matches!(task.state, daruda_store::tasks::TaskState::Backlog) {
-                    if let Some(branch) = edits.branch {
-                        task.branch_name = branch;
-                    }
-                    if let Some(run_in) = edits.run_in {
-                        task.run_in = run_in;
-                    }
-                    if let Some(project) = edits.project {
-                        task.project = project;
-                    }
-                }
-                task.updated_at = Utc::now();
-            }
-        });
-        self.save_tasks_dirty(cx);
-        cx.notify();
+    ) -> gpui::Task<Result<u64, crate::runs::TaskCommitError>> {
+        let intent = TaskIntent::Edit {
+            id: task_id.to_owned(),
+            edit,
+        };
+        self.propose_task_command(intent, cx)
     }
 
     // ------------------------------------------------------------------
     // Subtask CRUD
     // ------------------------------------------------------------------
     //
-    // Mutations are applied through `cx.update_global::<GlobalTasks, _>`
-    // and persisted via `save_tasks_dirty` immediately — subtask
-    // toggles are explicit user commits (checkbox click / Enter / X),
-    // not buffered form edits, so the Task editor's `saved_snapshot`
-    // dirty comparison deliberately ignores subtasks.
+    // Subtask toggles are explicit user commits (checkbox click / Enter /
+    // X), not buffered form edits, so each proposes at once and the Task
+    // editor's `saved_snapshot` dirty comparison deliberately ignores
+    // subtasks.
 
     /// Append a manually-added subtask to `task_id`. Empty / whitespace
-    /// titles are rejected silently — the inline `[+ Add subtask…]`
-    /// input drops empty submits without surfacing an error.
+    /// titles are dropped silently — the inline `[+ Add subtask…]` input
+    /// drops empty submits without surfacing an error.
     pub(in crate::workspace) fn add_subtask(
         &mut self,
         task_id: &str,
@@ -296,79 +195,46 @@ impl Workspace {
         if trimmed.is_empty() {
             return;
         }
-        let trimmed = trimmed.to_string();
-        let mutated = cx.update_global::<GlobalTasks, bool>(|g, _| {
-            let Some(task) = g.get_mut(task_id) else {
-                return false;
-            };
-            task.subtasks
-                .push(daruda_store::tasks::SubTask::new(trimmed));
-            task.updated_at = Utc::now();
-            true
-        });
-        if mutated {
-            self.save_tasks_dirty(cx);
-            cx.notify();
-        }
+        let intent = TaskIntent::AddSubtask {
+            id: task_id.to_owned(),
+            subtask: SubTask::new(trimmed.to_owned()),
+        };
+        self.propose_task_command(intent, cx).detach();
     }
 
-    /// Flip a subtask's `completed` flag. The owning task's
-    /// `updated_at` is bumped so list ordering reacts; the subtask's
-    /// `source_session_id` is left alone so an "auto" item the user
-    /// checks off stays labelled "auto".
+    /// Flip a subtask's `completed` flag; its `source_session_id` stays, so
+    /// an "auto" item the user checks off stays labelled "auto".
     pub(in crate::workspace) fn toggle_subtask(
         &mut self,
         task_id: &str,
         subtask_id: &str,
         cx: &mut Context<Self>,
     ) {
-        let mutated = cx.update_global::<GlobalTasks, bool>(|g, _| {
-            let Some(task) = g.get_mut(task_id) else {
-                return false;
-            };
-            let Some(sub) = task.subtasks.iter_mut().find(|s| s.id == subtask_id) else {
-                return false;
-            };
-            sub.completed = !sub.completed;
-            task.updated_at = Utc::now();
-            true
-        });
-        if mutated {
-            self.save_tasks_dirty(cx);
-            cx.notify();
-        }
+        let intent = TaskIntent::ToggleSubtask {
+            id: task_id.to_owned(),
+            subtask_id: subtask_id.to_owned(),
+        };
+        self.propose_task_command(intent, cx).detach();
     }
 
-    /// Remove a subtask by id. No-op when the task or subtask is gone.
-    /// Deletion is immediate with no undo — the X button is the only path.
+    /// Remove a subtask. Deletion is immediate with no undo — the X button is
+    /// the only path.
     pub(in crate::workspace) fn delete_subtask(
         &mut self,
         task_id: &str,
         subtask_id: &str,
         cx: &mut Context<Self>,
     ) {
-        let mutated = cx.update_global::<GlobalTasks, bool>(|g, _| {
-            let Some(task) = g.get_mut(task_id) else {
-                return false;
-            };
-            let before = task.subtasks.len();
-            task.subtasks.retain(|s| s.id != subtask_id);
-            if task.subtasks.len() == before {
-                return false;
-            }
-            task.updated_at = Utc::now();
-            true
-        });
-        if mutated {
-            self.save_tasks_dirty(cx);
-            cx.notify();
-        }
+        let intent = TaskIntent::DeleteSubtask {
+            id: task_id.to_owned(),
+            subtask_id: subtask_id.to_owned(),
+        };
+        self.propose_task_command(intent, cx).detach();
     }
 
-    /// Replace a subtask's title. Empty / whitespace titles are
-    /// rejected (the inline rename input commits via Enter or blur;
-    /// either path drops empty strings rather than deleting the row
-    /// silently — destructive removal goes through the X button).
+    /// Replace a subtask's title. Empty / whitespace titles are dropped (the
+    /// inline rename commits via Enter or blur; destructive removal goes
+    /// through the X button), as is a title that did not change.
     pub(in crate::workspace) fn rename_subtask(
         &mut self,
         task_id: &str,
@@ -377,51 +243,77 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let trimmed = new_title.trim();
-        if trimmed.is_empty() {
+        let unchanged = cx
+            .global::<GlobalTasks>()
+            .get(task_id)
+            .and_then(|task| task.subtasks.iter().find(|s| s.id == subtask_id))
+            .is_some_and(|sub| sub.title == trimmed);
+        if trimmed.is_empty() || unchanged {
             return;
         }
-        let trimmed = trimmed.to_string();
-        let mutated = cx.update_global::<GlobalTasks, bool>(|g, _| {
-            let Some(task) = g.get_mut(task_id) else {
-                return false;
-            };
-            let Some(sub) = task.subtasks.iter_mut().find(|s| s.id == subtask_id) else {
-                return false;
-            };
-            if sub.title == trimmed {
-                return false;
-            }
-            sub.title = trimmed;
-            task.updated_at = Utc::now();
-            true
-        });
-        if mutated {
-            self.save_tasks_dirty(cx);
-            cx.notify();
-        }
+        let intent = TaskIntent::RenameSubtask {
+            id: task_id.to_owned(),
+            subtask_id: subtask_id.to_owned(),
+            title: trimmed.to_owned(),
+        };
+        self.propose_task_command(intent, cx).detach();
     }
 
-    /// Permanent delete. The associated lane (if any) is *not*
-    /// removed — the user takes care of that from the left dock so two
-    /// destructive actions never share one click. (D-1) An editor showing
-    /// the task closes with it: it has nothing left to save into.
+    /// Permanent delete. The associated lane (if any) is *not* removed — the
+    /// user takes care of that from the left dock so two destructive actions
+    /// never share one click. (D-1) A run still under way is cancelled first
+    /// (the log never deletes an active task), and an editor showing the task
+    /// closes once it is gone: it has nothing left to save into.
     pub(in crate::workspace) fn delete_task(
         &mut self,
         task_id: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Drop pending failure tallies before the task itself
-        // disappears, otherwise the entries stay forever.
-        let stale_sessions: Vec<String> = cx
-            .global::<GlobalTasks>()
-            .get(task_id)
-            .map(|t| t.session_ids.clone())
-            .unwrap_or_default();
+        let Some(task) = cx.global::<GlobalTasks>().get(task_id) else {
+            return;
+        };
+        // Drop pending failure tallies before the task itself disappears,
+        // otherwise the entries stay forever.
+        let stale_sessions = task.session_ids.clone();
+        let active = (task.lifecycle.kind() != LifecycleKind::Backlog
+            && !task.lifecycle.is_terminal())
+        .then(|| task.current_exec().cloned())
+        .flatten();
         self.claude_sessions
             .forget_tool_use_failures(&stale_sessions);
-        cx.update_global::<GlobalTasks, _>(|g, _| g.remove(task_id));
-        self.save_tasks_dirty(cx);
+        let cancelled = active.map(|exec| self.cancel_execution(exec, cx));
+        let id = task_id.to_owned();
+        cx.spawn_in(window, async move |ws, cx| {
+            if let Some(cancelled) = cancelled
+                && cancelled.await.is_err()
+            {
+                return;
+            }
+            let Ok(deleted) = ws.update(cx, |ws, cx| {
+                let intent = TaskIntent::Delete { id: id.clone() };
+                ws.propose_task_command(intent, cx)
+            }) else {
+                return;
+            };
+            if deleted.await.is_err() {
+                return;
+            }
+            // SILENT-OK: the window closed; its editor went with it.
+            let _ = ws.update_in(cx, |ws, window, cx| {
+                ws.close_deleted_task_editor(&id, window, cx)
+            });
+        })
+        .detach();
+    }
+
+    /// Close the editor showing a task that no longer exists.
+    fn close_deleted_task_editor(
+        &mut self,
+        task_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(detail) = &self.pages.tasks.detail
             && detail.editor.task_id.as_deref() == Some(task_id)
         {
@@ -449,8 +341,7 @@ impl Workspace {
         // Build the picker items now, while we still own the
         // `&mut self` borrow. The modal must not re-enter the
         // workspace from inside its constructor.
-        let tasks_snapshot = cx.global::<GlobalTasks>().0.clone();
-        let items = TaskPickerModal::build_items(&tasks_snapshot, action);
+        let items = TaskPickerModal::build_items(cx.global::<GlobalTasks>().book(), action);
         let weak = cx.weak_entity();
         crate::workspace::dialog_helpers::open_form_modal(
             action.modal_title(),
@@ -461,12 +352,10 @@ impl Workspace {
         );
     }
 
-    /// Open an OK-only alert dialog showing the full
-    /// `TaskState::Error.message` for `task_id`. No-op for tasks that
-    /// are not currently in the `Error` state — the menu entry is
-    /// only exposed on Error rows, but defensive guarding keeps the
-    /// dispatcher honest if a race lets the state flip between menu
-    /// open and click.
+    /// Open an OK-only alert dialog showing why `task_id` failed. No-op
+    /// for tasks with no failure to show — the menu entry is only exposed
+    /// on failed rows, but defensive guarding keeps the dispatcher honest
+    /// if a race lets the state flip between menu open and click.
     pub(super) fn open_task_error_dialog(
         &mut self,
         task_id: &str,
@@ -478,9 +367,9 @@ impl Workspace {
             let Some(task) = g.get(task_id) else {
                 return;
             };
-            match &task.state {
-                daruda_store::tasks::TaskState::Error { message, .. } => message.clone(),
-                _ => return,
+            match super::tasks::failure_text(&task.lifecycle) {
+                Some(message) => message,
+                None => return,
             }
         };
         crate::workspace::dialog_helpers::open_alert_dialog(
@@ -506,7 +395,7 @@ impl Workspace {
             let Some(task) = g.get(task_id) else {
                 return;
             };
-            crate::surface::strings::task::confirm_delete_body(&task.title)
+            crate::surface::strings::task::confirm_delete_body(&task.spec.title)
         };
         let weak = cx.weak_entity();
         let id = task_id.to_string();

@@ -5,13 +5,14 @@
 //! control vocabulary. That translation lives inside `crate::workspace`
 //! because the answers' types do.
 
-use gpui::{BorrowAppContext as _, Context, Window};
+use chrono::Utc;
+use gpui::{Context, Window};
 
 use daruda_store::project::{LaneRef, ProjectId, ProjectUuid};
-use daruda_store::tasks::{Task, TaskRunIn, TaskState};
+use daruda_store::tasks::{Lifecycle, TaskRunIn, TaskSpec};
 
-use crate::agent::tasks_global::GlobalTasks;
 use crate::control::result::{ControlError, TaskProject};
+use crate::runs::{GlobalTasks, TaskCommitError, TaskIntent};
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::right_dock::task_chat_ops::TaskChatError;
@@ -44,6 +45,8 @@ impl Workspace {
 
     /// Add a Backlog task to `project`, running in `worktree` when one is
     /// named. Saved like one the form creates, with the form's defaults.
+    /// Answers once the task is in the log, so the caller's next command
+    /// finds it.
     pub(crate) fn control_task_create(
         &mut self,
         project: ProjectId,
@@ -51,7 +54,7 @@ impl Workspace {
         prompt: String,
         worktree: Option<LaneRef>,
         cx: &mut Context<Self>,
-    ) -> Result<String, ControlError> {
+    ) -> Result<gpui::Task<Result<String, ControlError>>, ControlError> {
         let title = title.trim();
         if title.is_empty() {
             return Err(ControlError::TaskTitleEmpty);
@@ -72,31 +75,36 @@ impl Workspace {
             },
             Some(_) => return Err(ControlError::TargetGone),
         };
-        let mut task = Task::new(uuid, title.to_owned(), prompt, None);
-        task.run_in = run_in;
-        let id = task.id.clone();
-        cx.update_global::<GlobalTasks, _>(|g, _| {
-            g.add(task);
-        });
-        self.save_tasks_dirty(cx);
-        cx.notify();
-        Ok(id)
+        let mut spec = TaskSpec::new(uuid, title.to_owned(), prompt, None, Utc::now());
+        spec.run_in = run_in;
+        let id = spec.id.clone();
+        let created = self.propose_task_command(TaskIntent::Create { spec }, cx);
+        Ok(cx.spawn(async move |_, _| created.await.map(|_| id).map_err(control_commit_error)))
     }
 
-    /// Cancel a running task, as the Tasks UI's Cancel does.
+    /// Cancel a task that is starting or running, as the Tasks UI's Cancel
+    /// does. Answers once the cancel is in the log.
     pub(crate) fn control_task_stop(
         &mut self,
         task: &str,
         cx: &mut Context<Self>,
-    ) -> Result<(), ControlError> {
-        match cx.global::<GlobalTasks>().get(task).map(|t| &t.state) {
-            None => Err(ControlError::TaskNotFound),
-            Some(TaskState::Running { .. }) => {
-                self.cancel_task(task, cx);
-                Ok(())
-            }
-            Some(_) => Err(ControlError::TaskNotRunning),
-        }
+    ) -> Result<gpui::Task<Result<(), ControlError>>, ControlError> {
+        let exec = match cx.global::<GlobalTasks>().get(task).map(|t| &t.lifecycle) {
+            None => return Err(ControlError::TaskNotFound),
+            Some(
+                Lifecycle::Preparing { exec, .. }
+                | Lifecycle::Dispatching { exec, .. }
+                | Lifecycle::Running { exec, .. },
+            ) => exec.clone(),
+            Some(_) => return Err(ControlError::TaskNotRunning),
+        };
+        let cancelled = self.cancel_execution(exec, cx);
+        Ok(cx.spawn(async move |_, _| {
+            cancelled.await.map(|_| ()).map_err(|e| match e {
+                TaskCommitError::Rejected(_) => ControlError::TaskNotRunning,
+                other => control_commit_error(other),
+            })
+        }))
     }
 
     /// Start `task`, answering on the returned channel. A refusal is on it
@@ -159,6 +167,13 @@ impl Workspace {
     }
 }
 
+/// A task change the log did not take, in the control vocabulary.
+fn control_commit_error(e: TaskCommitError) -> ControlError {
+    ControlError::TaskNotRecorded {
+        detail: e.to_string(),
+    }
+}
+
 /// A start failure in the control vocabulary. The detail strings are for
 /// the model reading the result, not for a person, so they stay English.
 fn control_start_error(e: TaskStartError) -> ControlError {
@@ -179,5 +194,6 @@ fn control_start_error(e: TaskStartError) -> ControlError {
         TaskStartError::GitAddFailed { detail }
         | TaskStartError::FinalizeFailed { detail }
         | TaskStartError::PromptUndelivered { detail } => ControlError::TaskStartFailed { detail },
+        TaskStartError::NotRecorded { detail } => ControlError::TaskNotRecorded { detail },
     }
 }

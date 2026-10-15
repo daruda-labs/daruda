@@ -57,8 +57,9 @@ impl ConvertError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Command {
     Immediate(ResolvedCommand),
-    /// Runs at once but answers later: it starts a turn and the reply is that
-    /// turn's. Not `Gated` — nobody is asked, so nothing is approved.
+    /// Runs at once but answers later: the reply is the turn it starts, or
+    /// the task change it writes. Not `Gated` — nobody is asked, so nothing
+    /// is approved.
     Waiting(ResolvedCommand),
     Gated(GatedCommand),
 }
@@ -108,7 +109,7 @@ pub(crate) fn to_command(id: ToolId, args: &Value) -> Result<Command, ConvertErr
             agent: optional_string_arg(args, "agent")?,
         }),
         ToolId::TaskList => Command::Immediate(ResolvedCommand::TaskList),
-        ToolId::TaskStop => Command::Immediate(ResolvedCommand::TaskStop {
+        ToolId::TaskStop => Command::Waiting(ResolvedCommand::TaskStop {
             task: string_arg(args, "task")?,
         }),
         ToolId::TaskCreate => Command::Gated(GatedCommand::TaskCreate {

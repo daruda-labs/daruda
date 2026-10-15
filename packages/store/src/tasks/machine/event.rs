@@ -7,10 +7,11 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::{InterruptCause, StartFailure, TaskRecord, TaskSpec, UndeliveredReason};
+use crate::accounts::AccountId;
 use crate::project::ProjectUuid;
 use crate::tasks::{
-    CliProcessState, ExecutionRef, SessionEndReason, SubTask, TaskAgentSurface, TaskExecution,
-    TaskId, TaskRunIn,
+    CliProcessState, ExecutionRef, SessionEndReason, SubTask, TaskAgentSurface,
+    TaskExecutionSource, TaskId, TaskRunIn,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,14 +61,21 @@ pub enum TaskEvent {
         items: Vec<TodoItem>,
         at: DateTime<Utc>,
     },
+    /// Freezes what is known before any lane or pane exists: the run's id
+    /// and what drives it. The rest of the run is fixed by `LanePrepared`.
     DispatchRequested {
         id: TaskId,
-        execution: TaskExecution,
+        execution_id: String,
+        source: TaskExecutionSource,
         at: DateTime<Utc>,
     },
+    /// The pane the run uses exists; its identity completes the run.
     LanePrepared {
         exec: ExecutionRef,
         worktree: PathBuf,
+        agent_id: String,
+        account_id: Option<AccountId>,
+        cwd: PathBuf,
         at: DateTime<Utc>,
     },
     DispatchFailed {

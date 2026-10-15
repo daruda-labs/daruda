@@ -17,6 +17,20 @@ use daruda_store::tasks::task::{
     TaskRunIn, TaskScope, TaskState, TasksState,
 };
 
+/// `task` as the task log holds it.
+fn record_of(task: &Task) -> daruda_store::tasks::TaskRecord {
+    let state = TasksState {
+        tasks: vec![task.clone()],
+        ..TasksState::default()
+    };
+    let daruda_store::tasks::TaskEvent::Imported { mut tasks } =
+        daruda_store::tasks::migrate_legacy(&state)
+    else {
+        panic!("migration yields an import");
+    };
+    tasks.remove(0)
+}
+
 fn sample_task() -> Task {
     Task::new(
         ProjectUuid::new(),
@@ -409,126 +423,120 @@ fn tasks_state_default_uses_current_schema_version() {
 }
 
 // ---------------------------------------------------------------------------
-// TaskFilter matrix (5 states × 6 filters)
+// TaskFilter matrix (9 lifecycle states × 6 filters)
 // ---------------------------------------------------------------------------
 
 #[test]
 fn task_filter_matrix_matches_each_pair() {
+    use daruda_store::tasks::ExecutionRef;
+    use daruda_store::tasks::machine::{
+        ErrorCause, InterruptCause, Lifecycle, StartFailure, UndeliveredReason,
+    };
     let wt = PathBuf::from("/repo/wt");
+    let exec = ExecutionRef {
+        task_id: "t".into(),
+        execution_id: "r".into(),
+    };
     let states = [
-        ("backlog", TaskState::Backlog),
+        ("backlog", Lifecycle::Backlog),
+        (
+            "preparing",
+            Lifecycle::Preparing {
+                exec: exec.clone(),
+                source: Default::default(),
+            },
+        ),
+        (
+            "dispatching",
+            Lifecycle::Dispatching {
+                exec: exec.clone(),
+                worktree: wt.clone(),
+            },
+        ),
         (
             "running",
-            TaskState::Running {
-                worktree_path: wt.clone(),
+            Lifecycle::Running {
+                exec: exec.clone(),
+                worktree: wt.clone(),
             },
         ),
         (
             "done",
-            TaskState::Done {
-                worktree_path: wt.clone(),
+            Lifecycle::Done {
+                exec: exec.clone(),
+                worktree: wt.clone(),
                 end_reason: SessionEndReason::Stop,
             },
         ),
         (
             "error",
-            TaskState::Error {
-                worktree_path: wt.clone(),
-                message: "x".into(),
+            Lifecycle::Error {
+                exec: Some(exec.clone()),
+                worktree: None,
+                cause: ErrorCause::StartFailed(StartFailure::GitAddFailed),
             },
         ),
-        ("cancelled", TaskState::Cancelled { worktree_path: wt }),
+        (
+            "cancelled",
+            Lifecycle::Cancelled {
+                exec: exec.clone(),
+                worktree: None,
+            },
+        ),
+        (
+            "undelivered",
+            Lifecycle::Undelivered {
+                exec: exec.clone(),
+                worktree: None,
+                reason: UndeliveredReason::PaneClosed,
+            },
+        ),
+        (
+            "interrupted",
+            Lifecycle::Interrupted {
+                exec: Some(exec),
+                worktree: wt,
+                cause: InterruptCause::UserStop,
+            },
+        ),
     ];
 
-    // (filter, state_label) -> expected match
-    let cases = [
-        (TaskFilter::All, "backlog", true),
-        (TaskFilter::All, "running", true),
-        (TaskFilter::All, "done", true),
-        (TaskFilter::All, "error", true),
-        (TaskFilter::All, "cancelled", true),
-        (TaskFilter::Backlog, "backlog", true),
-        (TaskFilter::Backlog, "running", false),
-        (TaskFilter::Backlog, "done", false),
-        (TaskFilter::Backlog, "error", false),
-        (TaskFilter::Backlog, "cancelled", false),
-        (TaskFilter::Running, "backlog", false),
-        (TaskFilter::Running, "running", true),
-        (TaskFilter::Running, "done", false),
-        (TaskFilter::Running, "error", false),
-        (TaskFilter::Running, "cancelled", false),
-        (TaskFilter::Done, "backlog", false),
-        (TaskFilter::Done, "running", false),
-        (TaskFilter::Done, "done", true),
-        (TaskFilter::Done, "error", false),
-        (TaskFilter::Done, "cancelled", false),
-        (TaskFilter::Failed, "backlog", false),
-        (TaskFilter::Failed, "running", false),
-        (TaskFilter::Failed, "done", false),
-        (TaskFilter::Failed, "error", true),
-        (TaskFilter::Failed, "cancelled", false),
-        (TaskFilter::Cancelled, "backlog", false),
-        (TaskFilter::Cancelled, "running", false),
-        (TaskFilter::Cancelled, "done", false),
-        (TaskFilter::Cancelled, "error", false),
-        (TaskFilter::Cancelled, "cancelled", true),
+    // Each filter's states; every other state is excluded.
+    let cases: [(TaskFilter, &[&str]); 6] = [
+        (
+            TaskFilter::All,
+            &[
+                "backlog",
+                "preparing",
+                "dispatching",
+                "running",
+                "done",
+                "error",
+                "cancelled",
+                "undelivered",
+                "interrupted",
+            ],
+        ),
+        (TaskFilter::Backlog, &["backlog"]),
+        (
+            TaskFilter::Running,
+            &["preparing", "dispatching", "running"],
+        ),
+        (TaskFilter::Done, &["done"]),
+        (TaskFilter::Failed, &["error", "undelivered"]),
+        (TaskFilter::Cancelled, &["cancelled", "interrupted"]),
     ];
 
-    for (filter, label, want) in cases {
-        let state = &states.iter().find(|(l, _)| *l == label).unwrap().1;
-        assert_eq!(
-            filter.matches(state),
-            want,
-            "filter={:?} state={label} expected={want}",
-            filter,
-        );
+    for (filter, included) in cases {
+        for (label, state) in &states {
+            let want = included.contains(label);
+            assert_eq!(
+                filter.matches(state),
+                want,
+                "filter={filter:?} state={label} expected={want}",
+            );
+        }
     }
-}
-
-#[test]
-fn tasks_state_filter_by_state_returns_matching_subset() {
-    let mut state = TasksState::default();
-    let mut t1 = sample_task();
-    t1.title = "a".into();
-    t1.state = TaskState::Backlog;
-    let mut t2 = sample_task();
-    t2.title = "b".into();
-    t2.state = TaskState::Running {
-        worktree_path: PathBuf::from("/wt"),
-    };
-    let mut t3 = sample_task();
-    t3.title = "c".into();
-    t3.state = TaskState::Done {
-        worktree_path: PathBuf::from("/wt"),
-        end_reason: SessionEndReason::Stop,
-    };
-    state.add(t1);
-    state.add(t2);
-    state.add(t3);
-
-    let backlog: Vec<_> = state
-        .filter_by_state(TaskFilter::Backlog)
-        .map(|t| t.title.clone())
-        .collect();
-    assert_eq!(backlog, vec!["a"]);
-
-    let running: Vec<_> = state
-        .filter_by_state(TaskFilter::Running)
-        .map(|t| t.title.clone())
-        .collect();
-    assert_eq!(running, vec!["b"]);
-
-    let terminal: Vec<_> = state
-        .filter_by_state(TaskFilter::Done)
-        .map(|t| t.title.clone())
-        .collect();
-    assert_eq!(terminal, vec!["c"]);
-
-    let all: Vec<_> = state
-        .filter_by_state(TaskFilter::All)
-        .map(|t| t.title.clone())
-        .collect();
-    assert_eq!(all, vec!["a", "b", "c"]);
 }
 
 // ---------------------------------------------------------------------------
@@ -567,31 +575,40 @@ fn prompt_file_is_named_by_task_id_wherever_the_task_runs() {
     let mut t = sample_task();
     let wt = PathBuf::from("/repo/wt");
     let expected = wt.join(PROMPT_DIR_NAME).join(format!("task-{}.md", t.id));
-    assert_eq!(prompt_file_path(&t, &wt), expected);
+    assert_eq!(prompt_file_path(&record_of(&t).spec, &wt), expected);
     t.run_in = TaskRunIn::ExistingLane { path: wt.clone() };
-    assert_eq!(prompt_file_path(&t, &wt), expected);
+    assert_eq!(prompt_file_path(&record_of(&t).spec, &wt), expected);
 }
 
 #[test]
 fn reading_falls_back_to_a_branch_named_file_only_when_it_is_the_one_on_disk() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let t = sample_task();
-    let by_id = prompt_file_path(&t, tmp.path());
+    let by_id = prompt_file_path(&record_of(&t).spec, tmp.path());
     let by_branch = tmp
         .path()
         .join(PROMPT_DIR_NAME)
         .join(format!("task-{}.md", t.branch_name));
-    assert_eq!(existing_prompt_file_path(&t, tmp.path()), by_id);
+    assert_eq!(
+        existing_prompt_file_path(&record_of(&t).spec, tmp.path()),
+        by_id
+    );
     write_prompt_file(&by_branch, "older build").expect("write");
-    assert_eq!(existing_prompt_file_path(&t, tmp.path()), by_branch);
+    assert_eq!(
+        existing_prompt_file_path(&record_of(&t).spec, tmp.path()),
+        by_branch
+    );
     write_prompt_file(&by_id, "current").expect("write");
-    assert_eq!(existing_prompt_file_path(&t, tmp.path()), by_id);
+    assert_eq!(
+        existing_prompt_file_path(&record_of(&t).spec, tmp.path()),
+        by_id
+    );
 }
 
 #[test]
 fn write_prompt_file_creates_dir_and_writes_contents() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let path = prompt_file_path(&sample_task(), tmp.path());
+    let path = prompt_file_path(&record_of(&sample_task()).spec, tmp.path());
     write_prompt_file(&path, "hello world").expect("write succeeds");
     let contents = std::fs::read_to_string(&path).expect("read");
     assert_eq!(contents, "hello world");
@@ -600,7 +617,7 @@ fn write_prompt_file_creates_dir_and_writes_contents() {
 #[test]
 fn write_prompt_file_overwrites_existing_file() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let path = prompt_file_path(&sample_task(), tmp.path());
+    let path = prompt_file_path(&record_of(&sample_task()).spec, tmp.path());
     write_prompt_file(&path, "first").expect("write 1");
     write_prompt_file(&path, "second").expect("write 2");
     let contents = std::fs::read_to_string(&path).expect("read");
@@ -636,7 +653,7 @@ fn build_claude_command_escapes_single_quotes_in_path() {
 #[test]
 fn render_task_prompt_wraps_user_prompt_with_metadata() {
     let t = sample_task();
-    let out = render_task_prompt(&t, "feature-x");
+    let out = render_task_prompt(&record_of(&t), "feature-x");
     assert!(out.starts_with("Task: \"Fix auth bug\" (feature-x)"));
     assert!(out.contains("Status: Backlog"));
     assert!(out.contains(&t.prompt));
@@ -745,14 +762,14 @@ fn save_creates_data_dir_if_missing() {
 fn task_scope_keeps_the_active_projects_tasks_or_every_task() {
     let task = sample_task();
     let other = ProjectUuid::new();
-    assert!(TaskScope::ActiveProject.matches(&task, Some(task.project)));
-    assert!(!TaskScope::ActiveProject.matches(&task, Some(other)));
-    assert!(!TaskScope::ActiveProject.matches(&task, None));
-    assert!(TaskScope::AllProjects.matches(&task, Some(other)));
-    assert!(TaskScope::AllProjects.matches(&task, None));
-    assert!(TaskScope::Project(task.project).matches(&task, Some(other)));
-    assert!(TaskScope::Project(task.project).matches(&task, None));
-    assert!(!TaskScope::Project(other).matches(&task, Some(task.project)));
+    assert!(TaskScope::ActiveProject.matches(task.project, Some(task.project)));
+    assert!(!TaskScope::ActiveProject.matches(task.project, Some(other)));
+    assert!(!TaskScope::ActiveProject.matches(task.project, None));
+    assert!(TaskScope::AllProjects.matches(task.project, Some(other)));
+    assert!(TaskScope::AllProjects.matches(task.project, None));
+    assert!(TaskScope::Project(task.project).matches(task.project, Some(other)));
+    assert!(TaskScope::Project(task.project).matches(task.project, None));
+    assert!(!TaskScope::Project(other).matches(task.project, Some(task.project)));
     assert_eq!(TaskScope::ActiveProject.project(Some(other)), Some(other));
     assert_eq!(
         TaskScope::Project(task.project).project(Some(other)),

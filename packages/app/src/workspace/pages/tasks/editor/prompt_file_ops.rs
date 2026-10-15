@@ -4,7 +4,7 @@
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::observability::system_info::redact_home;
-use daruda_store::tasks::Task;
+use daruda_store::tasks::TaskRecord;
 use gpui::{Context, Window};
 
 use super::TaskEditorId;
@@ -31,7 +31,7 @@ impl Workspace {
             return;
         };
         let task = cx
-            .global::<crate::agent::tasks_global::GlobalTasks>()
+            .global::<crate::runs::GlobalTasks>()
             .get(task_id)
             .cloned();
         let (handle, pump) = install_prompt_watcher(task.as_ref(), editor_id, window, cx);
@@ -44,14 +44,16 @@ impl Workspace {
 
 /// The on-disk prompt file for `task` — only meaningful once the task has
 /// been started (i.e. has a lane). Returns `None` for Backlog / drafts.
-fn prompt_file_path_for(task: &Task) -> Option<std::path::PathBuf> {
-    let wt = task.state.worktree_path()?;
-    Some(daruda_store::tasks::existing_prompt_file_path(task, wt))
+fn prompt_file_path_for(task: &TaskRecord) -> Option<std::path::PathBuf> {
+    let wt = task.lifecycle.worktree()?;
+    Some(daruda_store::tasks::existing_prompt_file_path(
+        &task.spec, wt,
+    ))
 }
 
 /// Install the watcher and pump when the task has a prompt file on disk.
 pub(super) fn install_prompt_watcher(
-    initial: Option<&Task>,
+    initial: Option<&TaskRecord>,
     editor_id: TaskEditorId,
     window: &mut Window,
     cx: &mut Context<Workspace>,
@@ -242,7 +244,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let Some(task) = cx
-            .global::<crate::agent::tasks_global::GlobalTasks>()
+            .global::<crate::runs::GlobalTasks>()
             .get(task_id)
             .cloned()
         else {

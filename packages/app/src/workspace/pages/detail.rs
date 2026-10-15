@@ -90,22 +90,29 @@ impl Workspace {
             let Ok(answer) = receiver.await else {
                 return;
             };
+            let saved = if answer == 0 {
+                let Ok(Some(pending)) = this.update_in(cx, |workspace, window, cx| {
+                    (workspace.page_detail_id(page) == Some(id)).then(|| {
+                        workspace.commit_dirty_items_with_failure_toast(
+                            std::slice::from_ref(&item),
+                            window,
+                            cx,
+                        )
+                    })
+                }) else {
+                    return;
+                };
+                pending.await
+            } else {
+                answer == 1
+            };
             // SILENT-OK: the window may close before the answer arrives
             let _ = this.update_in(cx, |ws, window, cx| {
                 // Answered for a detail since replaced: nothing to leave.
                 if ws.page_detail_id(page) != Some(id) {
                     return;
                 }
-                let leave = match answer {
-                    0 => ws.commit_dirty_items_with_failure_toast(
-                        std::slice::from_ref(&item),
-                        window,
-                        cx,
-                    ),
-                    1 => true,
-                    _ => false,
-                };
-                if leave {
+                if saved {
                     ws.leave_detail(id, window, cx);
                     next(ws, window, cx);
                 }

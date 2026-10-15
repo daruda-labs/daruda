@@ -12,12 +12,15 @@
 use std::path::Path;
 use std::time::Duration;
 
-use crate::agent::tasks_global::GlobalTasks;
+use crate::runs::{GlobalTasks, RunsHost};
 use chrono::Utc;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
-use daruda_store::tasks::SubTask;
-use gpui::{BorrowAppContext, Context, Window};
+use daruda_store::tasks::machine::{SettleOutcome, TodoItem as MergedTodo};
+use daruda_store::tasks::{
+    ExecutionRef, Lifecycle, TaskAgentSurface, TaskEvent, TaskRecord, new_task_id,
+};
+use gpui::{Context, Window};
 use serde::Deserialize;
 
 use crate::workspace::Workspace;
@@ -102,67 +105,60 @@ impl Workspace {
             .unwrap_or(false)
     }
 
-    /// User-initiated stop. Lane is preserved (D-1).
+    /// User-initiated stop. Lane is preserved (D-1). The log records the
+    /// cancel before the run's pane is told to stop.
     pub(in crate::workspace) fn cancel_task(&mut self, task_id: &str, cx: &mut Context<Self>) {
-        let cleared_sessions = cx.update_global::<GlobalTasks, Vec<String>>(|g, _| {
-            if let Some(task) = g.get_mut(task_id)
-                && let Some(wt) = task.state.worktree_path().cloned()
-            {
-                let ids = std::mem::take(&mut task.session_ids);
-                task.state = daruda_store::tasks::TaskState::Cancelled { worktree_path: wt };
-                task.finished_at = Some(Utc::now());
-                task.updated_at = Utc::now();
-                ids
-            } else {
-                Vec::new()
-            }
-        });
-        // Drop pending PostToolUseFailure tallies — ULIDs are never
-        // reused, so leaving them would slowly accumulate dead
-        // entries across many cancel/reopen cycles.
+        let Some(task) = cx.global::<GlobalTasks>().get(task_id) else {
+            return;
+        };
+        let cleared_sessions = task.session_ids.clone();
+        let exec = task.current_exec().cloned();
+        // Drop pending PostToolUseFailure tallies — ULIDs are never reused,
+        // so leaving them would slowly accumulate dead entries across many
+        // cancel/reopen cycles.
         self.claude_sessions
             .forget_tool_use_failures(&cleared_sessions);
-        self.cancel_task_chat_execution(task_id, cx);
-        self.save_tasks_dirty(cx);
-        cx.notify();
+        match exec {
+            Some(exec) => self.cancel_execution(exec, cx).detach(),
+            // Nothing runs, so the log refuses; the refusal is the report.
+            None => {
+                let refused = crate::runs::TaskCommitError::Rejected(
+                    daruda_store::tasks::TaskRejected::IllegalTransition {
+                        from: task_kind(cx, task_id),
+                        event: daruda_store::tasks::machine::EventKind::CancelRequested,
+                    },
+                );
+                self.report_error(super::task_commit_ops::task_commit_report(&refused), cx);
+            }
+        }
     }
 
-    /// Switch the active lane to the one this task is running in.
-    /// Lazily transitions to `Error { "lane gone" }` when the
-    /// path no longer exists on disk, so a deleted-from-the-
-    /// outside checkout doesn't dangle in `Running` forever.
+    /// Switch the active lane to the one this task is running in. A running
+    /// task whose checkout was deleted from the outside is interrupted
+    /// (`LaneLost`) rather than dangling in `Running` forever; a finished
+    /// task keeps its state.
     pub(in crate::workspace) fn focus_task_lane(
         &mut self,
         task_id: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(path) = cx
-            .global::<GlobalTasks>()
-            .get(task_id)
-            .and_then(|t| t.state.worktree_path().cloned())
-        else {
+        let Some(task) = cx.global::<GlobalTasks>().get(task_id) else {
             return;
         };
-
+        let Some(path) = task.lifecycle.worktree().map(ToOwned::to_owned) else {
+            return;
+        };
         if !path.exists() {
-            let path_for_state = path.clone();
-            let cleared = cx.update_global::<GlobalTasks, Vec<String>>(|g, _| {
-                if let Some(t) = g.get_mut(task_id) {
-                    let ids = std::mem::take(&mut t.session_ids);
-                    t.state = daruda_store::tasks::TaskState::Error {
-                        worktree_path: path_for_state,
-                        message: crate::surface::strings::task::error_lane_gone(),
-                    };
-                    t.updated_at = Utc::now();
-                    ids
-                } else {
-                    Vec::new()
-                }
-            });
-            self.claude_sessions.forget_tool_use_failures(&cleared);
-            self.save_tasks_dirty(cx);
-            cx.notify();
+            if let Lifecycle::Running { exec, .. } = &task.lifecycle {
+                let cleared = task.session_ids.clone();
+                let event = TaskEvent::LaneLost {
+                    exec: exec.clone(),
+                    at: Utc::now(),
+                };
+                self.claude_sessions.forget_tool_use_failures(&cleared);
+                RunsHost::propose_fact(event, cx);
+            }
             return;
         }
 
@@ -175,90 +171,91 @@ impl Workspace {
     /// Move a terminal-state task back to `Backlog`; the next [Start] runs
     /// it again (see `return_task_to_backlog` for where).
     pub(in crate::workspace) fn reopen_task(&mut self, task_id: &str, cx: &mut Context<Self>) {
-        self.return_task_to_backlog(task_id, cx);
+        self.return_task_to_backlog(task_id, cx).detach();
     }
 
     /// `Reopen` + `start_task` in one click — for the `[Retry]`
-    /// affordance on `Error` rows.
+    /// affordance on failed rows. The start waits for the reopen to land.
     pub(super) fn retry_task(
         &mut self,
         task_id: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.return_task_to_backlog(task_id, cx);
-        self.start_task(task_id, window, cx);
+        let reopened = self.return_task_to_backlog(task_id, cx);
+        let id = task_id.to_owned();
+        cx.spawn_in(window, async move |ws, cx| {
+            if reopened.await.is_err() {
+                return;
+            }
+            // SILENT-OK: the window closed; nothing is left to start in.
+            let _ = ws.update_in(cx, |ws, window, cx| ws.start_task(&id, window, cx));
+        })
+        .detach();
     }
 
     /// Put a finished task back in Backlog so it can run again — in the lane
-    /// its earlier run created, while that lane is still registered. Saved
-    /// here, since a Retry's Start may stop before it saves anything.
-    fn return_task_to_backlog(&mut self, task_id: &str, cx: &mut Context<Self>) {
-        let own_lane = cx
-            .global::<GlobalTasks>()
-            .get(task_id)
-            .and_then(|task| self.own_lane_for_rerun(task));
-        let cleared = cx.update_global::<GlobalTasks, Vec<String>>(|g, _| {
-            let Some(task) = g.get_mut(task_id) else {
-                return Vec::new();
-            };
-            if let Some(path) = own_lane {
-                task.run_in = daruda_store::tasks::TaskRunIn::ExistingLane { path };
-            }
-            task.state = daruda_store::tasks::TaskState::Backlog;
-            task.finished_at = None;
-            task.updated_at = Utc::now();
-            std::mem::take(&mut task.session_ids)
+    /// its earlier run created, while that lane is still registered.
+    fn return_task_to_backlog(
+        &mut self,
+        task_id: &str,
+        cx: &mut Context<Self>,
+    ) -> gpui::Task<Result<u64, crate::runs::TaskCommitError>> {
+        let task = cx.global::<GlobalTasks>().get(task_id);
+        let run_in = task.map(|task| match self.own_lane_for_rerun(task) {
+            Some(path) => daruda_store::tasks::TaskRunIn::ExistingLane { path },
+            None => task.spec.run_in.clone(),
         });
+        let cleared = task
+            .map(|task| task.session_ids.clone())
+            .unwrap_or_default();
         self.claude_sessions.forget_tool_use_failures(&cleared);
-        self.save_tasks_dirty(cx);
-        cx.notify();
+        let intent = crate::runs::TaskIntent::Reopen {
+            id: task_id.to_owned(),
+            run_in: run_in.unwrap_or_default(),
+        };
+        self.propose_task_command(intent, cx)
     }
 
     // ------------------------------------------------------------------
     // Claude hook → task state mapping
     // ------------------------------------------------------------------
 
-    /// Attach `session_id` to the `Running` task whose CLI run owns it.
-    /// Idempotent — duplicate registrations are skipped so the same hook
-    /// firing twice doesn't grow the `session_ids` vec without bound.
+    /// Attach `session_id` to the running CLI task whose run owns it.
+    /// Proposed only when it is not attached yet, so the same hook firing
+    /// twice does not grow the session list.
     pub(in crate::workspace) fn apply_task_session_changed(
         &mut self,
         session_id: &str,
         cx: &mut Context<Self>,
     ) {
-        let dirty = cx.update_global::<GlobalTasks, bool>(|g, _| {
-            let mut dirty = false;
-            for task in g.tasks.iter_mut() {
-                if !matches!(task.state, daruda_store::tasks::TaskState::Running { .. }) {
-                    continue;
-                }
-                if task.agent_surface != daruda_store::tasks::TaskAgentSurface::Terminal {
-                    continue;
-                }
-                if !task.execution.as_ref().is_some_and(|run| {
-                    run.source.cli_process().is_some()
-                        && run.session_id.as_deref() == Some(session_id)
-                }) {
-                    continue;
-                }
-                if !task.session_ids.iter().any(|s| s == session_id) {
-                    task.session_ids.push(session_id.to_string());
-                    task.updated_at = Utc::now();
-                    dirty = true;
-                }
-            }
-            dirty
-        });
-        if dirty {
-            self.save_tasks_dirty(cx);
-            cx.notify();
+        let attach: Vec<ExecutionRef> = cx
+            .global::<GlobalTasks>()
+            .records()
+            .filter(|task| {
+                matches!(task.lifecycle, Lifecycle::Running { .. })
+                    && task.spec.agent_surface == TaskAgentSurface::Terminal
+                    && task.execution.as_ref().is_some_and(|run| {
+                        run.source.cli_process().is_some()
+                            && run.session_id.as_deref() == Some(session_id)
+                    })
+                    && !task.session_ids.iter().any(|s| s == session_id)
+            })
+            .filter_map(|task| task.current_exec().cloned())
+            .collect();
+        for exec in attach {
+            let event = TaskEvent::SessionAttached {
+                exec,
+                session_id: session_id.to_owned(),
+                at: Utc::now(),
+            };
+            RunsHost::propose_fact(event, cx);
         }
     }
 
-    /// Transition every `Running` task that owns `session_id` into
-    /// `Done` / `Error`, depending on `reason`. The `session_ids`
-    /// list is cleared on transition so a future `Retry` starts clean.
+    /// Settle every running CLI task that owns `session_id` as `Done` /
+    /// `Error`, depending on `reason`. Settling clears its session list, so a
+    /// future `Retry` starts clean.
     pub(in crate::workspace) fn apply_task_session_ended(
         &mut self,
         session_id: &str,
@@ -273,93 +270,82 @@ impl Workspace {
         self.claude_sessions
             .tool_use_failure_counts
             .remove(session_id);
-
-        let dirty = cx.update_global::<GlobalTasks, bool>(|g, _| {
-            let mut dirty = false;
-            for task in g.tasks.iter_mut() {
-                if task.agent_surface != daruda_store::tasks::TaskAgentSurface::Terminal {
-                    continue;
-                }
-                if !task.session_ids.iter().any(|s| s == session_id) {
-                    continue;
-                }
-                if let daruda_store::tasks::TaskState::Running { worktree_path } =
-                    task.state.clone()
-                {
-                    task.state = match reason {
-                        daruda_store::tasks::SessionEndReason::Error => {
-                            daruda_store::tasks::TaskState::Error {
-                                worktree_path,
-                                message: crate::surface::strings::task::error_session_failed(),
-                            }
-                        }
-                        other => daruda_store::tasks::TaskState::Done {
-                            worktree_path,
-                            end_reason: other,
-                        },
-                    };
-                    task.finished_at = Some(Utc::now());
-                    task.updated_at = Utc::now();
-                    dirty = true;
-                }
-                // `retain` runs even on already-terminal tasks. That's
-                // intentional: a stale session_id from a long-completed
-                // task should still be scrubbed if we somehow see one,
-                // and the operation is a no-op when the vec is already
-                // empty (cancel/reopen path drained it).
-                task.session_ids.retain(|s| s != session_id);
-            }
-            dirty
-        });
-        if dirty {
-            self.save_tasks_dirty(cx);
-            cx.notify();
+        let settle: Vec<ExecutionRef> = cx
+            .global::<GlobalTasks>()
+            .records()
+            .filter(|task| {
+                task.spec.agent_surface == TaskAgentSurface::Terminal
+                    && task.session_ids.iter().any(|s| s == session_id)
+            })
+            .filter_map(running_exec)
+            .collect();
+        for exec in settle {
+            let event = TaskEvent::Settled {
+                exec,
+                outcome: SettleOutcome::Completed { end_reason: reason },
+                at: Utc::now(),
+            };
+            RunsHost::propose_fact(event, cx);
         }
     }
 
-    /// Only the pane that dispatched this execution may settle its task.
-    /// Restoring history or a stale execution's late event owns no new work.
-    pub(in crate::workspace) fn apply_agent_chat_task_ended(
+    /// Settle the task whose run `pane_id` owns, from that pane's activity
+    /// edge. Only the pane that dispatched this execution may settle it;
+    /// restoring history or a stale execution's late event owns no new work.
+    pub(in crate::workspace) fn settle_agent_chat_task(
         &mut self,
         pane_id: crate::workspace::main_area::pane_tree::PaneId,
-        reason: daruda_store::tasks::SessionEndReason,
+        outcome: SettleOutcome,
         cx: &mut Context<Self>,
     ) {
         let Some(owner) = self.task_chat_owner(pane_id, cx) else {
             return;
         };
-        let dirty = cx.update_global::<GlobalTasks, bool>(|g, _| {
-            let mut dirty = false;
-            for task in g.tasks.iter_mut() {
-                if task.id != owner {
-                    continue;
+        let Some(exec) = cx
+            .global::<GlobalTasks>()
+            .get(&owner)
+            .and_then(running_exec)
+        else {
+            return;
+        };
+        let event = TaskEvent::Settled {
+            exec,
+            outcome,
+            at: Utc::now(),
+        };
+        RunsHost::propose_fact(event, cx);
+    }
+
+    /// The pane that owns a task's run could not connect: a run already
+    /// under way fails, and one whose prompt never left fails to start.
+    pub(in crate::workspace) fn fail_agent_chat_task(
+        &mut self,
+        pane_id: crate::workspace::main_area::pane_tree::PaneId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(owner) = self.task_chat_owner(pane_id, cx) else {
+            return;
+        };
+        let Some(task) = cx.global::<GlobalTasks>().get(&owner) else {
+            return;
+        };
+        let at = Utc::now();
+        let event = match &task.lifecycle {
+            Lifecycle::Running { exec, .. } => TaskEvent::Settled {
+                exec: exec.clone(),
+                outcome: SettleOutcome::Errored,
+                at,
+            },
+            Lifecycle::Preparing { exec, .. } | Lifecycle::Dispatching { exec, .. } => {
+                TaskEvent::DispatchFailed {
+                    exec: exec.clone(),
+                    cause: daruda_store::tasks::machine::StartFailure::ConnectUnavailable,
+                    at,
                 }
-                let daruda_store::tasks::TaskState::Running { worktree_path } = task.state.clone()
-                else {
-                    continue;
-                };
-                task.state = match reason {
-                    daruda_store::tasks::SessionEndReason::Error => {
-                        daruda_store::tasks::TaskState::Error {
-                            worktree_path,
-                            message: crate::surface::strings::task::error_session_failed(),
-                        }
-                    }
-                    other => daruda_store::tasks::TaskState::Done {
-                        worktree_path,
-                        end_reason: other,
-                    },
-                };
-                task.finished_at = Some(Utc::now());
-                task.updated_at = Utc::now();
-                dirty = true;
             }
-            dirty
-        });
-        if dirty {
-            self.save_tasks_dirty(cx);
-            cx.notify();
-        }
+            _ => return,
+        };
+        RunsHost::propose_fact(event, cx);
     }
 
     /// Map a single Claude `last_event` string → a daruda
@@ -417,48 +403,29 @@ impl Workspace {
     /// so sessions outside daruda's task system don't trigger
     /// escalation.
     fn session_owned_by_running_task(session_id: &str, cx: &Context<Self>) -> bool {
-        cx.global::<GlobalTasks>().tasks.iter().any(|task| {
-            matches!(task.state, daruda_store::tasks::TaskState::Running { .. })
-                && task.agent_surface == daruda_store::tasks::TaskAgentSurface::Terminal
+        cx.global::<GlobalTasks>().records().any(|task| {
+            matches!(task.lifecycle, Lifecycle::Running { .. })
+                && task.spec.agent_surface == TaskAgentSurface::Terminal
                 && task.session_ids.iter().any(|s| s == session_id)
         })
     }
 
-    /// Force every `Running` task that owns `session_id` into
-    /// `Error { message }`. Distinct from
-    /// `apply_task_session_ended(_, Error, _)` because the message
-    /// reflects *why* daruda decided to escalate (e.g.
-    /// `tool_use_failure x5`) rather than the generic "session error"
-    /// fallback.
+    /// Escalate every running task that owns `session_id` to `Error` for
+    /// its tool failures. Distinct from a session that ended in error: the
+    /// cause names why daruda ended the run itself.
     pub(super) fn escalate_task_session_to_error(
         &mut self,
         session_id: &str,
         message: String,
         cx: &mut Context<Self>,
     ) {
-        let (matched, dirty) = cx.update_global::<GlobalTasks, (bool, bool)>(|g, _| {
-            let mut matched = false;
-            let mut dirty = false;
-            for task in g.tasks.iter_mut() {
-                if !task.session_ids.iter().any(|s| s == session_id) {
-                    continue;
-                }
-                matched = true;
-                if let daruda_store::tasks::TaskState::Running { worktree_path } =
-                    task.state.clone()
-                {
-                    task.state = daruda_store::tasks::TaskState::Error {
-                        worktree_path,
-                        message: message.clone(),
-                    };
-                    task.finished_at = Some(Utc::now());
-                    task.updated_at = Utc::now();
-                    dirty = true;
-                }
-                task.session_ids.retain(|s| s != session_id);
-            }
-            (matched, dirty)
-        });
+        let owners: Vec<&TaskRecord> = cx
+            .global::<GlobalTasks>()
+            .records()
+            .filter(|task| task.session_ids.iter().any(|s| s == session_id))
+            .collect();
+        let matched = !owners.is_empty();
+        let escalate: Vec<ExecutionRef> = owners.into_iter().filter_map(running_exec).collect();
         if !matched {
             // Hook ordering can land PostToolUseFailure before the
             // first StatusChanged that attaches the session to a
@@ -481,9 +448,12 @@ impl Workspace {
                 .build();
             self.report_error(report, cx);
         }
-        if dirty {
-            self.save_tasks_dirty(cx);
-            cx.notify();
+        for exec in escalate {
+            let event = TaskEvent::ToolFailuresEscalated {
+                exec,
+                at: Utc::now(),
+            };
+            RunsHost::propose_fact(event, cx);
         }
     }
 
@@ -540,52 +510,49 @@ impl Workspace {
             return;
         }
 
-        let dirty = cx.update_global::<GlobalTasks, bool>(|g, _| {
-            let now = Utc::now();
-            let mut dirty = false;
-            for task in g.tasks.iter_mut() {
-                if !task.session_ids.iter().any(|s| s == session_id) {
-                    continue;
-                }
-                for incoming in &payload.todos {
-                    let trimmed = incoming.content.trim();
-                    if trimmed.is_empty() {
-                        continue;
-                    }
-                    let completed = incoming.status.eq_ignore_ascii_case("completed");
-                    // Namespace match: only fold into an existing
-                    // subtask when both the title AND the originating
-                    // session id agree. This keeps manual rows (None)
-                    // off-limits and isolates multiple Claude sessions
-                    // sharing the same task.
-                    if let Some(existing) = task.subtasks.iter_mut().find(|s| {
-                        s.source_session_id.as_deref() == Some(session_id) && s.title == trimmed
-                    }) {
-                        if existing.completed != completed {
-                            existing.completed = completed;
-                            dirty = true;
-                        }
-                    } else {
-                        let mut new_sub = SubTask::new(trimmed.to_string());
-                        new_sub.completed = completed;
-                        new_sub.created_at = Some(now);
-                        new_sub.source_session_id = Some(session_id.to_string());
-                        task.subtasks.push(new_sub);
-                        dirty = true;
-                    }
-                }
-                if dirty {
-                    task.updated_at = now;
-                }
-            }
-            dirty
-        });
-
-        if dirty {
-            self.save_tasks_dirty(cx);
-            cx.notify();
+        let items: Vec<MergedTodo> = payload
+            .todos
+            .iter()
+            .map(|todo| MergedTodo {
+                content: todo.content.clone(),
+                completed: todo.status.eq_ignore_ascii_case("completed"),
+                // Used only if the entry becomes a new row.
+                id: new_task_id(),
+            })
+            .collect();
+        let owners: Vec<String> = cx
+            .global::<GlobalTasks>()
+            .records()
+            .filter(|task| task.session_ids.iter().any(|s| s == session_id))
+            .map(|task| task.id().to_owned())
+            .collect();
+        for id in owners {
+            let event = TaskEvent::TodoMerged {
+                id,
+                session_id: session_id.to_owned(),
+                items: items.clone(),
+                at: Utc::now(),
+            };
+            RunsHost::propose_fact(event, cx);
         }
     }
+}
+
+/// The execution of a task whose run is `Running`, the only state a
+/// session can settle or escalate.
+fn running_exec(task: &TaskRecord) -> Option<ExecutionRef> {
+    match &task.lifecycle {
+        Lifecycle::Running { exec, .. } => Some(exec.clone()),
+        _ => None,
+    }
+}
+
+fn task_kind(cx: &gpui::App, task_id: &str) -> daruda_store::tasks::LifecycleKind {
+    cx.global::<GlobalTasks>()
+        .get(task_id)
+        .map_or(daruda_store::tasks::LifecycleKind::Backlog, |task| {
+            task.lifecycle.kind()
+        })
 }
 
 /// Background loop that drives the Tasks-tab pulse + duration
@@ -598,10 +565,7 @@ pub(super) fn spawn_task_live_tick(cx: &mut Context<Workspace>) -> gpui::Task<()
             cx.background_executor().timer(TASK_LIVE_TICK).await;
             let still_alive = this
                 .update(cx, |ws, cx| {
-                    let running_exists =
-                        cx.global::<GlobalTasks>().0.tasks.iter().any(|t| {
-                            matches!(t.state, daruda_store::tasks::TaskState::Running { .. })
-                        });
+                    let running_exists = cx.global::<GlobalTasks>().any_active();
                     if running_exists {
                         cx.notify();
                         ws.notify_right_dock(cx);

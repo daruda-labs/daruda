@@ -1,3 +1,4 @@
+use futures::FutureExt as _;
 use gpui::{App, Context, Window};
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
@@ -173,15 +174,21 @@ impl Workspace {
         window
             .spawn(app, async move |cx| {
                 let answer = receiver.await.unwrap_or(2);
+                let saved = if answer == 0 {
+                    let Ok(pending) = weak_inner.update_in(cx, |this, window, cx| {
+                        this.commit_dirty_items_with_failure_toast(&dirty, window, cx)
+                    }) else {
+                        return;
+                    };
+                    pending.await
+                } else {
+                    answer == 1
+                };
                 // SILENT-OK: workspace may drop during async save-dialog wait
                 let _ = weak_inner.update_in(cx, |this, window, cx| {
                     this.window_runtime.close_in_flight = false;
-                    match answer {
-                        0 if this.commit_dirty_items_with_failure_toast(&dirty, window, cx) => {
-                            finish_close(after, window, cx);
-                        }
-                        1 => finish_close(after, window, cx),
-                        _ => {} // Cancel — leave the window open
+                    if saved {
+                        finish_close(after, window, cx);
                     }
                 });
             })
@@ -199,11 +206,58 @@ impl Workspace {
         dirty: &[DirtyItem],
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> bool {
-        let mut failed: Vec<gpui::SharedString> = Vec::new();
+    ) -> gpui::Task<bool> {
+        let mut saves = Vec::new();
         for item in dirty {
-            if !self.save_dirty_target(item.target, window, cx) {
-                failed.push(item.title.clone());
+            saves.push((
+                item.title.clone(),
+                self.save_dirty_target(item.target, window, cx),
+            ));
+        }
+        let mut saved = Box::pin(async move {
+            let mut failed = Vec::new();
+            for (title, pending) in saves {
+                if !pending.await {
+                    failed.push(title);
+                }
+            }
+            failed
+        });
+        if let Some(failed) = saved.as_mut().now_or_never() {
+            return gpui::Task::ready(self.report_failed_saves(failed, dirty, cx));
+        }
+        let requested = dirty.to_vec();
+        cx.spawn(async move |workspace, cx| {
+            let failed = saved.await;
+            match workspace.update(cx, |workspace, cx| {
+                workspace.report_failed_saves(failed, &requested, cx)
+            }) {
+                Ok(saved) => saved,
+                Err(error) => {
+                    daruda_store::observability::log_writer::LogWriter::log(
+                        ErrorReport::new("Batch save could not reach its workspace")
+                            .message(error.to_string())
+                            .at(file!(), line!())
+                            .dedup("tasks.batch_save.workspace")
+                            .build(),
+                    );
+                    false
+                }
+            }
+        })
+    }
+
+    fn report_failed_saves(
+        &mut self,
+        mut failed: Vec<gpui::SharedString>,
+        requested: &[DirtyItem],
+        cx: &mut Context<Self>,
+    ) -> bool {
+        for dirty in self.collect_dirty_items(cx) {
+            if requested.iter().any(|item| item.target == dirty.target)
+                && !failed.contains(&dirty.title)
+            {
+                failed.push(dirty.title);
             }
         }
         if failed.is_empty() {
@@ -234,21 +288,24 @@ impl Workspace {
         target: DirtyTarget,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> bool {
+    ) -> gpui::Task<bool> {
         match target {
-            DirtyTarget::Pane(pane_id) => {
-                self.write_file_pane(pane_id, false, cx) == FileSaveOutcome::Saved
+            DirtyTarget::Pane(pane_id) => gpui::Task::ready(
+                self.write_file_pane(pane_id, false, cx) == FileSaveOutcome::Saved,
+            ),
+            DirtyTarget::Detail(PageDetailId::TaskEditor(id)) => self
+                .commit_task_editor(id, window, cx)
+                .map(|(_, saved)| saved)
+                .unwrap_or_else(|| gpui::Task::ready(false)),
+            DirtyTarget::Detail(PageDetailId::Flow(id)) => {
+                gpui::Task::ready(match self.flow_graph(id) {
+                    Some((_, view)) => {
+                        let path = view.read(cx).path().to_path_buf();
+                        self.save_flow_editor(&path, view, window, cx)
+                    }
+                    None => false,
+                })
             }
-            DirtyTarget::Detail(PageDetailId::TaskEditor(id)) => {
-                self.commit_task_editor(id, window, cx).is_some()
-            }
-            DirtyTarget::Detail(PageDetailId::Flow(id)) => match self.flow_graph(id) {
-                Some((_, view)) => {
-                    let path = view.read(cx).path().to_path_buf();
-                    self.save_flow_editor(&path, view, window, cx)
-                }
-                None => false,
-            },
         }
     }
 

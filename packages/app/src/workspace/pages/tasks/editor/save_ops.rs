@@ -1,8 +1,12 @@
 //! Saving the Task editor's form: read it off the editor, check where the task
-//! runs, and persist it into `GlobalTasks`.
+//! runs, and propose it to the task log.
 
-use daruda_store::tasks::{TaskId, TaskRunIn};
-use gpui::{BorrowAppContext as _, Context, Window};
+use crate::runs::TaskIntent;
+use chrono::Utc;
+use daruda_store::tasks::machine::TaskEdit;
+use daruda_store::tasks::{TaskId, TaskRunIn, TaskSpec};
+use futures::FutureExt as _;
+use gpui::{Context, Window};
 
 use super::TaskEditorId;
 use super::state::{RunInChoice, TaskEditValues};
@@ -17,23 +21,38 @@ impl Workspace {
         editor_id: TaskEditorId,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Option<TaskId> {
+    ) -> Option<(TaskId, gpui::Task<bool>)> {
         if !self.task_editor(editor_id)?.can_save(cx) {
             return None;
         }
         self.submit_new_subtask(editor_id, window, cx);
         self.commit_rename_subtask(editor_id, cx);
-        self.commit_task_form(editor_id, cx)
+        self.begin_task_form_save(editor_id, cx)
     }
 
-    /// Persist the form into `GlobalTasks`, leaving the editor open.
-    /// Returns the resolved `task_id`, or `None` when the form is
-    /// invalid — the caller then keeps the editor.
+    /// Propose the form to the task log, leaving the editor open. Returns
+    /// the resolved `task_id`, or `None` when the form is invalid — the
+    /// caller then keeps the editor. The task shows in the projection once
+    /// the log commits it; `RunsHost::barrier` waits for that.
+    #[cfg(test)]
     pub(in crate::workspace) fn commit_task_form(
         &mut self,
         editor_id: TaskEditorId,
         cx: &mut Context<Self>,
     ) -> Option<TaskId> {
+        let (id, saved) = self.begin_task_form_save(editor_id, cx)?;
+        saved.detach();
+        Some(id)
+    }
+
+    fn begin_task_form_save(
+        &mut self,
+        editor_id: TaskEditorId,
+        cx: &mut Context<Self>,
+    ) -> Option<(TaskId, gpui::Task<bool>)> {
+        if self.task_editor(editor_id)?.pending_save.is_some() {
+            return None;
+        }
         let form = self.read_task_edit_form(editor_id, cx)?;
         let values = &form.values;
         if values.title.trim().is_empty() {
@@ -68,63 +87,122 @@ impl Workspace {
             .ok()
             .map(str::to_owned);
 
+        let mut commits = Vec::new();
         let task_id = match &form.task_id {
             Some(id) => {
-                cx.global::<crate::agent::tasks_global::GlobalTasks>()
-                    .get(id)?;
-                self.update_task(
-                    id,
-                    crate::workspace::right_dock::task_ops::TaskEdits {
-                        title: values.title.clone(),
-                        prompt: values.prompt.clone(),
-                        notes: values.notes.clone(),
-                        auto_execute: values.auto_execute,
-                        agent_surface: values.agent_surface,
-                        base_worktree_path: base_path.clone(),
-                        branch,
-                        run_in,
-                        project: form.project.filter(|_| form.editable),
-                    },
-                    cx,
-                );
+                cx.global::<crate::runs::GlobalTasks>().get(id)?;
+                let edit = TaskEdit {
+                    title: values.title.clone(),
+                    prompt: values.prompt.clone(),
+                    notes: values.notes.clone(),
+                    auto_execute: values.auto_execute,
+                    agent_surface: values.agent_surface,
+                    base_worktree_path: base_path.clone(),
+                    branch,
+                    run_in,
+                    project: form.project.filter(|_| form.editable),
+                };
+                commits.push(self.update_task(id, edit, cx));
                 id.clone()
             }
             None => {
                 // A new task belongs to the project the form names; with none
                 // open, it has nowhere to run.
                 let project = form.project?;
-                let mut task = daruda_store::tasks::Task::new(
+                let now = Utc::now();
+                let mut spec = TaskSpec::new(
                     project,
                     values.title.clone(),
                     values.prompt.clone(),
                     base_path.clone(),
+                    now,
                 );
                 if let Some(branch) = branch {
-                    task.branch_name = branch;
+                    spec.branch_name = branch;
                 }
-                task.run_in = run_in.unwrap_or_default();
-                task.subtasks = values.draft_subtasks.clone();
-                task.notes = values.notes.clone();
-                task.auto_execute = values.auto_execute;
-                task.agent_surface = values.agent_surface;
-                let new_id = task.id.clone();
-                cx.update_global::<crate::agent::tasks_global::GlobalTasks, _>(|g, _| {
-                    g.add(task);
-                });
-                self.save_tasks_dirty(cx);
+                spec.run_in = run_in.unwrap_or_default();
+                spec.notes = values.notes.clone();
+                spec.auto_execute = values.auto_execute;
+                spec.agent_surface = values.agent_surface;
+                let new_id = spec.id.clone();
+                // One log, one queue: the subtasks follow their task in order.
+                commits.push(self.propose_task_command(TaskIntent::Create { spec }, cx));
+                for subtask in values.draft_subtasks.iter().cloned() {
+                    let intent = TaskIntent::AddSubtask {
+                        id: new_id.clone(),
+                        subtask,
+                    };
+                    commits.push(self.propose_task_command(intent, cx));
+                }
                 new_id
             }
         };
 
-        // Re-baseline the dirty snapshot so the form no longer reads
-        // as dirty after a successful save.
         if let Some(te) = self.task_editor_mut(editor_id) {
-            te.task_id = Some(task_id.clone());
-            te.draft_subtasks.clear();
-            te.saved_snapshot = te.current_snapshot(cx);
+            te.pending_save = Some(task_id.clone());
         }
+        let mut committed = Box::pin(futures::future::join_all(commits));
+        if let Some(results) = committed.as_mut().now_or_never() {
+            let success = results.iter().all(Result::is_ok);
+            let saved =
+                self.finish_task_form_save(editor_id, &task_id, values.clone(), success, cx);
+            return success.then(|| (task_id, gpui::Task::ready(saved)));
+        }
+        let saved_id = task_id.clone();
+        let values = values.clone();
+        let (answer, answered) = smol::channel::bounded(1);
+        cx.spawn(async move |workspace, cx| {
+            let success = committed.await.iter().all(Result::is_ok);
+            let applied = workspace.update(cx, |workspace, cx| {
+                workspace.finish_task_form_save(editor_id, &saved_id, values, success, cx)
+            });
+            let saved = match applied {
+                Ok(saved) => saved,
+                Err(error) => {
+                    daruda_store::observability::log_writer::LogWriter::log(
+                        daruda_store::observability::error_report::ErrorReport::new(
+                            "Task save could not reach its editor",
+                        )
+                        .message(error.to_string())
+                        .at(file!(), line!())
+                        .dedup("tasks.editor.save")
+                        .build(),
+                    );
+                    false
+                }
+            };
+            // SILENT-OK: the save's caller stopped listening.
+            let _ = answer.try_send(saved);
+        })
+        .detach();
+        Some((
+            task_id,
+            cx.spawn(async move |_, _| answered.recv().await.unwrap_or(false)),
+        ))
+    }
 
-        Some(task_id)
+    fn finish_task_form_save(
+        &mut self,
+        editor_id: TaskEditorId,
+        task_id: &str,
+        mut values: TaskEditValues,
+        success: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if let Some(editor) = self.task_editor_mut(editor_id) {
+            editor.pending_save = None;
+            if success {
+                editor.task_id = Some(task_id.to_owned());
+                editor.draft_subtasks.clear();
+                values.draft_subtasks.clear();
+                editor.saved_snapshot = values;
+            }
+        }
+        cx.notify();
+        success
+            && self
+                .task_editor(editor_id)
+                .is_some_and(|editor| !editor.is_dirty(cx))
     }
 
     /// The location a still-editable form commits to, or `None` when it is

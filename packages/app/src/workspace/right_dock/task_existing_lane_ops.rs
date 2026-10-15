@@ -8,12 +8,20 @@
 use std::path::Path;
 
 use daruda_store::project::{LaneKind, LaneRef};
-use daruda_store::tasks::{Task, TaskAgentSurface};
+use daruda_store::tasks::{ExecutionRef, TaskAgentSurface, TaskRecord};
 use gpui::{Context, Window};
 
 use super::task_start::{TaskStartError, TaskStarted};
+use crate::runs::{GlobalTasks, TaskCommitError};
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
+
+/// An existing lane a start was checked against, before it is recorded.
+pub(super) struct ExistingLaneStart {
+    lane: LaneRef,
+    root: std::path::PathBuf,
+    branch: String,
+}
 
 /// What the prompt header names for a lane: its branch, else its label
 /// (a plain directory or a detached HEAD has no branch to name).
@@ -40,21 +48,20 @@ impl Workspace {
     /// The lane a task being run again should stay in: the one its earlier
     /// run created, while still registered. Starting it as a new worktree
     /// would ask git for a branch that lane already has checked out.
-    pub(super) fn own_lane_for_rerun(&self, task: &Task) -> Option<std::path::PathBuf> {
-        let path = task.state.worktree_path()?;
-        (self.lane_ref_at(path).is_some() && path.is_dir()).then(|| path.clone())
+    pub(super) fn own_lane_for_rerun(&self, task: &TaskRecord) -> Option<std::path::PathBuf> {
+        let path = task.lifecycle.worktree()?;
+        (self.lane_ref_at(path).is_some() && path.is_dir()).then(|| path.to_path_buf())
     }
 
-    /// Open a tab for `task` in the lane at `path` and hand it the prompt.
-    /// A lane that is gone or cannot host a pane leaves the task in
-    /// Backlog, so the user can pick another one and start again.
-    pub(super) fn start_task_in_existing_lane(
+    /// Check the lane at `path` can host the task, before the start is
+    /// recorded: a lane that is gone or cannot host a pane leaves the task
+    /// in Backlog, so the user can pick another one and start again.
+    pub(super) fn prepare_existing_lane_start(
         &mut self,
-        task: &Task,
         path: &Path,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Result<TaskStarted, TaskStartError> {
+    ) -> Result<ExistingLaneStart, TaskStartError> {
         let missing = || TaskStartError::LaneMissing {
             path: path.to_path_buf(),
         };
@@ -68,16 +75,41 @@ impl Workspace {
         if self.active_lane_is_inaccessible() {
             return Err(missing());
         }
+        Ok(ExistingLaneStart { lane, root, branch })
+    }
+
+    /// Open a tab for the recorded run in its lane and hand it the prompt.
+    pub(super) fn start_task_in_existing_lane(
+        &mut self,
+        exec: &ExecutionRef,
+        start: ExistingLaneStart,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<(TaskStarted, gpui::Task<Result<u64, TaskCommitError>>), TaskStartError> {
+        let ExistingLaneStart { lane, root, branch } = start;
+        let surface = cx
+            .global::<GlobalTasks>()
+            .get(&exec.task_id)
+            .map(|task| task.spec.agent_surface)
+            .ok_or(TaskStartError::NotFound)?;
+        // The lane may have closed while the start was recorded.
+        if self.lane_for(lane).is_none() {
+            return Err(TaskStartError::LaneMissing { path: root });
+        }
+        self.activate_lane(lane, window, cx);
         // `None` past the check above is a spawn failure, already reported.
         let pane = self
-            .open_task_pane_in_active_lane(task.agent_surface, root.clone(), window, cx)
+            .open_task_pane_in_active_lane(surface, root.clone(), window, cx)
             .ok_or(TaskStartError::PaneUnavailable)?;
-        self.dispatch_claude_for_task(&task.id, &root, &branch, pane, window, cx)?;
-        Ok(TaskStarted {
-            worktree: root,
-            pane,
-            surface: task.agent_surface,
-        })
+        let dispatched = self.dispatch_claude_for_task(exec, &root, &branch, pane, window, cx)?;
+        Ok((
+            TaskStarted {
+                worktree: root,
+                pane,
+                surface,
+            },
+            dispatched,
+        ))
     }
 
     fn open_task_pane_in_active_lane(

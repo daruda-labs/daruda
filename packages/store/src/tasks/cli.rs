@@ -97,7 +97,7 @@ pub struct ExecutionRef {
 }
 
 impl ExecutionRef {
-    pub fn resolve<'a>(&self, tasks: &'a super::TasksState) -> Option<&'a super::TaskExecution> {
+    pub fn resolve<'a>(&self, tasks: &'a super::TasksBook) -> Option<&'a super::TaskExecution> {
         tasks
             .get(&self.task_id)?
             .execution

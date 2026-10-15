@@ -345,6 +345,38 @@ task:
   # reason verbatim so it still matches what the adapter reported.
   error_tool_use_failure: "tool_use_failure x%{count}"
   error_write_prompt: "write prompt: %{error}"
+  # Lifecycle labels for a run that is starting, never reached its agent, or
+  # was stopped before it finished.
+  state_starting: "Starting"
+  state_undelivered: "Not delivered"
+  state_interrupted: "Interrupted"
+  # Why a start failed, shown after the Error label and in the error dialog.
+  error_start_failed: "could not start"
+  error_start_project_not_open: "project not open"
+  error_start_no_git_repo: "not a git repository"
+  error_start_repo_busy: "another worktree was being created"
+  error_start_lane_missing: "worktree missing"
+  error_start_pane_unavailable: "no pane could be opened"
+  error_start_git_add_failed: "worktree could not be created"
+  error_start_finalize_failed: "worktree could not be registered"
+  error_start_window_closed: "window closed while starting"
+  error_start_agent_missing: "agent unavailable"
+  error_start_connect_failed: "agent could not connect"
+  error_start_account_unavailable: "account unavailable"
+  # Why a prompt never reached its agent, shown after the Not delivered label.
+  undelivered_queue_full: "the chat queue was full"
+  undelivered_connect_failed: "the agent could not connect"
+  undelivered_session_ended: "the session ended first"
+  undelivered_removed: "removed from the queue"
+  undelivered_pane_closed: "the pane closed first"
+  undelivered_start_failed: "the turn could not start"
+  undelivered_pty_write_failed: "the terminal did not take it"
+  undelivered_app_restart: "daruda restarted first"
+  undelivered_orphaned: "nothing was left to deliver it"
+  # Why a run was interrupted, shown after the Interrupted label.
+  interrupted_user_stop: "stopped"
+  interrupted_extra_usage: "extra usage limit"
+  interrupted_app_restart: "daruda restarted"
   close_dirty_line: "• %{title}"
   close_dirty_line_draft: "• %{title} (new task)"
   # Which items — file panes, the Task editor, a flow graph — a save could
@@ -1461,6 +1493,13 @@ error:
   task_lane_missing: "The worktree this task runs in is not open"
   task_project_not_open: "This task's project is not open in this window"
   tasks_save_failed: "Tasks save failed"
+  # The task log could not be opened; tasks show but no change is kept.
+  tasks_unavailable: "Tasks could not be loaded, so changes to them are not saved"
+  # An earlier start stopped while it settled tasks left running; tasks stay
+  # read-only until daruda restarts cleanly.
+  tasks_read_only: "Tasks are read-only: an earlier start did not finish settling them"
+  # A task change the task log refused, e.g. stopping a task that already ended.
+  task_command_refused: "That task change is no longer possible"
   task_escalation_orphan: "Tool-use-failure escalation has no matching task"
   # Toast body under [`error_task_escalation_orphan`]. The title alone does not
   # say which session, and this report is the only trace of the dropped
@@ -2180,16 +2219,21 @@ control:
   # One /task row. `status` is one of the task_status_* words.
   task_list_row: "%{ordinal}. %{title} — %{status}"
   task_status_backlog: "backlog"
+  task_status_preparing: "preparing"
+  task_status_dispatching: "dispatching"
   task_status_running: "running"
   task_status_done: "done"
   task_status_error: "error"
   task_status_cancelled: "cancelled"
+  task_status_undelivered: "not delivered"
+  task_status_interrupted: "interrupted"
   error_task_not_found: "No such task. Send /task for the list."
   error_task_not_backlog: "That task has already run. Reopen it in daruda to run it again."
   error_task_not_running: "That task is not running."
   error_task_project_not_open: "That task's project is not open in daruda."
   error_task_start_failed: "The task did not start. daruda has the reason."
   error_task_title_empty: "A task needs a title."
+  error_task_not_recorded: "daruda could not save that task change. The desktop has the reason."
   error_task_no_session: "That task has no conversation to open yet."
   error_task_agent_unavailable: "The agent that task ran with is no longer set up."
   usage_daruda: "Usage: /daruda <what you want>"

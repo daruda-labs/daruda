@@ -61,24 +61,13 @@ impl crate::workspace::Workspace {
 
 #[cfg(test)]
 mod tests {
-    use daruda_store::tasks::Task;
-    use gpui::{AppContext as _, BorrowAppContext as _, TestAppContext};
+    use gpui::{AppContext as _, TestAppContext};
 
-    use crate::agent::tasks_global::GlobalTasks;
     use crate::workspace::tests::build_workspace;
 
     fn add_task(title: &str, cx: &mut gpui::Context<crate::workspace::Workspace>) -> String {
-        let task = Task::new(
-            daruda_store::project::ProjectUuid::default(),
-            title.into(),
-            String::new(),
-            None,
-        );
-        let id = task.id.clone();
-        cx.update_global::<GlobalTasks, _>(|g, _| {
-            g.add(task);
-        });
-        id
+        let spec = crate::runs::seed::spec(daruda_store::project::ProjectUuid::default(), title);
+        crate::runs::seed::task(spec, None, cx)
     }
 
     #[gpui::test]
@@ -121,21 +110,32 @@ mod tests {
     #[gpui::test]
     fn deleting_the_task_on_screen_closes_its_editor(cx: &mut TestAppContext) {
         let (window, ws) = build_workspace(cx);
+        let shown = cx
+            .update_window(window.into(), |_, window, cx| {
+                ws.update(cx, |ws, cx| {
+                    let shown = add_task("Shown", cx);
+                    let other = add_task("Other", cx);
+                    ws.open_task_editor(Some(shown.clone()), window, cx);
+                    ws.delete_task(&other, window, cx);
+                    shown
+                })
+            })
+            .unwrap();
+        cx.run_until_parked();
+        ws.read_with(cx, |ws, _| {
+            assert!(
+                ws.task_detail_id().is_some(),
+                "another task's delete keeps it"
+            );
+        });
         cx.update_window(window.into(), |_, window, cx| {
-            ws.update(cx, |ws, cx| {
-                let shown = add_task("Shown", cx);
-                let other = add_task("Other", cx);
-                ws.open_task_editor(Some(shown.clone()), window, cx);
-                ws.delete_task(&other, window, cx);
-                assert!(
-                    ws.task_detail_id().is_some(),
-                    "another task's delete keeps it"
-                );
-                ws.delete_task(&shown, window, cx);
-                assert_eq!(ws.task_detail_id(), None, "nothing left to save into");
-            });
+            ws.update(cx, |ws, cx| ws.delete_task(&shown, window, cx));
         })
         .unwrap();
+        cx.run_until_parked();
+        ws.read_with(cx, |ws, _| {
+            assert_eq!(ws.task_detail_id(), None, "nothing left to save into");
+        });
         assert!(
             !cx.has_pending_prompt(),
             "a deleted task's edits are not asked about"

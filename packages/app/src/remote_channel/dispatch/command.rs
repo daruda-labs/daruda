@@ -16,12 +16,15 @@ pub(crate) fn run_command(
     command: ControlCommand,
     target: &super::Target,
     cx: &mut gpui::AsyncApp,
-) -> Option<command::RenderedReply> {
+) -> super::Effect {
     trace::delivery("command", || format!("{command:?}"));
     let step = cx.update(|cx| {
         let state = target.state(cx)?;
         Some(command::resolve_command(command, state))
-    })?;
+    });
+    let Some(step) = step else {
+        return super::Effect::None;
+    };
     let (outcome, addressed) = match step {
         command::Resolution::Answer(outcome) => (outcome, None),
         // Fill in the one target no listing can name, then run like any other.
@@ -62,6 +65,15 @@ pub(crate) fn run_command(
             None,
         ),
         command::Resolution::StartTask(task) => (start_task(task, cx), None),
+        // Answered once the cancel is in the task log, so a listing sent
+        // right after the reply no longer shows the task running.
+        command::Resolution::StopTask(task) => {
+            let target = target.clone();
+            return super::Effect::Later(cx.spawn(async move |cx| {
+                let outcome = crate::control::exec::stop_task(task, cx).await;
+                cx.update(|cx| render_reply(&outcome, None, &target, cx))
+            }));
+        }
         command::Resolution::OpenTask(task) => (
             cx.update(|cx| crate::control::exec::open_task(task, cx)),
             None,
@@ -71,11 +83,19 @@ pub(crate) fn run_command(
             addressed,
         ),
     };
-    cx.update(|cx| {
-        let state = target.state(cx)?;
-        let absorbed = command::absorb(&outcome, addressed, state);
-        Some(command::render(&outcome, absorbed, state))
-    })
+    cx.update(|cx| render_reply(&outcome, addressed, target, cx))
+        .map_or(super::Effect::None, super::Effect::Reply)
+}
+
+fn render_reply(
+    outcome: &ControlOutcome,
+    addressed: Option<PaneRef>,
+    target: &super::Target,
+    cx: &mut App,
+) -> Option<command::RenderedReply> {
+    let state = target.state(cx)?;
+    let absorbed = command::absorb(outcome, addressed, state);
+    Some(command::render(outcome, absorbed, state))
 }
 
 /// Start a task for the phone. The reply says whether it was accepted; once

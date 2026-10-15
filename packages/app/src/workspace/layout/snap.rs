@@ -377,7 +377,7 @@ pub(in crate::workspace) struct RightDockSnapshot {
     pub sections: crate::workspace::right_dock::section::DockSections,
     /// Snapshot of the Tasks tab's task list. Plain-data clone — the
     /// renderer never touches `Workspace::tasks` directly.
-    pub tasks: daruda_store::tasks::TasksState,
+    pub tasks: daruda_store::tasks::TasksBook,
     pub task_browser: crate::workspace::right_dock::tasks::TaskBrowserSnapshot,
     pub task_projects: TaskProjects,
     pub task_agents: std::sync::Arc<[daruda_config::AgentDefinition]>,

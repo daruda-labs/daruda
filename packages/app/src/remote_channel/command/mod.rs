@@ -242,6 +242,9 @@ pub(crate) enum Resolution {
     /// `/task open <n>` — the opened chat becomes the phone's target, which
     /// needs the bridge this step does not have.
     OpenTask(String),
+    /// `/task stop <n>` — answered once the cancel is in the task log, which
+    /// the caller awaits.
+    StopTask(String),
 }
 
 /// Turn ordinals into concrete panes, and handle the one command that is
@@ -290,7 +293,7 @@ pub(crate) fn resolve_command(command: ControlCommand, state: &mut CommandState)
         },
         ControlCommand::Task(TaskCommand::List) => Resolution::Run(ResolvedCommand::TaskList, None),
         ControlCommand::Task(TaskCommand::Stop(ordinal)) => match state.resolve_task(ordinal) {
-            Ok(task) => Resolution::Run(ResolvedCommand::TaskStop { task }, None),
+            Ok(task) => Resolution::StopTask(task),
             Err(e) => Resolution::Answer(Err(e)),
         },
         ControlCommand::Task(TaskCommand::Start(ordinal)) => match state.resolve_task(ordinal) {

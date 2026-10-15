@@ -10,7 +10,8 @@ sections below when changing a subsystem.
 app/src/
 ├── (top-level)           # App entry, window/menu lifecycle, PTY, config watcher, slot actions
 ├── startup/              # Desktop startup and optional replay, capture, and smoke flows
-├── agent/                # Agent-side data models — MCP, skills, tasks (GPUI-free cores + Global wrappers) — plus GPUI-free account + ACP launch resolution
+├── agent/                # Agent-side data models — MCP, skills — plus GPUI-free account + ACP launch resolution
+├── runs/                 # Process-wide task log owner, read-only projection, and host-installed execution effects
 ├── surface/              # App-shell constants — name, shortcuts, strings, keybinding action map
 ├── title_bar/            # Window chrome — who draws the frame (GPUI-free `policy.rs`), the drag strip, the app-drawn caption controls, the application-menu button
 ├── ui/                   # Facade over `daruda_ui` (packages/ui/) + localized and agent-domain widgets
@@ -56,9 +57,20 @@ App-shell glue — process entry, native menu bar + Open Recent, window lifecycl
 
 ## `agent/`
 
-Agent-side data models for the right dock — MCP servers, skills, tasks. Each submodule splits responsibility into a GPUI-free state core (state struct, snapshot, disk scan, persistence writers, parsers) and a sibling GPUI Global wrapper. Personal/plugin layers are user-global; project layers are keyed per-lane. Tasks wraps `daruda_store::TasksState` as a newtype to satisfy the orphan rule.
+Agent-side data models for the right dock — MCP servers and skills. Each submodule splits responsibility into a GPUI-free state core (state struct, snapshot, disk scan, persistence writers, parsers) and a sibling GPUI Global wrapper. Personal/plugin layers are user-global; project layers are keyed per-lane.
 
 Not every submodule is a right-dock model with a Global wrapper: `account.rs` (`PreparedAccount`) and `launch_resolve.rs` (`resolve_launch` and its pure helpers) are a GPUI-free pair resolving what an ACP launch needs to spawn — command line, working directory, env, and session-host write-back — shared by the agent-chat connect pump and the shell-pane spawn funnel. `adapter_cli.rs` prepares an agent CLI run (login, auth status) through the same rules and installer, so it runs the adapter a session would.
+
+## `runs/`
+
+`RunsHost` owns the process-wide `TaskStore`. User commands enter through
+`TaskIntent`; observed execution facts are proposed as `TaskEvent`. Each reply
+follows its durable commit and foreground projection update. `GlobalTasks`
+exposes the resulting `TasksBook` through read-only accessors, and windows
+observe it instead of reloading task files. The desktop installs `RunsEffects`
+callbacks for pane operations; this module does not depend on Workspace.
+The temporary legacy mirror serializes `tasks.json` writes, including the
+latest durable state at app quit, to support downgrades during the migration.
 
 ## `surface/`
 
@@ -157,7 +169,8 @@ Runtime `Lane` model (id / path / status / `base_ref` / description) plus a GPUI
 | New pane content kind (plain-struct) | `PaneContent` variant + struct in `main_area/pane/mod.rs` → match arms (title/cwd/focus_handle/resize) → `main_area/mod.rs` walker arm (free-fn `render(&content, cx)`) → `daruda_project` persistence mirror + `#[serde(default)]` → `create_*_pane` constructor → `workspace/tests` round-trip. Rendered inline under `Workspace::render`, so its `cx.notify()` dirties the whole window. Fine for small, rarely-updating panes (File). |
 | New pane content kind (entity-backed / cached) | For a pane needing **scroll/perf isolation or its own internal state** (Terminal, AgentChat): hold a thin `XxxContent { view: Entity<XxxView>, cached_title, cwd }` wrapper; `XxxView: Render + Focusable`, its `render` calls `track_focus(&self.focus_handle)` and `cx.notify()`s itself; walker arm embeds `AnyView::from(view.clone()).cached(StyleRefinement::default().size_full().flex())`; `wrapper_focus_handle → None`; `Pane::{title,cwd}` read the wrapper (cx-free), `focus_handle(cx)` reads `view.read(cx)`. A `cx.notify()` on the view then dirties only its subtree — siblings keep their cached paint. |
 | Virtualized list inside a pane (variable-height) | Use gpui core `list(state, cx.processor(\|this, ix, win, cx\| …))` + `ListState` (`Top` align + `FollowMode::Tail` for chat-like append) — **not** `crate::ui::list` (that's the gpui_component delegate/searchable list) and not `uniform_list` (fixed height). Keep `list_state` count in sync after each items mutation; `remeasure_items(tail)` on streaming grow, `remeasure()` after any visible item's height changes (fold, async image/diff landing). Thumb + at-bottom: `crate::ui::scrollbar::{vertical_thumb_for_list, list_at_bottom}` (display-only thumb). Synthetic fold headers (turn ⊃ response ⊃ tool-group ⊃ block) are not stored — `rows::project(items, &fold)` derives a stable `Vec<RenderRow>` (header rows + `hidden`/`indent` flags) each rebuild; the list virtualizes over rows and `rebuild_rows` diff-splices so a fold toggle remeasures in place (no scroll drift). Reference: `packages/chat/src/{view/,render/,rows/,fold.rs}`. |
-| Skills / Tools / Tasks tab feature | Mutate the relevant Global via `cx.update_global::<GlobalSkills\|McpState\|GlobalTasks, _>(...)` → renderer reads through the snapshot in `RightDockSnapshot` → `cx.observe_global` rebroadcasts to every Workspace, which pushes into its open Settings |
+| Skills / Tools tab feature | Mutate the relevant Global via `cx.update_global::<GlobalSkills\|McpState, _>(...)` → renderer reads through the snapshot in `RightDockSnapshot` → `cx.observe_global` rebroadcasts to every Workspace, which pushes into its open Settings |
+| Tasks feature | Dispatch a `TaskIntent` through `RunsHost` → durable commit → read-only `GlobalTasks` projection → each Workspace's `cx.observe_global` notification |
 | Worktree drag/context menu | Data ops in `lane/mod.rs` → `LaneDrag` in `layout/ops.rs` → actions in `lane_ops/` → UI in `left_dock/projects/list.rs` |
 | New picker (search-and-pick overlay) | Plain shape, no "no list" state (copy lane switcher/palette): `is_open: bool` beside `pub picker: PickerState` on the view state, Workspace handler computes `visible_len` and calls `picker.on_key(...)` directly. Enum shape, has a "no list" state (copy flow picker): openness *is* the enum, `picker` module-private, view calls `FlowPicker::on_key` which answers Escape/Enter through the shared `picker::overlay_key` and delegates the rest only when there is a list. Either way: `PickerState` field → `ui::picker_row`/`picker_empty` → thin `on_*_key` handler in the view's `*_ops.rs` (next to its `execute_*`), opening with `let Some((key, ch)) = picker_keystroke(ev) else { return };` (`command/picker_key.rs` — returning early *without* `stop_propagation` is what keeps `Cmd+W` working) → `.when(is_open, capture_key_down(...))` stays in `render/workspace_frame.rs` |
 
@@ -209,7 +222,7 @@ daruda (app)  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
              →  gpui, gpui_component, merman, portable-pty
 
 gpui_component  →  daruda_core                         # vendored; shares the text primitives
-daruda_runlog   →  daruda_core                         # GPUI-free run log; no dependents yet
+daruda_store    →  daruda_runlog → daruda_core          # GPUI-free task state machine and run log
 ```
 
 The app can reach every package; GPUI-free packages cannot reach the app.

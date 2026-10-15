@@ -73,7 +73,7 @@ pub(crate) fn init_all(cx: &mut App) {
     }
     crate::agent::skills::global::start_catalog(cx);
     crate::agent::mcp::global::init(cx);
-    crate::agent::tasks_global::init(cx);
+    crate::runs::RunsHost::ensure_installed(cx);
     crate::update::init(cx);
 
     // Kick off a single background update check on startup when enabled.

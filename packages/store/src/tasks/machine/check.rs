@@ -33,7 +33,8 @@ pub(super) fn allowed(from: LifecycleKind, event: EventKind) -> bool {
         | E::LaneLost => from == L::Running,
         // CLI facts keep arriving after the run ends: the exit is usually
         // confirmed after the session-end hook already settled the task.
-        E::CliProcessObserved | E::CliTranscriptFound => from != L::Backlog,
+        // Before `LanePrepared` there is no run for them to describe.
+        E::CliProcessObserved | E::CliTranscriptFound => !matches!(from, L::Backlog | L::Preparing),
         E::CancelRequested | E::Reconciled => {
             matches!(from, L::Preparing | L::Dispatching | L::Running)
         }

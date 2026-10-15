@@ -11,7 +11,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::task::Task;
+use super::machine::{LifecycleKind, TaskRecord, TaskSpec};
 
 /// Subdirectory inside the lane where prompt files live.
 pub const PROMPT_DIR_NAME: &str = ".daruda";
@@ -25,13 +25,13 @@ pub const PROMPT_FILE_EXT: &str = "md";
 /// Where `task`'s prompt file is written inside `worktree`. Pure — the
 /// directory is *not* created here. Named by the task id: a lane may host
 /// several tasks, and a task's branch and lane can change while its id cannot.
-pub fn prompt_file_path(task: &Task, worktree: &Path) -> PathBuf {
+pub fn prompt_file_path(task: &TaskSpec, worktree: &Path) -> PathBuf {
     prompt_file_named(worktree, &task.id)
 }
 
 /// The prompt file to read for `task` — [`prompt_file_path`], unless only a
 /// file an older build wrote is on disk, which it named by the branch.
-pub fn existing_prompt_file_path(task: &Task, worktree: &Path) -> PathBuf {
+pub fn existing_prompt_file_path(task: &TaskSpec, worktree: &Path) -> PathBuf {
     let path = prompt_file_path(task, worktree);
     let by_branch = prompt_file_named(worktree, &task.branch_name);
     if !path.exists() && by_branch.exists() {
@@ -51,15 +51,18 @@ fn prompt_file_named(worktree: &Path, stem: &str) -> PathBuf {
 /// telling Claude to update the task on completion. Mirrors superset's
 /// `agent-prompt-template.ts`. `branch` is what the header names — the
 /// caller resolves it, since an existing lane's branch is read at Start.
-pub fn render_task_prompt(task: &Task, branch: &str) -> String {
-    let state_label = match &task.state {
-        super::task::TaskState::Backlog => "Backlog",
-        super::task::TaskState::Running { .. } => "Running",
-        super::task::TaskState::Done { .. } => "Done",
-        super::task::TaskState::Error { .. } => "Error",
-        super::task::TaskState::Cancelled { .. } => "Cancelled",
+pub fn render_task_prompt(task: &TaskRecord, branch: &str) -> String {
+    let state_label = match task.lifecycle.kind() {
+        LifecycleKind::Backlog => "Backlog",
+        LifecycleKind::Preparing | LifecycleKind::Dispatching => "Starting",
+        LifecycleKind::Running => "Running",
+        LifecycleKind::Done => "Done",
+        LifecycleKind::Error => "Error",
+        LifecycleKind::Cancelled => "Cancelled",
+        LifecycleKind::Undelivered => "Undelivered",
+        LifecycleKind::Interrupted => "Interrupted",
     };
-
+    let spec = &task.spec;
     format!(
         "Task: \"{title}\" ({branch})\n\
          Status: {status}\n\
@@ -69,10 +72,10 @@ pub fn render_task_prompt(task: &Task, branch: &str) -> String {
          Work in the current workspace. Inspect the relevant code, make the needed \
          changes, verify them when practical, and update task \"{id}\" with a short \
          summary when done.\n",
-        title = task.title,
+        title = spec.title,
         status = state_label,
-        body = task.prompt,
-        id = task.id,
+        body = spec.prompt,
+        id = spec.id,
     )
 }
 

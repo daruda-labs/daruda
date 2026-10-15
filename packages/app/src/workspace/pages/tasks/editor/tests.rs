@@ -1,10 +1,148 @@
-use crate::agent::tasks_global::GlobalTasks;
+use crate::runs::GlobalTasks;
+use crate::runs::seed::{SeedEnd, SeedRun};
 use crate::workspace::pages::tasks::editor::state::{BranchValidation, RunInChoice};
-use crate::workspace::tests::build_workspace;
-use daruda_store::tasks::{Task, TaskRunIn};
-use gpui::{
-    AppContext as _, BorrowAppContext as _, Focusable as _, TestAppContext, VisualTestContext,
-};
+use daruda_store::tasks::{TaskRunIn, TaskSpec};
+use gpui::{AppContext as _, Focusable as _, TestAppContext, VisualTestContext};
+
+/// Commits land on the spot: these tests are about the form, not about when
+/// the task log answers.
+fn build_workspace(
+    cx: &mut TestAppContext,
+) -> (
+    gpui::WindowHandle<crate::ui::Root>,
+    gpui::Entity<crate::workspace::Workspace>,
+) {
+    let built = crate::workspace::tests::build_workspace(cx);
+    cx.update(crate::runs::RunsHost::inline_commits_for_test);
+    built
+}
+
+fn new_spec(
+    project: daruda_store::project::ProjectUuid,
+    title: String,
+    prompt: String,
+    base: Option<std::path::PathBuf>,
+) -> TaskSpec {
+    TaskSpec::new(project, title, prompt, base, chrono::Utc::now())
+}
+
+fn add(task: TaskSpec, cx: &mut gpui::App) -> String {
+    crate::runs::seed::task(task, None, cx)
+}
+
+/// Commit `task` with a run in `worktree` that ended at `end`.
+fn add_run(task: TaskSpec, worktree: &std::path::Path, end: SeedEnd, cx: &mut gpui::App) -> String {
+    crate::runs::seed::task(task, Some((&SeedRun::chat(worktree), end)), cx)
+}
+
+fn records(cx: &gpui::App) -> Vec<daruda_store::tasks::TaskRecord> {
+    cx.global::<GlobalTasks>().records().cloned().collect()
+}
+
+#[gpui::test]
+async fn an_async_save_keeps_later_edits_unsaved(cx: &mut TestAppContext) {
+    let fixture = crate::test_support::workspace_for_control(cx);
+    let (editor, id, saved) = cx
+        .update_window(fixture.window.into(), |_, window, cx| {
+            fixture.workspace.update(cx, |workspace, cx| {
+                workspace.open_task_editor(None, window, cx);
+                let editor = workspace.task_detail_id().unwrap();
+                let title = workspace.task_editor(editor).unwrap().title_input.clone();
+                title.update(cx, |input, cx| {
+                    input.set_value("persisted title", window, cx)
+                });
+                let (id, saved) = workspace.commit_task_editor(editor, window, cx).unwrap();
+                assert!(workspace.task_editor(editor).unwrap().is_dirty(cx));
+                assert!(!workspace.task_editor(editor).unwrap().can_save(cx));
+                title.update(cx, |input, cx| input.set_value("later edit", window, cx));
+                (editor, id, saved)
+            })
+        })
+        .unwrap();
+    assert!(!saved.await);
+    fixture.workspace.read_with(cx, |workspace, cx| {
+        let content = workspace.task_editor(editor).unwrap();
+        assert!(content.is_dirty(cx));
+        assert!(content.can_save(cx));
+        assert_eq!(content.title_input.read(cx).value().as_ref(), "later edit");
+        assert_eq!(
+            cx.global::<GlobalTasks>().get(&id).unwrap().spec.title,
+            "persisted title"
+        );
+    });
+}
+
+#[gpui::test]
+fn a_refused_save_keeps_the_draft_open_and_dirty(cx: &mut TestAppContext) {
+    let (_project, window, workspace) = build_workspace_with_project(cx);
+    let directory = tempfile::tempdir().unwrap();
+    let store = daruda_store::tasks::TaskStore::in_directory(
+        directory.path(),
+        None,
+        "test",
+        crate::runs::no_hook(),
+    )
+    .unwrap();
+    let _claim = store.begin_reconcile().unwrap();
+    cx.update(|cx| {
+        crate::runs::RunsHost::install(crate::runs::RunsHost::open(Ok(store), None), cx)
+    });
+    let editor = cx
+        .update_window(window.into(), |_, window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                workspace.open_task_editor(None, window, cx);
+                let editor = workspace.task_detail_id().unwrap();
+                let title = workspace.task_editor(editor).unwrap().title_input.clone();
+                title.update(cx, |input, cx| {
+                    input.set_value("keep this draft", window, cx)
+                });
+                workspace.save_task_editor(editor, false, window, cx);
+                editor
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+    workspace.read_with(cx, |workspace, cx| {
+        assert_eq!(workspace.task_detail_id(), Some(editor));
+        let content = workspace.task_editor(editor).unwrap();
+        assert!(content.task_id.is_none());
+        assert!(content.is_dirty(cx));
+        assert_eq!(
+            content.title_input.read(cx).value().as_ref(),
+            "keep this draft"
+        );
+        assert!(cx.global::<GlobalTasks>().book().is_empty());
+        assert!(!workspace.error_history().is_empty());
+    });
+    cx.update_window(window.into(), |_, window, cx| {
+        workspace.update(cx, |workspace, cx| {
+            workspace.close_page_detail(window, cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert!(cx.has_pending_prompt());
+    cx.simulate_prompt_answer(&crate::surface::strings::task::edit_save_draft());
+    cx.run_until_parked();
+    workspace.read_with(cx, |workspace, cx| {
+        assert_eq!(workspace.task_detail_id(), Some(editor));
+        assert!(workspace.task_editor(editor).unwrap().is_dirty(cx));
+    });
+    let may_close = cx
+        .update_window(window.into(), |_, window, cx| {
+            crate::workspace::Workspace::may_close_window(&workspace.downgrade(), window, cx)
+        })
+        .unwrap();
+    assert!(!may_close);
+    cx.run_until_parked();
+    cx.simulate_prompt_answer(&crate::surface::strings::task::batch_save_all());
+    cx.run_until_parked();
+    assert!(cx.update_window(window.into(), |_, _, _| ()).is_ok());
+    workspace.read_with(cx, |workspace, cx| {
+        assert_eq!(workspace.task_detail_id(), Some(editor));
+        assert!(workspace.task_editor(editor).unwrap().is_dirty(cx));
+    });
+}
 
 #[gpui::test]
 fn task_list_scope_preserves_worktree_and_seeds_new_task_project(cx: &mut TestAppContext) {
@@ -45,7 +183,7 @@ fn task_list_scope_preserves_worktree_and_seeds_new_task_project(cx: &mut TestAp
             title.update(cx, |input, cx| input.set_value("Scoped draft", window, cx));
             ws.commit_task_form(editor, cx).unwrap();
             let id = ws.task_editor(editor).unwrap().task_id.clone().unwrap();
-            assert_eq!(cx.global::<GlobalTasks>().get(&id).unwrap().project, a);
+            assert_eq!(cx.global::<GlobalTasks>().get(&id).unwrap().spec.project, a);
             assert_eq!(ws.active, active);
             ws.set_task_scope(TaskScope::AllProjects, cx);
             ws.new_task_in_scope(window, cx);
@@ -72,7 +210,7 @@ fn task_list_scope_preserves_worktree_and_seeds_new_task_project(cx: &mut TestAp
 #[gpui::test]
 fn task_editor_watches_prompt_after_start_parks_its_lane(cx: &mut TestAppContext) {
     let source = tempfile::tempdir().unwrap();
-    let (window, ws) = crate::workspace::tests::build_workspace_with(
+    let (window, ws) = build_with(
         cx,
         &daruda_config::Config::default(),
         Some(daruda_store::project::Project::from_path(source.path())),
@@ -93,13 +231,12 @@ fn task_editor_watches_prompt_after_start_parks_its_lane(cx: &mut TestAppContext
                 crate::lane::Lane::default_for_project(lane, other.path().to_path_buf()),
             );
             ws.activate_lane(daruda_store::project::LaneRef { project, lane }, window, cx);
-            cx.update_global::<GlobalTasks, _>(|g, _| {
-                g.get_mut(&id).unwrap().state = daruda_store::tasks::TaskState::Running {
-                    worktree_path: other.path().to_path_buf(),
-                };
-            });
+            crate::runs::seed::commit_now(
+                crate::runs::seed::run(&id, &SeedRun::chat(other.path()), SeedEnd::Running),
+                cx,
+            );
             let task = cx.global::<GlobalTasks>().get(&id).unwrap().clone();
-            let path = daruda_store::tasks::prompt_file::prompt_file_path(&task, other.path());
+            let path = daruda_store::tasks::prompt_file::prompt_file_path(&task.spec, other.path());
             daruda_store::tasks::prompt_file::write_prompt_file(&path, "External update").unwrap();
             ws.attach_prompt_watcher_if_editor_open(&id, window, cx);
             assert!(ws.task_editor(editor).unwrap()._prompt_watcher.is_some());
@@ -148,9 +285,9 @@ fn task_editor_save_shortcut_and_tab_order(cx: &mut TestAppContext) {
     });
     vcx.run_until_parked();
     ws.read_with(&vcx, |ws, cx| {
-        let tasks = &cx.global::<GlobalTasks>().0.tasks;
+        let tasks = records(cx);
         assert_eq!(tasks.len(), 1, "shortcut saved the draft");
-        assert_eq!(tasks[0].title, "Keyboard save");
+        assert_eq!(tasks[0].spec.title, "Keyboard save");
         assert_eq!(ws.task_detail_id(), None, "a plain save closes the editor");
         assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Tasks));
     });
@@ -176,7 +313,7 @@ fn task_editor_rejects_blank_titles_and_invalid_branches(cx: &mut TestAppContext
             ws.on_task_edit_branch_typed(id, cx);
             assert!(!ws.task_editor(id).unwrap().can_save(cx));
             assert!(ws.commit_task_form(id, cx).is_none());
-            assert!(cx.global::<GlobalTasks>().0.tasks.is_empty());
+            assert!(cx.global::<GlobalTasks>().book().is_empty());
             ws.save_task_editor(id, false, window, cx);
             assert_eq!(
                 ws.task_detail_id(),
@@ -212,7 +349,7 @@ fn task_editor_save_returns_to_list_and_keeps_saved_subtasks(cx: &mut TestAppCon
                 ws.task_editor(editor).is_none(),
                 "a saved editor leaves no tab behind"
             );
-            let id = cx.global::<GlobalTasks>().0.tasks[0].id.clone();
+            let id = records(cx)[0].id().to_owned();
             let task = cx.global::<GlobalTasks>().get(&id).unwrap();
             assert_eq!(task.subtasks[0].title, "Verify keyboard");
             assert!(task.subtasks[0].completed);
@@ -223,7 +360,7 @@ fn task_editor_save_returns_to_list_and_keeps_saved_subtasks(cx: &mut TestAppCon
                 .expect("the Tasks page holds the editor");
             assert!(!ws.task_editor(editor).unwrap().is_dirty(cx));
             ws.save_task_editor(editor, false, window, cx);
-            assert_eq!(cx.global::<GlobalTasks>().0.tasks.len(), 1);
+            assert_eq!(cx.global::<GlobalTasks>().book().len(), 1);
             assert_eq!(
                 cx.global::<GlobalTasks>().get(&id).unwrap().subtasks.len(),
                 1
@@ -255,7 +392,7 @@ fn task_editor_is_no_lane_tab_and_a_plain_save_shows_the_list(cx: &mut TestAppCo
             ws.save_task_editor(editor, false, window, cx);
             assert_eq!(ws.task_detail_id(), None, "a plain save shows the list");
             assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Tasks));
-            assert_eq!(cx.global::<GlobalTasks>().0.tasks[0].title, "No tab");
+            assert_eq!(records(cx)[0].spec.title, "No tab");
         });
     })
     .unwrap();
@@ -294,8 +431,8 @@ fn leaving_with_save_keeps_an_unsubmitted_subtask(cx: &mut TestAppContext) {
     cx.run_until_parked();
     ws.read_with(cx, |ws, cx| {
         assert!(ws.task_editor(editor).is_none(), "a landed save leaves");
-        let task = &cx.global::<GlobalTasks>().0.tasks[0];
-        assert_eq!(task.title, "Closing");
+        let task = &records(cx)[0];
+        assert_eq!(task.spec.title, "Closing");
         assert_eq!(task.subtasks.len(), 1);
         assert_eq!(task.subtasks[0].title, "Typed only");
     });
@@ -351,11 +488,8 @@ fn a_saved_task_s_editor_closes_with_its_project(cx: &mut TestAppContext) {
         ws.update(cx, |ws, cx| {
             ws.add_project(b_root.path().to_path_buf(), window, cx);
             let b = ws.active_project().unwrap().uuid;
-            let task = Task::new(b, "In B".into(), String::new(), None);
-            let id = task.id.clone();
-            cx.update_global::<GlobalTasks, _>(|g, _| {
-                g.add(task);
-            });
+            let task = new_spec(b, "In B".into(), String::new(), None);
+            let id = add(task, cx);
             ws.open_task_editor(Some(id), window, cx);
             assert!(ws.task_detail_id().is_some());
             ws.close_active_project(window, cx);
@@ -373,16 +507,13 @@ fn a_save_the_leave_prompt_cannot_land_is_reported(cx: &mut TestAppContext) {
     let editor = cx
         .update_window(window.into(), |_, window, cx| {
             ws.update(cx, |ws, cx| {
-                let task = Task::new(
+                let task = new_spec(
                     daruda_store::project::ProjectUuid::default(),
                     "Titled".into(),
                     String::new(),
                     None,
                 );
-                let id = task.id.clone();
-                cx.update_global::<GlobalTasks, _>(|g, _| {
-                    g.add(task);
-                });
+                let id = add(task, cx);
                 ws.open_task_editor(Some(id), window, cx);
                 let editor = ws.task_detail_id().expect("the editor opened");
                 let title = ws.task_editor(editor).unwrap().title_input.clone();
@@ -448,7 +579,7 @@ fn task_editor_save_reveals_task_without_switching_worktree(cx: &mut TestAppCont
             assert!(ws.task_editor(editor).is_none());
 
             ws.close_page(cx);
-            let id = cx.global::<GlobalTasks>().0.tasks[0].id.clone();
+            let id = records(cx)[0].id().to_owned();
             ws.open_task_editor(Some(id), window, cx);
             let editor = ws
                 .task_detail_id()
@@ -477,17 +608,14 @@ fn task_editor_saving_a_rename_keeps_the_stored_branch(cx: &mut TestAppContext) 
     let (window, ws) = build_workspace(cx);
     cx.update_window(window.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            let task = Task::new(
+            let task = new_spec(
                 daruda_store::project::ProjectUuid::default(),
                 "Original".into(),
                 String::new(),
                 None,
             );
             let branch = task.branch_name.clone();
-            let id = task.id.clone();
-            cx.update_global::<GlobalTasks, _>(|g, _| {
-                g.add(task);
-            });
+            let id = add(task, cx);
             ws.open_task_editor(Some(id.clone()), window, cx);
             let editor = ws
                 .task_detail_id()
@@ -497,8 +625,8 @@ fn task_editor_saving_a_rename_keeps_the_stored_branch(cx: &mut TestAppContext) 
             ws.refresh_task_edit_title(editor, cx);
             ws.save_task_editor(editor, false, window, cx);
             let task = cx.global::<GlobalTasks>().get(&id).unwrap();
-            assert_eq!(task.title, "Renamed");
-            assert_eq!(task.branch_name, branch);
+            assert_eq!(task.spec.title, "Renamed");
+            assert_eq!(task.spec.branch_name, branch);
             assert!(ws.task_editor(editor).is_none());
         });
     })
@@ -607,8 +735,11 @@ fn task_editor_distinct_drafts_and_empty_branch_save(cx: &mut TestAppContext) {
                 .global::<GlobalTasks>()
                 .get(te.task_id.as_ref().unwrap())
                 .unwrap();
-            assert!(!task.branch_name.is_empty(), "an empty branch is generated");
-            assert_eq!(branch.read(cx).value().as_ref(), task.branch_name);
+            assert!(
+                !task.spec.branch_name.is_empty(),
+                "an empty branch is generated"
+            );
+            assert_eq!(branch.read(cx).value().as_ref(), task.spec.branch_name);
             assert!(!te.is_dirty(cx));
         });
     })
@@ -631,7 +762,11 @@ fn task_editor_stores_the_branch_trimmed(cx: &mut TestAppContext) {
             ws.on_task_edit_branch_typed(editor, cx);
             let id = ws.commit_task_form(editor, cx).unwrap();
             assert_eq!(
-                cx.global::<GlobalTasks>().get(&id).unwrap().branch_name,
+                cx.global::<GlobalTasks>()
+                    .get(&id)
+                    .unwrap()
+                    .spec
+                    .branch_name,
                 "fix-trim"
             );
         });
@@ -646,27 +781,21 @@ fn task_editor_edits_a_backlog_branch_but_not_a_started_one(cx: &mut TestAppCont
     let (window, ws) = build_workspace(cx);
     cx.update_window(window.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            let backlog = Task::new(
+            let backlog = new_spec(
                 daruda_store::project::ProjectUuid::default(),
                 "Backlog".into(),
                 String::new(),
                 None,
             );
-            let mut running = Task::new(
+            let running = new_spec(
                 daruda_store::project::ProjectUuid::default(),
                 "Running".into(),
                 String::new(),
                 None,
             );
-            running.state = daruda_store::tasks::TaskState::Running {
-                worktree_path: std::env::temp_dir(),
-            };
             let started_branch = running.branch_name.clone();
-            let (backlog_id, running_id) = (backlog.id.clone(), running.id.clone());
-            cx.update_global::<GlobalTasks, _>(|g, _| {
-                g.add(backlog);
-                g.add(running);
-            });
+            let backlog_id = add(backlog, cx);
+            let running_id = add_run(running, &std::env::temp_dir(), SeedEnd::Running, cx);
             for id in [&backlog_id, &running_id] {
                 ws.open_task_editor(Some(id.clone()), window, cx);
                 let editor = ws
@@ -678,11 +807,31 @@ fn task_editor_edits_a_backlog_branch_but_not_a_started_one(cx: &mut TestAppCont
                 ws.commit_task_form(editor, cx).unwrap();
             }
             let tasks = cx.global::<GlobalTasks>();
-            assert_eq!(tasks.get(&backlog_id).unwrap().branch_name, "fix-renamed");
-            assert_eq!(tasks.get(&running_id).unwrap().branch_name, started_branch);
+            assert_eq!(
+                tasks.get(&backlog_id).unwrap().spec.branch_name,
+                "fix-renamed"
+            );
+            assert_eq!(
+                tasks.get(&running_id).unwrap().spec.branch_name,
+                started_branch
+            );
         });
     })
     .unwrap();
+}
+
+/// [`crate::workspace::tests::build_workspace_with`], committing on the spot.
+fn build_with(
+    cx: &mut TestAppContext,
+    config: &daruda_config::Config,
+    project: Option<daruda_store::project::Project>,
+) -> (
+    gpui::WindowHandle<crate::ui::Root>,
+    gpui::Entity<crate::workspace::Workspace>,
+) {
+    let built = crate::workspace::tests::build_workspace_with(cx, config, project);
+    cx.update(crate::runs::RunsHost::inline_commits_for_test);
+    built
 }
 
 /// A workspace with one project, since lanes belong to a project.
@@ -695,11 +844,7 @@ fn build_workspace_with_project(
 ) {
     let root = tempfile::tempdir().unwrap();
     let project = daruda_store::project::Project::from_path(root.path());
-    let (window, ws) = crate::workspace::tests::build_workspace_with(
-        cx,
-        &daruda_config::Config::default(),
-        Some(project),
-    );
+    let (window, ws) = build_with(cx, &daruda_config::Config::default(), Some(project));
     (root, window, ws)
 }
 
@@ -787,8 +932,8 @@ fn task_editor_saves_an_existing_lane_without_a_base(cx: &mut TestAppContext) {
             ws.set_task_run_in(editor, RunInChoice::ExistingLane, cx);
             let id = ws.commit_task_form(editor, cx).unwrap();
             let task = cx.global::<GlobalTasks>().get(&id).unwrap();
-            assert_eq!(task.run_in, TaskRunIn::ExistingLane { path: lane });
-            assert_eq!(task.base_worktree_path, None);
+            assert_eq!(task.spec.run_in, TaskRunIn::ExistingLane { path: lane });
+            assert_eq!(task.spec.base_worktree_path, None);
             assert!(!ws.task_editor(editor).unwrap().is_dirty(cx));
         });
     })
@@ -801,20 +946,14 @@ fn task_editor_saves_a_running_task_whose_lane_holds_its_branch(cx: &mut TestApp
     let (_root, window, ws) = build_workspace_with_project(cx);
     cx.update_window(window.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            let mut task = Task::new(
+            let task = new_spec(
                 daruda_store::project::ProjectUuid::default(),
                 "Running".into(),
                 String::new(),
                 None,
             );
             let lane = push_git_lane(ws, &task.branch_name);
-            task.state = daruda_store::tasks::TaskState::Running {
-                worktree_path: lane,
-            };
-            let id = task.id.clone();
-            cx.update_global::<GlobalTasks, _>(|g, _| {
-                g.add(task);
-            });
+            let id = add_run(task, &lane, SeedEnd::Running, cx);
             ws.open_task_editor(Some(id.clone()), window, cx);
             let editor = ws
                 .task_detail_id()
@@ -824,7 +963,7 @@ fn task_editor_saves_a_running_task_whose_lane_holds_its_branch(cx: &mut TestApp
             assert!(ws.task_editor(editor).unwrap().can_save(cx));
             ws.commit_task_form(editor, cx).unwrap();
             assert_eq!(
-                cx.global::<GlobalTasks>().get(&id).unwrap().title,
+                cx.global::<GlobalTasks>().get(&id).unwrap().spec.title,
                 "Renamed"
             );
         });
@@ -837,16 +976,13 @@ fn task_editor_location_change_is_dirty_until_saved(cx: &mut TestAppContext) {
     let (_root, window, ws) = build_workspace_with_project(cx);
     cx.update_window(window.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            let task = Task::new(
+            let task = new_spec(
                 daruda_store::project::ProjectUuid::default(),
                 "Move me".into(),
                 String::new(),
                 None,
             );
-            let id = task.id.clone();
-            cx.update_global::<GlobalTasks, _>(|g, _| {
-                g.add(task);
-            });
+            let id = add(task, cx);
             ws.open_task_editor(Some(id.clone()), window, cx);
             let editor = ws
                 .task_detail_id()
@@ -868,7 +1004,7 @@ fn task_editor_saves_a_reopened_task(cx: &mut TestAppContext) {
     let (_root, window, ws) = build_workspace_with_project(cx);
     cx.update_window(window.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            let mut task = Task::new(
+            let task = new_spec(
                 daruda_store::project::ProjectUuid::default(),
                 "Reopened".into(),
                 String::new(),
@@ -876,14 +1012,7 @@ fn task_editor_saves_a_reopened_task(cx: &mut TestAppContext) {
             );
             let lane = push_git_lane(ws, &task.branch_name);
             std::fs::create_dir_all(&lane).unwrap();
-            task.state = daruda_store::tasks::TaskState::Done {
-                worktree_path: lane,
-                end_reason: daruda_store::tasks::SessionEndReason::Stop,
-            };
-            let id = task.id.clone();
-            cx.update_global::<GlobalTasks, _>(|g, _| {
-                g.add(task);
-            });
+            let id = add_run(task, &lane, SeedEnd::Done, cx);
             ws.reopen_task(&id, cx);
             ws.open_task_editor(Some(id.clone()), window, cx);
             let editor = ws
@@ -893,7 +1022,10 @@ fn task_editor_saves_a_reopened_task(cx: &mut TestAppContext) {
             title.update(cx, |s, cx| s.set_value("Edited", window, cx));
             assert!(ws.task_editor(editor).unwrap().can_save(cx));
             ws.commit_task_form(editor, cx).unwrap();
-            assert_eq!(cx.global::<GlobalTasks>().get(&id).unwrap().title, "Edited");
+            assert_eq!(
+                cx.global::<GlobalTasks>().get(&id).unwrap().spec.title,
+                "Edited"
+            );
         });
     })
     .unwrap();
@@ -933,16 +1065,13 @@ fn task_editor_crlf_only_prompt_change_is_not_dirty(cx: &mut TestAppContext) {
     let (window, ws) = build_workspace(cx);
     cx.update_window(window.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            let task = Task::new(
+            let task = new_spec(
                 daruda_store::project::ProjectUuid::default(),
                 "Lines".into(),
                 "one\ntwo".into(),
                 None,
             );
-            let id = task.id.clone();
-            cx.update_global::<GlobalTasks, _>(|g, _| {
-                g.add(task);
-            });
+            let id = add(task, cx);
             ws.open_task_editor(Some(id), window, cx);
             let editor = ws
                 .task_detail_id()
@@ -965,16 +1094,13 @@ fn task_editor_unregistered_base_is_clean_at_open_and_after_save(cx: &mut TestAp
     let (_root, window, ws) = build_workspace_with_project(cx);
     cx.update_window(window.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            let task = Task::new(
+            let task = new_spec(
                 daruda_store::project::ProjectUuid::default(),
                 "Old base".into(),
                 String::new(),
                 Some(std::path::PathBuf::from("/nonexistent/daruda-base")),
             );
-            let id = task.id.clone();
-            cx.update_global::<GlobalTasks, _>(|g, _| {
-                g.add(task);
-            });
+            let id = add(task, cx);
             ws.open_task_editor(Some(id), window, cx);
             let editor = ws
                 .task_detail_id()
@@ -1002,12 +1128,9 @@ fn task_editor_project_change_refills_lane_pickers_and_saves(cx: &mut TestAppCon
             let a_lane = ws.projects[0].lanes[0].path.clone();
             ws.add_project(b_root.path().to_path_buf(), window, cx);
             let b = ws.projects[1].uuid;
-            let mut task = Task::new(a, "Move".into(), String::new(), Some(a_lane.clone()));
+            let mut task = new_spec(a, "Move".into(), String::new(), Some(a_lane.clone()));
             task.run_in = TaskRunIn::ExistingLane { path: a_lane };
-            let id = task.id.clone();
-            cx.update_global::<GlobalTasks, _>(|g, _| {
-                g.add(task);
-            });
+            let id = add(task, cx);
             ws.open_task_editor(Some(id.clone()), window, cx);
             let editor = ws
                 .task_detail_id()
@@ -1036,7 +1159,7 @@ fn task_editor_project_change_refills_lane_pickers_and_saves(cx: &mut TestAppCon
             );
             ws.set_task_run_in(editor, RunInChoice::NewWorktree, cx);
             ws.commit_task_form(editor, cx).unwrap();
-            assert_eq!(cx.global::<GlobalTasks>().get(&id).unwrap().project, b);
+            assert_eq!(cx.global::<GlobalTasks>().get(&id).unwrap().spec.project, b);
         });
     })
     .unwrap();
@@ -1053,14 +1176,13 @@ fn task_editor_keeps_a_started_tasks_project(cx: &mut TestAppContext) {
             let a = ws.projects[0].uuid;
             ws.add_project(b_root.path().to_path_buf(), window, cx);
             let b = ws.projects[1].uuid;
-            let mut task = Task::new(a, "Running".into(), String::new(), None);
-            task.state = daruda_store::tasks::TaskState::Running {
-                worktree_path: std::path::PathBuf::from("/tmp/elsewhere"),
-            };
-            let id = task.id.clone();
-            cx.update_global::<GlobalTasks, _>(|g, _| {
-                g.add(task);
-            });
+            let task = new_spec(a, "Running".into(), String::new(), None);
+            let id = add_run(
+                task,
+                std::path::Path::new("/tmp/elsewhere"),
+                SeedEnd::Running,
+                cx,
+            );
             ws.open_task_editor(Some(id.clone()), window, cx);
             let editor = ws
                 .task_detail_id()
@@ -1074,7 +1196,7 @@ fn task_editor_keeps_a_started_tasks_project(cx: &mut TestAppContext) {
                 )
             });
             ws.commit_task_form(editor, cx).unwrap();
-            assert_eq!(cx.global::<GlobalTasks>().get(&id).unwrap().project, a);
+            assert_eq!(cx.global::<GlobalTasks>().get(&id).unwrap().spec.project, a);
         });
     })
     .unwrap();
@@ -1211,11 +1333,8 @@ fn the_open_task_reopens_after_a_restart(cx: &mut TestAppContext) {
         .update_window(window.into(), |_, window, cx| {
             ws.update(cx, |ws, cx| {
                 let project = ws.active_project().unwrap().uuid;
-                let task = Task::new(project, "Kept".into(), String::new(), None);
-                let id = task.id.clone();
-                cx.update_global::<GlobalTasks, _>(|g, _| {
-                    g.add(task);
-                });
+                let task = new_spec(project, "Kept".into(), String::new(), None);
+                let id = add(task, cx);
                 ws.open_task_editor(Some(id.clone()), window, cx);
                 id
             })
@@ -1223,7 +1342,15 @@ fn the_open_task_reopens_after_a_restart(cx: &mut TestAppContext) {
         .unwrap();
     assert_eq!(restored_detail(&ws, cx), Some(Some(task_id.clone())));
 
-    cx.update(|cx| cx.update_global::<GlobalTasks, _>(|g, _| g.remove(&task_id)));
+    cx.update(|cx| {
+        crate::runs::seed::commit_now(
+            vec![daruda_store::tasks::TaskEvent::Deleted {
+                id: task_id.clone(),
+                at: chrono::Utc::now(),
+            }],
+            cx,
+        )
+    });
     assert_eq!(
         restored_detail(&ws, cx),
         None,

@@ -237,10 +237,14 @@ fn render_task_list(tasks: &[TaskEntry]) -> String {
 fn task_status_label(status: TaskStatus) -> String {
     match status {
         TaskStatus::Backlog => s::control::task_status_backlog(),
+        TaskStatus::Preparing => s::control::task_status_preparing(),
+        TaskStatus::Dispatching => s::control::task_status_dispatching(),
         TaskStatus::Running => s::control::task_status_running(),
         TaskStatus::Done => s::control::task_status_done(),
         TaskStatus::Error => s::control::task_status_error(),
         TaskStatus::Cancelled => s::control::task_status_cancelled(),
+        TaskStatus::Undelivered => s::control::task_status_undelivered(),
+        TaskStatus::Interrupted => s::control::task_status_interrupted(),
     }
 }
 
@@ -281,6 +285,7 @@ pub(crate) fn render_error(error: &ControlError) -> String {
         // Same as a failed worktree: the detail is for the model and the log.
         ControlError::TaskStartFailed { .. } => s::control::error_task_start_failed(),
         ControlError::TaskTitleEmpty => s::control::error_task_title_empty(),
+        ControlError::TaskNotRecorded { .. } => s::control::error_task_not_recorded(),
         ControlError::TaskNoSession => s::control::error_task_no_session(),
         ControlError::TaskAgentUnavailable => s::control::error_task_agent_unavailable(),
     }

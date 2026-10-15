@@ -3,12 +3,13 @@
 use chrono::Utc;
 use daruda_store::accounts::AccountRecipeId;
 use daruda_store::tasks::{
-    CliProcessState, ExecutionRef, Task, TaskExecution, TaskExecutionSource, TaskState,
+    CliProcessState, ExecutionRef, Lifecycle, TaskEvent, TaskExecution, TaskRecord,
 };
-use gpui::{BorrowAppContext as _, Context};
+use gpui::Context;
 use std::path::Path;
 
-use crate::agent::tasks_global::GlobalTasks;
+use super::task_start::PaneIdentity;
+use crate::runs::{GlobalTasks, RunsHost};
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane::PaneContent;
@@ -16,31 +17,47 @@ use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_agent::pty_tracker::PtyBinding;
 use daruda_chat::view::LoadIntent;
 
+/// The CLI runs `concerns` names, with the execution events must name.
+fn cli_runs<'a>(
+    tasks: &'a GlobalTasks,
+    concerns: impl Fn(&TaskExecution) -> bool + 'a,
+) -> impl Iterator<Item = (&'a TaskRecord, &'a TaskExecution, ExecutionRef)> + 'a {
+    tasks.records().filter_map(move |task| {
+        let run = task
+            .execution
+            .as_ref()
+            .filter(|run| run.source.cli_process().is_some() && concerns(run))?;
+        let exec = task
+            .current_exec()
+            .filter(|exec| exec.execution_id == run.id)?;
+        Some((task, run, exec.clone()))
+    })
+}
+
 impl Workspace {
+    /// Make terminal `pane_id` the one that runs `exec`, and read the
+    /// identity the run records. `None` when the pane is not a terminal.
     pub(super) fn bind_task_cli_execution(
         &mut self,
-        task_id: &str,
+        exec: &ExecutionRef,
         pane_id: PaneId,
         cwd: &Path,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(pane) = self
+    ) -> Option<PaneIdentity> {
+        let pane = self
             .main_area
             .runtimes
             .values_mut()
             .flat_map(|rt| &mut rt.panes)
-            .find(|pane| pane.id == pane_id)
-        else {
-            return;
-        };
+            .find(|pane| pane.id == pane_id)?;
         let PaneContent::Terminal(terminal) = &mut pane.content else {
-            return;
+            return None;
         };
         let account_id = terminal.account.to_persisted().filter(|id| {
             self.accounts
                 .find(*id)
                 .is_some_and(|a| a.recipe == AccountRecipeId::Claude)
         });
+        terminal.task_run = Some(exec.clone());
         let agent_id = self
             .mirrors
             .agents
@@ -48,34 +65,22 @@ impl Workspace {
             .find(|agent| agent.launch.account_recipe(false) == Some(AccountRecipeId::Claude))
             .map(|agent| agent.id.clone())
             .unwrap_or_else(|| daruda_config::AgentDefinition::claude_default().id);
-        let execution = TaskExecution::begin(
-            TaskExecutionSource::ClaudeCli {
-                transcript_path: None,
-                process: CliProcessState::Discovering,
-            },
+        Some(PaneIdentity {
             agent_id,
             account_id,
-            cwd.to_path_buf(),
-        );
-        terminal.task_run = Some(ExecutionRef {
-            task_id: task_id.to_string(),
-            execution_id: execution.id.clone(),
-        });
-        let recorded = cx.update_global::<GlobalTasks, _>(|tasks, _| {
-            let Some(task) = tasks.get_mut(task_id) else {
-                return false;
-            };
-            task.execution = Some(execution);
-            true
-        });
-        // A task deleted under its own start has no run to discover.
-        if !recorded {
-            return;
-        }
+            cwd: cwd.to_path_buf(),
+        })
+    }
+
+    /// Watch for the `claude` process the run's terminal is about to start.
+    pub(super) fn track_task_cli_execution(
+        &mut self,
+        pane_id: PaneId,
+        account_id: Option<daruda_store::accounts::AccountId>,
+    ) {
         if let Some(dir) = self.cli_sessions_dir(account_id) {
             self.claude_sessions.pty_tracker.track_task(pane_id, dir);
         }
-        self.save_tasks_dirty(cx);
     }
 
     /// Where a `claude` run under `account_id` writes its per-PID session
@@ -94,71 +99,35 @@ impl Workspace {
         Some(daruda_agent::pty_link::sessions_dir_in(&home))
     }
 
-    /// Apply one observation to every CLI run it concerns and persist when any
-    /// changed. `apply` sees the task's state, its session list and the run,
-    /// and answers whether it changed them.
-    fn update_cli_runs(
-        &mut self,
-        cx: &mut Context<Self>,
-        concerns: impl Fn(&TaskExecution) -> bool,
-        mut apply: impl FnMut(&TaskState, &mut Vec<String>, &mut TaskExecution) -> bool,
-    ) {
-        let dirty = cx.update_global::<GlobalTasks, _>(|tasks, _| {
-            let mut dirty = false;
-            for task in &mut tasks.tasks {
-                let Task {
-                    state,
-                    session_ids,
-                    execution,
-                    updated_at,
-                    ..
-                } = task;
-                let Some(run) = execution
-                    .as_mut()
-                    .filter(|run| run.source.cli_process().is_some() && concerns(run))
-                else {
-                    continue;
-                };
-                if apply(state, session_ids, run) {
-                    *updated_at = Utc::now();
-                    dirty = true;
-                }
-            }
-            dirty
-        });
-        if dirty {
-            self.save_tasks_dirty(cx);
-        }
-    }
-
     /// Re-arm exit tracking for runs a previous launch saw running, and give
     /// up on runs that never bound — their pane did not survive the restart.
     pub(in crate::workspace) fn restore_task_cli_tracking(&mut self, cx: &mut Context<Self>) {
-        let runs: Vec<_> = cx
-            .global::<GlobalTasks>()
-            .tasks
-            .iter()
-            .filter_map(|task| task.execution.clone())
-            .collect();
-        for run in runs {
-            if let (Some(CliProcessState::Running { pid }), Some(session)) =
-                (run.source.cli_process(), &run.session_id)
-                && let Some(dir) = self.cli_sessions_dir(run.account_id)
-            {
-                self.claude_sessions
-                    .pty_tracker
-                    .track_session(session.clone(), *pid, dir);
+        let mut orphaned = Vec::new();
+        let mut tracked = Vec::new();
+        for (_, run, exec) in cli_runs(cx.global::<GlobalTasks>(), |_| true) {
+            match (run.source.cli_process(), &run.session_id) {
+                (Some(CliProcessState::Running { pid }), Some(session)) => {
+                    tracked.push((session.clone(), *pid, run.account_id));
+                }
+                (Some(CliProcessState::Discovering), _) => orphaned.push(exec),
+                _ => {}
             }
         }
-        self.update_cli_runs(
-            cx,
-            |_| true,
-            |_, _, run| {
-                run.source
-                    .cli_mut()
-                    .is_some_and(|(_, process)| process.orphan_discovery())
-            },
-        );
+        for (session, pid, account_id) in tracked {
+            if let Some(dir) = self.cli_sessions_dir(account_id) {
+                self.claude_sessions
+                    .pty_tracker
+                    .track_session(session, pid, dir);
+            }
+        }
+        for exec in orphaned {
+            let event = TaskEvent::CliProcessObserved {
+                exec,
+                process: CliProcessState::Unknown,
+                at: Utc::now(),
+            };
+            RunsHost::propose_fact(event, cx);
+        }
     }
 
     /// Record what a PTY binding proves. In the owning terminal it names the
@@ -181,46 +150,67 @@ impl Workspace {
                 PaneContent::Terminal(terminal) => terminal.task_run.clone(),
                 _ => None,
             });
-        if let Some(owner) = owner {
-            let session = binding.session_id.clone();
-            self.update_cli_runs(
-                cx,
-                move |run| run.id == owner.execution_id && run.session_id.is_none(),
-                |state, session_ids, run| {
-                    // The first session in the owning terminal is the run's; a
-                    // later `claude` there never takes it over.
-                    run.session_id = Some(session.clone());
-                    if matches!(state, TaskState::Running { .. }) && !session_ids.contains(&session)
-                    {
-                        session_ids.push(session.clone());
-                    }
-                    true
-                },
-            );
-        }
+        let session = binding.session_id.clone();
         let transcript = self
             .claude_sessions
             .status
             .get(&binding.session_id)
             .and_then(|file| file.transcript_path.clone());
-        let session = binding.session_id.clone();
         let pid = binding.claude_pid;
-        self.update_cli_runs(
-            cx,
-            move |run| run.session_id.as_deref() == Some(session.as_str()),
-            |_, _, run| {
-                let Some((transcript_path, process)) = run.source.cli_mut() else {
-                    return false;
-                };
-                if !process.observe_running(pid) {
-                    return false;
-                }
-                if transcript.is_some() {
-                    transcript_path.clone_from(&transcript);
-                }
-                true
-            },
-        );
+        let at = Utc::now();
+        let mut events = Vec::new();
+        let tasks = cx.global::<GlobalTasks>();
+        // The first session in the owning terminal is the run's; a later
+        // `claude` there never takes it over.
+        let bound_now = owner.as_ref().and_then(|owner| {
+            cli_runs(tasks, |run| {
+                run.id == owner.execution_id && run.session_id.is_none()
+            })
+            .next()
+            .map(|(task, _, exec)| (task, exec))
+        });
+        if let Some((task, exec)) = &bound_now {
+            events.push(TaskEvent::ExecutionSessionBound {
+                exec: exec.clone(),
+                session_id: session.clone(),
+                at,
+            });
+            if matches!(task.lifecycle, Lifecycle::Running { .. })
+                && !task.session_ids.contains(&session)
+            {
+                events.push(TaskEvent::SessionAttached {
+                    exec: exec.clone(),
+                    session_id: session.clone(),
+                    at,
+                });
+            }
+        }
+        let bound_id = bound_now.map(|(_, exec)| exec.execution_id);
+        let observed = cli_runs(tasks, |run| {
+            run.session_id.as_deref() == Some(session.as_str())
+                || Some(&run.id) == bound_id.as_ref()
+        });
+        for (_, run, exec) in observed {
+            let mut process = run.source.cli_process().cloned().unwrap_or_default();
+            if !process.observe_running(pid) {
+                continue;
+            }
+            events.push(TaskEvent::CliProcessObserved {
+                exec: exec.clone(),
+                process,
+                at,
+            });
+            if let Some(path) = &transcript {
+                events.push(TaskEvent::CliTranscriptFound {
+                    exec,
+                    transcript_path: path.clone(),
+                    at,
+                });
+            }
+        }
+        for event in events {
+            RunsHost::propose_fact(event, cx);
+        }
     }
 
     pub(in crate::workspace) fn record_task_cli_transcript(
@@ -230,21 +220,27 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let Some(path) = path else { return };
-        let session = session_id.to_string();
-        self.update_cli_runs(
-            cx,
-            move |run| run.session_id.as_deref() == Some(session.as_str()),
-            |_, _, run| {
-                let Some((transcript_path, _)) = run.source.cli_mut() else {
-                    return false;
-                };
-                if transcript_path.as_deref() == Some(path) {
-                    return false;
-                }
-                *transcript_path = Some(path.to_path_buf());
-                true
-            },
-        );
+        let events: Vec<TaskEvent> = cli_runs(cx.global::<GlobalTasks>(), |run| {
+            run.session_id.as_deref() == Some(session_id)
+        })
+        .filter(|(_, run, _)| {
+            !matches!(
+                &run.source,
+                daruda_store::tasks::TaskExecutionSource::ClaudeCli {
+                    transcript_path: Some(current),
+                    ..
+                } if current == path
+            )
+        })
+        .map(|(_, _, exec)| TaskEvent::CliTranscriptFound {
+            exec,
+            transcript_path: path.to_path_buf(),
+            at: Utc::now(),
+        })
+        .collect();
+        for event in events {
+            RunsHost::propose_fact(event, cx);
+        }
     }
 
     pub(in crate::workspace) fn record_task_cli_exit(
@@ -253,17 +249,24 @@ impl Workspace {
         pid: u32,
         cx: &mut Context<Self>,
     ) {
-        let session = session_id.to_string();
         let now = Utc::now();
-        self.update_cli_runs(
-            cx,
-            move |run| run.session_id.as_deref() == Some(session.as_str()),
-            |_, _, run| {
-                run.source
-                    .cli_mut()
-                    .is_some_and(|(_, process)| process.confirm_exit(pid, now))
-            },
-        );
+        let events: Vec<TaskEvent> = cli_runs(cx.global::<GlobalTasks>(), |run| {
+            run.session_id.as_deref() == Some(session_id)
+        })
+        .filter_map(|(_, run, exec)| {
+            let mut process = run.source.cli_process().cloned().unwrap_or_default();
+            process
+                .confirm_exit(pid, now)
+                .then_some(TaskEvent::CliProcessObserved {
+                    exec,
+                    process,
+                    at: now,
+                })
+        })
+        .collect();
+        for event in events {
+            RunsHost::propose_fact(event, cx);
+        }
     }
 
     /// Whether anything still shows a process writing `session_id`: a pane
@@ -292,7 +295,7 @@ impl Workspace {
         run: &ExecutionRef,
         cx: &gpui::App,
     ) -> Option<CliProcessState> {
-        run.resolve(cx.global::<GlobalTasks>())?
+        run.resolve(cx.global::<GlobalTasks>().book())?
             .source
             .cli_process()
             .cloned()
@@ -386,12 +389,14 @@ impl Workspace {
             .map(|lane| lane.path.clone())
             .unwrap_or_else(std::env::temp_dir);
         let project = self.active_project().map(|p| p.uuid).unwrap_or_default();
-        let mut task = daruda_store::tasks::Task::new(
+        let mut spec = daruda_store::tasks::TaskSpec::new(
             project,
             "CLI task".into(),
             "Fix the parser".into(),
             None,
+            Utc::now(),
         );
+        spec.agent_surface = daruda_store::tasks::TaskAgentSurface::Terminal;
         let process = if exited {
             CliProcessState::ExitConfirmed {
                 ended_at: Utc::now(),
@@ -401,26 +406,17 @@ impl Workspace {
                 pid: std::process::id(),
             }
         };
-        let mut execution = TaskExecution::begin(
-            TaskExecutionSource::ClaudeCli {
-                transcript_path: None,
-                process,
-            },
-            self.mirrors.agents[0].id.clone(),
-            None,
-            cwd.clone(),
-        );
-        execution.session_id = Some("screenshot-cli-session".into());
-        task.agent_surface = daruda_store::tasks::TaskAgentSurface::Terminal;
-        task.state = TaskState::Running { worktree_path: cwd };
-        let access = daruda_store::tasks::AgentChatAccess::CliSnapshot(ExecutionRef {
-            task_id: task.id.clone(),
-            execution_id: execution.id.clone(),
-        });
-        task.execution = Some(execution);
-        cx.update_global::<GlobalTasks, _>(|tasks, _| {
-            tasks.add(task);
-        });
+        let run = crate::runs::seed::SeedRun::cli(cwd, process)
+            .agent(self.mirrors.agents[0].id.clone())
+            .session("screenshot-cli-session");
+        let access = daruda_store::tasks::AgentChatAccess::CliSnapshot(run.exec(&spec.id));
+        let mut events = crate::runs::seed::created(spec.clone());
+        events.extend(crate::runs::seed::run(
+            &spec.id,
+            &run,
+            crate::runs::seed::SeedEnd::Running,
+        ));
+        crate::runs::seed::commit_now(events, cx);
         self.open_agent_chat_pane_seeded(
             None,
             move |v, window, cx| {

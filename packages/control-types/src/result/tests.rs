@@ -245,6 +245,9 @@ fn every_error_variant_round_trips_through_json() {
         ControlError::LaneNameInvalid,
         ControlError::ApprovalUnavailable,
         ControlError::ApprovalsPending,
+        ControlError::TaskNotRecorded {
+            detail: "the task log is read-only".into(),
+        },
     ];
     for case in cases {
         let json =
@@ -346,4 +349,75 @@ fn an_interrupted_answer_names_its_cause_on_the_wire() {
             "cause": { "by": "extra_usage", "resets_at": 1_791_340_200 }
         })
     );
+}
+
+/// Every status keeps its snake_case wire name, so a phone or an agent
+/// reading an older answer sees the same words.
+#[test]
+fn every_task_status_round_trips_under_its_wire_name() {
+    let cases = [
+        (TaskStatus::Backlog, "backlog"),
+        (TaskStatus::Preparing, "preparing"),
+        (TaskStatus::Dispatching, "dispatching"),
+        (TaskStatus::Running, "running"),
+        (TaskStatus::Done, "done"),
+        (TaskStatus::Error, "error"),
+        (TaskStatus::Cancelled, "cancelled"),
+        (TaskStatus::Undelivered, "undelivered"),
+        (TaskStatus::Interrupted, "interrupted"),
+    ];
+    for (status, wire) in cases {
+        let json = serde_json::to_string(&status).expect("serialize");
+        assert_eq!(json, format!("\"{wire}\""));
+        let back: TaskStatus = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, status);
+    }
+}
+
+/// Each lifecycle phase has its own external status.
+#[test]
+fn a_task_status_names_each_lifecycle() {
+    use daruda_store::tasks::machine::{InterruptCause, UndeliveredReason};
+    use daruda_store::tasks::{ExecutionRef, Lifecycle};
+    let exec = ExecutionRef {
+        task_id: "t".into(),
+        execution_id: "r".into(),
+    };
+    let worktree = std::path::PathBuf::from("/wt");
+    let cases = [
+        (Lifecycle::Backlog, TaskStatus::Backlog),
+        (
+            Lifecycle::Preparing {
+                exec: exec.clone(),
+                source: Default::default(),
+            },
+            TaskStatus::Preparing,
+        ),
+        (
+            Lifecycle::Dispatching {
+                exec: exec.clone(),
+                worktree: worktree.clone(),
+            },
+            TaskStatus::Dispatching,
+        ),
+        (
+            Lifecycle::Undelivered {
+                exec: exec.clone(),
+                worktree: None,
+                reason: UndeliveredReason::QueueFull,
+            },
+            TaskStatus::Undelivered,
+        ),
+        (
+            Lifecycle::Interrupted {
+                exec: Some(exec),
+                worktree,
+                cause: InterruptCause::UserStop,
+            },
+            TaskStatus::Interrupted,
+        ),
+    ];
+    for (lifecycle, status) in cases {
+        assert_eq!(TaskStatus::of(&lifecycle), status, "{lifecycle:?}");
+    }
 }

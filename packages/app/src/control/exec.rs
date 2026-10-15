@@ -10,11 +10,11 @@
 
 use gpui::{App, AppContext as _};
 
-use crate::agent::tasks_global::GlobalTasks;
 use crate::control::result::{
     ControlError, ControlOutcome, ControlResult, FlowEntry, LaneHandle, PaneAnswer,
     SendDisposition, TaskEntry, TaskProject, TaskStatus, ask_disposition,
 };
+use crate::runs::GlobalTasks;
 // Named only by the tests, which reach it through `super::*`.
 #[cfg(test)]
 use crate::control::spec::GatedCommand;
@@ -125,11 +125,20 @@ pub(crate) fn run(cmd: ResolvedCommand, cx: &mut App) -> ControlOutcome {
         ResolvedCommand::TaskList => Ok(ControlResult::TaskList {
             tasks: task_list(cx),
         }),
-        ResolvedCommand::TaskStop { task } => {
-            in_task_window(&task, cx, |ws, _window, cx| ws.control_task_stop(&task, cx))
-                .map(|()| ControlResult::TaskStopped { task })
-        }
+        ResolvedCommand::TaskStop { .. } => Err(ControlError::TaskNotRecorded {
+            detail: "task_stop requires deferred dispatch".into(),
+        }),
     }
+}
+
+/// Cancel `task` and answer once the cancel is in the task log, so the
+/// caller's next listing no longer shows it running.
+pub(crate) async fn stop_task(task: String, cx: &mut gpui::AsyncApp) -> ControlOutcome {
+    let pending = cx.update(|cx| {
+        in_task_window(&task, cx, |ws, _window, cx| ws.control_task_stop(&task, cx))
+    })?;
+    pending.await?;
+    Ok(ControlResult::TaskStopped { task })
 }
 
 /// Every task, grouped by project — by name, the projects no window has
@@ -144,14 +153,13 @@ fn task_list(cx: &mut App) -> Vec<TaskEntry> {
             }
         }
     });
-    let mut tasks: Vec<(&daruda_store::tasks::Task, Option<TaskProject>)> = cx
+    let mut tasks: Vec<(&daruda_store::tasks::TaskRecord, Option<TaskProject>)> = cx
         .global::<GlobalTasks>()
-        .tasks
-        .iter()
+        .records()
         .map(|task| {
             let project = projects
                 .iter()
-                .find(|(uuid, _)| *uuid == task.project)
+                .find(|(uuid, _)| *uuid == task.spec.project)
                 .map(|(_, p)| p.clone());
             (task, project)
         })
@@ -161,15 +169,15 @@ fn task_list(cx: &mut App) -> Vec<TaskEntry> {
         pa.is_none()
             .cmp(&pb.is_none())
             .then_with(|| name(pa).cmp(&name(pb)))
-            .then_with(|| a.project.cmp(&b.project))
-            .then_with(|| b.created_at.cmp(&a.created_at))
+            .then_with(|| a.spec.project.cmp(&b.spec.project))
+            .then_with(|| b.spec.created_at.cmp(&a.spec.created_at))
     });
     tasks
         .into_iter()
         .map(|(task, project)| TaskEntry {
-            task: task.id.clone(),
-            title: task.title.clone(),
-            status: TaskStatus::of(&task.state),
+            task: task.id().to_owned(),
+            title: task.spec.title.clone(),
+            status: TaskStatus::of(&task.lifecycle),
             project,
         })
         .collect()
@@ -189,7 +197,7 @@ fn in_task_window<T>(
     let project = cx
         .global::<GlobalTasks>()
         .get(task)
-        .map(|t| t.project)
+        .map(|t| t.spec.project)
         .ok_or(ControlError::TaskNotFound)?;
     let mut out = None;
     WindowRegistry::for_each_workspace(cx, |ws, window, cx| {
@@ -209,6 +217,9 @@ fn in_task_window<T>(
 /// somebody else's answer — so it is told `Queued` and can read the reply
 /// later.
 pub(crate) fn run_waiting(cmd: ResolvedCommand, cx: &mut App) -> Dispatch {
+    if let ResolvedCommand::TaskStop { task } = cmd {
+        return stop_task_waiting(task, cx);
+    }
     let ResolvedCommand::AskPane { target, text } = cmd else {
         // Unreachable: `convert` builds `Command::Waiting` for exactly one
         // tool. Answering through the immediate path is the harmless way to
@@ -241,6 +252,26 @@ pub(crate) fn run_waiting(cmd: ResolvedCommand, cx: &mut App) -> Dispatch {
                 },
             }
         }
+    }
+}
+
+/// Cancel `task`, answering once the cancel is in the task log.
+fn stop_task_waiting(task: String, cx: &mut App) -> Dispatch {
+    let pending = match in_task_window(&task, cx, |ws, _window, cx| ws.control_task_stop(&task, cx))
+    {
+        Ok(pending) => pending,
+        Err(refusal) => return Dispatch::Ready(Err(refusal)),
+    };
+    let (tx, rx) = smol::channel::bounded(1);
+    cx.spawn(async move |_| {
+        let outcome = pending.await.map(|()| ControlResult::TaskStopped { task });
+        // SILENT-OK: the caller went away; the cancel stands.
+        let _ = tx.send(Some(outcome)).await;
+    })
+    .detach();
+    Dispatch::Deferred {
+        outcome: rx,
+        pending: Pending::Commit,
     }
 }
 
@@ -334,6 +365,9 @@ pub(crate) enum Dispatch {
 #[derive(Clone, Copy)]
 pub(crate) enum Pending {
     Approval(crate::control::approval::ApprovalId),
+    /// A task change being written to the log. It is short and already
+    /// under way, so it stays live until answered and cannot be taken back.
+    Commit,
     Waiter {
         pane: PaneRef,
         /// *Which* wait on that pane. A pane is unique in space but not in
@@ -351,6 +385,7 @@ impl Pending {
     pub(crate) fn is_live(self, cx: &App) -> bool {
         match self {
             Self::Approval(id) => crate::control::approval::is_waiting(id, cx),
+            Self::Commit => true,
             Self::Waiter { pane, id, deadline } => {
                 std::time::Instant::now() < deadline
                     && crate::control::ask::is_waiting(pane, id, cx)
@@ -364,6 +399,8 @@ impl Pending {
             Self::Approval(id) => {
                 crate::control::approval::withdraw(id, cx);
             }
+            // The cancel lands either way; withdrawing only stops listening.
+            Self::Commit => {}
             Self::Waiter { pane, id, .. } => {
                 crate::control::ask::withdraw(pane, id, cx);
             }

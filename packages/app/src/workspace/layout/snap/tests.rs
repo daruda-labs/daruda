@@ -68,7 +68,7 @@ fn right_fixture(window: &mut Window, cx: &mut gpui::App) -> RightDockSnapshot {
         skill_search_query: String::new(),
         skill_plugin_expanded: std::collections::HashSet::new(),
         sections: Default::default(),
-        tasks: daruda_store::tasks::TasksState::default(),
+        tasks: daruda_store::tasks::TasksBook::default(),
         task_browser: crate::workspace::right_dock::tasks::TaskBrowserSnapshot {
             state: Default::default(),
             search: Handle(task_search_input),

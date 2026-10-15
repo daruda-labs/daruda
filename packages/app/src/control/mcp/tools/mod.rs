@@ -451,8 +451,10 @@ static TABLE: &[Tool] = &[
         id: ToolId::TaskList,
         name: "daruda_task_list",
         description: "List every task in every project, with its status and the project \
-                      it belongs to. A task with no `project` is in one daruda does not \
-                      have open, and cannot be started or opened.",
+                      it belongs to. A status is backlog, preparing, dispatching, running, done, error, \
+                      cancelled, undelivered (the prompt never reached the agent) or \
+                      interrupted (stopped before it finished). A task with no `project` \
+                      is in one daruda does not have open, and cannot be started or opened.",
         gate: Gate::Open,
         properties: no_properties,
         required: &[],
@@ -482,7 +484,8 @@ static TABLE: &[Tool] = &[
     Tool {
         id: ToolId::TaskStop,
         name: "daruda_task_stop",
-        description: "Cancel a running task. Its worktree is kept.",
+        description: "Cancel a task that is starting or running. Its worktree is kept. \
+                      Answers once the cancel is recorded.",
         gate: Gate::Open,
         properties: task_properties,
         required: &["task"],

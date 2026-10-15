@@ -30,5 +30,5 @@ thiserror = { workspace = true }
 [dev-dependencies]
 # The public-API tests in `tests/it` drive the harness; enabling the feature
 # here keeps them running under a plain `cargo test`.
-daruda_runlog = { path = ".", features = ["test-support"] }
+daruda_runlog = { workspace = true, features = ["test-support"] }
 tempfile = { workspace = true }

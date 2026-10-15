@@ -542,10 +542,7 @@ impl Workspace {
                 .to_string(),
             skill_plugin_expanded: self.right_views.skill_plugin_expanded.clone(),
             sections: self.right_views.sections.clone(),
-            tasks: cx
-                .global::<crate::agent::tasks_global::GlobalTasks>()
-                .0
-                .clone(),
+            tasks: cx.global::<crate::runs::GlobalTasks>().book().clone(),
             task_browser: self.right_views.tasks.snapshot(cx),
             task_agents: self.mirrors.agents.clone(),
             task_projects: crate::workspace::layout::TaskProjects {

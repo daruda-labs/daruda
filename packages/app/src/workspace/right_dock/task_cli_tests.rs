@@ -3,33 +3,119 @@
 
 use super::*;
 use crate::control::result::ControlError;
+use crate::runs::seed::{SeedEnd, SeedRun, commit_now};
 use crate::workspace::main_area::agent_chat_host::agent_chat_event_ops::PumpStep;
 use crate::workspace::main_area::pane::{Pane, TabEntry};
 use crate::workspace::main_area::pane_input_ops::{PaneTextInput, PaneTextIntent};
 use crate::workspace::main_area::pane_tree::PaneLayout;
-use crate::workspace::tests::build_workspace;
 use daruda_agent::pty_tracker::PtyTrackerEvent;
 use daruda_chat::view::{AgentSessionStatus, LoadIntent, PromptDispatch};
 use daruda_store::project::PaneCwd;
-use daruda_store::tasks::{AgentChatAccess, SessionEndReason, Task, TaskAgentSurface};
+use daruda_store::tasks::{
+    AgentChatAccess, SessionEndReason, TaskAgentSurface, TaskExecutionSource,
+};
 use gpui::{AppContext as _, TestAppContext, Window};
 
-fn cli_task(cwd: &Path, cx: &mut gpui::App) -> String {
-    let mut task = Task::new(
-        daruda_store::project::ProjectUuid::default(),
-        "CLI".into(),
-        "prompt".into(),
-        None,
-    );
-    task.agent_surface = TaskAgentSurface::Terminal;
-    task.state = TaskState::Running {
-        worktree_path: cwd.to_path_buf(),
+/// A workspace whose task commits land on the spot: these tests are about
+/// what the CLI tracker records, not when.
+fn build_workspace(
+    cx: &mut TestAppContext,
+) -> (
+    gpui::WindowHandle<gpui_component::Root>,
+    gpui::Entity<Workspace>,
+) {
+    let built = crate::workspace::tests::build_workspace(cx);
+    cx.update(crate::runs::RunsHost::inline_commits_for_test);
+    built
+}
+
+/// A Backlog CLI task; [`start`] runs it in a terminal.
+fn cli_task(cx: &mut gpui::App) -> String {
+    let mut spec = crate::runs::seed::spec(daruda_store::project::ProjectUuid::default(), "CLI");
+    spec.agent_surface = TaskAgentSurface::Terminal;
+    crate::runs::seed::task(spec, None, cx)
+}
+
+/// Start task `id` in terminal `pane` the way a start does: request the
+/// run, bind the pane, record its identity, watch for its process, dispatch.
+fn start(
+    ws: &mut Workspace,
+    id: &str,
+    pane: PaneId,
+    cwd: &Path,
+    agent: Option<String>,
+    cx: &mut Context<Workspace>,
+) -> ExecutionRef {
+    let exec = ExecutionRef {
+        task_id: id.to_owned(),
+        execution_id: uuid::Uuid::new_v4().to_string(),
     };
-    let id = task.id.clone();
-    cx.update_global::<GlobalTasks, _>(|tasks, _| {
-        tasks.add(task);
-    });
-    id
+    let at = Utc::now();
+    commit_now(
+        vec![TaskEvent::DispatchRequested {
+            id: id.to_owned(),
+            execution_id: exec.execution_id.clone(),
+            source: TaskExecutionSource::ClaudeCli {
+                transcript_path: None,
+                process: CliProcessState::Discovering,
+            },
+            at,
+        }],
+        cx,
+    );
+    let identity = ws
+        .bind_task_cli_execution(&exec, pane, cwd)
+        .expect("a terminal takes the run");
+    ws.track_task_cli_execution(pane, identity.account_id);
+    commit_now(
+        vec![
+            TaskEvent::LanePrepared {
+                exec: exec.clone(),
+                worktree: cwd.to_path_buf(),
+                agent_id: agent.unwrap_or(identity.agent_id),
+                account_id: identity.account_id,
+                cwd: identity.cwd,
+                at,
+            },
+            TaskEvent::Dispatched {
+                exec: exec.clone(),
+                session_id: None,
+                at,
+            },
+        ],
+        cx,
+    );
+    exec
+}
+
+/// End the task's current run and start it again in `pane`.
+fn rerun(ws: &mut Workspace, id: &str, pane: PaneId, cx: &mut Context<Workspace>) -> ExecutionRef {
+    let current = cx
+        .global::<GlobalTasks>()
+        .get(id)
+        .and_then(|task| task.current_exec().cloned())
+        .unwrap();
+    let at = Utc::now();
+    commit_now(
+        vec![
+            TaskEvent::CancelRequested { exec: current, at },
+            TaskEvent::Reopened {
+                id: id.to_owned(),
+                run_in: Default::default(),
+                at,
+            },
+        ],
+        cx,
+    );
+    start(ws, id, pane, &std::env::temp_dir(), None, cx)
+}
+
+fn lifecycle(id: &str, cx: &gpui::App) -> daruda_store::tasks::Lifecycle {
+    cx.global::<GlobalTasks>()
+        .get(id)
+        .unwrap()
+        .lifecycle
+        .clone()
 }
 
 fn terminal_panes(ws: &Workspace) -> Vec<PaneId> {
@@ -146,9 +232,9 @@ fn attach_handle(
 /// A task whose run was bound to the first terminal pane, then confirmed.
 fn bound_task(ws: &mut Workspace, pid: u32, cx: &mut Context<Workspace>) -> (String, PaneId) {
     let cwd = std::env::temp_dir();
-    let id = cli_task(&cwd, cx);
+    let id = cli_task(cx);
     let pane = terminal_panes(ws)[0];
-    ws.bind_task_cli_execution(&id, pane, &cwd, cx);
+    start(ws, &id, pane, &cwd, None, cx);
     bind(ws, pane, pid, "cli-session", cx);
     (id, pane)
 }
@@ -159,12 +245,12 @@ fn start_creates_a_run_owned_by_the_pane_before_any_session(cx: &mut TestAppCont
     cx.update_window(window.into(), |_, _, cx| {
         workspace.update(cx, |ws, cx| {
             let cwd = std::env::temp_dir();
-            let id = cli_task(&cwd, cx);
+            let id = cli_task(cx);
             let pane = terminal_panes(ws)[0];
             // A stub pane has no shell to register; a spawned one is
             // registered before any task can be dispatched into it.
             ws.claude_sessions.pty_tracker.register(pane, 4242);
-            ws.bind_task_cli_execution(&id, pane, &cwd, cx);
+            start(ws, &id, pane, &cwd, None, cx);
             let execution = run(&id, cx);
             assert_eq!(execution.session_id, None);
             assert_eq!(process(&id, cx), CliProcessState::Discovering);
@@ -194,10 +280,10 @@ fn binding_records_only_the_owning_pane_and_its_first_session(cx: &mut TestAppCo
             ws.add_tab(window, cx);
             let panes = terminal_panes(ws);
             let cwd = std::env::temp_dir();
-            let owned = cli_task(&cwd, cx);
-            let neighbour = cli_task(&cwd, cx);
-            ws.bind_task_cli_execution(&owned, panes[0], &cwd, cx);
-            ws.bind_task_cli_execution(&neighbour, panes[1], &cwd, cx);
+            let owned = cli_task(cx);
+            let neighbour = cli_task(cx);
+            start(ws, &owned, panes[0], &cwd, None, cx);
+            start(ws, &neighbour, panes[1], &cwd, None, cx);
 
             bind(ws, panes[1], 20, "neighbour-session", cx);
             assert_eq!(run(&owned, cx).session_id, None);
@@ -236,8 +322,8 @@ fn a_session_already_bound_to_the_pane_is_not_the_new_run(cx: &mut TestAppContex
             let cwd = std::env::temp_dir();
             let pane = terminal_panes(ws)[0];
             bind(ws, pane, 5, "earlier-session", cx);
-            let id = cli_task(&cwd, cx);
-            ws.bind_task_cli_execution(&id, pane, &cwd, cx);
+            let id = cli_task(cx);
+            start(ws, &id, pane, &cwd, None, cx);
             assert_eq!(run(&id, cx).session_id, None);
             assert_eq!(process(&id, cx), CliProcessState::Discovering);
 
@@ -256,9 +342,7 @@ fn late_events_never_reach_a_rerun(cx: &mut TestAppContext) {
     cx.update_window(window.into(), |_, _, cx| {
         workspace.update(cx, |ws, cx| {
             let (id, pane) = bound_task(ws, 10, cx);
-            let cwd = std::env::temp_dir();
-            ws.bind_task_cli_execution(&id, pane, &cwd, cx);
-            let rerun = run(&id, cx).id;
+            let rerun = rerun(ws, &id, pane, cx).execution_id;
 
             exit(ws, 10, "cli-session", cx);
             assert_eq!(process(&id, cx), CliProcessState::Discovering);
@@ -300,9 +384,9 @@ fn transcript_fills_whichever_of_hook_and_binding_arrives_first(cx: &mut TestApp
             let cwd = std::env::temp_dir();
 
             // Hook first: the status store already knows the transcript.
-            let early = cli_task(&cwd, cx);
+            let early = cli_task(cx);
             let pane = terminal_panes(ws)[0];
-            ws.bind_task_cli_execution(&early, pane, &cwd, cx);
+            start(ws, &early, pane, &cwd, None, cx);
             let mut file = daruda_agent::hooks::status_file::StatusFile::new_hook(
                 "early-session",
                 &cwd,
@@ -317,8 +401,8 @@ fn transcript_fills_whichever_of_hook_and_binding_arrives_first(cx: &mut TestApp
             assert_eq!(transcript(run(&early, cx)), Some("/tmp/early.jsonl".into()));
 
             // Binding first: the hook fills it in afterwards.
-            let late = cli_task(&cwd, cx);
-            ws.bind_task_cli_execution(&late, pane, &cwd, cx);
+            let late = cli_task(cx);
+            start(ws, &late, pane, &cwd, None, cx);
             bind(ws, pane, 11, "late-session", cx);
             assert_eq!(transcript(run(&late, cx)), None);
             ws.record_task_cli_transcript("late-session", Some(Path::new("/tmp/late.jsonl")), cx);
@@ -337,8 +421,8 @@ fn only_the_observed_pid_leaving_the_os_confirms_exit(cx: &mut TestAppContext) {
 
             // Stop / SessionEnd / status-file removal end the task, not the CLI.
             ws.apply_task_session_ended("cli-session", SessionEndReason::Stop, cx);
-            let state = cx.global::<GlobalTasks>().get(&id).unwrap().state.clone();
-            assert!(matches!(state, TaskState::Done { .. }));
+            let state = lifecycle(&id, cx);
+            assert!(matches!(state, daruda_store::tasks::Lifecycle::Done { .. }));
             assert_eq!(process(&id, cx), CliProcessState::Running { pid: 10 });
 
             // Detaching the pane is not an exit either.
@@ -360,7 +444,7 @@ fn only_the_observed_pid_leaving_the_os_confirms_exit(cx: &mut TestAppContext) {
                 CliProcessState::ExitConfirmed { .. }
             ));
             // The task's own outcome is untouched by the process record.
-            assert_eq!(cx.global::<GlobalTasks>().get(&id).unwrap().state, state);
+            assert_eq!(lifecycle(&id, cx), state);
         })
     })
     .unwrap();
@@ -438,40 +522,26 @@ fn restart_rearms_tracking_for_running_pids_only(cx: &mut TestAppContext) {
     cx.update_window(window.into(), |_, _, cx| {
         workspace.update(cx, |ws, cx| {
             let cwd = std::env::temp_dir();
-            let running = cli_task(&cwd, cx);
-            let ended = cli_task(&cwd, cx);
-            let set =
-                |id: &str, session: &str, process: CliProcessState, cx: &mut Context<Workspace>| {
-                    cx.update_global::<GlobalTasks, _>(|tasks, _| {
-                        tasks.get_mut(id).unwrap().execution = Some(TaskExecution {
-                            source: TaskExecutionSource::ClaudeCli {
-                                transcript_path: None,
-                                process,
-                            },
-                            id: "run".into(),
-                            agent_id: "claude".into(),
-                            account_id: None,
-                            cwd: std::env::temp_dir(),
-                            session_id: Some(session.into()),
-                        });
-                    });
-                };
+            // What a previous launch left: runs in each process state.
+            let set = |session: &str, process: CliProcessState, cx: &mut Context<Workspace>| {
+                let mut spec = crate::runs::seed::spec(Default::default(), "CLI");
+                spec.agent_surface = TaskAgentSurface::Terminal;
+                let run = SeedRun::cli(&cwd, process).session(session);
+                crate::runs::seed::task(spec, Some((&run, SeedEnd::Dispatching)), cx)
+            };
             set(
-                &running,
                 "running-session",
                 CliProcessState::Running { pid: 4242 },
                 cx,
             );
             set(
-                &ended,
                 "ended-session",
                 CliProcessState::ExitConfirmed {
                     ended_at: Utc::now(),
                 },
                 cx,
             );
-            let orphan = cli_task(&cwd, cx);
-            set(&orphan, "orphan-session", CliProcessState::Discovering, cx);
+            let orphan = set("orphan-session", CliProcessState::Discovering, cx);
             ws.restore_task_cli_tracking(cx);
             assert_eq!(
                 ws.claude_sessions
@@ -600,7 +670,7 @@ fn continue_waits_for_confirmed_exit_and_a_completed_load(cx: &mut TestAppContex
             let (task, _) = bound_task(ws, 10, cx);
             let id = snapshot_pane(ws, &task, window, cx);
             let view = ws.agent_chat_view(id).unwrap().clone();
-            let state = cx.global::<GlobalTasks>().get(&task).unwrap().state.clone();
+            let state = lifecycle(&task, cx);
 
             // Still running: continuing is refused before any load starts.
             ws.continue_cli_chat(id, cx);
@@ -644,7 +714,7 @@ fn continue_waits_for_confirmed_exit_and_a_completed_load(cx: &mut TestAppContex
             let v = view.read(cx);
             assert_eq!(v.session_id(), Some("cli-session"));
             assert!(ws.task_chat_owner(id, cx).is_none());
-            assert_eq!(cx.global::<GlobalTasks>().get(&task).unwrap().state, state);
+            assert_eq!(lifecycle(&task, cx), state);
         });
     })
     .unwrap();
@@ -658,15 +728,13 @@ fn a_continue_that_loses_its_gate_mid_load_settles_as_a_snapshot(cx: &mut TestAp
     let (window, workspace) = build_workspace(cx);
     cx.update_window(window.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
-            let (task, _) = bound_task(ws, 10, cx);
+            let (task, pane) = bound_task(ws, 10, cx);
             let id = snapshot_pane(ws, &task, window, cx);
             exit(ws, 10, "cli-session", cx);
             let view = ws.agent_chat_view(id).unwrap().clone();
             view.update(cx, |v, _| v.set_load_intent(LoadIntent::Continue));
             let mut probe = attach_handle(ws, id, cx);
-            cx.update_global::<GlobalTasks, _>(|tasks, _| {
-                tasks.get_mut(&task).unwrap().execution.as_mut().unwrap().id = "rerun".into();
-            });
+            rerun(ws, &task, pane, cx);
 
             assert_eq!(
                 ws.fold_agent_chat_event(id, connected(), cx),
@@ -686,7 +754,7 @@ fn a_snapshot_of_a_deleted_or_rerun_task_stays_read_only(cx: &mut TestAppContext
     let (window, workspace) = build_workspace(cx);
     cx.update_window(window.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
-            let (task, _) = bound_task(ws, 10, cx);
+            let (task, pane) = bound_task(ws, 10, cx);
             let id = snapshot_pane(ws, &task, window, cx);
             exit(ws, 10, "cli-session", cx);
             let run = ws
@@ -701,14 +769,22 @@ fn a_snapshot_of_a_deleted_or_rerun_task_stays_read_only(cx: &mut TestAppContext
                 Some(CliProcessState::ExitConfirmed { .. })
             ));
 
-            cx.update_global::<GlobalTasks, _>(|tasks, _| {
-                tasks.get_mut(&task).unwrap().execution.as_mut().unwrap().id = "rerun".into();
-            });
+            let current = rerun(ws, &task, pane, cx);
             assert_eq!(ws.cli_run_process(&run, cx), None);
             ws.continue_cli_chat(id, cx);
             assert!(ws.agent_chat_view(id).unwrap().read(cx).is_read_only());
 
-            cx.update_global::<GlobalTasks, _>(|tasks, _| tasks.remove(&task));
+            let at = Utc::now();
+            commit_now(
+                vec![
+                    TaskEvent::CancelRequested { exec: current, at },
+                    TaskEvent::Deleted {
+                        id: task.clone(),
+                        at,
+                    },
+                ],
+                cx,
+            );
             assert_eq!(ws.cli_run_process(&run, cx), None);
             let view = ws.agent_chat_view(id).unwrap().clone();
             view.update(cx, |v, _| v.set_load_intent(LoadIntent::Continue));
@@ -728,23 +804,16 @@ fn open_chat_marks_a_cli_run_read_only_and_restore_keeps_it(cx: &mut TestAppCont
         &daruda_config::Config::default(),
         Some(project),
     );
+    cx.update(crate::runs::RunsHost::inline_commits_for_test);
     cx.update_window(window.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
             std::sync::Arc::make_mut(&mut ws.mirrors.agents)[0].launch =
                 daruda_config::AgentLaunch::Raw("daruda-missing-test-adapter".into());
             let cwd = ws.active_lane().unwrap().path.clone();
-            let task = cli_task(&cwd, cx);
+            let task = cli_task(cx);
             let pane = terminal_panes(ws)[0];
-            ws.bind_task_cli_execution(&task, pane, &cwd, cx);
-            cx.update_global::<GlobalTasks, _>(|tasks, _| {
-                tasks
-                    .get_mut(&task)
-                    .unwrap()
-                    .execution
-                    .as_mut()
-                    .unwrap()
-                    .agent_id = ws.mirrors.agents[0].id.clone();
-            });
+            let agent = ws.mirrors.agents[0].id.clone();
+            start(ws, &task, pane, &cwd, Some(agent), cx);
             bind(ws, pane, 10, "cli-session", cx);
             let execution_id = run(&task, cx).id;
 

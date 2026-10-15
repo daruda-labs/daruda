@@ -65,15 +65,8 @@ enum Source {
 }
 
 fn execution(id: &str, source: Source) -> TaskExecution {
-    let source = match source {
-        Source::Chat => TaskExecutionSource::AgentChat,
-        Source::Cli => TaskExecutionSource::ClaudeCli {
-            transcript_path: None,
-            process: CliProcessState::Discovering,
-        },
-    };
     TaskExecution {
-        source,
+        source: source_of(source),
         id: id.into(),
         agent_id: "claude".into(),
         account_id: None,
@@ -82,11 +75,24 @@ fn execution(id: &str, source: Source) -> TaskExecution {
     }
 }
 
-fn lifecycle(kind: LifecycleKind) -> Lifecycle {
+fn source_of(source: Source) -> TaskExecutionSource {
+    match source {
+        Source::Chat => TaskExecutionSource::AgentChat,
+        Source::Cli => TaskExecutionSource::ClaudeCli {
+            transcript_path: None,
+            process: CliProcessState::Discovering,
+        },
+    }
+}
+
+fn lifecycle(kind: LifecycleKind, source: Source) -> Lifecycle {
     let (exec, worktree) = (exec(), worktree());
     match kind {
         LifecycleKind::Backlog => Lifecycle::Backlog,
-        LifecycleKind::Preparing => Lifecycle::Preparing { exec },
+        LifecycleKind::Preparing => Lifecycle::Preparing {
+            exec,
+            source: source_of(source),
+        },
         LifecycleKind::Dispatching => Lifecycle::Dispatching { exec, worktree },
         LifecycleKind::Running => Lifecycle::Running { exec, worktree },
         LifecycleKind::Done => Lifecycle::Done {
@@ -121,8 +127,10 @@ fn lifecycle(kind: LifecycleKind) -> Lifecycle {
 fn record(kind: LifecycleKind, source: Source) -> TaskRecord {
     TaskRecord {
         spec: spec(),
-        lifecycle: lifecycle(kind),
-        execution: (kind != LifecycleKind::Backlog).then(|| execution(RUN, source)),
+        lifecycle: lifecycle(kind, source),
+        // A run is recorded from `LanePrepared` on.
+        execution: (!matches!(kind, LifecycleKind::Backlog | LifecycleKind::Preparing))
+            .then(|| execution(RUN, source)),
         session_ids: vec![SESSION.into()],
         subtasks: vec![SubTask {
             id: SUBTASK.into(),
@@ -215,12 +223,16 @@ fn sample(kind: EventKind) -> TaskEvent {
         },
         EventKind::DispatchRequested => TaskEvent::DispatchRequested {
             id,
-            execution: execution(RUN, Source::Cli),
+            execution_id: RUN.into(),
+            source: source_of(Source::Cli),
             at: t,
         },
         EventKind::LanePrepared => TaskEvent::LanePrepared {
             exec,
             worktree: worktree(),
+            agent_id: "claude".into(),
+            account_id: None,
+            cwd: worktree(),
             at: t,
         },
         EventKind::DispatchFailed => TaskEvent::DispatchFailed {
@@ -350,11 +362,11 @@ const TABLE: &[(EventKind, [Cell; 9])] = &[
     ),
     (
         EventKind::CliProcessObserved,
-        [No, Same, Same, Same, Same, Same, Same, Same, Same],
+        [No, No, Same, Same, Same, Same, Same, Same, Same],
     ),
     (
         EventKind::CliTranscriptFound,
-        [No, Same, Same, Same, Same, Same, Same, Same, Same],
+        [No, No, Same, Same, Same, Same, Same, Same, Same],
     ),
     (
         EventKind::Settled,
@@ -505,13 +517,12 @@ fn running_book(source: Source, run: &str) -> TasksBook {
 }
 
 fn start(book: &mut TasksBook, source: Source, run: &str) {
-    let mut execution = execution(run, source);
-    execution.session_id = None;
     commit(
         book,
         TaskEvent::DispatchRequested {
             id: ID.into(),
-            execution,
+            execution_id: run.into(),
+            source: source_of(source),
             at: at(1),
         },
     );
@@ -520,9 +531,15 @@ fn start(book: &mut TasksBook, source: Source, run: &str) {
         TaskEvent::LanePrepared {
             exec: exec_of(run),
             worktree: worktree(),
+            agent_id: "claude".into(),
+            account_id: None,
+            cwd: worktree(),
             at: at(2),
         },
     );
+    let mut expected = execution(run, source);
+    expected.session_id = None;
+    assert_eq!(task(book).execution, Some(expected));
     commit(
         book,
         TaskEvent::Dispatched {
@@ -598,7 +615,7 @@ fn launch_fields_only_change_in_backlog() {
 }
 
 #[test]
-fn dispatch_facts_are_frozen_at_dispatch_requested() {
+fn dispatch_facts_are_frozen_once_the_lane_is_prepared() {
     let mut book = running_book(Source::Cli, RUN);
     let frozen = task(&book).execution.clone();
     commit(
@@ -815,7 +832,8 @@ fn reconciling_before_a_lane_exists_is_undelivered_without_a_worktree() {
         &mut book,
         TaskEvent::DispatchRequested {
             id: ID.into(),
-            execution: execution(RUN, Source::Chat),
+            execution_id: RUN.into(),
+            source: source_of(Source::Chat),
             at: at(1),
         },
     );
@@ -1054,15 +1072,14 @@ fn the_machine_obeys_the_run_log_laws() {
 
 #[test]
 fn every_crash_point_recovers_a_committed_prefix() {
-    let mut cli = execution(RUN, Source::Cli);
-    cli.session_id = None;
     let scenario = vec![
         TaskEvent::Created { spec: spec() },
         sample(EventKind::Edited),
         sample(EventKind::SubtaskAdded),
         TaskEvent::DispatchRequested {
             id: ID.into(),
-            execution: cli,
+            execution_id: RUN.into(),
+            source: source_of(Source::Cli),
             at: at(11),
         },
         sample(EventKind::LanePrepared),
@@ -1094,7 +1111,10 @@ fn every_crash_point_recovers_a_committed_prefix() {
 
 #[test]
 fn every_lifecycle_and_event_round_trips_through_json() {
-    let mut lifecycles: Vec<_> = COLUMNS.into_iter().map(lifecycle).collect();
+    let mut lifecycles: Vec<_> = COLUMNS
+        .into_iter()
+        .map(|kind| lifecycle(kind, Source::Cli))
+        .collect();
     let causes = [
         ErrorCause::StartFailed(StartFailure::RepoBusy),
         ErrorCause::ToolFailures,

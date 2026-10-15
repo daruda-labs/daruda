@@ -32,7 +32,7 @@ pub(crate) fn init_gpui_component(cx: &mut TestAppContext) {
         // still need these.
         crate::agent::skills::global::init(cx);
         crate::agent::mcp::global::init(cx);
-        crate::agent::tasks_global::init(cx);
+        crate::runs::RunsHost::ensure_installed(cx);
     });
 }
 

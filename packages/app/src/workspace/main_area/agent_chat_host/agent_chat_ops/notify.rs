@@ -121,13 +121,24 @@ impl Workspace {
         // is not the phone's, so nothing re-arms it, and its completion would
         // be measured against a message from a turn that is long gone.
         self.close_phone_turn(pane_id, cx);
-        let reason = match outcome {
-            TurnOutcome::Completed | TurnOutcome::Stopped => {
-                daruda_store::tasks::SessionEndReason::Stop
-            }
-            TurnOutcome::Errored => daruda_store::tasks::SessionEndReason::Error,
+        // A stop interrupts the task's run; it is never `Done`.
+        let settled = match outcome {
+            TurnOutcome::Completed => daruda_store::tasks::machine::SettleOutcome::Completed {
+                end_reason: daruda_store::tasks::SessionEndReason::Stop,
+            },
+            TurnOutcome::Errored => daruda_store::tasks::machine::SettleOutcome::Errored,
+            TurnOutcome::Stopped => daruda_store::tasks::machine::SettleOutcome::Stopped {
+                cause: match self.interrupt_cause(pane_id, cx) {
+                    crate::control::result::InterruptCause::ExtraUsage { .. } => {
+                        daruda_store::tasks::machine::StopCause::ExtraUsage
+                    }
+                    crate::control::result::InterruptCause::User => {
+                        daruda_store::tasks::machine::StopCause::UserStop
+                    }
+                },
+            },
         };
-        self.apply_agent_chat_task_ended(pane_id, reason, cx);
+        self.settle_agent_chat_task(pane_id, settled, cx);
         // Last, because handing `outcome` on moves it — the matches above
         // bind nothing and so only read it.
         self.answer_waiting_ask(pane_id, outcome, cx);

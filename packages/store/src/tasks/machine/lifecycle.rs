@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::tasks::{ExecutionRef, SessionEndReason};
+use crate::tasks::{ExecutionRef, SessionEndReason, TaskExecutionSource};
 
 /// A task's lifecycle. Active states always name the execution they belong
 /// to, so an event from an earlier execution can be told apart.
@@ -17,6 +17,9 @@ pub enum Lifecycle {
     /// Start accepted; the lane and pane are being prepared.
     Preparing {
         exec: ExecutionRef,
+        /// What will drive the run, until `LanePrepared` records the run.
+        #[serde(default)]
+        source: TaskExecutionSource,
     },
     /// The prompt is handed to the chat or PTY but not yet on the wire.
     Dispatching {
@@ -160,7 +163,7 @@ impl Lifecycle {
     pub fn exec(&self) -> Option<&ExecutionRef> {
         match self {
             Self::Backlog => None,
-            Self::Preparing { exec }
+            Self::Preparing { exec, .. }
             | Self::Dispatching { exec, .. }
             | Self::Running { exec, .. }
             | Self::Done { exec, .. }

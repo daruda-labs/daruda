@@ -3,10 +3,10 @@
 
 use gpui::App;
 
-use crate::agent::tasks_global::GlobalTasks;
 use crate::control::approval::ApprovalOutcome;
 use crate::control::result::{ControlError, ControlOutcome, ControlResult, LaneHandle};
 use crate::control::spec::GatedCommand;
+use crate::runs::GlobalTasks;
 use crate::surface::strings as s;
 use crate::telegram::bridge::PaneRef;
 
@@ -89,7 +89,7 @@ fn guard_gated(cmd: &GatedCommand, cx: &mut App) -> Result<(), ControlError> {
         GatedCommand::TaskStart { task } => {
             let tasks = cx.global::<GlobalTasks>();
             let found = tasks.get(task).ok_or(ControlError::TaskNotFound)?;
-            if !matches!(found.state, daruda_store::tasks::TaskState::Backlog) {
+            if found.lifecycle != daruda_store::tasks::Lifecycle::Backlog {
                 return Err(ControlError::TaskNotBacklog);
             }
             let creates_lane = task_creates_lane(found);
@@ -103,15 +103,18 @@ fn guard_gated(cmd: &GatedCommand, cx: &mut App) -> Result<(), ControlError> {
     }
 }
 
-fn task_creates_lane(task: &daruda_store::tasks::Task) -> bool {
-    matches!(task.run_in, daruda_store::tasks::TaskRunIn::NewWorktree)
+fn task_creates_lane(task: &daruda_store::tasks::TaskRecord) -> bool {
+    matches!(
+        task.spec.run_in,
+        daruda_store::tasks::TaskRunIn::NewWorktree
+    )
 }
 
 /// A task's title, for the sentence that asks about it.
 fn task_title(task: &str, cx: &App) -> String {
     cx.global::<GlobalTasks>()
         .get(task)
-        .map(|t| t.title.clone())
+        .map(|t| t.spec.title.clone())
         .unwrap_or_default()
 }
 
@@ -158,7 +161,9 @@ async fn perform_gated(cmd: GatedCommand, cx: &mut gpui::AsyncApp) -> ControlOut
             prompt,
             worktree,
         } => {
-            return cx.update(|cx| {
+            // Answered once the task is in the log, so a start or a listing
+            // the caller sends next finds it.
+            let created = cx.update(|cx| {
                 in_project_window(workspace, project, cx, |ws, _window, cx| {
                     ws.control_task_create(
                         project,
@@ -168,8 +173,10 @@ async fn perform_gated(cmd: GatedCommand, cx: &mut gpui::AsyncApp) -> ControlOut
                         cx,
                     )
                 })
-                .map(|task| ControlResult::TaskCreated { task })
-            });
+            })?;
+            return created
+                .await
+                .map(|task| ControlResult::TaskCreated { task });
         }
         GatedCommand::TaskStart { task } => return start_task(task, cx).await,
         GatedCommand::TaskOpen { task } => return cx.update(|cx| open_task(task, cx)),

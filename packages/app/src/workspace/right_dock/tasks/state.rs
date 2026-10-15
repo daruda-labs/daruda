@@ -1,7 +1,7 @@
 //! What the task list is narrowed to — window-local, never persisted.
 
 use daruda_store::project::ProjectUuid;
-use daruda_store::tasks::{Task, TaskFilter, TaskScope};
+use daruda_store::tasks::{TaskFilter, TaskRecord, TaskScope};
 
 use super::TaskGroups;
 
@@ -15,11 +15,11 @@ pub(in crate::workspace) struct TaskBrowserState {
 impl TaskBrowserState {
     /// Relax only the choices hiding `task` — its project, status and fold —
     /// and keep the rest. Search is the caller's: it lives in an input.
-    pub fn reveal(&mut self, task: &Task, active: Option<ProjectUuid>) {
-        if !self.scope.matches(task, active) {
-            self.scope = TaskScope::Project(task.project);
+    pub fn reveal(&mut self, task: &TaskRecord, active: Option<ProjectUuid>) {
+        if !self.scope.matches(task.spec.project, active) {
+            self.scope = TaskScope::Project(task.spec.project);
         }
-        if !self.filter.matches(&task.state) {
+        if !self.filter.matches(&task.lifecycle) {
             self.filter = TaskFilter::All;
         }
         self.groups.reveal(task);
@@ -35,7 +35,8 @@ mod tests {
     fn reveal_relaxes_only_what_hides_the_task() {
         let active = ProjectUuid::new();
         let other = ProjectUuid::new();
-        let task = Task::new(other, "Task".into(), String::new(), None);
+        let task =
+            crate::runs::seed::record(other, "Task", daruda_store::tasks::Lifecycle::Backlog);
         let mut state = TaskBrowserState {
             scope: TaskScope::ActiveProject,
             filter: TaskFilter::Failed,

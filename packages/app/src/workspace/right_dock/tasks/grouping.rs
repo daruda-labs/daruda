@@ -1,7 +1,7 @@
 //! In-window grouping preferences and stable, disjoint task sections.
 
 use daruda_store::project::ProjectUuid;
-use daruda_store::tasks::{Task, TaskFilter};
+use daruda_store::tasks::{TaskFilter, TaskRecord};
 
 use super::list::FILTERS;
 
@@ -45,27 +45,27 @@ impl TaskGroups {
         }
     }
 
-    pub fn reveal(&mut self, task: &Task) {
+    pub fn reveal(&mut self, task: &TaskRecord) {
         self.collapsed.retain(|key| !key.matches(task));
     }
 }
 
 impl TaskGroupKey {
-    fn matches(self, task: &Task) -> bool {
+    fn matches(self, task: &TaskRecord) -> bool {
         match self {
-            Self::Status(filter) => filter.matches(&task.state),
-            Self::Project(project) => task.project == project,
+            Self::Status(filter) => filter.matches(&task.lifecycle),
+            Self::Project(project) => task.spec.project == project,
         }
     }
 }
 
 pub(super) struct TaskGroup<'a> {
     pub key: TaskGroupKey,
-    pub tasks: Vec<&'a Task>,
+    pub tasks: Vec<&'a TaskRecord>,
 }
 
 pub(super) fn project<'a>(
-    visible: &[&'a Task],
+    visible: &[&'a TaskRecord],
     mode: TaskGrouping,
     projects: &[(ProjectUuid, String)],
 ) -> Vec<TaskGroup<'a>> {
@@ -82,7 +82,7 @@ pub(super) fn project<'a>(
                 .map(|(id, _)| TaskGroupKey::Project(*id))
                 .collect();
             for task in visible {
-                let key = TaskGroupKey::Project(task.project);
+                let key = TaskGroupKey::Project(task.spec.project);
                 if !keys.contains(&key) {
                     keys.push(key);
                 }
@@ -105,18 +105,16 @@ pub(super) fn project<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use daruda_store::tasks::TaskState;
+    use crate::runs::seed::{lifecycle, record};
+    use daruda_store::tasks::{Lifecycle, LifecycleKind};
 
     #[test]
     fn groups_keep_filtered_order_and_include_closed_projects() {
         let project = ProjectUuid::new();
         let closed = ProjectUuid::new();
-        let a = Task::new(project, "A".into(), String::new(), None);
-        let mut b = Task::new(closed, "B".into(), String::new(), None);
-        b.state = TaskState::Cancelled {
-            worktree_path: "/tmp".into(),
-        };
-        let c = Task::new(project, "C".into(), String::new(), None);
+        let a = record(project, "A", Lifecycle::Backlog);
+        let b = record(closed, "B", lifecycle(LifecycleKind::Cancelled));
+        let c = record(project, "C", Lifecycle::Backlog);
         let visible = [&c, &b, &a];
         let groups = project_groups(&visible, project);
         assert_eq!(groups.len(), 2);
@@ -124,7 +122,7 @@ mod tests {
             groups[0]
                 .tasks
                 .iter()
-                .map(|t| t.title.as_str())
+                .map(|t| t.spec.title.as_str())
                 .collect::<Vec<_>>(),
             ["C", "A"]
         );
@@ -139,14 +137,14 @@ mod tests {
         );
     }
 
-    fn project_groups<'a>(visible: &[&'a Task], id: ProjectUuid) -> Vec<TaskGroup<'a>> {
+    fn project_groups<'a>(visible: &[&'a TaskRecord], id: ProjectUuid) -> Vec<TaskGroup<'a>> {
         super::project(visible, TaskGrouping::Project, &[(id, "App".into())])
     }
 
     #[test]
     fn saving_reveals_only_its_group_and_mode_changes_reset_folds() {
-        let task = Task::new(ProjectUuid::new(), "Task".into(), String::new(), None);
-        let key = TaskGroupKey::Project(task.project);
+        let task = record(ProjectUuid::new(), "Task", Lifecycle::Backlog);
+        let key = TaskGroupKey::Project(task.spec.project);
         let other = TaskGroupKey::Project(ProjectUuid::new());
         let mut groups = TaskGroups::default();
         groups.set_mode(TaskGrouping::Project);

@@ -14,19 +14,9 @@ async fn task_status_controls_preserve_scope_and_clear_without_switching_worktre
     let mut vcx = VisualTestContext::from_window(window.into(), cx);
     vcx.update(|window, cx| {
         workspace.update(cx, |ws, cx| {
-            use gpui::BorrowAppContext as _;
-            let mut task = daruda_store::tasks::Task::new(
-                Default::default(),
-                "Visible task".into(),
-                String::new(),
-                None,
-            );
-            task.state = daruda_store::tasks::TaskState::Running {
-                worktree_path: "/tmp".into(),
-            };
-            cx.update_global::<crate::agent::tasks_global::GlobalTasks, _>(|tasks, _| {
-                tasks.add(task);
-            });
+            let spec = crate::runs::seed::spec(Default::default(), "Visible task");
+            let run = crate::runs::seed::SeedRun::chat("/tmp");
+            crate::runs::seed::task(spec, Some((&run, crate::runs::seed::SeedEnd::Running)), cx);
             ws.set_task_scope(TaskScope::AllProjects, cx);
             ws.open_page(Page::Tasks, window, cx);
         });
@@ -79,24 +69,15 @@ fn pages_preserve_the_active_lane_and_utility_selection(cx: &mut TestAppContext)
 
 #[gpui::test]
 async fn task_groups_collapse_and_reopen_without_changing_filters(cx: &mut TestAppContext) {
-    use crate::agent::tasks_global::GlobalTasks;
     use crate::workspace::right_dock::tasks::{TaskGroupKey, TaskGrouping};
-    use daruda_store::tasks::{Task, TaskFilter, TaskScope};
-    use gpui::BorrowAppContext as _;
+    use daruda_store::tasks::{TaskFilter, TaskScope};
     let (window, workspace) = build_workspace(cx);
     let mut vcx = VisualTestContext::from_window(window.into(), cx);
-    let mut task = Task::new(
-        Default::default(),
-        "Fold this task".into(),
-        String::new(),
-        None,
-    );
+    let mut task = crate::runs::seed::spec(Default::default(), "Fold this task");
     task.id = "group-fixture".into();
     vcx.update(|window, cx| {
         workspace.update(cx, |ws, cx| {
-            cx.update_global::<GlobalTasks, _>(|tasks, _| {
-                tasks.add(task);
-            });
+            crate::runs::seed::task(task, None, cx);
             ws.set_task_scope(TaskScope::AllProjects, cx);
             ws.set_task_grouping(TaskGrouping::Status, cx);
             ws.open_page(Page::Tasks, window, cx);

@@ -77,11 +77,10 @@ impl Workspace {
                         let task_chat = ac.access.is_read_only()
                             || ac.session_id.is_some()
                                 && cx
-                                    .global::<crate::agent::tasks_global::GlobalTasks>()
-                                    .tasks
-                                    .iter()
+                                    .global::<crate::runs::GlobalTasks>()
+                                    .records()
                                     .any(|task| {
-                                        task.agent_surface
+                                        task.spec.agent_surface
                                             == daruda_store::tasks::TaskAgentSurface::AgentChat
                                             && task.execution.as_ref().is_some_and(|run| {
                                                 ac.agent_id.as_ref() == Some(&run.agent_id)

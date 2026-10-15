@@ -216,9 +216,12 @@ impl Workspace {
         self.window_runtime.cached_bounds = Some(new);
     }
 
-    #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn suspend_persistence_for_shot(&mut self) {
+    /// Keep a capture's fixtures off disk: the layout stops saving, and the
+    /// task log moves to a scratch copy.
+    #[cfg(any(test, feature = "screenshot"))]
+    pub(in crate::workspace) fn suspend_persistence_for_shot(&mut self, cx: &mut App) {
         self.persistence_suspended = true;
+        crate::runs::RunsHost::suspend_persistence(cx);
     }
 
     /// Persist state to disk: one workspace file

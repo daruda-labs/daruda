@@ -4,6 +4,7 @@
 mod browser;
 mod controls;
 mod grouping;
+mod lifecycle_text;
 mod list;
 mod rows;
 #[cfg(feature = "screenshot")]
@@ -13,11 +14,13 @@ mod state;
 pub(in crate::workspace) use browser::{TaskBrowser, TaskBrowserSnapshot};
 pub(in crate::workspace) use controls::header;
 pub(in crate::workspace) use grouping::{TaskGroupKey, TaskGrouping, TaskGroups};
+pub(in crate::workspace) use lifecycle_text::failure_text;
+use lifecycle_text::state_label;
 
 use crate::ui::theme;
 use chrono::{DateTime, Utc};
 use daruda_agent::SessionStatus;
-use daruda_store::tasks::{SessionEndReason, TASK_TOOL_USE_FAILURE_THRESHOLD, Task, TaskState};
+use daruda_store::tasks::{Lifecycle, TASK_TOOL_USE_FAILURE_THRESHOLD, TaskRecord};
 use daruda_terminal::ux::strings as ux_strings;
 use gpui::{AnyElement, Hsla, IntoElement, SharedString, div, prelude::*, px};
 
@@ -53,12 +56,13 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &gpui::App) -> 
 }
 
 /// Search task metadata and subtasks, excluding attached session IDs.
-pub(super) fn matches_task(t: &Task, query_lower: &str) -> bool {
-    t.title.to_ascii_lowercase().contains(query_lower)
-        || t.id.to_ascii_lowercase().contains(query_lower)
-        || t.prompt.to_ascii_lowercase().contains(query_lower)
-        || t.notes.to_ascii_lowercase().contains(query_lower)
-        || t.branch_name.to_ascii_lowercase().contains(query_lower)
+pub(super) fn matches_task(t: &TaskRecord, query_lower: &str) -> bool {
+    let spec = &t.spec;
+    spec.title.to_ascii_lowercase().contains(query_lower)
+        || spec.id.to_ascii_lowercase().contains(query_lower)
+        || spec.prompt.to_ascii_lowercase().contains(query_lower)
+        || spec.notes.to_ascii_lowercase().contains(query_lower)
+        || spec.branch_name.to_ascii_lowercase().contains(query_lower)
         || t.subtasks
             .iter()
             .any(|s| s.title.to_ascii_lowercase().contains(query_lower))
@@ -86,7 +90,7 @@ fn search_row(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
 // ---------------------------------------------------------------------------
 
 /// Progress is metadata, omitted by the row when no subtasks exist.
-fn subtask_progress_cell(task: &Task, cx: &gpui::App) -> AnyElement {
+fn subtask_progress_cell(task: &TaskRecord, cx: &gpui::App) -> AnyElement {
     let (done, total) = task.subtask_progress();
     div()
         .flex_none()
@@ -100,11 +104,11 @@ fn subtask_progress_cell(task: &Task, cx: &gpui::App) -> AnyElement {
         .into_any_element()
 }
 
-/// Leading state-indicator cell. `Running` rows paint a filled circle
+/// Leading state-indicator cell. Running rows paint a filled circle
 /// whose alpha pulses (see `pulse_alpha`), driven by the workspace's
 /// `spawn_task_live_tick` redraws; every other state renders a static
 /// glyph in its state color.
-fn indicator_cell(state: &TaskState, now: DateTime<Utc>, cx: &gpui::App) -> AnyElement {
+fn indicator_cell(state: &Lifecycle, now: DateTime<Utc>, cx: &gpui::App) -> AnyElement {
     let cell = div()
         .w(px(theme::RIGHT_PANEL_TASK_INDICATOR_W))
         .flex_none()
@@ -112,7 +116,7 @@ fn indicator_cell(state: &TaskState, now: DateTime<Utc>, cx: &gpui::App) -> AnyE
         .items_center()
         .justify_center();
     match state {
-        TaskState::Running { .. } => {
+        Lifecycle::Running { .. } => {
             let alpha = pulse_alpha(now);
             let dot_color = Hsla {
                 a: alpha,
@@ -156,47 +160,25 @@ fn pulse_alpha(now: DateTime<Utc>) -> f32 {
     }
 }
 
-fn state_indicator(state: &TaskState, cx: &gpui::App) -> (&'static str, Hsla) {
+/// A starting run shares the running glyph and color; an undelivered prompt
+/// reads as a failure and an interrupted run as a cancel.
+fn state_indicator(state: &Lifecycle, cx: &gpui::App) -> (&'static str, Hsla) {
     let t = theme::current(cx);
     match state {
-        TaskState::Backlog => (ux_strings::AGENT_TASK_QUEUED, t.text_subtle),
-        TaskState::Running { .. } => (
-            ux_strings::AGENT_TASK_RUNNING,
-            t.right_panel_task_running_color,
-        ),
-        TaskState::Done { .. } => (ux_strings::AGENT_TASK_DONE, t.text_muted),
-        TaskState::Error { .. } => (ux_strings::AGENT_TASK_ERROR, theme::ERROR),
-        TaskState::Cancelled { .. } => (ux_strings::AGENT_TASK_CANCELLED, t.text_subtle),
-    }
-}
-
-fn state_label(state: &TaskState) -> SharedString {
-    match state {
-        TaskState::Backlog => SharedString::from(strings::terminal::task_backlog()),
-        TaskState::Running { .. } => SharedString::from(strings::terminal::task_running()),
-        TaskState::Done { end_reason, .. } => SharedString::from(format!(
-            "{} ({})",
-            strings::terminal::task_done_prefix(),
-            done_flavour_label(*end_reason),
-        )),
-        TaskState::Error { message, .. } => SharedString::from(format!(
-            "{}: {}",
-            strings::terminal::task_error_prefix(),
-            message,
-        )),
-        TaskState::Cancelled { .. } => SharedString::from(strings::terminal::task_cancelled()),
-    }
-}
-
-fn done_flavour_label(reason: SessionEndReason) -> String {
-    match reason {
-        SessionEndReason::Stop => strings::task::done_flavour_stop(),
-        SessionEndReason::PromptInputExit => strings::task::done_flavour_prompt_input_exit(),
-        SessionEndReason::Logout => strings::task::done_flavour_logout(),
-        SessionEndReason::Other => strings::task::done_flavour_other(),
-        // `Error` belongs to the `Error` state, not `Done`; reaching
-        // here means a migrated row — fall back to "Other".
-        SessionEndReason::Error => strings::task::done_flavour_other(),
+        Lifecycle::Backlog => (ux_strings::AGENT_TASK_QUEUED, t.text_subtle),
+        Lifecycle::Preparing { .. } | Lifecycle::Dispatching { .. } | Lifecycle::Running { .. } => {
+            (
+                ux_strings::AGENT_TASK_RUNNING,
+                t.right_panel_task_running_color,
+            )
+        }
+        Lifecycle::Done { .. } => (ux_strings::AGENT_TASK_DONE, t.text_muted),
+        Lifecycle::Error { .. } | Lifecycle::Undelivered { .. } => {
+            (ux_strings::AGENT_TASK_ERROR, theme::ERROR)
+        }
+        Lifecycle::Cancelled { .. } | Lifecycle::Interrupted { .. } => {
+            (ux_strings::AGENT_TASK_CANCELLED, t.text_subtle)
+        }
     }
 }
 
@@ -204,24 +186,23 @@ fn done_flavour_label(reason: SessionEndReason) -> String {
 // Duration cell — `now - created_at` or `finished_at - created_at`
 // ---------------------------------------------------------------------------
 
-/// Inline span showing the task's run duration — live for `Running`
-/// rows (re-rendered by `spawn_task_live_tick`), frozen at
+/// Inline span showing the task's run duration — live while it starts or
+/// runs (re-rendered by `spawn_task_live_tick`), frozen at
 /// `finished_at - created_at` for terminal states, dropped for
 /// `Backlog`. Formatting reuses `format_duration_compact`.
 fn duration_cell(
-    task: &Task,
+    task: &TaskRecord,
     snap: &RightDockSnapshot,
     t: &crate::ui::theme::DarudaTheme,
 ) -> Option<AnyElement> {
-    let end = match &task.state {
-        TaskState::Backlog => return None,
-        TaskState::Running { .. } => *snap.now,
-        TaskState::Done { .. } | TaskState::Error { .. } | TaskState::Cancelled { .. } => {
-            task.finished_at.unwrap_or(*snap.now)
-        }
+    let live = !task.lifecycle.is_terminal();
+    let end = match &task.lifecycle {
+        Lifecycle::Backlog => return None,
+        _ if live => *snap.now,
+        _ => task.finished_at.unwrap_or(*snap.now),
     };
-    let elapsed = (end - task.created_at).to_std().ok()?;
-    if elapsed.as_secs() == 0 && !matches!(task.state, TaskState::Running { .. }) {
+    let elapsed = (end - task.spec.created_at).to_std().ok()?;
+    if elapsed.as_secs() == 0 && !live {
         // A near-instant terminal transition (cancel-before-start) is
         // not worth a "0s" badge — drop the cell entirely so the row
         // stays clean.
@@ -248,7 +229,11 @@ fn duration_cell(
 /// isn't known to the store (hook + jsonl both silent) so a fresh
 /// task that hasn't yet emitted any event reads as "no session
 /// activity yet" rather than "idle".
-fn session_badge(task: &Task, snap: &RightDockSnapshot, cx: &gpui::App) -> Option<AnyElement> {
+fn session_badge(
+    task: &TaskRecord,
+    snap: &RightDockSnapshot,
+    cx: &gpui::App,
+) -> Option<AnyElement> {
     let sid = task.session_ids.first()?;
     let take = ux_strings::RIGHT_PANEL_TASK_SESSION_BADGE_LEN.min(sid.len());
     let prefix: String = sid.chars().take(take).collect();
@@ -318,8 +303,8 @@ fn session_status_glyph(status: SessionStatus, cx: &gpui::App) -> (&'static str,
 ///
 /// Drops out for terminal states (the row has already settled) and
 /// when no session has crossed the soft threshold yet.
-fn failure_indicator(task: &Task, snap: &RightDockSnapshot) -> Option<AnyElement> {
-    if !matches!(task.state, TaskState::Running { .. }) {
+fn failure_indicator(task: &TaskRecord, snap: &RightDockSnapshot) -> Option<AnyElement> {
+    if !matches!(task.lifecycle, Lifecycle::Running { .. }) {
         return None;
     }
     let count = task
@@ -351,19 +336,28 @@ mod tests {
     use super::{matches_task, pulse_alpha};
     use crate::ui::theme;
     use chrono::{TimeZone, Utc};
-    use daruda_store::tasks::{SubTask, Task};
+    use daruda_store::tasks::{Lifecycle, SubTask, TaskRecord, TaskSpec};
 
     /// The branch is set apart from every other field, so a branch hit
     /// cannot pass by matching the title instead.
-    fn fresh_task() -> Task {
-        let mut task = Task::new(
+    fn fresh_task() -> TaskRecord {
+        let mut spec = TaskSpec::new(
             daruda_store::project::ProjectUuid::default(),
             "fix-bug".into(),
             "prompt body".into(),
             None,
+            Utc::now(),
         );
-        task.branch_name = "feat-login".into();
-        task
+        spec.branch_name = "feat-login".into();
+        TaskRecord {
+            spec,
+            lifecycle: Lifecycle::Backlog,
+            execution: None,
+            session_ids: Vec::new(),
+            subtasks: Vec::new(),
+            updated_at: Utc::now(),
+            finished_at: None,
+        }
     }
 
     /// Title / prompt / notes / branch_name stay matched even once
@@ -371,7 +365,7 @@ mod tests {
     #[test]
     fn matches_task_still_matches_core_metadata_fields() {
         let mut t = fresh_task();
-        t.notes = "Investigate the auth flow".into();
+        t.spec.notes = "Investigate the auth flow".into();
         assert!(matches_task(&t, "fix"), "title hit");
         assert!(matches_task(&t, "prompt"), "prompt hit");
         assert!(matches_task(&t, "auth"), "notes hit");
