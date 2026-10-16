@@ -334,6 +334,106 @@ fn a_run_an_older_build_started_is_resumed_from_its_journal() {
     assert_eq!(replay.next_seq, 4);
 }
 
+/// One node allowed two attempts, for the journal tests below.
+const RETRY_TWICE: &str = "\
+version: 1
+defaults: { agent: { id: claude } }
+nodes:
+  - id: design
+    kind: agent
+    output: design.md
+    prompt: write
+    on_fail:
+      retry: { max_attempts: 2, wait: 0s, hint: again }
+";
+
+/// An older build's run whose `design` attempts all failed, journaled.
+fn journal_of_failures(
+    dir: &Path,
+    failures: u32,
+) -> (crate::request::RunRequest, std::path::PathBuf) {
+    let request = request_for(RETRY_TWICE, dir);
+    let run_dir = request.run_dir.clone();
+    std::fs::create_dir_all(&run_dir).expect("mkdir");
+    std::fs::write(run_dir.join(crate::resume::RUN_SPEC_FILE), RETRY_TWICE).expect("spec");
+    crate::journal::start(&run_dir, None, None, &[]).expect("start");
+    for attempt in 1..=failures {
+        let failed = crate::record::AttemptRecord {
+            attempt,
+            evidence_seq: attempt,
+            outcome: crate::record::AttemptOutcome::Reported("timed out after 9 seconds".into()),
+            invalidated: crate::record::Invalidation::default(),
+            git_status: None,
+            at: std::time::UNIX_EPOCH,
+            took: Duration::ZERO,
+            waited: crate::runner::Waiting::default(),
+            tools: Vec::new(),
+            turns: 1,
+            usage: None,
+        };
+        let spent = crate::run_log::reader::Spent {
+            node_runs: attempt,
+            ..Default::default()
+        };
+        crate::journal::append_attempt(&run_dir, &"design".into(), &failed, &spent).expect("line");
+    }
+    as_if_killed_without_log(&request, &run_dir);
+    (request, run_dir)
+}
+
+/// **F10 for imported runs.** A failure the older build journaled still
+/// counts: with one of two attempts spent, the resume has one left.
+#[test]
+fn an_imported_run_keeps_the_attempts_its_journal_spent() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (_, run_dir) = journal_of_failures(dir.path(), 1);
+
+    let resumed = resume_request(RETRY_TWICE, dir.path(), &run_dir).expect("resumable");
+    let runner = FakeRunner::new().script(
+        "design",
+        vec![
+            Step::fail(NodeFailure::Exit { code: Some(1) }),
+            Step::fail(NodeFailure::Exit { code: Some(1) }),
+        ],
+    );
+    let report = execute(&resumed, &runner, &CancelToken::default());
+
+    assert!(
+        matches!(report.outcome, RunOutcome::Failed { .. }),
+        "{:?}",
+        report.outcome
+    );
+    assert_eq!(
+        runner.ids(),
+        vec![NodeId::from("design")],
+        "a spent try ran again"
+    );
+    let design = crate::run_log::reader::read(&run_dir);
+    assert_eq!(
+        design.next_seq, 3,
+        "evidence did not continue past the journal's"
+    );
+}
+
+/// An imported node whose journal spent every attempt fails the resume
+/// with the reason it was journaled with, and runs nothing.
+#[test]
+fn an_imported_node_with_no_attempts_left_fails_as_journaled() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (_, run_dir) = journal_of_failures(dir.path(), 2);
+
+    let resumed = resume_request(RETRY_TWICE, dir.path(), &run_dir).expect("resumable");
+    let runner = FakeRunner::new();
+    let report = execute(&resumed, &runner, &CancelToken::default());
+
+    assert!(runner.ids().is_empty(), "{:?}", runner.ids());
+    let RunOutcome::Failed { node, failure } = &report.outcome else {
+        panic!("{:?}", report.outcome);
+    };
+    assert_eq!(node, &NodeId::from("design"));
+    assert_eq!(failure.to_string(), "timed out after 9 seconds");
+}
+
 fn as_if_killed_without_log(request: &crate::request::RunRequest, run_dir: &Path) {
     let lock_dir = super::lock_dir_of(request);
     std::fs::create_dir_all(&lock_dir).expect("lock dir");

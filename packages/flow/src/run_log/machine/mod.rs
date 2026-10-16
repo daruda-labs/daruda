@@ -8,7 +8,8 @@ mod rejected;
 mod state;
 
 pub use event::{
-    AbandonReason, FixOutcome, FlowRunEvent, Imported, ImportedAttempt, ImportedOutcome, NodeStart,
+    AbandonReason, FixOutcome, FlowRunEvent, Imported, ImportedAttempt, ImportedLast, ImportedNode,
+    ImportedOutcome, NodeStart,
 };
 pub use rejected::FlowRunRejected;
 pub use state::{

@@ -26,7 +26,7 @@ use crate::marker::RunStatus;
 use crate::run_log::line::AttemptLine;
 use crate::run_log::machine::{
     AbandonReason, AttemptState, FlowRunEvent, FlowRunMachine, FlowRunState, Imported,
-    ImportedAttempt, ImportedOutcome, Produces,
+    ImportedAttempt, ImportedLast, ImportedNode, ImportedOutcome, Produces,
 };
 use crate::run_log::reader::{self, Replay};
 use crate::run_log::store::FlowRunStore;
@@ -306,7 +306,51 @@ fn import_journal(run_dir: &Path, loaded: &LoadedFlow) -> FlowRunEvent {
         next_evidence: replay.next_seq.max(1),
         spent: (&replay.spent).into(),
         records,
+        carried: carried(&replay.records, &replay.passed),
     }))
+}
+
+/// Each unpassed node's settled attempts since a repair last invalidated
+/// it. Counted, not read off attempt numbers: an older build's resume
+/// restarted those at 1, so the numbers alone undercount.
+fn carried(records: &[crate::record::NodeRecord], passed: &[NodeId]) -> Vec<ImportedNode> {
+    use crate::record::AttemptOutcome;
+    // The evidence number is run-wide and only rises, so an invalidation
+    // splits a node's attempts into the generation before it and after.
+    let mut boundary = std::collections::BTreeMap::<&NodeId, u32>::new();
+    for attempt in records.iter().flat_map(|node| &node.attempts) {
+        for id in &attempt.invalidated.nodes {
+            let seen = boundary.entry(id).or_default();
+            *seen = (*seen).max(attempt.evidence_seq);
+        }
+    }
+    records
+        .iter()
+        .filter(|node| !passed.contains(&node.id))
+        .filter_map(|node| {
+            let since = boundary.get(&node.id).copied();
+            let current: Vec<_> = node
+                .attempts
+                .iter()
+                .filter(|attempt| since.is_none_or(|seq| attempt.evidence_seq > seq))
+                .collect();
+            let last = match &current.iter().max_by_key(|a| a.evidence_seq)?.outcome {
+                AttemptOutcome::Canceled => ImportedLast::Canceled,
+                AttemptOutcome::Reported(reason) => ImportedLast::Failed {
+                    reason: reason.clone(),
+                },
+                AttemptOutcome::Failed(failure) => ImportedLast::Failed {
+                    reason: failure.to_string(),
+                },
+                AttemptOutcome::Passed => return None,
+            };
+            Some(ImportedNode {
+                node: node.id.clone(),
+                attempts: u32::try_from(current.len()).unwrap_or(u32::MAX),
+                last,
+            })
+        })
+        .collect()
 }
 
 /// The rest of §5.5 once the log is open: steps 3–7. Returns the store and
@@ -630,5 +674,64 @@ mod tests {
             );
             daruda_core::path::remove_symlink(&output).expect("unlink");
         }
+    }
+
+    fn journaled(
+        seq: u32,
+        outcome: crate::record::AttemptOutcome,
+        invalidated: &[&str],
+    ) -> crate::record::AttemptRecord {
+        crate::record::AttemptRecord {
+            attempt: 1,
+            evidence_seq: seq,
+            outcome,
+            invalidated: crate::record::Invalidation {
+                nodes: invalidated.iter().map(|id| NodeId::from(*id)).collect(),
+                archived: Vec::new(),
+            },
+            git_status: None,
+            at: std::time::UNIX_EPOCH,
+            took: Duration::ZERO,
+            waited: crate::runner::Waiting::default(),
+            tools: Vec::new(),
+            turns: 1,
+            usage: None,
+        }
+    }
+
+    /// A repair's invalidation starts the member's count over: only the
+    /// attempts after it are carried, and a passed node carries nothing.
+    #[test]
+    fn only_the_current_generations_attempts_are_carried() {
+        use crate::record::{AttemptOutcome, NodeRecord};
+        let failed = || AttemptOutcome::Reported("exited with status 1".into());
+        let records = vec![
+            NodeRecord {
+                id: "review".into(),
+                attempts: vec![
+                    journaled(1, failed(), &[]),
+                    journaled(4, AttemptOutcome::Canceled, &[]),
+                ],
+            },
+            NodeRecord {
+                id: "gate".into(),
+                attempts: vec![journaled(3, failed(), &["review", "gate"])],
+            },
+            NodeRecord {
+                id: "design".into(),
+                attempts: vec![journaled(2, AttemptOutcome::Passed, &[])],
+            },
+        ];
+
+        let carried = carried(&records, &["design".into()]);
+
+        assert_eq!(
+            carried,
+            vec![ImportedNode {
+                node: "review".into(),
+                attempts: 1,
+                last: ImportedLast::Canceled,
+            }]
+        );
     }
 }

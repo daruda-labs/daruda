@@ -122,6 +122,28 @@ pub struct Imported {
     pub spent: SpentLine,
     /// The old journal's attempts, for `run.md`; each with its outcome.
     pub records: Vec<ImportedAttempt>,
+    /// For each node that has not passed, what its current generation
+    /// spent, so a resume keeps counting from there (F10). Absent from
+    /// imports written before it was carried.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub carried: Vec<ImportedNode>,
+}
+
+/// A node's settled attempts in its current generation, as the old journal
+/// knew them. Only settled ones: the journal never saw an attempt a crash
+/// cut short, and such an attempt spends nothing anyway (D4-2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportedNode {
+    pub node: NodeId,
+    pub attempts: u32,
+    pub last: ImportedLast,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "result", rename_all = "snake_case")]
+pub enum ImportedLast {
+    Failed { reason: String },
+    Canceled,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

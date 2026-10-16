@@ -126,6 +126,9 @@ pub enum FailureLine {
         code: Option<i32>,
     },
     Interrupted,
+    Recorded {
+        message: String,
+    },
 }
 
 /// How a started run ended. No `LockHeld` or `Invalid`: neither run ever
@@ -341,6 +344,7 @@ impl From<&NodeFailure> for FailureLine {
             }
             NodeFailure::Exit { code } => Self::Exit { code },
             NodeFailure::Interrupted => Self::Interrupted,
+            NodeFailure::Recorded(message) => Self::Recorded { message },
         }
     }
 }
@@ -388,6 +392,7 @@ impl From<&FailureLine> for NodeFailure {
             }
             FailureLine::Exit { code } => Self::Exit { code },
             FailureLine::Interrupted => Self::Interrupted,
+            FailureLine::Recorded { message } => Self::Recorded(message),
         }
     }
 }
@@ -547,6 +552,7 @@ mod tests {
             NodeFailure::Exit { code: Some(2) },
             NodeFailure::Exit { code: None },
             NodeFailure::Interrupted,
+            NodeFailure::Recorded("exited with status 2".to_string()),
         ];
         for failure in failures {
             let line = FailureLine::from(&failure);

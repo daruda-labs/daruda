@@ -83,6 +83,9 @@ pub enum NodeFailure {
     /// to read logs of builds that counted such an attempt; a crash spends
     /// no attempt now (D4-2), so the engine no longer ends a node this way.
     Interrupted,
+    /// A failure an older build journaled: only its rendered text survived,
+    /// so it is reported as written rather than guessed back into a kind.
+    Recorded(String),
 }
 
 impl NodeFailure {
@@ -176,6 +179,7 @@ impl std::fmt::Display for NodeFailure {
                     "was interrupted when the app stopped, and has no attempts left"
                 )
             }
+            NodeFailure::Recorded(text) => f.write_str(text),
         }
     }
 }

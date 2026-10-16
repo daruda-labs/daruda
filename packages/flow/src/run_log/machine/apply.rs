@@ -1,12 +1,12 @@
 //! Transitions. Infallible and deterministic: runs only on events `check`
 //! accepted and `assign` numbered, and again on replay.
 
-use super::event::{FlowRunEvent as E, Imported, NodeStart};
+use super::event::{FlowRunEvent as E, Imported, ImportedLast, NodeStart};
 use super::state::{
     AttemptState, EndKind, FlowRunState, NodeState, OpenAsk, RunPhase, SpawnedProcess, StartFacts,
 };
 use crate::NodeId;
-use crate::run_log::line::EndLine;
+use crate::run_log::line::{EndLine, FailureLine};
 
 pub(super) fn apply(state: &mut FlowRunState, event: &E) {
     match event {
@@ -168,8 +168,8 @@ fn start(
     state.phase = RunPhase::Running;
 }
 
-/// The old journal knew which nodes passed and nothing per generation, so
-/// every other node starts over at attempt 1, as a resume did before.
+/// The old journal knew which nodes passed and, per node, the settled
+/// attempts of its current generation; those keep counting (F10).
 fn import(state: &mut FlowRunState, imported: &Imported) {
     start(
         state,
@@ -181,6 +181,21 @@ fn import(state: &mut FlowRunState, imported: &Imported) {
     for id in &imported.passed {
         if let Some(node) = state.nodes.get_mut(id) {
             node.last = AttemptState::Passed { attempt: 0 };
+        }
+    }
+    for carried in &imported.carried {
+        if let Some(node) = state.nodes.get_mut(&carried.node) {
+            let attempt = carried.attempts;
+            node.attempts = attempt;
+            node.last = match &carried.last {
+                ImportedLast::Failed { reason } => AttemptState::Failed {
+                    attempt,
+                    failure: FailureLine::Recorded {
+                        message: reason.clone(),
+                    },
+                },
+                ImportedLast::Canceled => AttemptState::Canceled { attempt },
+            };
         }
     }
     state.next_evidence = imported.next_evidence;
