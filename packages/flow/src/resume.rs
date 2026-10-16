@@ -60,16 +60,16 @@ pub struct Resumed {
     /// The flow as the earlier process resolved it, read back from
     /// `run.yaml`.
     pub loaded: LoadedFlow,
-    /// What the run directory said it had finished when this was read. For
-    /// display: the run itself reads it again once it holds the lock.
-    pub replay: Replay,
+    /// The node the run was started up to. Only facts fixed at the start
+    /// are read before the lock (F14); the progress is read under it.
+    pub until: Option<NodeId>,
 }
 
 impl Resumed {
     /// What the request carries into `execute`.
     pub fn continuation(&self) -> Continuation {
         Continuation {
-            until: self.replay.until.clone(),
+            until: self.until.clone(),
             settle: SETTLE_AFTER_CRASH,
         }
     }
@@ -164,7 +164,7 @@ pub fn prepare(
     let loaded = crate::load::load(&text, None).map_err(ResumeError::Load)?;
     Ok(Resumed {
         loaded,
-        replay: reader::read(run_dir),
+        until: reader::selection(run_dir),
     })
 }
 

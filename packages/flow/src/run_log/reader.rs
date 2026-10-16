@@ -59,6 +59,31 @@ pub fn started(run_dir: &Path) -> bool {
     has_log(run_dir) || crate::journal::exists(run_dir)
 }
 
+/// The node the run was started up to, read from its first event alone: a
+/// fact fixed when the run started, so reading it before the lock cannot
+/// disagree with what the run finds under it. An older build's journal, or
+/// a log still waiting to import one, says it in the journal.
+pub fn selection(run_dir: &Path) -> Option<NodeId> {
+    if !has_log(run_dir) || awaits_import(run_dir) {
+        return crate::journal::read(run_dir).until;
+    }
+    let path = super::log_dir(run_dir).join(super::FIRST_LOG_FILE);
+    let file = std::fs::File::open(path).ok()?;
+    std::io::BufRead::split(std::io::BufReader::new(file), b'\n')
+        .map_while(Result::ok)
+        .map_while(|line| serde_json::from_slice::<Record<E>>(&line).ok())
+        .find_map(|record| match record.body {
+            Body::Event {
+                event: E::RunStarted { until, .. },
+            } => Some(until),
+            Body::Event {
+                event: E::Imported(imported),
+            } => Some(imported.until),
+            _ => None,
+        })
+        .flatten()
+}
+
 /// What a run directory says it finished. A missing record is an empty
 /// replay: a crash before the first line is a run with nothing done.
 pub fn read(run_dir: &Path) -> Replay {
@@ -314,5 +339,31 @@ mod tests {
         assert!(replay.passed.is_empty(), "{:?}", replay.passed);
         assert_eq!(replay.pinned, vec![NodeId::from("pinned")]);
         assert_eq!(replay.profile.as_deref(), Some("cheap"));
+    }
+
+    /// The selection comes from the run's first event, so the progress
+    /// after it — even a torn tail — is not read before the lock (F14).
+    #[test]
+    fn the_selection_is_read_from_the_first_event_alone() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut log =
+            crate::run_log::store::open_file_log(dir.path()).unwrap_or_else(|_| panic!("open"));
+        log.commit(E::RunStarted {
+            nodes: vec![NodeStart {
+                id: "design".into(),
+                produces: Produces::File,
+            }],
+            until: Some("design".into()),
+            pinned: Vec::new(),
+            profile: None,
+        })
+        .expect("commit");
+        drop(log);
+        let path = crate::run_log::log_dir(dir.path()).join(crate::run_log::FIRST_LOG_FILE);
+        let mut text = std::fs::read(&path).expect("log");
+        text.extend_from_slice(b"{not a record");
+        std::fs::write(&path, text).expect("tear");
+
+        assert_eq!(selection(dir.path()), Some(NodeId::from("design")));
     }
 }

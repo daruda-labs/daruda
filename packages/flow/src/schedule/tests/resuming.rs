@@ -240,7 +240,7 @@ fn a_resume_carries_the_spend_and_not_the_waiting() {
     let mut request = request_for(CHAIN_OF_THREE, dir.path());
     let resumed = crate::resume::prepare(&run_dir, Some(&super::lock_dir_of(&request)), &dead)
         .expect("resumable");
-    let spent_before = resumed.replay.spent.node_runs;
+    let spent_before = crate::run_log::reader::read(&run_dir).spent.node_runs;
     assert!(spent_before > 0, "the first half ran nothing");
     request.resume = Some(at_once(&resumed));
     request.loaded = resumed.loaded;
@@ -287,10 +287,10 @@ fn waiting_done_before_the_crash_does_not_extend_the_new_clock() {
     let mut request = request_for(CHAIN_OF_THREE, dir.path());
     let resumed = crate::resume::prepare(&run_dir, Some(&super::lock_dir_of(&request)), &dead)
         .expect("resumable");
+    let parked = crate::run_log::reader::read(&run_dir).spent.parked;
     assert!(
-        resumed.replay.spent.parked >= Duration::from_secs(30),
-        "the first half's waiting did not read back: {:?}",
-        resumed.replay.spent.parked
+        parked >= Duration::from_secs(30),
+        "the first half's waiting did not read back: {parked:?}",
     );
     request.resume = Some(at_once(&resumed));
     request.loaded = resumed.loaded;

@@ -276,7 +276,7 @@ impl Workspace {
             lane_ref,
             &cwd,
             FlowPurpose::Run,
-            &referenced_agents(&resumed.loaded, resumed.replay.until.as_ref()),
+            &referenced_agents(&resumed.loaded, resumed.until.as_ref()),
             cx,
         )?;
         let node_install_dir = daruda_store::persistence::node_install_dir();
