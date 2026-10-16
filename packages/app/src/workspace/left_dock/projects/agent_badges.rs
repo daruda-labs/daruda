@@ -2,7 +2,7 @@
 
 use crate::ui::theme;
 use daruda_agent::{AgentOutcome, SessionStatus};
-use gpui::{AnyElement, IntoElement, ParentElement, Styled, div, prelude::*, px};
+use gpui::{AnyElement, IntoElement, ParentElement, Styled, div, px};
 
 use crate::ui::{AgentStatusBadge, IndicatorSize};
 use crate::workspace::tab_indicator::TabIndicator;

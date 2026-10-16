@@ -1,5 +1,5 @@
 use super::*;
-use gpui::{HeadlessAppContext, Render};
+use gpui::{AppContext as _, HeadlessAppContext, Render};
 use std::sync::Arc;
 
 const PREVIEW_WIDTH: f32 = 160.0;
