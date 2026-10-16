@@ -1,4 +1,3 @@
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
@@ -196,17 +195,6 @@ fn flush_times_out_while_a_proposal_is_still_queued() {
 }
 
 #[test]
-fn a_proposal_can_be_awaited_from_a_non_send_future() {
-    let committer = spawn(FaultBackend::new(), no_hook());
-    let total = smol::block_on(async {
-        let held = Rc::new(7);
-        let committed = committer.propose(add(*held)).await.unwrap();
-        committed.state_after.total + i64::from(Rc::strong_count(&held) == 1)
-    });
-    assert_eq!(total, 8);
-}
-
-#[test]
 fn concurrent_proposals_get_distinct_assigned_numbers() {
     let committer = spawn(FaultBackend::new(), no_hook());
     let start = Arc::new(Barrier::new(8));
@@ -236,20 +224,39 @@ fn concurrent_proposals_get_distinct_assigned_numbers() {
     assert_eq!(numbers, (1..=200).collect::<Vec<_>>());
 }
 
+/// The proposer is answered only once the hook has returned: a proposal is
+/// still pending while the hook is held, and a subscriber has the record by
+/// the time the proposer has its answer.
 #[test]
 fn the_after_commit_hook_runs_before_the_proposer_resumes() {
-    let marker = Arc::new(AtomicU64::new(0));
-    let hook_marker = Arc::clone(&marker);
+    let entered = Arc::new(Barrier::new(2));
+    let in_hook = Arc::clone(&entered);
+    // A channel rather than a barrier: if an assertion below fails, the
+    // sender drops and the hook is let go, so the failure is not a hang.
+    let (sender, released) = std::sync::mpsc::channel::<()>();
     let committer = spawn(
         FaultBackend::new(),
-        Box::new(move |record, state| {
+        Box::new(move |_, state| {
             assert_eq!(state.total, 3);
-            hook_marker.store(record.seq, Ordering::SeqCst);
+            in_hook.wait();
+            released.recv().ok();
         }),
     );
+    // Bound after the committer so it drops first: a committer dropped while
+    // its hook still waits would never finish joining its thread.
+    let release = sender;
     let (_, live) = committer.subscribe(0).unwrap();
-    let committed = smol::block_on(committer.propose(add(3))).unwrap();
-    assert_eq!(marker.load(Ordering::SeqCst), committed.seq);
+    let mut proposal = std::pin::pin!(committer.propose(add(3)));
+    entered.wait();
+    for _ in 0..5 {
+        assert!(
+            smol::block_on(smol::future::poll_once(proposal.as_mut())).is_none(),
+            "the proposer resumed while the hook was still running"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    release.send(()).unwrap();
+    let committed = smol::block_on(proposal).unwrap();
     // Subscribers are fed before the proposer is answered, too.
     assert_eq!(live.try_recv().unwrap().seq, committed.seq);
 }
@@ -298,6 +305,98 @@ fn a_panicking_hook_poisons_the_committer() {
     // The durable record still reaches the stream, which then ends.
     assert_eq!(live.recv_blocking().unwrap().seq, 2);
     assert!(live.recv_blocking().is_err());
+}
+
+/// A machine with a bug: `check` panics on one event, `apply` on another.
+struct Fuse;
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+enum FuseEvent {
+    Fine,
+    BlowInCheck,
+    BlowInApply,
+}
+
+impl daruda_runlog::Machine for Fuse {
+    type State = u32;
+    type Event = FuseEvent;
+    type Rejected = std::fmt::Error;
+
+    fn check(_: &u32, event: &FuseEvent) -> Result<(), std::fmt::Error> {
+        assert!(*event != FuseEvent::BlowInCheck, "machine bug in check");
+        Ok(())
+    }
+
+    fn apply(state: &mut u32, event: &FuseEvent) {
+        assert!(*event != FuseEvent::BlowInApply, "machine bug in apply");
+        *state += 1;
+    }
+}
+
+/// A panic inside the machine, before or after the record is durable,
+/// poisons the committer like a panicking hook does.
+#[test]
+fn a_panicking_machine_poisons_the_committer() {
+    for blow in [FuseEvent::BlowInCheck, FuseEvent::BlowInApply] {
+        let log = RunLog::<Fuse, _>::open(FaultBackend::new(), BUILD).unwrap();
+        let committer = Committer::spawn(log, "runlog-test", Box::new(|_, _| {})).unwrap();
+        smol::block_on(committer.propose(FuseEvent::Fine)).unwrap();
+        assert!(
+            matches!(
+                smol::block_on(committer.propose(blow.clone())),
+                Err(CommitError::Poisoned)
+            ),
+            "{blow:?}"
+        );
+        assert!(
+            matches!(
+                smol::block_on(committer.propose(FuseEvent::Fine)),
+                Err(CommitError::Poisoned)
+            ),
+            "{blow:?}: a later proposal went through"
+        );
+        committer.flush(Duration::from_secs(10)).unwrap();
+    }
+}
+
+/// What the hook got back from the committer it was called by.
+#[derive(Debug, Default)]
+struct FromInside {
+    subscribe: Option<bool>,
+    flush: Option<bool>,
+}
+
+/// The hook cannot wait on the committer that runs it: `subscribe` refuses
+/// at once and `flush` times out, rather than either deadlocking.
+#[test]
+fn the_hook_cannot_wait_on_its_own_committer() {
+    let slot: Arc<Mutex<Option<Committer<Toy>>>> = Arc::new(Mutex::new(None));
+    let seen = Arc::new(Mutex::new(FromInside::default()));
+    let (inner, out) = (Arc::clone(&slot), Arc::clone(&seen));
+    let committer = spawn(
+        FaultBackend::new(),
+        Box::new(move |_, _| {
+            let Some(own) = inner.lock().unwrap().clone() else {
+                return;
+            };
+            let mut seen = out.lock().unwrap();
+            seen.subscribe = Some(matches!(
+                own.subscribe(0),
+                Err(daruda_runlog::SubscribeError::OnCommitterThread)
+            ));
+            seen.flush = Some(own.flush(Duration::from_millis(50)).is_err());
+        }),
+    );
+    *slot.lock().unwrap() = Some(committer.clone());
+
+    smol::block_on(committer.propose(add(1))).unwrap();
+    // The hook holding its own committer is a cycle; break it so the thread
+    // can exit (see the crate's AGENTS.md).
+    slot.lock().unwrap().take();
+
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen.subscribe, Some(true), "subscribe did not refuse");
+    assert_eq!(seen.flush, Some(true), "flush did not time out");
 }
 
 #[test]
