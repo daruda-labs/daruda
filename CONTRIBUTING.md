@@ -257,10 +257,24 @@ Task state uses the profile data directory:
 |---|---|---|
 | Current tasks | `<data_dir>/task-log/` | TaskStore's single-writer run log, opened by the primary desktop process. |
 | Legacy tasks | `<data_dir>/tasks.json` | One-time migration input, preserved byte-for-byte and never rewritten. |
+| Startup reconciliation marker | `<data_dir>/task-log/.reconciling` | Present only while a start settles the runs the last session left. |
 
 Task edits and app-quit flushing write only the run log. Older builds still
 read the preserved, potentially stale legacy file; automatic downgrade
 synchronization is not supported.
+
+A start that finds `.reconciling` assumes the previous settling pass crashed
+and opens tasks read-only, so a pass that crashes the app cannot do so on
+every start. A pass that fails without crashing removes the marker, and the
+next start tries again. To recover by hand, quit daruda, inspect `task-log/`
+(the marker is empty; the log is the record), then delete `.reconciling`.
+
+Flow runs live in the worktree they ran in, under
+`<worktree>/.daruda/flow-runs/<run-id>/`. The run log is
+`logs/progress/log.0.jsonl` there, written only by the process holding the
+worktree's run lock. A run an older build started keeps a
+`progress.jsonl` journal instead; it is only read, and a resume imports it
+into a new run log once.
 
 Remote commands use a shared per-bot inbox under
 `remote_lock_root()/bot-<credential-digest>/inbox/`. A durable claim precedes

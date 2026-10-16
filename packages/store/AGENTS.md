@@ -35,9 +35,14 @@ profiles use one bot token; a path lint cannot detect that collision.
 - Native logs begin at the current location. Diagnostic export can read old
   default logs without copying or deleting them; an explicit data override
   excludes those old logs.
+- The task log's startup reconciliation leaves `task-log/.reconciling` only
+  when it crashes mid-pass; the next start then opens tasks read-only.
+  `Reconciling` has no clearing `Drop` for that reason. A pass that ends,
+  whether it got through or stopped on a handled failure, clears the marker
+  through `finish` or `abandon`; never leave it behind on a reported error.
 
 See [storage locations](../../CONTRIBUTING.md#storage-locations) for the
-contributor-facing directory map.
+contributor-facing directory map and manual recovery.
 
 ## Deliberately Shared Resources
 

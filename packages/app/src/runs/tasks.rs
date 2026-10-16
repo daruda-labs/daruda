@@ -160,7 +160,7 @@ impl RunsHost {
             }
             Err(ReconcileBlocked::Io(e)) => {
                 LogWriter::log(
-                    ErrorReport::new(crate::surface::strings::error::tasks_read_only())
+                    ErrorReport::new(crate::surface::strings::error::tasks_settle_failed())
                         .severity(ErrorSeverity::Error)
                         .from_error(&e)
                         .at(file!(), line!())
@@ -492,8 +492,36 @@ pub(crate) fn no_hook() -> AfterCommit<TaskMachine> {
 
 /// Settle every run the previous process left starting or running in a
 /// chat: nothing of it survived. A CLI run is its tracker's to settle.
+///
+/// A failure handled here ends the pass and clears its marker: only a crash
+/// in the middle of it may leave the marker that keeps later starts from
+/// reconciling. A record the machine refuses is skipped and reported: the
+/// refusal leaves the log as it was, and the other records still need
+/// settling.
 fn reconcile(store: &TaskStore) -> Result<(), ReconcileBlocked> {
     let claim = store.begin_reconcile()?;
+    match settle_lost_runs(store) {
+        Ok(()) => {
+            claim.finish()?;
+            Ok(())
+        }
+        Err(e) => {
+            if let Err(cleared) = claim.abandon() {
+                LogWriter::log(
+                    ErrorReport::new(crate::surface::strings::error::tasks_settle_failed())
+                        .severity(ErrorSeverity::Error)
+                        .from_error(&cleared)
+                        .at(file!(), line!())
+                        .dedup("tasks.reconcile.abandon")
+                        .build(),
+                );
+            }
+            Err(e)
+        }
+    }
+}
+
+fn settle_lost_runs(store: &TaskStore) -> Result<(), ReconcileBlocked> {
     let (_, book) = store
         .current()
         .map_err(|e| ReconcileBlocked::Io(std::io::Error::other(e)))?;
@@ -517,11 +545,19 @@ fn reconcile(store: &TaskStore) -> Result<(), ReconcileBlocked> {
             exec: exec.clone(),
             at,
         };
-        if let Err(e) = smol::block_on(store.propose(event)) {
-            return Err(ReconcileBlocked::Io(std::io::Error::other(e)));
+        match smol::block_on(store.propose(event)) {
+            Ok(_) => {}
+            Err(CommitError::Rejected(rejected)) => LogWriter::log(
+                ErrorReport::new(crate::surface::strings::error::task_command_refused())
+                    .severity(ErrorSeverity::Warning)
+                    .from_error(&rejected)
+                    .at(file!(), line!())
+                    .dedup("tasks.reconcile.rejected")
+                    .build(),
+            ),
+            Err(e) => return Err(ReconcileBlocked::Io(std::io::Error::other(e))),
         }
     }
-    claim.finish()?;
     Ok(())
 }
 

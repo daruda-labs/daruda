@@ -37,6 +37,9 @@ and no subscriber sees a record the disk lacks. A rejection emits nothing.
 - Dropping the last handle drains the queue, then joins the thread.
 - Never block on the committer from inside the hook: `subscribe` refuses,
   `flush` times out.
+- A hook must not hold a `Committer` handle, including through a clone of a
+  store that wraps one. The thread exits when the last handle drops, and a
+  handle inside the hook it owns is a reference cycle: it never exits.
 
 ## Fresh State Comes Only From Replay
 

@@ -40,13 +40,26 @@ pub enum ReconcileBlocked {
 
 /// A reconciliation under way; [`Reconciling::finish`] clears its marker.
 /// Dropped unfinished, the marker stays, so the next start skips it.
+///
+/// No `Drop` clears it on purpose: the marker exists to outlive a crash in
+/// the middle of the pass, so a start that keeps crashing there stops
+/// running it. Only a pass that ended — whether or not it got through —
+/// says so, by [`Self::finish`] or [`Self::abandon`].
 #[must_use]
 pub struct Reconciling {
     sentinel: PathBuf,
 }
 
 impl Reconciling {
+    /// The pass got through.
     pub fn finish(self) -> io::Result<()> {
+        std::fs::remove_file(&self.sentinel)
+    }
+
+    /// The pass stopped on a failure it handled and reported. Nothing
+    /// crashed, so the next start may try again rather than open the tasks
+    /// read-only for good.
+    pub fn abandon(self) -> io::Result<()> {
         std::fs::remove_file(&self.sentinel)
     }
 }
@@ -236,6 +249,26 @@ mod tests {
         ));
         first.finish().unwrap();
         store.begin_reconcile().unwrap().finish().unwrap();
+    }
+
+    /// A pass that failed without crashing leaves the next start free to
+    /// reconcile; one that crashed (never ended) leaves it read-only.
+    #[test]
+    fn only_a_pass_that_never_ended_blocks_the_next_start() {
+        let temp = tempfile::tempdir().unwrap();
+        let hook = || -> AfterCommit<TaskMachine> { Box::new(|_, _| {}) };
+        let store = TaskStore::in_directory(temp.path(), None, "b", hook()).unwrap();
+        store.begin_reconcile().unwrap().abandon().unwrap();
+        drop(store);
+        let next = TaskStore::in_directory(temp.path(), None, "b", hook()).unwrap();
+        let crashed = next.begin_reconcile().unwrap();
+        std::mem::forget(crashed);
+        drop(next);
+        let after_crash = TaskStore::in_directory(temp.path(), None, "b", hook()).unwrap();
+        assert!(matches!(
+            after_crash.begin_reconcile(),
+            Err(ReconcileBlocked::Unfinished)
+        ));
     }
 
     #[test]

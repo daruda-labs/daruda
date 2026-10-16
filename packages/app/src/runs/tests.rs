@@ -255,6 +255,51 @@ fn an_unfinished_reconciliation_reopens_read_only_and_preserves_files(cx: &mut T
     );
 }
 
+/// A reconciliation that fails without crashing reports it and clears its
+/// marker: this start stays read-only, and the next one settles the tasks
+/// and is writable, rather than read-only for good.
+#[gpui::test]
+fn a_reconciliation_that_fails_without_crashing_leaves_the_next_start_writable(
+    cx: &mut TestAppContext,
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_at(dir.path(), None);
+    let spec = seed::spec(ProjectUuid::new(), "lost");
+    let id = spec.id.clone();
+    let mut events = seed::created(spec);
+    events.extend(seed::run(&id, &SeedRun::chat("/lost"), SeedEnd::Preparing));
+    for event in events {
+        smol::block_on(store.propose(event)).unwrap();
+    }
+    drop(store);
+    // A hook that panics stops the committer at the first settle: a commit
+    // failure this process handles, not a crash of it.
+    let failing = TaskStore::in_directory(
+        dir.path(),
+        None,
+        "test",
+        Box::new(|_, _| panic!("the committer stops here")),
+    )
+    .unwrap();
+    cx.update(|cx| {
+        RunsHost::install(RunsHost::open(Ok(failing)), cx);
+        assert!(!RunsHost::is_writable(cx), "this start could not settle");
+    });
+    assert!(
+        !dir.path().join(".reconciling").exists(),
+        "a handled failure left the marker that makes tasks read-only for good"
+    );
+
+    cx.update(|cx| {
+        RunsHost::install(RunsHost::open(Ok(store_at(dir.path(), None))), cx);
+        assert!(RunsHost::is_writable(cx), "the next start stayed read-only");
+        assert!(matches!(
+            cx.global::<GlobalTasks>().get(&id).unwrap().lifecycle,
+            Lifecycle::Undelivered { .. }
+        ));
+    });
+}
+
 #[gpui::test]
 fn startup_reconciles_only_the_runs_the_process_lost(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();

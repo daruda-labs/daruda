@@ -1499,6 +1499,9 @@ error:
   # An earlier start stopped while it settled tasks left running; tasks stay
   # read-only until daruda restarts cleanly.
   tasks_read_only: "Tasks are read-only: an earlier start did not finish settling them"
+  # Settling the runs the last session left failed this time, without a
+  # crash; the next start tries again.
+  tasks_settle_failed: "Tasks are read-only until daruda restarts: the runs left by the last session could not be settled"
   # A task change the task log refused, e.g. stopping a task that already ended.
   task_command_refused: "That task change is no longer possible"
   task_escalation_orphan: "Tool-use-failure escalation has no matching task"
