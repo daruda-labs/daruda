@@ -13,6 +13,7 @@ use crate::observability::log_writer::LogWriter;
 use crate::observability::system_info::redact_home;
 
 mod recovery;
+pub(crate) use recovery::read_json_bytes;
 pub use recovery::{delete_recoverable_json, load_recoverable_json, save_recoverable_json};
 
 /// Outcome of [`load_json_file`]. `Missing` and `Parsed` are the

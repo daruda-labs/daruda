@@ -193,3 +193,26 @@ fn legacy_rings_use_the_same_bound_and_corrupt_inputs_fail_closed() {
     std::fs::write(&file, b"{corrupt").unwrap();
     assert!(migrate::remote(data.path(), "old", ChannelKey::new("slack")).is_err());
 }
+
+#[test]
+fn oversized_legacy_inputs_are_refused_before_parsing_without_modification() {
+    let data = tempfile::tempdir().unwrap();
+    for name in ["telegram.json", "remote_channels.json"] {
+        let path = data.path().join(name);
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(64 * 1024 * 1024 + 1).unwrap();
+        drop(file);
+        let before = std::fs::metadata(&path).unwrap();
+        let error = if name == "telegram.json" {
+            migrate::telegram_for_bot(data.path(), BOT, "test").unwrap_err()
+        } else {
+            migrate::remote(data.path(), "old", ChannelKey::new("slack")).unwrap_err()
+        };
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(error.to_string(), "State record is too large");
+        let after = std::fs::metadata(&path).unwrap();
+        assert_eq!(after.len(), before.len());
+        assert_eq!(after.modified().unwrap(), before.modified().unwrap());
+        assert!(!data.path().join(format!("{name}.bak")).exists());
+    }
+}

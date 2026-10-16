@@ -13,7 +13,7 @@ use crate::observability::system_info::redact_home;
 // Bound allocation before parsing even if a damaged file advertises no useful schema.
 pub(super) const MAX_RECORD_BYTES: usize = 64 * 1024 * 1024;
 
-fn read_record(path: &Path) -> io::Result<Vec<u8>> {
+pub(crate) fn read_json_bytes(path: &Path) -> io::Result<Vec<u8>> {
     use io::Read as _;
     let file = std::fs::File::open(path)?;
     if file.metadata()?.len() > MAX_RECORD_BYTES as u64 {
@@ -63,7 +63,7 @@ pub fn save_recoverable_json<T: Serialize + DeserializeOwned>(
     target: &Path,
     value: &T,
 ) -> io::Result<()> {
-    match read_record(target) {
+    match read_json_bytes(target) {
         Ok(bytes) => {
             let _: T = parse(&bytes)?;
             let previous: serde_json::Value = parse(&bytes)?;
@@ -116,7 +116,7 @@ pub fn load_recoverable_json<T: DeserializeOwned>(
     subsystem: &str,
     path: &Path,
 ) -> io::Result<Option<T>> {
-    let original = match read_record(path) {
+    let original = match read_json_bytes(path) {
         Ok(bytes) => match parse::<T>(&bytes) {
             Ok(value) => return Ok(Some(value)),
             Err(_) => Some(bytes),
@@ -124,7 +124,7 @@ pub fn load_recoverable_json<T: DeserializeOwned>(
         Err(error) if error.kind() == io::ErrorKind::NotFound => None,
         Err(error) => return Err(error),
     };
-    let backup = match read_record(&backup_path(path)) {
+    let backup = match read_json_bytes(&backup_path(path)) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound && original.is_none() => {
             return Ok(None);

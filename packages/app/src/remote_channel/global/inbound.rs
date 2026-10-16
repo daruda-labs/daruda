@@ -67,6 +67,7 @@ async fn finish_claim(
         )) => return None,
         Err(error) => {
             remote_channel::log_error("Remote command claim failed", &error, "remote.inbox.claim");
+            cx.update(|cx| RemoteChannels::recover_inbox(id, generation, &bot, cx));
             return None;
         }
     }

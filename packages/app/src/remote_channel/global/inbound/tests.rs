@@ -36,6 +36,144 @@ fn wait_release(root: &std::path::Path) {
     drop(lease);
 }
 
+#[gpui::test]
+async fn a_failed_claim_retires_its_worker_and_reopens_without_losing_history(
+    cx: &mut TestAppContext,
+) {
+    cx.executor().allow_parking();
+    let root = tempfile::tempdir().unwrap();
+    let bot = open_bot(root.path(), || Ok(InboxSeed::default()));
+    let generation = cx.update(|cx| install_connection("work", bot.clone(), cx));
+    let target = crate::remote_channel::bridge::PaneRef {
+        workspace: Default::default(),
+        pane: 7,
+    };
+    cx.update(|cx| {
+        cx.global_mut::<RemoteChannels>()
+            .connections
+            .get_mut("work")
+            .unwrap()
+            .core
+            .command_state_mut()
+            .select(Some(target))
+    });
+    let mut app = cx.to_async();
+    assert!(
+        claim_incoming("work", generation, "committed", &mut app)
+            .await
+            .is_some()
+    );
+    let config = cx.update(|cx| {
+        cx.global::<RemoteChannels>().connections["work"]
+            .config
+            .clone()
+    });
+    let result = finish_claim(
+        "work",
+        generation,
+        bot.clone(),
+        config,
+        std::future::ready(Err(daruda_store::inbox::CommitError::Io(
+            std::io::Error::other("temporary storage failure"),
+        ))),
+        &mut app,
+    )
+    .await;
+    assert!(result.is_none());
+    cx.update(|cx| {
+        let connection = &cx.global::<RemoteChannels>().connections["work"];
+        assert_eq!(
+            connection.status,
+            crate::remote_channel::runtime::Status::Failed
+        );
+        assert_ne!(connection.generation, generation);
+        assert!(connection.bot.is_none());
+        assert!(!connection.can_send());
+    });
+    cx.update(|cx| {
+        assert_eq!(
+            cx.global_mut::<RemoteChannels>()
+                .connections
+                .get_mut("work")
+                .unwrap()
+                .core
+                .command_state_mut()
+                .selected(),
+            Some(target)
+        )
+    });
+    assert!(!bot.is_live());
+    assert!(
+        InboxLease::try_acquire(root.path(), &lock::digest_of("shared-bot"))
+            .unwrap()
+            .is_none()
+    );
+    drop(bot);
+    let reopened = open_bot(root.path(), || panic!("recovery must not reimport"));
+    let generation = cx.update(|cx| {
+        let connection = cx
+            .global_mut::<RemoteChannels>()
+            .connections
+            .get_mut("work")
+            .unwrap();
+        connection.bot = Some(reopened.clone());
+        connection.status = crate::remote_channel::runtime::Status::Connected;
+        connection.generation
+    });
+    assert!(
+        claim_incoming("work", generation, "committed", &mut app)
+            .await
+            .is_none()
+    );
+    assert!(
+        claim_incoming("work", generation, "new", &mut app)
+            .await
+            .is_some()
+    );
+    cx.update(|cx| cx.global_mut::<RemoteChannels>().connections.clear());
+    drop(reopened);
+    wait_release(root.path());
+}
+
+#[gpui::test]
+fn an_old_inbox_failure_cannot_restart_a_replacement_or_finish_credential_updates(
+    cx: &mut TestAppContext,
+) {
+    cx.update(|cx| {
+        let first_root = tempfile::tempdir().unwrap();
+        let old = open_bot(first_root.path(), || Ok(InboxSeed::default()));
+        let generation = install_connection("work", old.clone(), cx);
+        let config = cx.global::<RemoteChannels>().connections["work"]
+            .config
+            .clone();
+        RemoteChannels::suspend(config.clone(), cx);
+        RemoteChannels::suspend(config, cx);
+        let current_generation = cx.global::<RemoteChannels>().connections["work"].generation;
+        RemoteChannels::recover_inbox("work", generation, &old, cx);
+        assert_eq!(
+            cx.global::<RemoteChannels>().connections["work"].generation,
+            current_generation
+        );
+        assert!(matches!(
+            cx.global::<RemoteChannels>().connections["work"].worker,
+            super::super::WorkerState::UpdatingCredential { pending: 2 }
+        ));
+        let current_root = tempfile::tempdir().unwrap();
+        let current = open_bot(current_root.path(), || Ok(InboxSeed::default()));
+        let current_generation = install_connection("work", current.clone(), cx);
+        RemoteChannels::recover_inbox("work", generation, &old, cx);
+        let connection = &cx.global::<RemoteChannels>().connections["work"];
+        assert_eq!(connection.generation, current_generation);
+        assert!(connection.can_send());
+        assert!(current.is_live());
+        cx.global_mut::<RemoteChannels>().connections.clear();
+        drop(old);
+        drop(current);
+        wait_release(first_root.path());
+        wait_release(current_root.path());
+    });
+}
+
 fn install_connection(id: &str, bot: Arc<BotSession>, cx: &mut App) -> uuid::Uuid {
     SettingsStore::init(cx);
     let mut config = daruda_config::Config::default();

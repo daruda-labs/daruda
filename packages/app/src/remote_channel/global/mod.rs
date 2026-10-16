@@ -305,6 +305,27 @@ impl RemoteChannels {
         reconcile(cx);
     }
 
+    fn recover_inbox(id: &str, generation: uuid::Uuid, bot: &Arc<BotSession>, cx: &mut App) {
+        bot.revoke();
+        let bridge = cx.global_mut::<Self>();
+        let Some(connection) = bridge.connections.get_mut(id) else {
+            return;
+        };
+        if connection.generation != generation
+            || !connection
+                .bot
+                .as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, bot))
+        {
+            return;
+        }
+        connection.bot = None;
+        connection.status = Status::Failed;
+        connection.generation = uuid::Uuid::new_v4();
+        connection.worker = WorkerState::Idle;
+        connection.worker = start_worker(&connection.config, connection.generation, &bridge.events);
+    }
+
     pub(crate) fn suspend(config: ChannelConfig, cx: &mut App) {
         if !cx.has_global::<Self>() {
             return;
@@ -403,21 +424,7 @@ pub(crate) fn reconcile(cx: &mut App) {
         }
         bridge.connections.remove(&config.id);
         let generation = uuid::Uuid::new_v4();
-        let worker = if config.enabled && !cfg!(test) {
-            match runtime::start(config.clone(), generation, bridge.events.clone()) {
-                Ok(worker) => WorkerState::Running { _worker: worker },
-                Err(error) => {
-                    super::log_error(
-                        "Remote gateway worker could not start",
-                        &error,
-                        "remote.worker.start",
-                    );
-                    WorkerState::Idle
-                }
-            }
-        } else {
-            WorkerState::Idle
-        };
+        let worker = start_worker(config, generation, &bridge.events);
         let status = if config.enabled {
             Status::Connecting
         } else {
@@ -435,6 +442,27 @@ pub(crate) fn reconcile(cx: &mut App) {
                 worker,
             },
         );
+    }
+}
+
+fn start_worker(
+    config: &ChannelConfig,
+    generation: uuid::Uuid,
+    events: &UnboundedSender<WorkerEvent>,
+) -> WorkerState {
+    if !config.enabled || cfg!(test) {
+        return WorkerState::Idle;
+    }
+    match runtime::start(config.clone(), generation, events.clone()) {
+        Ok(worker) => WorkerState::Running { _worker: worker },
+        Err(error) => {
+            super::log_error(
+                "Remote gateway worker could not start",
+                &error,
+                "remote.worker.start",
+            );
+            WorkerState::Idle
+        }
     }
 }
 

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use super::{ChannelKey, INBOX_RING_CAPACITY, InboxSeed};
 
 fn load<T: DeserializeOwned + Default>(path: &Path) -> io::Result<T> {
-    match std::fs::read(path) {
+    match crate::persistence::read_json_bytes(path) {
         Ok(bytes) => serde_json::from_slice(&bytes)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error)),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(T::default()),

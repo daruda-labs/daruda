@@ -69,7 +69,9 @@ async fn telegram_redelivery_and_claimed_before_crash_have_no_second_effect_or_r
     let mut app = cx.to_async();
     let mut replies = 0;
     for _ in 0..2 {
-        if claim_update(&first, 42, Some(42), &mut app, keychain::revision).await {
+        if claim_update(&first, 42, Some(42), &mut app, keychain::revision).await
+            == ClaimOutcome::Committed
+        {
             let effect = app.update(|cx| dispatch_update(&first, Some(42), update(42), cx));
             assert!(matches!(
                 effect,
@@ -78,14 +80,20 @@ async fn telegram_redelivery_and_claimed_before_crash_have_no_second_effect_or_r
             replies += 1;
         }
     }
-    assert!(claim_update(&first, 43, Some(42), &mut app, keychain::revision).await);
+    assert_eq!(
+        claim_update(&first, 43, Some(42), &mut app, keychain::revision).await,
+        ClaimOutcome::Committed
+    );
     cx.update(|cx| cx.global_mut::<TelegramBridge>().release_claim());
     drop(first);
     wait_release(locks.path());
     let second = ready(locks.path(), second_profile.path());
     cx.update(|cx| cx.global_mut::<TelegramBridge>().bot = Ownership::Ready(second.clone()));
     for id in [42, 43] {
-        assert!(!claim_update(&second, id, Some(42), &mut app, keychain::revision).await);
+        assert_eq!(
+            claim_update(&second, id, Some(42), &mut app, keychain::revision).await,
+            ClaimOutcome::Ignored
+        );
     }
     assert_eq!(replies, 1);
     cx.update(|cx| cx.global_mut::<TelegramBridge>().release_claim());
@@ -102,12 +110,13 @@ async fn a_credential_aba_during_the_real_claim_and_a_recipient_change_before_di
     let bot = cx.update(|cx| cx.global::<TelegramBridge>().bot.ready().unwrap().clone());
     let mut app = cx.to_async();
     let reads = Cell::new(0);
-    assert!(
-        !claim_update(&bot, 42, Some(42), &mut app, || {
+    assert_eq!(
+        claim_update(&bot, 42, Some(42), &mut app, || {
             reads.set(reads.get() + 1);
             bot.token.revision + u64::from(reads.get() > 1)
         })
-        .await
+        .await,
+        ClaimOutcome::Ignored
     );
     assert_eq!(
         bot.inbox.snapshot().maximum(&ChannelKey::new("telegram")),
@@ -119,7 +128,10 @@ async fn a_credential_aba_during_the_real_claim_and_a_recipient_change_before_di
             .await,
         Err(daruda_store::inbox::CommitError::Rejected(_))
     ));
-    assert!(claim_update(&bot, 43, Some(42), &mut app, keychain::revision).await);
+    assert_eq!(
+        claim_update(&bot, 43, Some(42), &mut app, keychain::revision).await,
+        ClaimOutcome::Committed
+    );
     cx.update(|cx| {
         let mut config = SettingsStore::global(cx).user().clone();
         config.telegram.authorized_chat_id = Some(99);
@@ -152,7 +164,10 @@ async fn a_failed_pair_cannot_authorize_later_commands_in_the_same_unpaired_batc
         (43, "/list".into()),
         (44, "untrusted prompt".into()),
     ] {
-        assert!(claim_update(&bot, id, None, &mut app, keychain::revision).await);
+        assert_eq!(
+            claim_update(&bot, id, None, &mut app, keychain::revision).await,
+            ClaimOutcome::Committed
+        );
         let incoming = client::Update {
             update_id: id,
             kind: client::UpdateKind::Message {
@@ -179,4 +194,89 @@ async fn a_failed_pair_cannot_authorize_later_commands_in_the_same_unpaired_batc
         Some(44)
     );
     assert_eq!(std::fs::read(config_path).unwrap(), invalid_config);
+}
+
+#[gpui::test]
+async fn failed_claims_release_the_owner_for_backed_off_reopen_and_preserve_history(
+    cx: &mut TestAppContext,
+) {
+    cx.executor().allow_parking();
+    cx.update(configure);
+    for error in [
+        daruda_store::inbox::CommitError::Io(std::io::Error::other("temporary storage failure")),
+        daruda_store::inbox::CommitError::Closed,
+        daruda_store::inbox::CommitError::Poisoned,
+    ] {
+        let locks = tempfile::tempdir().unwrap();
+        let profile = tempfile::tempdir().unwrap();
+        let bot = ready(locks.path(), profile.path());
+        cx.update(|cx| cx.global_mut::<TelegramBridge>().bot = Ownership::Ready(bot.clone()));
+        let mut app = cx.to_async();
+        assert_eq!(
+            claim_update(&bot, 41, Some(42), &mut app, keychain::revision).await,
+            ClaimOutcome::Committed
+        );
+        assert_eq!(
+            finish_claim_update(
+                &bot,
+                Some(42),
+                std::future::ready(Err(error)),
+                &mut app,
+                keychain::revision
+            )
+            .await,
+            ClaimOutcome::Retry
+        );
+        cx.update(|cx| assert!(matches!(cx.global::<TelegramBridge>().bot, Ownership::Idle)));
+        assert!(
+            InboxLease::try_acquire(
+                locks.path(),
+                &crate::remote_channel::lock::digest_of("shared-telegram")
+            )
+            .unwrap()
+            .is_none()
+        );
+        drop(bot);
+        wait_release(locks.path());
+        let reopened = ready(locks.path(), profile.path());
+        cx.update(|cx| cx.global_mut::<TelegramBridge>().bot = Ownership::Ready(reopened.clone()));
+        assert_eq!(
+            claim_update(&reopened, 41, Some(42), &mut app, keychain::revision).await,
+            ClaimOutcome::Ignored
+        );
+        assert_eq!(
+            claim_update(&reopened, 42, Some(42), &mut app, keychain::revision).await,
+            ClaimOutcome::Committed
+        );
+        cx.update(|cx| cx.global_mut::<TelegramBridge>().release_claim());
+        drop(reopened);
+        wait_release(locks.path());
+    }
+}
+
+#[gpui::test]
+async fn an_old_failed_claim_does_not_release_a_new_healthy_owner(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    cx.update(configure);
+    let old = cx.update(|cx| cx.global::<TelegramBridge>().bot.ready().unwrap().clone());
+    let locks = tempfile::tempdir().unwrap();
+    let profile = tempfile::tempdir().unwrap();
+    let current = ready(locks.path(), profile.path());
+    cx.update(|cx| cx.global_mut::<TelegramBridge>().bot = Ownership::Ready(current.clone()));
+    let mut app = cx.to_async();
+    assert_eq!(
+        finish_claim_update(
+            &old,
+            Some(42),
+            std::future::ready(Err(daruda_store::inbox::CommitError::Closed)),
+            &mut app,
+            keychain::revision
+        )
+        .await,
+        ClaimOutcome::Retry
+    );
+    cx.update(|cx| assert!(live_bot(&current, Some(42), keychain::revision(), cx)));
+    cx.update(|cx| cx.global_mut::<TelegramBridge>().release_claim());
+    drop(current);
+    wait_release(locks.path());
 }

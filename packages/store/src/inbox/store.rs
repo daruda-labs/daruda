@@ -79,8 +79,9 @@ impl InboxStore {
             .clone()
     }
 
-    /// Queue the claim now. Canceling its waiter does not cancel the write.
-    /// Only `Ok` grants permission to perform this command's effect.
+    /// Queue a claim now; canceling its waiter never cancels the write.
+    /// Only `Ok` permits its effect. After a write failure or poisoning, retire
+    /// this writer and reopen under a newly acquired lease, not its old handle.
     pub fn claim(
         &self,
         channel: ChannelKey,

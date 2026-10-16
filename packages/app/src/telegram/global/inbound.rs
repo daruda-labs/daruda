@@ -30,6 +30,13 @@ use crate::platform::attention::is_app_active;
 use crate::settings_store::SettingsStore;
 use crate::surface::strings as s;
 
+#[derive(Debug, PartialEq, Eq)]
+enum ClaimOutcome {
+    Committed,
+    Ignored,
+    Retry,
+}
+
 /// The inbound long-poll loop. Every iteration re-syncs `enabled` /
 /// `authorized_chat_id` from the live `SettingsStore` so a
 /// Settings-window toggle takes effect without any extra plumbing —
@@ -102,10 +109,7 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
                 .await;
 
             let updates = match fetched {
-                Ok(updates) => {
-                    backoff.reset();
-                    updates
-                }
+                Ok(updates) => updates,
                 Err(e) => {
                     trace::delivery("poll.failed", || format!("offset={offset} error={e}"));
                     LogWriter::log(
@@ -147,10 +151,16 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
             // The global is held only for the routing step and released
             // before any side effect (HTTP calls, cross-workspace dispatch)
             // — routing is the only step that touches `BridgeCore` directly.
+            let mut retry_inbox = false;
             for update in updates {
                 let update_id = update.update_id;
-                if !claim_update(&bot, update_id, chat_id, cx, keychain::revision).await {
-                    continue;
+                match claim_update(&bot, update_id, chat_id, cx, keychain::revision).await {
+                    ClaimOutcome::Committed => {}
+                    ClaimOutcome::Ignored => continue,
+                    ClaimOutcome::Retry => {
+                        retry_inbox = true;
+                        break;
+                    }
                 }
                 trace::delivery("inbound", || {
                     format!(
@@ -203,6 +213,13 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
                 {
                     trace::delivery("answer.dropped", || "reason=queue_closed".to_string());
                 }
+            }
+
+            if retry_inbox {
+                drop(bot);
+                cx.background_executor().timer(backoff.delay()).await;
+            } else {
+                backoff.reset();
             }
 
             // No extra sleep on success — the long-poll `timeout_s` itself
@@ -400,28 +417,59 @@ async fn claim_update(
     chat_id: Option<i64>,
     cx: &mut gpui::AsyncApp,
     revision: impl Fn() -> u64,
-) -> bool {
+) -> ClaimOutcome {
     if !cx.update(|cx| live_bot(bot, chat_id, revision(), cx)) {
-        return false;
+        return ClaimOutcome::Ignored;
     }
     let claimed = crate::runs::RunsHost::claim_inbound(
         &bot.inbox,
         daruda_store::inbox::ChannelKey::new("telegram"),
         daruda_store::inbox::InboxId::Monotonic(update_id),
-    )
-    .await;
+    );
+    finish_claim_update(bot, chat_id, claimed, cx, revision).await
+}
+
+async fn finish_claim_update(
+    bot: &Arc<ReadyBot>,
+    chat_id: Option<i64>,
+    claimed: impl Future<
+        Output = Result<
+            daruda_store::inbox::Committed<daruda_store::inbox::InboxMachine>,
+            daruda_store::inbox::CommitError<daruda_store::inbox::InboxRejected>,
+        >,
+    >,
+    cx: &mut gpui::AsyncApp,
+    revision: impl Fn() -> u64,
+) -> ClaimOutcome {
+    let claimed = claimed.await;
     match claimed {
-        Ok(_) => cx.update(|cx| live_bot(bot, chat_id, revision(), cx)),
+        Ok(_) => cx.update(|cx| {
+            if live_bot(bot, chat_id, revision(), cx) {
+                ClaimOutcome::Committed
+            } else {
+                ClaimOutcome::Ignored
+            }
+        }),
         Err(daruda_store::inbox::CommitError::Rejected(
             daruda_store::inbox::InboxRejected::Duplicate { .. },
-        )) => false,
+        )) => ClaimOutcome::Ignored,
         Err(error) => {
             crate::remote_channel::log_error(
                 "Telegram command claim failed",
                 &error,
                 "telegram.inbox.claim",
             );
-            false
+            cx.update(|cx| {
+                let owns_writer = cx
+                    .global::<TelegramBridge>()
+                    .bot
+                    .ready()
+                    .is_some_and(|current| Arc::ptr_eq(&current.inbox, &bot.inbox));
+                if owns_writer {
+                    cx.global_mut::<TelegramBridge>().release_claim();
+                }
+            });
+            ClaimOutcome::Retry
         }
     }
 }
