@@ -246,23 +246,46 @@ fn a_crash_at_any_write_resumes_with_numbers_and_outputs_intact() {
     assert!(continued > 0, "no crash interrupted an attempt");
 }
 
-/// **D4-2, S8.** An attempt interrupted by a crash counts. With two allowed,
-/// two crashes mid-attempt leave the node failed on the next pick-up, with
-/// no third session and no loop.
-#[test]
-fn interrupted_attempts_count_toward_the_cap() {
-    let flow = "\
+/// One agent node allowed `max_attempts` tries.
+fn retrying_design(max_attempts: u32) -> LoadedFlow {
+    let flow = format!(
+        "\
 version: 1
-defaults: { agent: { id: claude } }
+defaults: {{ agent: {{ id: claude }} }}
 nodes:
   - id: design
     kind: agent
     output: design.md
     prompt: write
     on_fail:
-      retry: { max_attempts: 2, wait: 0s, hint: again }
-";
-    let loaded = load(flow, None).expect("valid flow");
+      retry: {{ max_attempts: {max_attempts}, wait: 0s, hint: again }}
+"
+    );
+    load(&flow, None).expect("valid flow")
+}
+
+/// The attempt numbers and evidence each `design` start was given.
+fn design_starts(events: &[FlowRunEvent]) -> Vec<(u32, u32)> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            FlowRunEvent::AttemptStarted {
+                node,
+                attempt,
+                evidence,
+                ..
+            } if node == "design" => Some((*attempt, *evidence)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// **D4-2, S8.** An attempt a crash interrupted does not count: with two
+/// allowed, two crashes mid-attempt still leave the next pick-up a try,
+/// numbered past both.
+#[test]
+fn crash_interrupted_attempts_do_not_count_toward_the_cap() {
+    let loaded = retrying_design(2);
     let dir = tempfile::tempdir().expect("tempdir");
     // opened 0, run_started 1, attempt_started 2, attempt_passed 3.
     let first = FaultBackend::new().with_fault(Fault::TornAppend { k: 3, keep: 0 });
@@ -277,18 +300,142 @@ nodes:
     assert_eq!(runner.calls()[0].attempt, 2, "and as the second attempt");
 
     let third = FakeRunner::new();
-    let Process::Drove(report) = process(second.crash(), &loaded, dir.path(), &third) else {
+    let last = second.crash();
+    let Process::Drove(report) = process(last.clone(), &loaded, dir.path(), &third) else {
         panic!("the run could not be picked up");
     };
     assert!(
+        matches!(report.outcome, RunOutcome::Done),
+        "{:?}",
+        report.outcome
+    );
+    let attempts: Vec<u32> = third.calls().iter().map(|call| call.attempt).collect();
+    assert_eq!(attempts, [3], "the crashed attempts used up the cap");
+    assert_eq!(design_starts(&records(&last)), [(1, 1), (2, 2), (3, 3)]);
+}
+
+/// **D4-2.** A node with no retry policy that a crash caught mid-attempt
+/// runs again on resume, under fresh attempt and evidence numbers, rather
+/// than failing as interrupted.
+#[test]
+fn a_node_without_retries_runs_again_after_a_crash() {
+    let flow = "\
+version: 1
+defaults: { agent: { id: claude } }
+nodes:
+  - id: design
+    kind: agent
+    output: design.md
+    prompt: write
+";
+    let loaded = load(flow, None).expect("valid flow");
+    let dir = tempfile::tempdir().expect("tempdir");
+    // opened 0, run_started 1, attempt_started 2, attempt_passed 3.
+    let first = FaultBackend::new().with_fault(Fault::TornAppend { k: 3, keep: 0 });
+    let _ = process(first.clone(), &loaded, dir.path(), &FakeRunner::new());
+
+    let runner = FakeRunner::new();
+    let second = first.crash();
+    let Process::Drove(report) = process(second.clone(), &loaded, dir.path(), &runner) else {
+        panic!("the run could not be picked up");
+    };
+
+    assert!(
+        matches!(report.outcome, RunOutcome::Done),
+        "{:?}",
+        report.outcome
+    );
+    assert_eq!(runner.calls().len(), 1);
+    assert_eq!(design_starts(&records(&second)), [(1, 1), (2, 2)]);
+}
+
+/// **D4-2, F10.** A failure that reached a verdict still counts across a
+/// resume; only the crashed attempt after it does not. With two allowed,
+/// one failure and one crash leave exactly one more try.
+#[test]
+fn a_verdict_failure_still_counts_after_a_crash() {
+    let loaded = retrying_design(2);
+    let failing = || {
+        FakeRunner::new().script(
+            "design",
+            vec![
+                Step::fail(NodeFailure::Exit { code: Some(1) }),
+                Step::Ok {
+                    writes: Some("design ran\n".to_string()),
+                },
+                Step::fail(NodeFailure::Exit { code: Some(1) }),
+            ],
+        )
+    };
+    let probe = FaultBackend::new();
+    let _ = process(
+        probe.clone(),
+        &loaded,
+        tempfile::tempdir().expect("t").path(),
+        &failing(),
+    );
+    let passed = append_index(&probe, |e| matches!(e, FlowRunEvent::AttemptPassed { .. }));
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let first = FaultBackend::new().with_fault(Fault::TornAppend { k: passed, keep: 0 });
+    let _ = process(first.clone(), &loaded, dir.path(), &failing());
+    let runner = failing();
+    let second = first.crash();
+    let Process::Drove(report) = process(second.clone(), &loaded, dir.path(), &runner) else {
+        panic!("the run could not be picked up");
+    };
+
+    // Attempt 3 fails too, and is the last: the verdict on attempt 1 and
+    // this one spend both tries; the crash on attempt 2 spent none.
+    assert!(
         matches!(
             &report.outcome,
-            RunOutcome::Failed { node, failure: NodeFailure::Interrupted } if node == "design"
+            RunOutcome::Failed { node, failure: NodeFailure::Exit { .. } } if node == "design"
         ),
         "{:?}",
         report.outcome
     );
-    assert!(third.calls().is_empty(), "a third session was paid for");
+    let attempts: Vec<u32> = runner.calls().iter().map(|call| call.attempt).collect();
+    assert_eq!(attempts, [3], "the failed attempt was forgotten");
+}
+
+/// **D4-1, D4-2.** A stopped attempt counts like a failed one: picked up
+/// after a crash that kept the stop but lost the run's end, a node allowed
+/// two tries gets one more, not two.
+#[test]
+fn a_stopped_attempt_still_counts() {
+    let loaded = retrying_design(2);
+    let stopping = || FakeRunner::new().cancel_at("design", 1);
+    let probe = FaultBackend::new();
+    let _ = process(
+        probe.clone(),
+        &loaded,
+        tempfile::tempdir().expect("t").path(),
+        &stopping(),
+    );
+    let ended = append_index(&probe, |e| matches!(e, FlowRunEvent::RunEnded { .. }));
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let first = FaultBackend::new().with_fault(Fault::TornAppend { k: ended, keep: 0 });
+    let _ = process(first.clone(), &loaded, dir.path(), &stopping());
+    let runner = FakeRunner::new().script(
+        "design",
+        vec![Step::fail(NodeFailure::Exit { code: Some(1) })],
+    );
+    let Process::Drove(report) = process(first.crash(), &loaded, dir.path(), &runner) else {
+        panic!("the run could not be picked up");
+    };
+
+    assert!(
+        matches!(
+            &report.outcome,
+            RunOutcome::Failed { node, failure: NodeFailure::Exit { .. } } if node == "design"
+        ),
+        "{:?}",
+        report.outcome
+    );
+    let attempts: Vec<u32> = runner.calls().iter().map(|call| call.attempt).collect();
+    assert_eq!(attempts, [2], "the stop did not count");
 }
 
 /// **F4.** A pass whose output is gone when the run is picked up is undone,

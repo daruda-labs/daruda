@@ -59,8 +59,13 @@ pub struct NodeState {
     pub(crate) produces: Produces,
     /// Raised by each repair rerun; attempts count from 1 within one.
     pub(crate) generation: u32,
-    /// Attempts started in this generation, interrupted ones included.
+    /// Attempts started in this generation, interrupted ones included: the
+    /// next attempt's number is one past this.
     pub(crate) attempts: u32,
+    /// Of those, the ones a crash interrupted. They do not count against
+    /// `max_attempts` (D4-2); a stop or a failure does.
+    #[serde(default)]
+    pub(crate) crashed: u32,
     pub(crate) last: AttemptState,
     /// A repair took this node's output away; it is no longer current.
     pub(crate) invalidated: bool,
@@ -97,7 +102,8 @@ pub enum AttemptState {
     Canceled {
         attempt: u32,
     },
-    /// Started by a process that died before it settled.
+    /// Started by a process that died before it settled. A user's or an
+    /// overage stop settles as `Canceled` instead.
     Interrupted {
         attempt: u32,
     },
@@ -186,6 +192,7 @@ impl NodeState {
             produces,
             generation: 0,
             attempts: 0,
+            crashed: 0,
             last: AttemptState::NotRun,
             invalidated: false,
         }
@@ -194,6 +201,11 @@ impl NodeState {
     /// How this node's latest attempt in its generation ended, if it did.
     pub fn last(&self) -> &AttemptState {
         &self.last
+    }
+
+    /// Attempts in this generation that count against `max_attempts`.
+    pub(crate) fn spent(&self) -> u32 {
+        self.attempts - self.crashed
     }
 
     /// A repair took this node's output away and it has not passed since.

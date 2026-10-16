@@ -21,6 +21,7 @@ pub(super) fn apply(state: &mut FlowRunState, event: &E) {
             for node in state.nodes.values_mut() {
                 if let AttemptState::Started { attempt, .. } = node.last {
                     node.last = AttemptState::Interrupted { attempt };
+                    node.crashed += 1;
                 }
             }
             state.open_asks.clear();
@@ -113,6 +114,7 @@ pub(super) fn apply(state: &mut FlowRunState, event: &E) {
                 if let Some(current) = state.nodes.get_mut(member) {
                     current.generation += 1;
                     current.attempts = 0;
+                    current.crashed = 0;
                 }
             }
         }

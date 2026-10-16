@@ -79,8 +79,9 @@ pub enum NodeFailure {
     Exit {
         code: Option<i32>,
     },
-    /// The process running the attempt died, and a resume found its
-    /// attempts already spent: nothing reached a verdict.
+    /// The process running the attempt died with its attempts spent. Kept
+    /// to read logs of builds that counted such an attempt; a crash spends
+    /// no attempt now (D4-2), so the engine no longer ends a node this way.
     Interrupted,
 }
 

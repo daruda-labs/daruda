@@ -317,7 +317,7 @@ impl<'a> Run<'a> {
         Box::pin(async move {
             let policy = self.policy_of(node);
             // A resume can find this node's attempts in this generation
-            // already spent, the interrupted one included (D4-2).
+            // already spent; one a crash interrupted is not (D4-2).
             if let Some(spent) = self.attempts_spent_before(id, &policy) {
                 return Err(spent);
             }
@@ -489,7 +489,10 @@ impl<'a> Run<'a> {
                 // A refusal cannot be argued with, and a node with no retry
                 // policy has nothing to try. A run this node stopped retries
                 // nothing either; it ends `Canceled`.
-                if stopped_here || failure.forbids_retry() || attempt >= policy.max_attempts {
+                if stopped_here
+                    || failure.forbids_retry()
+                    || self.spent_attempts(id) >= policy.max_attempts
+                {
                     // This returns before any invalidation set is computed,
                     // so the attempt that ends the run archives nothing.
                     self.settle(

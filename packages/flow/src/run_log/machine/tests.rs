@@ -293,8 +293,8 @@ fn a_rerun_starts_a_generation_at_attempt_one() {
 }
 
 /// **F10, D4-2.** A resume turns the attempt in flight into an interrupted
-/// one that still counts, closes every question, and lets the next start
-/// continue the numbers.
+/// one that keeps its number but spends no try, closes every question, and
+/// lets the next start continue the numbers.
 #[test]
 fn a_resume_interrupts_closes_questions_and_continues_numbers() {
     let (crashed, _) = run(vec![
@@ -323,7 +323,8 @@ fn a_resume_interrupts_closes_questions_and_continues_numbers() {
     let (resumed, _) = run(events.clone());
     let gate = resumed.node(&id("gate")).expect("gate");
     assert_eq!(gate.last, AttemptState::Interrupted { attempt: 1 });
-    assert_eq!(gate.attempts, 1, "the interrupted attempt still counts");
+    assert_eq!(gate.attempts, 1, "the interrupted attempt keeps its number");
+    assert_eq!(gate.spent(), 0, "a crash spends none of the node's tries");
     assert!(resumed.open_asks.is_empty());
 
     events.push(FlowRunEvent::attempt_started(id("gate"), 0));

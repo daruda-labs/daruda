@@ -9,7 +9,7 @@ use crate::error::{FlowIoError, IoSite};
 use crate::record::{AttemptOutcome, AttemptRecord, Invalidation, Reported};
 use crate::run_log::line::AttemptLine;
 use crate::run_log::machine::{AttemptState, FixOutcome, FlowRunEvent};
-use crate::runner::{NodeFailure, RunContext, RunResult};
+use crate::runner::{RunContext, RunResult};
 use std::path::{Path, PathBuf};
 
 impl Run<'_> {
@@ -22,8 +22,15 @@ impl Run<'_> {
             .map_or(1, |node| node.attempts + 1)
     }
 
-    /// A resumed node whose last attempt failed or was interrupted, with no
-    /// attempts left in its generation: it fails without running again.
+    /// Attempts in this node's generation that count against its cap: a
+    /// crash-interrupted one does not, a stop or a failure does (D4-2).
+    pub(super) fn spent_attempts(&self, id: &NodeId) -> u32 {
+        self.log.state().node(id).map_or(0, |node| node.spent())
+    }
+
+    /// A resumed node whose last attempt failed, with no attempts left in
+    /// its generation: it fails without running again. One a crash
+    /// interrupted runs again, since that attempt did not count.
     pub(super) fn attempts_spent_before(
         &self,
         id: &NodeId,
@@ -32,11 +39,10 @@ impl Run<'_> {
         let state = self.log.state();
         let node = state.node(id)?;
         let failure = match &node.last {
-            AttemptState::Interrupted { .. } => NodeFailure::Interrupted,
             AttemptState::Failed { failure, .. } => failure.into(),
             _ => return None,
         };
-        (node.attempts >= policy.max_attempts).then(|| RunOutcome::Failed {
+        (node.spent() >= policy.max_attempts).then(|| RunOutcome::Failed {
             node: id.clone(),
             failure,
         })

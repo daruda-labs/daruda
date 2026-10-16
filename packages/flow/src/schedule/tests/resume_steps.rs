@@ -471,9 +471,15 @@ nodes:
     fn resume(dir: &Path, loaded: &crate::load::LoadedFlow) {
         let log_dir = crate::run_log::log_dir(&dir.join("run"));
         let backend = daruda_runlog::FileBackend::new(log_dir);
-        let Process::Drove(_) = process(backend, loaded, dir, &FakeRunner::new()) else {
+        let Process::Drove(report) = process(backend, loaded, dir, &FakeRunner::new()) else {
             panic!("the run could not be picked up");
         };
+        // The crashed attempt spent no try, so the node runs again (D4-2).
+        assert!(
+            matches!(report.outcome, RunOutcome::Done),
+            "{:?}",
+            report.outcome
+        );
     }
 
     #[test]
