@@ -5,8 +5,7 @@
 //! by worktree, so a window that did not start it — or outlived the one that
 //! did — sees, answers and stops it the same way.
 
-use std::path::Path;
-
+use daruda_flow::lock::CanonicalTree;
 use daruda_store::project::LaneRef;
 use gpui::App;
 
@@ -15,11 +14,16 @@ use crate::runs::{FlowRun, Lull, NodeRunState, ParkedAsk, RunView, RunsHost};
 use crate::surface::strings as s;
 
 impl Workspace {
-    /// This window's lane at `worktree`, if it holds one.
-    pub(in crate::workspace) fn lane_at(&self, worktree: &Path) -> Option<LaneRef> {
+    /// This window's lane at `worktree`, if it holds one — under whatever
+    /// spelling this window opened the folder by.
+    pub(in crate::workspace) fn lane_at(
+        &self,
+        worktree: &CanonicalTree,
+        cx: &App,
+    ) -> Option<LaneRef> {
         self.projects
             .lanes()
-            .find(|(_, _, lane)| lane.path == worktree)
+            .find(|(_, _, lane)| RunsHost::names_flow_tree(&lane.path, worktree, cx))
             .map(|(lane_ref, _, _)| lane_ref)
     }
 

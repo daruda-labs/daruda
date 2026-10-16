@@ -3,18 +3,22 @@
 //! and any window holding its worktree can still watch, answer and stop it
 //! (F6).
 //!
-//! A run is keyed by its worktree, the unit its lock admits one run to. Each
-//! run has one pump, which folds its notices and questions into the
+//! A run is keyed by its worktree, resolved, the unit its lock admits one run
+//! to. A window asks with its own spelling of a lane's folder — a symlinked
+//! prefix, a folder opened twice under two names — and that spelling is
+//! resolved once and remembered, never per frame. Each run has one pump, which folds its notices and questions into the
 //! [`RunView`] every window reads, and tells windows through
 //! [`super::RunsEffects`] after the state changed — never from inside it.
 
 mod colour;
 mod view;
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use daruda_flow::event::{FlowEvent, RunEnd, RunNotice};
+use daruda_flow::lock::CanonicalTree;
 use daruda_flow::request::RunRequest;
 use daruda_flow::runner::{CancelToken, OverageStop, PendingAsk, Runners};
 use gpui::{App, AsyncApp, BorrowAppContext as _};
@@ -62,14 +66,76 @@ impl FlowRun {
 /// Every run this process holds, by the worktree it runs in.
 #[derive(Default)]
 pub(crate) struct FlowRuns {
-    runs: HashMap<PathBuf, FlowRun>,
+    runs: HashMap<CanonicalTree, FlowRun>,
+    /// What each spelling a window asked with resolves to, `None` for one
+    /// that would not resolve. Lanes are looked up every frame and resolving
+    /// is a filesystem call, so it is made once per spelling. Forgotten
+    /// whenever a run starts or ends, which bounds how long an entry can
+    /// outlive the folder it described.
+    spellings: RefCell<HashMap<PathBuf, Option<CanonicalTree>>>,
     /// Distinguishes two runs started in the same millisecond.
     counter: u32,
 }
 
+impl FlowRuns {
+    /// The key `spelling` names, as the lock would resolve it. `None` when
+    /// nothing runs, without touching the filesystem.
+    fn key_for(&self, spelling: &Path) -> Option<CanonicalTree> {
+        if self.runs.is_empty() {
+            return None;
+        }
+        if let Some((key, _)) = self.runs.get_key_value(spelling) {
+            return Some(key.clone());
+        }
+        self.resolve(spelling)
+    }
+
+    /// `spelling` resolved, remembered. Also asked after a run ended and
+    /// left the map, by the windows working out which of their lanes it was.
+    fn resolve(&self, spelling: &Path) -> Option<CanonicalTree> {
+        self.spellings
+            .borrow_mut()
+            .entry(spelling.to_path_buf())
+            .or_insert_with(|| CanonicalTree::resolve(spelling).ok())
+            .clone()
+    }
+
+    fn get(&self, spelling: &Path) -> Option<&FlowRun> {
+        self.runs.get(&self.key_for(spelling)?)
+    }
+
+    fn get_mut(&mut self, spelling: &Path) -> Option<&mut FlowRun> {
+        let key = self.key_for(spelling)?;
+        self.runs.get_mut(&key)
+    }
+
+    /// Hold `run` in `tree`, unless a run is already there.
+    fn insert(&mut self, tree: CanonicalTree, run: FlowRun) -> Result<(), AlreadyRunning> {
+        if self.runs.contains_key(&tree) {
+            return Err(AlreadyRunning);
+        }
+        self.runs.insert(tree, run);
+        self.spellings.get_mut().clear();
+        Ok(())
+    }
+
+    fn remove(&mut self, tree: &Path) -> Option<FlowRun> {
+        let run = self.runs.remove(tree)?;
+        self.spellings.get_mut().clear();
+        Some(run)
+    }
+}
+
+/// A run was asked for in a worktree that already has one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AlreadyRunning;
+
 /// Everything a run needs to start. The runners are built on the run's own
 /// thread, from the request, by the host that decides what they are given.
 pub(crate) struct FlowStart {
+    /// The worktree resolved, which the run is keyed by: the tree its lock
+    /// is named after.
+    pub tree: CanonicalTree,
     pub request: RunRequest,
     pub source: FlowSource,
     pub runners: Box<dyn FnOnce(&RunRequest) -> Runners + Send>,
@@ -81,7 +147,7 @@ pub(crate) struct FlowStart {
 /// What changed about the run in `worktree`, for the windows holding it.
 #[derive(Clone, Debug)]
 pub(crate) struct FlowChange {
-    pub worktree: PathBuf,
+    pub worktree: CanonicalTree,
     pub what: FlowChanged,
 }
 
@@ -111,9 +177,19 @@ pub(crate) struct FlowEnded {
 }
 
 impl RunsHost {
-    /// The run in `worktree`, if this process holds one.
+    /// The run in `worktree`, however it is spelled, if this process holds
+    /// one.
     pub(crate) fn flow_run<'a>(worktree: &Path, cx: &'a App) -> Option<&'a FlowRun> {
-        cx.try_global::<RunsHost>()?.flows.runs.get(worktree)
+        cx.try_global::<RunsHost>()?.flows.get(worktree)
+    }
+
+    /// Whether `spelling` names `tree`, the key a run's changes are told by.
+    pub(crate) fn names_flow_tree(spelling: &Path, tree: &CanonicalTree, cx: &App) -> bool {
+        spelling == tree.as_path()
+            || cx
+                .try_global::<RunsHost>()
+                .and_then(|host| host.flows.resolve(spelling))
+                .is_some_and(|key| &key == tree)
     }
 
     /// The next run id. Wrapping because it only has to differ from the
@@ -125,9 +201,12 @@ impl RunsHost {
         })
     }
 
-    /// Start a run: its thread, its pump, and its entry, together.
-    pub(crate) fn start_flow(start: FlowStart, cx: &mut App) {
+    /// Start a run: its thread, its pump, and its entry, together. Refused,
+    /// with nothing started, when the worktree already has a run: replacing
+    /// its entry would leave that run with no stop switch anywhere.
+    pub(crate) fn start_flow(start: FlowStart, cx: &mut App) -> Result<(), AlreadyRunning> {
         let FlowStart {
+            tree,
             request,
             source,
             runners,
@@ -135,7 +214,9 @@ impl RunsHost {
             events,
             asks,
         } = start;
-        let worktree = request.cwd.clone();
+        if cx.global::<RunsHost>().flows.runs.contains_key(&tree) {
+            return Err(AlreadyRunning);
+        }
         let run_dir = request.run_dir.clone();
         let nodes_at_start = request
             .loaded
@@ -166,10 +247,11 @@ impl RunsHost {
             caller: Caller::Desktop,
             _thread: Some(thread),
         };
-        cx.update_global::<RunsHost, _>(|host, _| host.flows.runs.insert(worktree.clone(), run));
-        Self::tell_windows(worktree.clone(), FlowChanged::Repainted, cx);
-        cx.spawn(async move |cx| pump(worktree, run_dir, events, asks, cx).await)
+        cx.update_global::<RunsHost, _>(|host, _| host.flows.insert(tree.clone(), run))?;
+        Self::tell_windows(tree.clone(), FlowChanged::Repainted, cx);
+        cx.spawn(async move |cx| pump(tree, run_dir, events, asks, cx).await)
             .detach();
+        Ok(())
     }
 
     /// Owe `worktree`'s run's outcome to a remote caller. `false` when no
@@ -177,7 +259,7 @@ impl RunsHost {
     /// produced none.
     #[must_use = "a submission that produced no run has to be answered"]
     pub(crate) fn owe_flow_outcome_remotely(worktree: &Path, cx: &mut App) -> bool {
-        cx.update_global::<RunsHost, _>(|host, _| match host.flows.runs.get_mut(worktree) {
+        cx.update_global::<RunsHost, _>(|host, _| match host.flows.get_mut(worktree) {
             Some(run) => {
                 run.caller = Caller::Remote;
                 true
@@ -191,17 +273,19 @@ impl RunsHost {
     /// land. The entry stays until the run says it ended.
     pub(crate) fn stop_flow(worktree: &Path, cx: &mut App) -> bool {
         let stopped = cx.update_global::<RunsHost, _>(|host, _| {
-            let Some(run) = host.flows.runs.get_mut(worktree) else {
-                return false;
-            };
+            let key = host.flows.key_for(worktree)?;
+            let run = host.flows.runs.get_mut(&key)?;
             run.cancel.cancel();
             run.view.withdraw_questions();
-            true
+            Some(key)
         });
-        if stopped {
-            Self::tell_windows(worktree.to_path_buf(), FlowChanged::Repainted, cx);
+        match stopped {
+            Some(key) => {
+                Self::tell_windows(key, FlowChanged::Repainted, cx);
+                true
+            }
+            None => false,
         }
-        stopped
     }
 
     /// Answer question `ask_id` of the run in `worktree`. Taken down at
@@ -212,15 +296,21 @@ impl RunsHost {
         decision: daruda_acp::PermissionDecision,
         cx: &mut App,
     ) -> Result<(), AnswerRefused> {
-        let answered =
-            cx.update_global::<RunsHost, _>(|host, _| match host.flows.runs.get_mut(worktree) {
-                Some(run) => run.view.answer(ask_id, decision),
-                None => Err(AnswerRefused::NotOpen),
-            });
-        if answered != Err(AnswerRefused::NotOpen) {
-            Self::tell_windows(worktree.to_path_buf(), FlowChanged::Repainted, cx);
+        let answered = cx.update_global::<RunsHost, _>(|host, _| {
+            let Some(key) = host.flows.key_for(worktree) else {
+                return (None, Err(AnswerRefused::NotOpen));
+            };
+            match host.flows.runs.get_mut(&key) {
+                Some(run) => (Some(key), run.view.answer(ask_id, decision)),
+                None => (None, Err(AnswerRefused::NotOpen)),
+            }
+        });
+        if let (Some(key), answer) = &answered
+            && *answer != Err(AnswerRefused::NotOpen)
+        {
+            Self::tell_windows(key.clone(), FlowChanged::Repainted, cx);
         }
-        answered
+        answered.1
     }
 
     /// Hold a question until somebody answers it.
@@ -237,19 +327,20 @@ impl RunsHost {
     ) {
         let ask_id = pending.ask_id;
         let parked = cx.update_global::<RunsHost, _>(|host, _| {
+            let key = host.flows.key_for(worktree)?;
             let run = host
                 .flows
                 .runs
-                .get_mut(worktree)
+                .get_mut(&key)
                 .filter(|run| run.view.run_dir() == run_dir)?;
-            Some(run.view.park(ParkedAsk::new(pending)))
+            Some((key, run.view.park(ParkedAsk::new(pending))))
         });
-        if let Some(parked) = parked {
+        if let Some((key, parked)) = parked {
             let what = FlowChanged::Asked {
                 ask_id,
                 alone: parked == Parked::Alone,
             };
-            Self::tell_windows(worktree.to_path_buf(), what, cx);
+            Self::tell_windows(key, what, cx);
         }
     }
 
@@ -263,41 +354,43 @@ impl RunsHost {
         cx: &mut App,
     ) {
         let what = cx.update_global::<RunsHost, _>(|host, _| {
-            let runs = &mut host.flows.runs;
-            if runs.get(worktree)?.view.run_dir() != run_dir {
+            let key = host.flows.key_for(worktree)?;
+            if host.flows.runs.get(&key)?.view.run_dir() != run_dir {
                 return None;
             }
             if let FlowEvent::RunEnded { end } = event {
-                let mut run = runs.remove(worktree)?;
+                let mut run = host.flows.remove(key.as_path())?;
                 run.view.advance(event);
                 if let Some(states) = from_log {
                     run.view.reconcile(states);
                 }
-                return Some(FlowChanged::Ended(Box::new(FlowEnded {
+                let ended = FlowChanged::Ended(Box::new(FlowEnded {
                     end: end.clone(),
                     run_dir: run_dir.to_path_buf(),
                     overage: run.overage.tripped().cloned(),
                     owes_remote_answer: run.caller == Caller::Remote,
                     colouring: run.view.colouring(),
-                })));
+                }));
+                return Some((key, ended));
             }
-            let run = runs.get_mut(worktree)?;
+            let run = host.flows.runs.get_mut(&key)?;
             let advanced = run.view.advance(event);
             let reconciled = from_log.is_some_and(|states| run.view.reconcile(states));
-            match (advanced, reconciled) {
-                (Advanced::Moved { left_setup }, _) => Some(FlowChanged::Progressed { left_setup }),
-                (Advanced::Nothing, true) => Some(FlowChanged::Progressed { left_setup: false }),
-                (Advanced::Nothing, false) => None,
-            }
+            let what = match (advanced, reconciled) {
+                (Advanced::Moved { left_setup }, _) => FlowChanged::Progressed { left_setup },
+                (Advanced::Nothing, true) => FlowChanged::Progressed { left_setup: false },
+                (Advanced::Nothing, false) => return None,
+            };
+            Some((key, what))
         });
-        if let Some(what) = what {
-            Self::tell_windows(worktree.to_path_buf(), what, cx);
+        if let Some((key, what)) = what {
+            Self::tell_windows(key, what, cx);
         }
     }
 
     /// Tell the windows, after this update: a window asking from inside its
     /// own update would otherwise be re-entered.
-    fn tell_windows(worktree: PathBuf, what: FlowChanged, cx: &mut App) {
+    fn tell_windows(worktree: CanonicalTree, what: FlowChanged, cx: &mut App) {
         let Some(effects) = cx.global::<RunsHost>().effects.clone() else {
             return;
         };
@@ -306,9 +399,11 @@ impl RunsHost {
     }
 
     /// Put a run in `worktree` with no engine behind it, for tests and
-    /// `--screenshot`.
+    /// `--screenshot`. Keyed as a started run is, by the folder resolved.
     #[cfg(any(test, feature = "screenshot"))]
     pub(crate) fn seed_flow_run(worktree: PathBuf, view: RunView, cx: &mut App) {
+        let tree = CanonicalTree::resolve(&worktree)
+            .unwrap_or_else(|_| CanonicalTree::unchecked(worktree));
         let run = FlowRun {
             view,
             cancel: CancelToken::default(),
@@ -316,8 +411,14 @@ impl RunsHost {
             caller: Caller::Desktop,
             _thread: None,
         };
-        cx.update_global::<RunsHost, _>(|host, _| host.flows.runs.insert(worktree.clone(), run));
-        Self::tell_windows(worktree, FlowChanged::Repainted, cx);
+        // A seed lands on whatever a test left there: it stands in for
+        // state, not for a start.
+        cx.update_global::<RunsHost, _>(|host, _| {
+            host.flows.remove(tree.as_path());
+            host.flows.insert(tree.clone(), run)
+        })
+        .expect("the worktree was just cleared");
+        Self::tell_windows(tree, FlowChanged::Repainted, cx);
     }
 
     /// Drive one event through the path the pump takes, log read included.
@@ -342,7 +443,7 @@ impl RunsHost {
         cx: &mut App,
     ) {
         cx.update_global::<RunsHost, _>(|host, _| {
-            let run = host.flows.runs.get_mut(worktree).expect("a seeded run");
+            let run = host.flows.get_mut(worktree).expect("a seeded run");
             run.overage = OverageStop::new(std::sync::Arc::new(true.into()));
             assert!(run.overage.trip(limit));
         });
@@ -376,7 +477,7 @@ enum Next {
 /// The run's one pump: its notices and questions, in arrival order, until it
 /// ends. App-owned, so it outlives every window.
 async fn pump(
-    worktree: PathBuf,
+    worktree: CanonicalTree,
     run_dir: PathBuf,
     events: smol::channel::Receiver<RunNotice>,
     asks: smol::channel::Receiver<PendingAsk>,
@@ -396,7 +497,7 @@ async fn pump(
         };
         let event = match next {
             Next::Ask(pending) => {
-                cx.update(|cx| RunsHost::park_flow_ask(&worktree, &run_dir, pending, cx));
+                cx.update(|cx| RunsHost::park_flow_ask(worktree.as_path(), &run_dir, pending, cx));
                 continue;
             }
             Next::AsksDone => {
@@ -424,7 +525,9 @@ async fn pump(
             None
         };
         let ended = matches!(event, FlowEvent::RunEnded { .. });
-        cx.update(|cx| RunsHost::apply_flow_event(&worktree, &run_dir, &event, from_log, cx));
+        cx.update(|cx| {
+            RunsHost::apply_flow_event(worktree.as_path(), &run_dir, &event, from_log, cx)
+        });
         if ended {
             break;
         }

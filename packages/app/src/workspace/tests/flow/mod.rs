@@ -11,6 +11,7 @@ mod control;
 mod files;
 mod graph;
 mod inspector;
+mod ownership;
 mod partial;
 mod report;
 mod run;

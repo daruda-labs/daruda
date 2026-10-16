@@ -1,222 +1,54 @@
 use std::path::PathBuf;
 
-use daruda_flow::event::FlowEvent;
-use daruda_flow::runner::{AskOwner, AskRequest, PendingAsk};
-
-use super::view::{Advanced, Parked};
 use super::*;
 
-fn view() -> RunView {
-    let run_dir = PathBuf::from("/run");
-    RunView::new(
-        run_dir.clone(),
-        FlowSource::Resumed { run_dir },
-        vec!["design".into(), "build".into()],
-    )
-}
-
-/// A question and the receiver an answer would arrive on.
-fn ask(
-    id: u64,
-    node: &str,
-) -> (
-    ParkedAsk,
-    smol::channel::Receiver<daruda_acp::PermissionDecision>,
-) {
-    let (reply, rx) = smol::channel::bounded(1);
-    let pending = PendingAsk {
-        owner: AskOwner::Node {
-            node: node.into(),
-            generation: 0,
-            attempt: 1,
-        },
-        ask_id: id,
-        request: AskRequest {
-            tool: "write".into(),
-            detail: None,
-            options: Vec::new(),
-        },
-        reply,
-    };
-    (ParkedAsk::new(pending), rx)
-}
-
-fn open_ids(view: &RunView) -> Vec<u64> {
-    view.questions().map(ParkedAsk::ask_id).collect()
-}
-
-fn started(node: &str) -> FlowEvent {
-    FlowEvent::NodeStarted {
-        node: node.into(),
-        attempt: 1,
+fn run_in(run_dir: &str) -> FlowRun {
+    let run_dir = PathBuf::from(run_dir);
+    FlowRun {
+        view: RunView::new(run_dir.clone(), FlowSource::Resumed { run_dir }, Vec::new()),
+        cancel: CancelToken::default(),
+        overage: OverageStop::default(),
+        caller: Caller::Desktop,
+        _thread: None,
     }
 }
 
-/// Nodes running together ask independently: a second question sits beside
-/// the first, and only the first is the one to bring forward.
-#[test]
-fn questions_are_held_as_a_set() {
-    let mut view = view();
-    let (first, _rx1) = ask(1, "design");
-    let (second, _rx2) = ask(2, "build");
-    assert_eq!(view.park(first), Parked::Alone);
-    assert_eq!(view.park(second), Parked::Beside);
-    assert_eq!(open_ids(&view), [1, 2]);
+fn tree(path: &Path) -> CanonicalTree {
+    CanonicalTree::resolve(path).expect("the folder resolves")
 }
 
-/// F1: a sibling's progress used to replace the stage holding the question,
-/// leaving its node parked on a reply nobody could send.
+/// A worktree holds one run: a second never replaces the first, whose stop
+/// switch would otherwise be lost with its entry.
 #[test]
-fn a_sibling_event_never_drops_an_open_question() {
-    let mut view = view();
-    view.advance(&started("design"));
-    let (question, rx) = ask(1, "design");
-    view.park(question);
-    view.advance(&started("build"));
-    view.advance(&FlowEvent::NodePassed {
-        node: "build".into(),
-        attempt: 1,
-    });
-    assert_eq!(open_ids(&view), [1], "the sibling took the question down");
+fn a_worktree_holds_one_run_at_a_time() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut runs = FlowRuns::default();
+    assert_eq!(runs.insert(tree(dir.path()), run_in("/first")), Ok(()));
     assert_eq!(
-        view.answer(1, daruda_acp::PermissionDecision::Cancelled),
-        Ok(())
+        runs.insert(tree(dir.path()), run_in("/second")),
+        Err(AlreadyRunning)
     );
-    assert_eq!(rx.try_recv(), Ok(daruda_acp::PermissionDecision::Cancelled));
+    let held = runs.get(dir.path()).expect("the first run");
+    assert_eq!(held.view.run_dir(), Path::new("/first"));
 }
 
-/// Answering one leaves the rest up; a stale id answers nothing.
+/// Any spelling of the worktree finds its run — the key as given, or a
+/// path through a symlinked prefix — and a folder that is not it does not.
+#[cfg(unix)]
 #[test]
-fn answering_takes_down_only_the_question_it_names() {
-    let mut view = view();
-    let (first, rx1) = ask(1, "design");
-    let (second, rx2) = ask(2, "build");
-    view.park(first);
-    view.park(second);
-    assert_eq!(
-        view.answer(9, daruda_acp::PermissionDecision::Cancelled),
-        Err(AnswerRefused::NotOpen)
-    );
-    assert_eq!(
-        view.answer(2, daruda_acp::PermissionDecision::Cancelled),
-        Ok(())
-    );
-    assert!(rx1.try_recv().is_err(), "the other question was answered");
-    assert!(rx2.try_recv().is_ok());
-    assert_eq!(open_ids(&view), [1]);
-}
+fn every_spelling_of_a_worktree_finds_its_run() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let links = tempfile::tempdir().expect("tempdir");
+    let link = links.path().join("lane");
+    std::os::unix::fs::symlink(dir.path(), &link).expect("symlink");
+    let mut runs = FlowRuns::default();
+    let key = tree(dir.path());
+    runs.insert(key.clone(), run_in("/run")).expect("inserted");
 
-/// F13: the engine abandoned the question, so the answer reached nobody —
-/// and says so — and the question does not stay up.
-#[test]
-fn an_answer_to_an_abandoned_question_is_refused() {
-    let mut view = view();
-    let (question, rx) = ask(1, "design");
-    view.park(question);
-    drop(rx);
-    assert_eq!(
-        view.answer(1, daruda_acp::PermissionDecision::Cancelled),
-        Err(AnswerRefused::Closed)
-    );
-    assert!(open_ids(&view).is_empty());
-}
-
-/// The engine closing a question is the one event that takes it down.
-#[test]
-fn a_question_the_engine_closed_goes_on_the_next_event() {
-    let mut view = view();
-    let (closed, rx) = ask(1, "design");
-    let (open, _rx) = ask(2, "build");
-    view.park(closed);
-    view.park(open);
-    drop(rx);
-    assert_eq!(
-        view.advance(&started("review")),
-        Advanced::Moved { left_setup: true }
-    );
-    assert_eq!(open_ids(&view), [2]);
-}
-
-#[test]
-fn stopping_withdraws_every_question() {
-    let mut view = view();
-    let (first, rx1) = ask(1, "design");
-    let (second, rx2) = ask(2, "build");
-    view.park(first);
-    view.park(second);
-    assert!(view.withdraw_questions());
-    assert!(open_ids(&view).is_empty());
-    assert!(rx1.is_closed() && rx2.is_closed(), "the engine is released");
-}
-
-/// Only the first node reports leaving setup: that is the one moment
-/// retention has run, so the history read from disk is stale exactly then.
-#[test]
-fn leaving_setup_is_reported_once() {
-    let mut view = view();
-    assert_eq!(
-        view.advance(&started("design")),
-        Advanced::Moved { left_setup: true }
-    );
-    assert_eq!(
-        view.advance(&started("build")),
-        Advanced::Moved { left_setup: false }
-    );
-    assert_eq!(view.advance(&started("build")), Advanced::Nothing);
-}
-
-/// Running nodes are a set, drawn in the flow's order.
-#[test]
-fn every_node_under_way_is_running() {
-    let mut view = view();
-    view.advance(&started("build"));
-    view.advance(&started("design"));
-    let running: Vec<String> = view
-        .running()
-        .into_iter()
-        .map(|(id, _)| id.to_string())
-        .collect();
-    assert_eq!(running, ["design", "build"]);
-    view.advance(&FlowEvent::NodePassed {
-        node: "design".into(),
-        attempt: 1,
-    });
-    assert_eq!(view.running().len(), 1);
-}
-
-/// F12: the log's word replaces what the stream left behind — a stopped
-/// node that was still drawn running, a carried node never re-announced.
-#[test]
-fn the_log_settles_every_node() {
-    let mut view = view();
-    view.advance(&started("build"));
-    let mut from_log = NodeRunStates::new();
-    from_log.insert("design".into(), NodeRunState::Passed);
-    from_log.insert("build".into(), NodeRunState::Pending);
-    assert!(view.reconcile(from_log.clone()));
-    assert_eq!(view.node_state("design"), NodeRunState::Passed);
-    assert_eq!(view.node_state("build"), NodeRunState::Pending);
-    assert!(
-        !view.reconcile(from_log),
-        "the same word twice changes nothing"
-    );
-}
-
-/// A resume's wait for the dead run is still setup: the run says it is
-/// waiting, and leaves setup only when its first node starts.
-#[test]
-fn a_resume_wait_is_still_setup() {
-    let mut view = view();
-    let settling = FlowEvent::Settling {
-        wait: std::time::Duration::from_secs(4),
-    };
-    assert_eq!(
-        view.advance(&settling),
-        Advanced::Moved { left_setup: false }
-    );
-    assert_eq!(view.lull(), &Lull::Settling);
-    assert_eq!(
-        view.advance(&started("design")),
-        Advanced::Moved { left_setup: true }
-    );
+    assert!(runs.get(key.as_path()).is_some());
+    assert!(runs.get(dir.path()).is_some());
+    assert!(runs.get(&link).is_some(), "the symlinked spelling missed");
+    assert!(runs.get(links.path()).is_none());
+    assert!(runs.remove(key.as_path()).is_some());
+    assert!(runs.get(&link).is_none());
 }

@@ -110,16 +110,15 @@ impl Workspace {
         if !purpose.blocked_by_a_running_flow() {
             return true;
         }
+        // The host first: a run this process holds — for *this* worktree —
+        // is one we can stop, whether or not its thread has taken the lock
+        // yet. Between a start and its lock only the host knows of it, and a
+        // second start then would replace it with no stop switch left.
+        if self.is_flow_running_in(lane, cx) {
+            self.offer_to_stop_flow_in(lane, cx);
+            return false;
+        }
         match self.lane_holder(&cwd) {
-            // The stop switch is a `CancelToken`, so the only run we can
-            // stop is one this process holds — for *this* worktree. The
-            // host is the authority, not the lock's pid: a token for another
-            // worktree belongs to this process too and would not stop this one.
-            Some(_) if self.is_flow_running_in(lane, cx) => {
-                self.overlays.flow_picker = FlowPicker::Stopping { lane };
-                cx.notify();
-                false
-            }
             // Offering "stop it" for a run we cannot reach would be a
             // button that does nothing.
             Some(holder) => {
@@ -135,6 +134,17 @@ impl Workspace {
             }
             None => true,
         }
+    }
+
+    /// Answer a start in `lane`, which already has a run this process holds,
+    /// by offering to stop that run.
+    fn offer_to_stop_flow_in(
+        &mut self,
+        lane: daruda_store::project::LaneRef,
+        cx: &mut Context<Self>,
+    ) {
+        self.overlays.flow_picker = FlowPicker::Stopping { lane };
+        cx.notify();
     }
 
     /// The live process holding this lane's run lock, if any. A lock left by
@@ -394,7 +404,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         match self.build_flow_request(lane, path, profile, selection, cx) {
-            Ok(submission) => self.start_flow_thread(submission, cx),
+            Ok(submission) => self.start_flow_thread(lane, submission, cx),
             Err(e) => self.report_flow_refusal(e, cx),
         }
     }
@@ -412,15 +422,21 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         match self.build_resume_request(lane_ref, run_dir, cx) {
-            Ok(submission) => self.start_flow_thread(submission, cx),
+            Ok(submission) => self.start_flow_thread(lane_ref, submission, cx),
             Err(e) => self.report_flow_refusal(e, cx),
         }
     }
 
     /// Hand the run to the process. Its thread, stop switch and pump live
     /// there, so this window closing does not take the run with it.
-    fn start_flow_thread(&mut self, submission: FlowSubmission, cx: &mut Context<Self>) {
+    fn start_flow_thread(
+        &mut self,
+        lane: daruda_store::project::LaneRef,
+        submission: FlowSubmission,
+        cx: &mut Context<Self>,
+    ) {
         let FlowSubmission {
+            tree,
             request,
             source,
             node_install_dir,
@@ -434,8 +450,9 @@ impl Workspace {
                 runners_for(request, node_install_dir, overage)
             })
         };
-        crate::runs::RunsHost::start_flow(
+        let started = crate::runs::RunsHost::start_flow(
             crate::runs::FlowStart {
+                tree,
                 request,
                 source,
                 runners,
@@ -445,6 +462,12 @@ impl Workspace {
             },
             cx,
         );
+        // The guard ran when the picker opened, and another window can have
+        // started a run here since. Its answer then is the guard's: offer to
+        // stop the run that is there.
+        if let Err(crate::runs::AlreadyRunning) = started {
+            self.offer_to_stop_flow_in(lane, cx);
+        }
     }
 
     /// Stop the run a named lane holds. The status bar lists every run in

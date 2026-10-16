@@ -306,4 +306,4 @@ impl RunView {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests;

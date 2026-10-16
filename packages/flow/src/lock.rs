@@ -186,6 +186,14 @@ impl AsRef<Path> for CanonicalTree {
     }
 }
 
+/// So a map keyed by tree can be asked with a plain path. Sound because the
+/// derived `Hash` and `Eq` are the inner path's.
+impl std::borrow::Borrow<Path> for CanonicalTree {
+    fn borrow(&self) -> &Path {
+        &self.0
+    }
+}
+
 /// Where a working tree's lock pair lives under the host's lock root.
 ///
 /// **A directory per tree, not a file per tree.** `take` pairs `.lock`

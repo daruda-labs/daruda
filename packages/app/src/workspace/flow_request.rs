@@ -100,6 +100,9 @@ pub(in crate::workspace) struct FlowSelection {
 /// separately because the sender lives inside the request, and the two are
 /// created together exactly once.
 pub(in crate::workspace) struct FlowSubmission {
+    /// The lane's folder resolved: the key the run is held under, so every
+    /// window's spelling of that folder finds it.
+    pub tree: daruda_flow::lock::CanonicalTree,
     pub request: RunRequest,
     /// Which flow file this run is of, when that is knowable ([`FlowSource`]).
     pub source: FlowSource,
@@ -309,6 +312,7 @@ impl Workspace {
             resume: Some(continuation),
         };
         Ok(FlowSubmission {
+            tree,
             request,
             source: FlowSource::Resumed {
                 run_dir: run_dir.to_path_buf(),
@@ -354,9 +358,9 @@ impl Workspace {
         purpose: FlowPurpose,
         cx: &mut Context<Self>,
     ) -> Result<FlowSubmission, FlowSubmitError> {
-        // The tree is the engine's to derive from `cwd`; resolving it here
-        // is the pre-flight refusal, not a value this path needs.
-        let (cwd, _) = self.lane_tree(lane_ref)?;
+        // The engine derives its lock from `cwd`; resolving it here is the
+        // pre-flight refusal, and the key the run is held under.
+        let (cwd, tree) = self.lane_tree(lane_ref)?;
         let text = std::fs::read_to_string(flow_path).map_err(|e| FlowSubmitError::Read {
             path: flow_path.to_path_buf(),
             message: e.to_string(),
@@ -402,6 +406,7 @@ impl Workspace {
             resume: None,
         };
         Ok(FlowSubmission {
+            tree,
             request,
             source: FlowSource::File(flow_path.to_path_buf()),
             node_install_dir,

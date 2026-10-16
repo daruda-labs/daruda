@@ -128,4 +128,4 @@ pub(crate) fn states_from_log(log: &FlowRunState) -> NodeRunStates {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests;

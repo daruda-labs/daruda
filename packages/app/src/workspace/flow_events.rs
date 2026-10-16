@@ -10,6 +10,7 @@
 use std::path::{Path, PathBuf};
 
 use daruda_flow::event::RunEnd;
+use daruda_flow::lock::CanonicalTree;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::project::LaneRef;
 use gpui::{App, Context, Window};
@@ -21,9 +22,9 @@ use crate::surface::strings as s;
 use crate::window_registry::WindowRegistry;
 
 /// Hand `change` to every window, with the one that speaks for the run
-/// chosen first: the window in front if it holds the worktree, else the
-/// first that does, else — for a run whose window closed — any window, so
-/// a phone that asked still hears how it ended.
+/// chosen first: the window in front if it holds the worktree, else one
+/// showing that worktree, else the first that holds it, else — for a run
+/// whose window closed — any window, so the end is still said somewhere.
 pub(in crate::workspace) fn deliver_flow_change(change: &FlowChange, cx: &mut App) {
     let lead = match &change.what {
         FlowChanged::Ended(_) => lead_window_for(&change.worktree, cx),
@@ -35,18 +36,23 @@ pub(in crate::workspace) fn deliver_flow_change(change: &FlowChange, cx: &mut Ap
     });
 }
 
-fn lead_window_for(worktree: &Path, cx: &mut App) -> Option<gpui::EntityId> {
+fn lead_window_for(worktree: &CanonicalTree, cx: &mut App) -> Option<gpui::EntityId> {
     let mut holders = Vec::new();
+    let mut showing = None;
     let mut any = None;
     WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
         any.get_or_insert(cx.entity_id());
-        if ws.lane_at(worktree).is_some() {
+        if let Some(lane) = ws.lane_at(worktree, cx) {
             holders.push(cx.entity_id());
+            if lane == ws.active {
+                showing.get_or_insert(cx.entity_id());
+            }
         }
     });
     let front = WindowRegistry::active_workspace(cx).map(|(_, weak)| weak.entity_id());
     front
         .filter(|front| holders.contains(front))
+        .or(showing)
         .or_else(|| holders.first().copied())
         .or(any)
 }
@@ -60,10 +66,10 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let lane = self.lane_at(&change.worktree);
+        let lane = self.lane_at(&change.worktree, cx);
         match (&change.what, lane) {
             (FlowChanged::Ended(ended), lane) => {
-                self.on_flow_run_ended(lane, &change.worktree, ended, lead, cx);
+                self.on_flow_run_ended(lane, change.worktree.as_path(), ended, lead, cx);
             }
             (_, None) => {}
             (FlowChanged::Repainted, Some(_)) => cx.notify(),
@@ -74,8 +80,8 @@ impl Workspace {
                 if *left_setup {
                     self.invalidate_flow_history(lane);
                 }
-                let colouring =
-                    RunsHost::flow_run(&change.worktree, cx).and_then(|run| run.view().colouring());
+                let colouring = RunsHost::flow_run(change.worktree.as_path(), cx)
+                    .and_then(|run| run.view().colouring());
                 self.colour_flow_graph(lane, colouring, cx);
                 cx.notify();
             }
@@ -84,7 +90,8 @@ impl Workspace {
                 // Only a question that is alone comes forward: a dialog
                 // stacked over one being answered would take the click.
                 if *alone {
-                    self.raise_flow_question(lane, &change.worktree, *ask_id, window, cx);
+                    let worktree = change.worktree.as_path();
+                    self.raise_flow_question(lane, worktree, *ask_id, window, cx);
                 }
             }
         }
@@ -177,20 +184,21 @@ impl Workspace {
                 self.toast_flow_overage_stop(limit, cx);
             }
         }
-        let Some(lane) = lane else {
-            return;
-        };
         if report_to_open(&ended.end, &ended.run_dir).is_none() {
             return;
         }
         // The report waits in the Flows page's past runs; nothing opens over
         // what the person is looking at. A worktree off screen is marked
         // unread, the way an agent's finished turn marks it; the one on
-        // screen, which no mark can reach, gets a toast instead.
-        if lane != self.active {
-            self.mark_lane_unread(lane, cx);
-        } else if lead {
-            self.toast_flow_run_end(lane, &ended.end, cx);
+        // screen, which no mark can reach, gets a toast instead — and so does
+        // a lead holding no lane there, which no mark can reach either.
+        match lane {
+            Some(lane) if lane != self.active => self.mark_lane_unread(lane, cx),
+            Some(lane) if lead && !self.shows_flows_of(lane) => {
+                self.toast_flow_run_end(&ended.end, cx);
+            }
+            None if lead => self.toast_flow_run_end(&ended.end, cx),
+            Some(_) | None => {}
         }
     }
 
@@ -238,17 +246,18 @@ impl Workspace {
         );
     }
 
-    /// Say a run in the worktree on screen ended, unless the Flows page is
-    /// already showing that worktree — its list or graph shows it there.
-    fn toast_flow_run_end(&mut self, lane: LaneRef, end: &RunEnd, cx: &mut Context<Self>) {
-        let on_page = self.active_page() == Some(super::pages::Page::Flows)
+    /// Whether the Flows page is showing `lane`'s runs — its list or graph
+    /// already says how a run there ended.
+    fn shows_flows_of(&self, lane: LaneRef) -> bool {
+        self.active_page() == Some(super::pages::Page::Flows)
             && match &self.pages.flows.detail {
                 Some(detail) => detail.lane == lane,
                 None => self.flow_browser_lane() == lane,
-            };
-        if on_page {
-            return;
-        }
+            }
+    }
+
+    /// Say a run ended, when it finished or failed on its own.
+    fn toast_flow_run_end(&mut self, end: &RunEnd, cx: &mut Context<Self>) {
         let (message, severity) = match end {
             RunEnd::Done => (s::flow::run_finished_toast(), ErrorSeverity::Info),
             RunEnd::Failed { .. } => (s::flow::run_failed_toast(), ErrorSeverity::Warning),
