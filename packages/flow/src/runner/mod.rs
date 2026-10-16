@@ -602,6 +602,17 @@ pub struct RunContext<'a> {
     /// code. An additional turn has to use this door while the session is
     /// still open so the same ceiling covers both.
     pub reserve_extra_turn: &'a dyn Fn() -> bool,
+    /// Told the process group a command started, so a resume after this
+    /// process dies can end what it left running. Agent sessions never call it.
+    pub spawned: &'a dyn Fn(SpawnedGroup),
+}
+
+/// A command's process group, named so that a later process can tell it
+/// from whatever else comes to hold the pid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpawnedGroup {
+    pub leader: u32,
+    pub identity: daruda_core::process::ProcessIdentity,
 }
 
 /// One tool call a node's turn made, as the protocol reported it.

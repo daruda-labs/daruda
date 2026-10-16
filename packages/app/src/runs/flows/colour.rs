@@ -85,6 +85,8 @@ pub(crate) fn apply_run_event(states: &mut NodeRunStates, event: &FlowEvent) {
                 states.insert(node.clone(), NodeRunState::Pending);
             }
         }
+        // A wait before the first node changes no node.
+        FlowEvent::Settling { .. } => {}
         // Whatever the last word on each node was, it stands.
         FlowEvent::RunEnded { .. } => {}
     }

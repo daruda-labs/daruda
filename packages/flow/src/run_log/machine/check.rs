@@ -40,6 +40,14 @@ pub(super) fn check(state: &FlowRunState, event: &E) -> Result<(), R> {
             idle(node, current)?;
             assigned(*attempt, current.attempts + 1)
         }
+        E::ProcessSpawned { node, evidence, .. } => match running_node(state, node)?.last {
+            AttemptState::Started {
+                evidence: started,
+                process: None,
+                ..
+            } if started == *evidence => Ok(()),
+            _ => Err(R::NotInFlight(node.clone())),
+        },
         E::AttemptPassed { node, record }
         | E::AttemptFailed { node, record, .. }
         | E::AttemptCanceled { node, record } => in_flight(state, node, record),
@@ -152,11 +160,9 @@ fn idle(node: &NodeId, current: &NodeState) -> Result<(), R> {
 
 fn in_flight(state: &FlowRunState, node: &NodeId, record: &AttemptLine) -> Result<(), R> {
     match running_node(state, node)?.last {
-        AttemptState::Started { attempt, evidence }
-            if attempt == record.attempt && evidence == record.evidence =>
-        {
-            Ok(())
-        }
+        AttemptState::Started {
+            attempt, evidence, ..
+        } if attempt == record.attempt && evidence == record.evidence => Ok(()),
         _ => Err(R::NotInFlight(node.clone())),
     }
 }

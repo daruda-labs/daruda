@@ -11,7 +11,9 @@ pub use event::{
     AbandonReason, FixOutcome, FlowRunEvent, Imported, ImportedAttempt, ImportedOutcome, NodeStart,
 };
 pub use rejected::FlowRunRejected;
-pub use state::{AttemptState, EndKind, FlowRunState, NodeState, Produces, RunPhase};
+pub use state::{
+    AttemptState, EndKind, FlowRunState, NodeState, Produces, RunPhase, SpawnedProcess,
+};
 
 /// The flow run [`daruda_runlog::Machine`]. It owns the attempt, evidence and
 /// question numbers, so concurrent proposers never pick the same one.

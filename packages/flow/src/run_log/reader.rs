@@ -197,6 +197,7 @@ pub(crate) fn replay_events<'e>(events: impl IntoIterator<Item = &'e E>) -> Repl
             E::OutputLost { node } => replay.passed.retain(|passed| passed != node),
             E::Resumed { .. }
             | E::NodeRefused { .. }
+            | E::ProcessSpawned { .. }
             | E::RerunScheduled { .. }
             | E::AskRaised { .. }
             | E::AskAnswered { .. }

@@ -43,6 +43,15 @@ nodes:
     prompt: write
 ";
 
+/// A continuation that does not wait out the settle window: a test's
+/// "dead" run left no process to wait for.
+pub(super) fn at_once(resumed: &crate::resume::Resumed) -> crate::resume::Continuation {
+    crate::resume::Continuation {
+        settle: Duration::ZERO,
+        ..resumed.continuation()
+    }
+}
+
 fn run(text: &str, runner: &FakeRunner) -> (RunReport, tempfile::TempDir) {
     run_with(text, runner, &CancelToken::default(), Budget::unlimited())
 }

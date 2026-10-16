@@ -269,6 +269,7 @@ impl Fixture {
             },
             cancel: &self.cancel,
             reserve_extra_turn: self.reserve.as_ref(),
+            spawned: &|_| {},
         }
     }
 

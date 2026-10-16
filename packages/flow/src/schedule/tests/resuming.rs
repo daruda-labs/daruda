@@ -101,7 +101,7 @@ fn resume_run(run_dir: &std::path::Path, flow: &str, runner: &FakeRunner) -> Run
     let lock_dir = super::lock_dir_of(&request);
     let resumed =
         crate::resume::prepare(run_dir, Some(&lock_dir), &dead).expect("a killed run is resumable");
-    request.resume = Some(resumed.continuation());
+    request.resume = Some(at_once(&resumed));
     request.loaded = resumed.loaded;
     request.run_dir = run_dir.to_path_buf();
     request.is_alive = Box::new(dead);
@@ -238,7 +238,7 @@ fn a_resume_carries_the_spend_and_not_the_waiting() {
         .expect("resumable");
     let spent_before = resumed.replay.spent.node_runs;
     assert!(spent_before > 0, "the first half ran nothing");
-    request.resume = Some(resumed.continuation());
+    request.resume = Some(at_once(&resumed));
     request.loaded = resumed.loaded;
     request.run_dir = run_dir.clone();
     request.is_alive = Box::new(dead);
@@ -288,7 +288,7 @@ fn waiting_done_before_the_crash_does_not_extend_the_new_clock() {
         "the first half's waiting did not read back: {:?}",
         resumed.replay.spent.parked
     );
-    request.resume = Some(resumed.continuation());
+    request.resume = Some(at_once(&resumed));
     request.loaded = resumed.loaded;
     request.run_dir = run_dir.clone();
     request.is_alive = Box::new(dead);

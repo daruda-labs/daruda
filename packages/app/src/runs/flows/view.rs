@@ -41,10 +41,19 @@ pub(crate) enum FlowSource {
 pub(crate) enum Lull {
     /// Submitted; the engine has not started a node yet.
     Starting,
+    /// A resume waiting for what the dead run left to exit.
+    Settling,
     /// The last node that started, and its try.
     After { node: NodeId, attempt: u32 },
     /// A fix is done and its gate is about to be re-derived.
     Rederiving { gate: NodeId },
+}
+
+impl Lull {
+    /// Still before the first node.
+    fn is_setup(&self) -> bool {
+        matches!(self, Lull::Starting | Lull::Settling)
+    }
 }
 
 /// A question waiting for a person, and the way to answer it.
@@ -192,6 +201,7 @@ impl RunView {
         let before = self.nodes.clone();
         apply_run_event(&mut self.nodes, event);
         let lull = match event {
+            FlowEvent::Settling { .. } => Some(Lull::Settling),
             FlowEvent::NodeStarted { node, attempt } => Some(Lull::After {
                 node: node.clone(),
                 attempt: *attempt,
@@ -201,7 +211,7 @@ impl RunView {
             }
             _ => None,
         };
-        let left_setup = lull.is_some() && self.lull == Lull::Starting;
+        let left_setup = lull.as_ref().is_some_and(|lull| !lull.is_setup()) && self.lull.is_setup();
         let lull_moved = lull.as_ref().is_some_and(|lull| *lull != self.lull);
         if let Some(lull) = lull {
             self.lull = lull;

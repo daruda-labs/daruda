@@ -1322,6 +1322,7 @@ flow:
   chip_many: "플로우: %{n}개"
   chip_summary: "이 창에서 %{n}개가 실행 중입니다"
   stage_starting: "시작 중"
+  stage_settling: "중단된 실행이 정리되기를 기다리는 중"
   stage_node: "%{node}"
   stage_node_retry: "%{node} · %{attempt}회차"
   stage_rederiving: "%{gate} 재유도 중"

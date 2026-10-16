@@ -51,6 +51,11 @@ pub enum FlowEvent {
         gate: NodeId,
         members: Vec<NodeId>,
     },
+    /// A resume waits this long before its first node, so the processes a
+    /// dead run left can exit first.
+    Settling {
+        wait: std::time::Duration,
+    },
     RunEnded {
         end: RunEnd,
     },
@@ -119,6 +124,9 @@ pub struct Sequenced<T> {
 pub enum RunNotice {
     /// The narration of a durable record, sent only once it is on disk.
     Recorded(Sequenced<FlowEvent>),
+    /// A resume is waiting for what a dead run left to exit; nothing is
+    /// recorded for it.
+    Settling { wait: std::time::Duration },
     /// An end no record carries: a run whose log failed before it could
     /// record its end, or a host's last word for a run its thread returned
     /// without starting or lost to a panic.
@@ -131,6 +139,7 @@ impl RunNotice {
         match self {
             RunNotice::Recorded(sequenced) => sequenced.event,
             RunNotice::Unrecorded(end) => FlowEvent::RunEnded { end },
+            RunNotice::Settling { wait } => FlowEvent::Settling { wait },
         }
     }
 }

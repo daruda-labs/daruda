@@ -10,6 +10,12 @@ pub(super) fn lead_own_group(_command: &mut Command) {}
 pub(super) fn is_alive(_pid: u32) -> bool {
     false
 }
+pub(super) fn start_time(_pid: u32) -> Option<u64> {
+    None
+}
+pub(super) fn kill_group(_leader: u32) -> io::Result<()> {
+    Err(unavailable())
+}
 pub(super) fn has_descendants(_pid: u32) -> io::Result<bool> {
     Err(unavailable())
 }

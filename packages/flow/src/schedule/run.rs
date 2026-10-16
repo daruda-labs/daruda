@@ -116,7 +116,7 @@ fn execute_with(
     // run had finished here, never before the lock (F14).
     let begun = match &request.resume {
         None => begin(request, &mut setup_warnings),
-        Some(_) => continue_run(request, &mut setup_warnings),
+        Some(_) => continue_run(request, cancel, &mut setup_warnings),
     };
     let Begun {
         store,
@@ -259,8 +259,18 @@ fn begin(request: &RunRequest, warnings: &mut Vec<String>) -> Result<Begun, RunO
 }
 
 /// A continuation: the log replayed and tidied under the lock (§5.5).
-fn continue_run(request: &RunRequest, warnings: &mut Vec<String>) -> Result<Begun, RunOutcome> {
+fn continue_run(
+    request: &RunRequest,
+    cancel: &CancelToken,
+    warnings: &mut Vec<String>,
+) -> Result<Begun, RunOutcome> {
     let log = crate::resume::open_under_lock(&request.run_dir, &request.loaded)?;
+    let settle = request
+        .resume
+        .as_ref()
+        .map(|c| c.settle)
+        .unwrap_or_default();
+    crate::resume::settle_after_crash(&log, settle, request.events.as_ref(), cancel);
     let (store, replay) = crate::resume::pick_up(
         log,
         &request.loaded,

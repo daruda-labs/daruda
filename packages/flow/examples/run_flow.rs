@@ -165,6 +165,9 @@ fn describe(event: &FlowEvent) -> String {
         FlowEvent::Rerunning { gate, members } => {
             format!("  {gate} re-derives: {}", members.join(", "))
         }
+        FlowEvent::Settling { wait } => {
+            format!("waiting {wait:?} for the earlier run's processes to exit")
+        }
         FlowEvent::RunEnded { end } => format!("run ended: {end:?}"),
     }
 }

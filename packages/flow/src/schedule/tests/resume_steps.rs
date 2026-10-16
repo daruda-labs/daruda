@@ -36,7 +36,7 @@ fn resume_request(
     let mut request = request_for(text, cwd);
     let dead = |_: u32| false;
     let resumed = crate::resume::prepare(run_dir, Some(&super::lock_dir_of(&request)), &dead)?;
-    request.resume = Some(resumed.continuation());
+    request.resume = Some(at_once(&resumed));
     request.loaded = resumed.loaded;
     request.run_dir = run_dir.to_path_buf();
     request.is_alive = Box::new(dead);
@@ -345,4 +345,162 @@ fn as_if_killed_without_log(request: &crate::request::RunRequest, run_dir: &Path
         ),
     )
     .expect("lock");
+}
+
+/// A resume right after the crash says it is waiting, then waits out the
+/// rest of the window before its first node: an agent the dead run started
+/// can outlive it by seconds.
+#[test]
+fn a_resume_right_after_a_crash_waits_for_what_it_left() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let request = request_for(CHAIN, dir.path());
+    let first = execute(
+        &request,
+        &FakeRunner::new().cancel_at("test", 1),
+        &CancelToken::default(),
+    );
+    as_if_killed(&request, &first.run_dir);
+    let mut resumed =
+        resume_request(CHAIN, dir.path(), &first.run_dir).expect("a killed run is resumable");
+    let settle = Duration::from_secs(2);
+    resumed.resume.as_mut().expect("a continuation").settle = settle;
+    let (events, notices) = smol::channel::unbounded();
+    resumed.events = Some(events);
+
+    let began = std::time::Instant::now();
+    let report = execute(&resumed, &FakeRunner::new(), &CancelToken::default());
+    let took = began.elapsed();
+
+    assert!(
+        matches!(report.outcome, RunOutcome::Done),
+        "{:?}",
+        report.outcome
+    );
+    let first_notice = notices.try_recv().expect("a notice").into_event();
+    let FlowEvent::Settling { wait } = first_notice else {
+        panic!("the resume did not say it was waiting: {first_notice:?}");
+    };
+    assert!(!wait.is_zero() && wait <= settle, "{wait:?}");
+    assert!(took >= wait, "it said {wait:?} and took {took:?}");
+}
+
+/// **F7, S10.** A command's process group outlives a host killed while it
+/// ran. A resume ends it before the node runs again, and only when the
+/// recorded identity says the pid is still that command.
+#[cfg(unix)]
+mod orphans {
+    use super::*;
+
+    const ONE_COMMAND: &str = "\
+version: 1
+nodes:
+  - id: build
+    kind: command
+    run: \"true\"
+";
+
+    /// A `sleep` standing in for the command the dead run left, ended on
+    /// drop whatever the test found.
+    struct Orphan(std::process::Child);
+
+    impl Orphan {
+        fn spawn() -> Self {
+            let mut command = daruda_core::process::command("sleep");
+            command.arg("600");
+            daruda_core::process::lead_own_group(&mut command);
+            Self(command.spawn().expect("spawn sleep"))
+        }
+
+        fn identity(&self) -> u64 {
+            daruda_core::process::identity(self.0.id())
+                .expect("a live child has an identity")
+                .to_raw()
+        }
+
+        /// Whether it ended within a few seconds.
+        fn ended(&mut self) -> bool {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while std::time::Instant::now() < deadline {
+                if self.0.try_wait().expect("try_wait").is_some() {
+                    return true;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            false
+        }
+    }
+
+    impl Drop for Orphan {
+        fn drop(&mut self) {
+            // SILENT-OK: it may already be gone, which is what most tests want.
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    /// The log a host killed mid-`build` leaves: the attempt started and its
+    /// group recorded, nothing settled.
+    fn killed_mid_command(dir: &Path, leader: u32, identity: u64) -> crate::load::LoadedFlow {
+        let loaded = load(ONE_COMMAND, None).expect("valid flow");
+        let log_dir = crate::run_log::log_dir(&dir.join("run"));
+        std::fs::create_dir_all(&log_dir).expect("mkdir");
+        let backend = daruda_runlog::FileBackend::new(log_dir.clone());
+        let Ok(mut log) = crate::run_log::store::open_log(backend, &log_dir) else {
+            panic!("the log did not open");
+        };
+        for event in [
+            FlowRunEvent::RunStarted {
+                nodes: crate::run_log::node_starts(&loaded),
+                until: None,
+                pinned: Vec::new(),
+                profile: None,
+            },
+            FlowRunEvent::attempt_started("build".into(), 0),
+            FlowRunEvent::ProcessSpawned {
+                node: "build".into(),
+                evidence: 1,
+                leader,
+                identity,
+            },
+        ] {
+            log.commit(event).expect("commit");
+        }
+        loaded
+    }
+
+    fn resume(dir: &Path, loaded: &crate::load::LoadedFlow) {
+        let log_dir = crate::run_log::log_dir(&dir.join("run"));
+        let backend = daruda_runlog::FileBackend::new(log_dir);
+        let Process::Drove(_) = process(backend, loaded, dir, &FakeRunner::new()) else {
+            panic!("the run could not be picked up");
+        };
+    }
+
+    #[test]
+    fn a_resume_ends_the_group_its_crashed_run_left() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut orphan = Orphan::spawn();
+        let loaded = killed_mid_command(dir.path(), orphan.0.id(), orphan.identity());
+
+        resume(dir.path(), &loaded);
+
+        assert!(orphan.ended(), "the crashed run's command is still running");
+    }
+
+    /// The pid is someone else's now: the identity recorded with it differs
+    /// from what runs under it, so it is left alone.
+    #[test]
+    fn a_reused_pid_is_never_killed() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut bystander = Orphan::spawn();
+        let other = bystander.identity() + 1;
+        let loaded = killed_mid_command(dir.path(), bystander.0.id(), other);
+
+        resume(dir.path(), &loaded);
+
+        assert!(
+            bystander.0.try_wait().expect("try_wait").is_none(),
+            "a process that only shares the pid was signalled"
+        );
+    }
 }

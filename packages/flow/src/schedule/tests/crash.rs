@@ -614,6 +614,7 @@ fn the_stream_is_the_log_replayed() {
         .map(|notice| match notice {
             crate::event::RunNotice::Recorded(said) => format!("{} {:?}", said.seq, said.event),
             crate::event::RunNotice::Unrecorded(end) => panic!("an unrecorded end: {end:?}"),
+            crate::event::RunNotice::Settling { wait } => panic!("a fresh run waited {wait:?}"),
         })
         .collect();
     let replayed: Vec<String> = crate::run_log::reader::narration(&report.run_dir)

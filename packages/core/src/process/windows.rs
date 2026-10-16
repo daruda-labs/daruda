@@ -33,6 +33,22 @@ pub(super) fn is_alive(pid: u32) -> bool {
     }
 }
 
+/// None: the identity exists to find a crashed host's orphans, and a tree
+/// here is held by the kill-on-close job from the Windows port's Job Object
+/// work (`windows/job.rs`), which ends with its host.
+pub(super) fn start_time(_pid: u32) -> Option<u64> {
+    None
+}
+
+/// Unreachable while [`start_time`] knows no process; refused rather than
+/// guessed at should that change.
+pub(super) fn kill_group(_leader: u32) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "A recorded group has no job handle to end it by",
+    ))
+}
+
 pub(super) fn has_descendants(pid: u32) -> std::io::Result<bool> {
     use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{

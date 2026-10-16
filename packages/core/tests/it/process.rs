@@ -191,3 +191,52 @@ fn a_tree_whose_leader_already_exited_is_already_stopped() {
         .expect("an exited tree counts as stopped");
     assert!(child.wait().expect("wait").success());
 }
+
+/// The identity is what tells a recorded pid's process from a later one
+/// given the same number, so it has to stay put for one process.
+#[cfg(unix)]
+#[test]
+fn a_running_process_keeps_one_identity() {
+    let me = identity(std::process::id()).expect("this process has an identity");
+    assert_eq!(identity(std::process::id()), Some(me));
+    assert_eq!(identity(0), None);
+}
+
+/// A recorded leader that still runs as the recorded process has its whole
+/// group ended; one whose identity differs is someone else and is spared.
+#[cfg(unix)]
+#[test]
+fn only_the_recorded_process_has_its_group_ended() {
+    let mut cmd = command("sh");
+    cmd.arg("-c").arg("sleep 30");
+    lead_own_group(&mut cmd);
+    let mut child = cmd.spawn().expect("spawn");
+    let pid = child.id();
+    let recorded = identity(pid).expect("a live child has an identity");
+
+    let other = ProcessIdentity::from_raw(recorded.to_raw() + 1);
+    let spared = end_recorded_group(pid, other);
+    let still_running = child.try_wait().expect("try_wait").is_none();
+    let ended = end_recorded_group(pid, recorded);
+    // Whatever was asserted, the child does not outlive the test.
+    let _ = child.kill();
+    let status = child.wait().expect("wait");
+
+    assert_eq!(
+        spared.expect("a reused pid is no error"),
+        RecordedGroup::Reused
+    );
+    assert!(
+        still_running,
+        "a process with another identity was signalled"
+    );
+    assert_eq!(
+        ended.expect("the recorded group ends"),
+        RecordedGroup::Ended
+    );
+    assert!(!status.success(), "the recorded leader was not signalled");
+    assert_eq!(
+        end_recorded_group(pid, recorded).expect("gone"),
+        RecordedGroup::Gone
+    );
+}

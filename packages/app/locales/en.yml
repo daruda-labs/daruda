@@ -1933,6 +1933,8 @@ flow:
   chip_summary: "%{n} flow(s) running in this window"
   # What a run is doing, in the terms `RunStage` keeps.
   stage_starting: "starting"
+  # A resume waiting a few seconds for the crashed run's processes to exit.
+  stage_settling: "waiting for the crashed run to wind down"
   stage_node: "%{node}"
   stage_node_retry: "%{node} · try %{attempt}"
   stage_rederiving: "re-deriving for %{gate}"

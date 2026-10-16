@@ -185,6 +185,62 @@ pub fn is_alive(pid: u32) -> bool {
     pid != 0 && backend::is_alive(pid)
 }
 
+/// Which process a pid named when it was read: its start time, in a unit
+/// only this host's [`identity`] produces. A reaped pid may be handed to an
+/// unrelated process, so a pid kept by a process that has since died is
+/// trusted only while its identity still matches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProcessIdentity(u64);
+
+impl ProcessIdentity {
+    /// For storing beside the pid; compare only with [`Self::from_raw`].
+    pub fn to_raw(self) -> u64 {
+        self.0
+    }
+
+    pub fn from_raw(raw: u64) -> Self {
+        Self(raw)
+    }
+}
+
+/// `pid`'s identity, or `None` when nothing runs under it or the platform
+/// keeps none. Windows answers `None`: a tree there is held by a
+/// kill-on-close job ([`Group`]), so it dies with its host and leaves no
+/// orphan to recognise later.
+pub fn identity(pid: u32) -> Option<ProcessIdentity> {
+    if pid == 0 {
+        return None;
+    }
+    backend::start_time(pid).map(ProcessIdentity)
+}
+
+/// What [`end_recorded_group`] found at a recorded group leader's pid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordedGroup {
+    /// The recorded leader was still running; its group was ended.
+    Ended,
+    /// Nothing runs under the pid any more.
+    Gone,
+    /// Another process has the pid now, and was left alone.
+    Reused,
+}
+
+/// End the group a process that has since died left behind, if its leader
+/// is still the process recorded as `recorded`.
+///
+/// A group whose leader exited while members live on is reported `Gone`
+/// and left: without the leader there is nothing to check the pid against.
+pub fn end_recorded_group(
+    leader: u32,
+    recorded: ProcessIdentity,
+) -> std::io::Result<RecordedGroup> {
+    match identity(leader) {
+        None => Ok(RecordedGroup::Gone),
+        Some(found) if found != recorded => Ok(RecordedGroup::Reused),
+        Some(_) => backend::kill_group(leader).map(|()| RecordedGroup::Ended),
+    }
+}
+
 /// Whether a live child belongs to this shell. Windows has no foreground groups;
 /// callers use this conservative check only when shell integration has no marker.
 pub fn has_descendants(pid: u32) -> std::io::Result<bool> {

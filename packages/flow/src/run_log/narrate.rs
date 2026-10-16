@@ -64,6 +64,7 @@ pub(crate) fn narrate(run_dir: &Path, event: &E, after: &FlowRunState) -> Option
             end: end.to_run_end(),
         },
         E::Imported(_)
+        | E::ProcessSpawned { .. }
         | E::AttemptCanceled { .. }
         | E::OutputLost { .. }
         | E::Invalidated { .. }

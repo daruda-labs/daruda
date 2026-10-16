@@ -45,6 +45,7 @@ pub(in crate::workspace) fn describe(view: &RunView) -> String {
     if running.is_empty() {
         return match view.lull() {
             Lull::Starting => s::flow::stage_starting(),
+            Lull::Settling => s::flow::stage_settling(),
             Lull::After { node, attempt } => {
                 describe_node(node, NodeRunState::Running { attempt: *attempt })
             }

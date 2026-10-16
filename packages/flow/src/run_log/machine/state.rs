@@ -83,6 +83,9 @@ pub enum AttemptState {
     Started {
         attempt: u32,
         evidence: u32,
+        /// The process group a command attempt started, once recorded.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        process: Option<SpawnedProcess>,
     },
     Passed {
         attempt: u32,
@@ -98,6 +101,13 @@ pub enum AttemptState {
     Interrupted {
         attempt: u32,
     },
+}
+
+/// A command attempt's process group as the log keeps it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpawnedProcess {
+    pub(crate) leader: u32,
+    pub(crate) identity: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -144,6 +154,20 @@ impl FlowRunState {
 
     pub(crate) fn has_open_asks(&self) -> bool {
         !self.open_asks.is_empty()
+    }
+
+    /// Process groups of attempts that started and never settled.
+    pub(crate) fn unsettled_processes(&self) -> Vec<(NodeId, SpawnedProcess)> {
+        self.nodes
+            .iter()
+            .filter_map(|(id, node)| match node.last {
+                AttemptState::Started {
+                    process: Some(process),
+                    ..
+                } => Some((id.clone(), process)),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Whether `resume` may pick this run up: it stopped without saying it

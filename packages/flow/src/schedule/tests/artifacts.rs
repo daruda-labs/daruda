@@ -213,6 +213,7 @@ fn name_of(event: &FlowEvent) -> &'static str {
         FlowEvent::FixStarted { .. } => "FixStarted",
         FlowEvent::FixEnded { .. } => "FixEnded",
         FlowEvent::Rerunning { .. } => "Rerunning",
+        FlowEvent::Settling { .. } => "Settling",
         FlowEvent::RunEnded { .. } => "RunEnded",
     }
 }

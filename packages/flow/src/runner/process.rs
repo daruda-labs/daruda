@@ -64,6 +64,14 @@ impl ProcessRunner {
                 return failed(artifacts, format!("could not own process tree: {error}"));
             }
         };
+        // Where the platform keeps no identity there is nothing a later
+        // process could check the pid against, so nothing is recorded.
+        if let Some(identity) = daruda_core::process::identity(child.id()) {
+            (ctx.spawned)(crate::runner::SpawnedGroup {
+                leader: child.id(),
+                identity,
+            });
+        }
         let started = std::time::Instant::now();
 
         // Scoped so the racing futures are dropped before `child` is used
@@ -286,6 +294,7 @@ mod tests {
                 // A command node owes no file, so nothing here can ask for
                 // another turn.
                 reserve_extra_turn: &|| false,
+                spawned: &|_| {},
             }
         }
 
@@ -470,6 +479,32 @@ mod tests {
 
         let pid = grandchild_pid(&pid_file);
         assert!(wait_until_gone(pid), "the grandchild outlived the cancel");
+    }
+
+    /// The group is reported while it runs, led by the shell itself, so a
+    /// resume after a crash knows which group to end.
+    #[cfg(unix)]
+    #[test]
+    fn a_command_reports_the_group_it_started() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pid_file = dir.path().join("leader.pid");
+        let fixture = Fixture::new(dir.path());
+
+        let line = format!("echo $$ > {}", pid_file.display());
+        let reported = std::cell::Cell::new(None);
+        let ctx = RunContext {
+            spawned: &|group| reported.set(Some(group)),
+            ..fixture.context()
+        };
+        let result = smol::block_on(ProcessRunner::new(Vec::new()).run_command(&ctx, &line));
+
+        assert_eq!(result.outcome, Ok(()));
+        let group = reported.get().expect("the group was reported");
+        assert_eq!(
+            group.leader,
+            grandchild_pid(&pid_file),
+            "not the shell's group"
+        );
     }
 
     /// A node's script gets three variables to orient itself by. Without

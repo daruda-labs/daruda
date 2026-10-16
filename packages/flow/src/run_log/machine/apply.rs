@@ -2,7 +2,9 @@
 //! accepted and `assign` numbered, and again on replay.
 
 use super::event::{FlowRunEvent as E, Imported, NodeStart};
-use super::state::{AttemptState, EndKind, FlowRunState, NodeState, OpenAsk, RunPhase, StartFacts};
+use super::state::{
+    AttemptState, EndKind, FlowRunState, NodeState, OpenAsk, RunPhase, SpawnedProcess, StartFacts,
+};
 use crate::NodeId;
 use crate::run_log::line::EndLine;
 
@@ -37,11 +39,29 @@ pub(super) fn apply(state: &mut FlowRunState, event: &E) {
                 current.last = AttemptState::Started {
                     attempt: *attempt,
                     evidence: *evidence,
+                    process: None,
                 };
             }
             state.next_evidence = evidence + 1;
         }
         E::NodeRefused { .. } => {}
+        E::ProcessSpawned {
+            node,
+            leader,
+            identity,
+            ..
+        } => {
+            if let Some(NodeState {
+                last: AttemptState::Started { process, .. },
+                ..
+            }) = state.nodes.get_mut(node)
+            {
+                *process = Some(SpawnedProcess {
+                    leader: *leader,
+                    identity: *identity,
+                });
+            }
+        }
         E::AttemptPassed { node, record } => {
             settle(
                 state,

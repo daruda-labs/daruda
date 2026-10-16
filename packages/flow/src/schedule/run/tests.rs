@@ -269,6 +269,7 @@ fn a_resumed_selection_narrows_the_same_way_a_fresh_one_does() {
     ));
     request.resume = Some(crate::resume::Continuation {
         until: Some(crate::NodeId::from("design")),
+        ..Default::default()
     });
 
     let report = execute_with(

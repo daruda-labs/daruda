@@ -403,6 +403,16 @@ impl<'a> Run<'a> {
                 let started = self.start_attempt(id, next).await?;
                 // A local because `ctx` borrows it, like `contract` above.
                 let reserve = || self.reserve_extra_turn();
+                // Queued, not awaited: the runner reports from inside its
+                // spawn, and the committer keeps this ahead of the settle.
+                let spawned = |group: crate::runner::SpawnedGroup| {
+                    self.log.commit_detached(FlowRunEvent::ProcessSpawned {
+                        node: id.clone(),
+                        evidence: started.evidence,
+                        leader: group.leader,
+                        identity: group.identity.to_raw(),
+                    });
+                };
                 let owner = AskOwner::Node {
                     node: id.clone(),
                     generation: started.generation,
@@ -427,6 +437,7 @@ impl<'a> Run<'a> {
                     permission: self.permission_for(node, owner),
                     cancel: self.cancel,
                     reserve_extra_turn: &reserve,
+                    spawned: &spawned,
                 };
                 let attempt = ctx.attempt;
                 let result = self.call(node, &ctx, &prompt).await;

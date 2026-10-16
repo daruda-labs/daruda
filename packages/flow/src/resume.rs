@@ -15,6 +15,7 @@
 //! happen again. That is the honest bound on this feature.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use daruda_runlog::{LogBackend, RunLog};
 
@@ -24,8 +25,8 @@ use crate::load::LoadedFlow;
 use crate::marker::RunStatus;
 use crate::run_log::line::AttemptLine;
 use crate::run_log::machine::{
-    AbandonReason, AttemptState, FlowRunEvent, FlowRunMachine, Imported, ImportedAttempt,
-    ImportedOutcome, Produces,
+    AbandonReason, AttemptState, FlowRunEvent, FlowRunMachine, FlowRunState, Imported,
+    ImportedAttempt, ImportedOutcome, Produces,
 };
 use crate::run_log::reader::{self, Replay};
 use crate::run_log::store::FlowRunStore;
@@ -69,15 +70,44 @@ impl Resumed {
     pub fn continuation(&self) -> Continuation {
         Continuation {
             until: self.replay.until.clone(),
+            settle: SETTLE_AFTER_CRASH,
         }
     }
 }
+
+/// How long after a dead run's last record a resume waits before it starts.
+/// Measured: after the host is killed, an agent's CLI lingers as an orphan
+/// for 3–10 s before it exits, and a resume should not start beside it.
+pub(crate) const SETTLE_AFTER_CRASH: Duration = Duration::from_secs(10);
 
 /// The part of a run fixed when it started, which a request to continue it
 /// needs before its lock: which nodes it reaches.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Continuation {
     pub until: Option<NodeId>,
+    /// [`SETTLE_AFTER_CRASH`] outside the tests, which resume at once.
+    pub(crate) settle: Duration,
+}
+
+/// What is left of `settle` after a record written at `last_ms`, at `now_ms`.
+/// A record dated after now (a clock set back) waits the whole window, never
+/// longer.
+pub(crate) fn settle_wait(last_ms: u64, now_ms: u64, settle: Duration) -> Duration {
+    let since = Duration::from_millis(now_ms.saturating_sub(last_ms));
+    settle.saturating_sub(since)
+}
+
+/// When the process before this one last wrote the log: the newest record
+/// ahead of this process's `opened`. `None` when that cannot be read, which
+/// only costs the wait.
+pub(crate) fn last_written_ms<B: LogBackend>(log: &RunLog<FlowRunMachine, B>) -> Option<u64> {
+    let Ok(daruda_runlog::CatchUp::Records(records)) = log.since(0) else {
+        return None;
+    };
+    let opened = records
+        .iter()
+        .rposition(|record| matches!(record.body, daruda_runlog::Body::Opened { .. }))?;
+    records[..opened].last().map(|record| record.at_ms)
 }
 
 /// Why a run directory cannot be picked up.
@@ -149,6 +179,41 @@ pub fn prepare(
         loaded,
         replay: reader::read(run_dir),
     })
+}
+
+/// Wait out what is left of the settle window after a dead run's last
+/// record, so its agent processes exit before the run starts beside them.
+/// Only for a run that stopped without ending; a stop cuts the wait short.
+pub(crate) fn settle_after_crash<B: LogBackend>(
+    log: &RunLog<FlowRunMachine, B>,
+    settle: Duration,
+    events: Option<&smol::channel::Sender<crate::event::RunNotice>>,
+    cancel: &crate::runner::CancelToken,
+) {
+    if log.state().phase() != crate::run_log::machine::RunPhase::Running {
+        return;
+    }
+    let Some(last_ms) = last_written_ms(log) else {
+        return;
+    };
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| {
+            u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
+        });
+    let wait = settle_wait(last_ms, now_ms, settle);
+    if wait.is_zero() {
+        return;
+    }
+    crate::event::emit(events, crate::event::RunNotice::Settling { wait });
+    let until = std::time::Instant::now() + wait;
+    while !cancel.is_canceled() {
+        let left = until.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            break;
+        }
+        std::thread::sleep(left.min(Duration::from_millis(100)));
+    }
 }
 
 /// A refusal found once the lock is held: nothing was recorded, so the run
@@ -226,8 +291,7 @@ fn import_journal(run_dir: &Path, loaded: &LoadedFlow) -> FlowRunEvent {
     }))
 }
 
-/// The rest of §5.5 once the log is open: steps 3 and 5–7. Step 4, ending
-/// processes a dead run left behind, is not done here. Returns the store and
+/// The rest of §5.5 once the log is open: steps 3–7. Returns the store and
 /// what the scheduler starts from (step 8).
 pub(crate) fn pick_up<B: LogBackend + Send + 'static>(
     log: RunLog<FlowRunMachine, B>,
@@ -248,6 +312,9 @@ pub(crate) fn pick_up<B: LogBackend + Send + 'static>(
     if let Err(e) = crate::marker::clear_markers(run_dir) {
         warnings.push(e.to_string());
     }
+    // Step 4. Before `Resumed` turns these attempts into interrupted ones
+    // and forgets their groups.
+    warnings.extend(end_orphaned_commands(log.state()));
     let store = FlowRunStore::spawn(log, run_dir, events)?;
     smol::block_on(resume_steps(&store, loaded, run_dir, warnings))?;
     let history = store.events().map_err(|e| store.failure(IoSite::Run, e))?;
@@ -302,6 +369,27 @@ async fn resume_steps(
         &log_dir, &outputs, &passed, resumes,
     ));
     Ok(())
+}
+
+/// End the command groups a dead process left running (F7). A command
+/// survives its host in a group of its own, and the retry would otherwise
+/// run beside it. A pid whose identity no longer matches is someone else's.
+fn end_orphaned_commands(state: &FlowRunState) -> Vec<String> {
+    state
+        .unsettled_processes()
+        .into_iter()
+        .filter_map(|(node, process)| {
+            let identity = daruda_core::process::ProcessIdentity::from_raw(process.identity);
+            daruda_core::process::end_recorded_group(process.leader, identity)
+                .err()
+                .map(|e| {
+                    format!(
+                        "`{node}`'s command from before the crash could not be stopped, so it \
+                         may still be running beside its retry: {e}"
+                    )
+                })
+        })
+        .collect()
 }
 
 /// Whether a passed agent node's output no longer meets its contract.
@@ -384,6 +472,18 @@ mod tests {
         ] {
             assert!(!is_resumable(ended), "{ended:?}");
         }
+    }
+
+    /// The wait is what is left of the window after the dead run's last
+    /// record; a clock set back never stretches it past the window.
+    #[test]
+    fn the_settle_wait_is_what_is_left_of_the_window() {
+        let window = Duration::from_secs(10);
+        assert_eq!(settle_wait(1_000, 4_000, window), Duration::from_secs(7));
+        assert_eq!(settle_wait(1_000, 11_000, window), Duration::ZERO);
+        assert_eq!(settle_wait(1_000, 90_000, window), Duration::ZERO);
+        assert_eq!(settle_wait(9_000, 1_000, window), window);
+        assert_eq!(settle_wait(1_000, 4_000, Duration::ZERO), Duration::ZERO);
     }
 
     /// A run directory with a live lock and no journal is not resumable for

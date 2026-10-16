@@ -201,3 +201,22 @@ fn the_log_settles_every_node() {
         "the same word twice changes nothing"
     );
 }
+
+/// A resume's wait for the dead run is still setup: the run says it is
+/// waiting, and leaves setup only when its first node starts.
+#[test]
+fn a_resume_wait_is_still_setup() {
+    let mut view = view();
+    let settling = FlowEvent::Settling {
+        wait: std::time::Duration::from_secs(4),
+    };
+    assert_eq!(
+        view.advance(&settling),
+        Advanced::Moved { left_setup: false }
+    );
+    assert_eq!(view.lull(), &Lull::Settling);
+    assert_eq!(
+        view.advance(&started("design")),
+        Advanced::Moved { left_setup: true }
+    );
+}

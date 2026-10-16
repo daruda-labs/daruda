@@ -14,6 +14,49 @@ pub(super) fn is_alive(pid: u32) -> bool {
     }
 }
 
+/// Microseconds since the epoch at which `pid` started.
+#[cfg(target_vendor = "apple")]
+pub(super) fn start_time(pid: u32) -> Option<u64> {
+    let pid = libc::pid_t::try_from(pid).ok()?;
+    // SAFETY: `proc_bsdinfo` is plain C data, for which all zeroes is valid.
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = libc::c_int::try_from(std::mem::size_of::<libc::proc_bsdinfo>()).ok()?;
+    // SAFETY: the buffer is `info`, owned by this frame, and `size` is its
+    // length; the call writes at most that many bytes.
+    let written =
+        unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size) };
+    (written == size).then(|| {
+        info.pbi_start_tvsec
+            .saturating_mul(1_000_000)
+            .saturating_add(info.pbi_start_tvusec)
+    })
+}
+
+/// Clock ticks after boot at which `pid` started.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub(super) fn start_time(pid: u32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    proc_stat_start_time(&stat)
+}
+
+#[cfg(not(any(target_vendor = "apple", target_os = "linux", target_os = "android")))]
+pub(super) fn start_time(_pid: u32) -> Option<u64> {
+    None
+}
+
+/// Field 22 of `/proc/<pid>/stat`. Counted after the last `)`, because the
+/// command name before it is parenthesised and may hold spaces or `)`.
+#[cfg(any(target_os = "linux", target_os = "android", test))]
+fn proc_stat_start_time(stat: &str) -> Option<u64> {
+    let (_, after_name) = stat.rsplit_once(')')?;
+    // Field 3 (state) is the first after the name, so field 22 is the 20th.
+    after_name.split_whitespace().nth(19)?.parse().ok()
+}
+
+pub(super) fn kill_group(leader: u32) -> std::io::Result<()> {
+    GroupInner::adopt(leader).try_kill_tree()
+}
+
 pub(super) fn has_descendants(_pid: u32) -> std::io::Result<bool> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
@@ -79,6 +122,17 @@ mod tests {
     fn a_vanished_group_is_gone_on_every_unix() {
         assert!(group_is_gone(libc::ESRCH, false));
         assert!(group_is_gone(libc::ESRCH, true));
+    }
+
+    /// A command name may hold spaces and parentheses; only the last `)`
+    /// ends it.
+    #[test]
+    fn the_start_time_is_read_past_a_command_name_with_parentheses() {
+        let stat = "4242 (a) b (c) S 1 4242 4242 0 -1 4194304 90 0 0 0 0 0 0 0 20 0 1 0 \
+                    987654 1000 200";
+        assert_eq!(proc_stat_start_time(stat), Some(987_654));
+        assert_eq!(proc_stat_start_time("4242 (cut) S 1"), None);
+        assert_eq!(proc_stat_start_time("no name at all"), None);
     }
 
     #[test]

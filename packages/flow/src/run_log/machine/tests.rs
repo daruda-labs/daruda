@@ -57,6 +57,15 @@ fn ask(node: &str, generation: u32, attempt: u32) -> FlowRunEvent {
     )
 }
 
+fn spawned(node: &str, evidence: u32) -> FlowRunEvent {
+    FlowRunEvent::ProcessSpawned {
+        node: id(node),
+        evidence,
+        leader: 4242,
+        identity: 7,
+    }
+}
+
 /// Commit `events` in order through `check`, `assign` and `apply`, the way
 /// the log does, and return the state and the events as assigned.
 fn run(events: Vec<FlowRunEvent>) -> (FlowRunState, Vec<FlowRunEvent>) {
@@ -97,6 +106,8 @@ fn samples() -> Vec<FlowRunEvent> {
         FlowRunEvent::attempt_started(id("gate"), 0),
         FlowRunEvent::attempt_started(id("gate"), 7),
         FlowRunEvent::node_refused(id("design"), FailureLine::Refused),
+        spawned("gate", 2),
+        spawned("gate", 9),
         FlowRunEvent::AttemptPassed {
             node: id("gate"),
             record: line(1, 2),
@@ -407,4 +418,32 @@ fn only_a_crashed_or_stalled_run_resumes() {
     ])
     .0;
     assert!(FlowRunMachine::check(&stalled, &FlowRunEvent::Resumed { carried: 0 }).is_ok());
+}
+
+/// **F7.** A command's group is kept with its attempt until it settles, once
+/// per attempt, and only for the attempt that started it.
+#[test]
+fn a_spawned_group_belongs_to_its_attempt_until_it_settles() {
+    let (state, _) = run(vec![
+        started(),
+        FlowRunEvent::attempt_started(id("gate"), 0),
+        spawned("gate", 1),
+    ]);
+    assert_eq!(state.unsettled_processes().len(), 1);
+    for refused in [spawned("gate", 1), spawned("gate", 2), spawned("design", 1)] {
+        assert!(
+            FlowRunMachine::check(&state, &refused).is_err(),
+            "{refused:?} was accepted"
+        );
+    }
+    let (settled, _) = run(vec![
+        started(),
+        FlowRunEvent::attempt_started(id("gate"), 0),
+        spawned("gate", 1),
+        FlowRunEvent::AttemptPassed {
+            node: id("gate"),
+            record: line(1, 1),
+        },
+    ]);
+    assert!(settled.unsettled_processes().is_empty());
 }

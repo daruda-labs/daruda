@@ -124,6 +124,8 @@ impl Run<'_> {
             cancel: self.cancel,
             // The run's real door, though a fix owing no file never asks.
             reserve_extra_turn: &reserve,
+            // A fix is an agent session; it starts no process group.
+            spawned: &|_| {},
         };
         let result = self
             .accounted_call(|| self.runner.run_agent(&fix_ctx, agent, &text))

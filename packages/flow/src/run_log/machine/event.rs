@@ -39,6 +39,14 @@ pub enum FlowRunEvent {
         attempt: u32,
         failure: FailureLine,
     },
+    /// A command attempt's process group, so a resume after a crash can
+    /// end it. `identity` is `daruda_core::process::ProcessIdentity::to_raw`.
+    ProcessSpawned {
+        node: NodeId,
+        evidence: u32,
+        leader: u32,
+        identity: u64,
+    },
     AttemptPassed {
         node: NodeId,
         record: Box<AttemptLine>,
