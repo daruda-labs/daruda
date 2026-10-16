@@ -124,6 +124,20 @@ impl FlowRunState {
             .collect()
     }
 
+    /// Every node the run started with, in the order a host draws them,
+    /// with what the log says of it.
+    pub fn node_states(&self) -> impl Iterator<Item = (&NodeId, &NodeState)> {
+        self.start
+            .order
+            .iter()
+            .filter_map(|id| self.nodes.get_key_value(id))
+    }
+
+    /// Whether `gate`'s repair is running its fix session.
+    pub fn is_fixing(&self, gate: &NodeId) -> bool {
+        self.fixing.contains_key(gate)
+    }
+
     pub fn open_ask_ids(&self) -> Vec<u64> {
         self.open_asks.keys().copied().collect()
     }
@@ -151,6 +165,16 @@ impl NodeState {
             last: AttemptState::NotRun,
             invalidated: false,
         }
+    }
+
+    /// How this node's latest attempt in its generation ended, if it did.
+    pub fn last(&self) -> &AttemptState {
+        &self.last
+    }
+
+    /// A repair took this node's output away and it has not passed since.
+    pub fn is_invalidated(&self) -> bool {
+        self.invalidated
     }
 
     pub(crate) fn counts_as_passed(&self) -> bool {

@@ -158,8 +158,7 @@ pub(super) fn seeded(mut data: StatusBarData, cx: &App) -> StatusBarData {
                     },
                     lane_label: format!("daruda / ui-controls-{i:02}").into(),
                     doing: "Checking shared controls".into(),
-                    asking: None,
-                    also_waiting: 0,
+                    asking: Vec::new(),
                 })
                 .collect();
         }

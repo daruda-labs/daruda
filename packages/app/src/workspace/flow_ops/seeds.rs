@@ -4,24 +4,21 @@
 #[cfg(any(test, feature = "screenshot"))]
 use std::path::PathBuf;
 
+#[cfg(any(test, feature = "screenshot"))]
+use gpui::Context;
 #[cfg(feature = "screenshot")]
-use gpui::{Context, Window};
+use gpui::Window;
 
+#[cfg(any(test, feature = "screenshot"))]
+use crate::runs::{RunView, RunsHost};
 use crate::workspace::Workspace;
 #[cfg(feature = "screenshot")]
 use crate::workspace::command::flow_picker::FlowPurpose;
 #[cfg(feature = "screenshot")]
 use crate::workspace::flow_request::FlowSelection;
-#[cfg(any(test, feature = "screenshot"))]
-use crate::workspace::flow_runs::RunHandle;
 
 #[cfg(feature = "screenshot")]
 use super::flow_profiles;
-
-// Only the seeded runs name a stage outright; a real one gets there through
-// the event pump.
-#[cfg(any(test, feature = "screenshot"))]
-use crate::workspace::flow_runs::RunStage;
 
 impl Workspace {
     /// Show the active lane's Flows page without changing the utility dock.
@@ -85,82 +82,54 @@ impl Workspace {
     pub(in crate::workspace) fn seed_flow_run_for_shot(
         &mut self,
         asking: bool,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use daruda_acp::{PermissionChoice, PermissionKindView};
+        self.ensure_project_for_shot();
         let lane = self.active;
+        let Some(worktree) = self.lane_for(lane).map(|lane| lane.path.clone()) else {
+            return;
+        };
         let run_dir = self.active_lane_root().unwrap_or_default();
-        self.flows.runs.insert(
-            lane,
-            // This capture is of the panel and the chip, which read `doing`;
-            // no graph is open for it to colour.
-            RunHandle::seeded(
-                run_dir.clone(),
-                crate::workspace::flow_request::FlowSource::Resumed {
-                    run_dir: run_dir.clone(),
-                },
-                RunStage::Node {
-                    id: "verdict".into(),
-                    attempt: 2,
-                },
-            ),
+        // This capture is of the panel and the chip, which read what the run
+        // is doing; no graph is open for it to colour.
+        self.seed_flow_run_for_test(lane, run_dir.clone(), cx);
+        RunsHost::apply_flow_event(
+            &worktree,
+            &run_dir,
+            &daruda_flow::event::FlowEvent::NodeStarted {
+                node: "verdict".into(),
+                attempt: 2,
+            },
+            None,
+            cx,
         );
         if asking {
-            // Through the real parking path, not by writing the stage: the
-            // modal is raised there, and a capture that skipped it would
-            // show only the panel — the half already covered.
-            let (reply, _rx) = smol::channel::bounded(1);
-            self.park_flow_ask(
-                lane,
+            // Through the real parking path: the modal is raised there, and
+            // a capture that skipped it would show only the panel.
+            // The receiver goes at once: nothing in a capture answers, and
+            // no event follows to find the question abandoned.
+            let (reply, _) = smol::channel::bounded(1);
+            RunsHost::park_flow_ask(
+                &worktree,
                 &run_dir,
-                daruda_flow::runner::PendingAsk {
-                    owner: daruda_flow::runner::AskOwner::Node {
-                        node: "implement".into(),
-                        generation: 0,
-                        attempt: 1,
-                    },
-                    ask_id: 1,
-                    request: daruda_flow::runner::AskRequest {
-                        tool: "Bash".to_string(),
-                        detail: Some("rm -rf target/debug/incremental".to_string()),
-                        options: vec![
-                            PermissionChoice {
-                                option_id: "once".to_string(),
-                                name: "Allow once".to_string(),
-                                kind: PermissionKindView::AllowOnce,
-                            },
-                            PermissionChoice {
-                                option_id: "always".to_string(),
-                                name: "Allow always".to_string(),
-                                kind: PermissionKindView::AllowAlways,
-                            },
-                            PermissionChoice {
-                                option_id: "no".to_string(),
-                                name: "Reject".to_string(),
-                                kind: PermissionKindView::RejectOnce,
-                            },
-                        ],
-                    },
-                    reply,
-                },
-                window,
+                shot_question(1, "implement", "rm -rf target/debug/incremental", reply),
                 cx,
             );
         }
-        cx.notify();
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "screenshot"))]
     pub(in crate::workspace) fn seed_flow_run_for_test(
         &mut self,
         lane: daruda_store::project::LaneRef,
         run_dir: PathBuf,
+        cx: &mut Context<Self>,
     ) {
         let source = crate::workspace::flow_request::FlowSource::Resumed {
             run_dir: run_dir.clone(),
         };
-        self.seed_flow_run_of_for_test(lane, run_dir, source);
+        self.seed_flow_run_of_for_test(lane, run_dir, source, cx);
     }
 
     /// Same, for a run whose origin matters — a graph is coloured only
@@ -172,9 +141,69 @@ impl Workspace {
         lane: daruda_store::project::LaneRef,
         run_dir: PathBuf,
         source: crate::workspace::flow_request::FlowSource,
+        cx: &mut Context<Self>,
     ) {
-        self.flows
-            .runs
-            .insert(lane, RunHandle::seeded(run_dir, source, RunStage::Starting));
+        let Some(worktree) = self.lane_for(lane).map(|lane| lane.path.clone()) else {
+            return;
+        };
+        RunsHost::seed_flow_run(worktree, seeded_view(run_dir, source), cx);
+    }
+}
+
+/// A run with no engine behind it. The node ids come off the file the seed
+/// names, the way a real submission takes them off what it loaded — a graph
+/// is only coloured when the run and the file still agree about which nodes
+/// exist.
+#[cfg(any(test, feature = "screenshot"))]
+fn seeded_view(run_dir: PathBuf, source: crate::workspace::flow_request::FlowSource) -> RunView {
+    let nodes_at_start = match &source {
+        crate::workspace::flow_request::FlowSource::File(path) => std::fs::read_to_string(path)
+            .ok()
+            .and_then(|text| daruda_flow::parse::parse_flow_file(&text).ok())
+            .map(|file| file.nodes.iter().map(|n| n.id.clone()).collect())
+            .unwrap_or_default(),
+        crate::workspace::flow_request::FlowSource::Resumed { .. } => Vec::new(),
+    };
+    RunView::new(run_dir, source, nodes_at_start)
+}
+
+/// A permission question for a capture, as an agent asks one.
+#[cfg(feature = "screenshot")]
+pub(in crate::workspace) fn shot_question(
+    ask_id: u64,
+    node: &str,
+    detail: &str,
+    reply: smol::channel::Sender<daruda_acp::PermissionDecision>,
+) -> daruda_flow::runner::PendingAsk {
+    use daruda_acp::{PermissionChoice, PermissionKindView};
+    daruda_flow::runner::PendingAsk {
+        owner: daruda_flow::runner::AskOwner::Node {
+            node: node.into(),
+            generation: 0,
+            attempt: 1,
+        },
+        ask_id,
+        request: daruda_flow::runner::AskRequest {
+            tool: "Bash".to_string(),
+            detail: Some(detail.to_string()),
+            options: vec![
+                PermissionChoice {
+                    option_id: "once".to_string(),
+                    name: "Allow once".to_string(),
+                    kind: PermissionKindView::AllowOnce,
+                },
+                PermissionChoice {
+                    option_id: "always".to_string(),
+                    name: "Allow always".to_string(),
+                    kind: PermissionKindView::AllowAlways,
+                },
+                PermissionChoice {
+                    option_id: "no".to_string(),
+                    name: "Reject".to_string(),
+                    kind: PermissionKindView::RejectOnce,
+                },
+            ],
+        },
+        reply,
     }
 }

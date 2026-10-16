@@ -250,8 +250,8 @@ fn run_row(
             .child(row)
             .children(
                 live.asking
-                    .as_ref()
-                    .map(|ask| super::live::ask_block(live.lane, ask, live.also_waiting, snap, cx)),
+                    .iter()
+                    .map(|ask| super::live::ask_block(live.lane, ask, snap, cx)),
             )
             .into_any_element(),
         RunRow::Past(past) => {

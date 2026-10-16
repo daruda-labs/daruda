@@ -20,7 +20,7 @@ impl Workspace {
             self.active_page() == Some(Page::Flows) && self.pages.flows.detail.is_none();
         self.flows.browser.page_snapshot = list_shown.then(|| super::FlowPageSnapshot {
             workspace: cx.weak_entity(),
-            flows: self.flow_rows_matching(|lane| lane == self.flow_browser_lane()),
+            flows: self.flow_rows_matching(|lane| lane == self.flow_browser_lane(), cx),
             flow_lane: self.flow_browser_lane(),
             flow_history: self.flow_history_for_panel(cx),
             flow_files: self.flow_list_for_panel(cx),

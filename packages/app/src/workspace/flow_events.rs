@@ -1,190 +1,223 @@
-//! One run's event stream and its parked questions: everything the engine
-//! reports, arriving in workspace state.
+//! What a window does when a flow run in one of its worktrees changes.
 //!
-//! Two pumps, not one. The engine narrates on a `RunNotice` channel and asks
-//! permission on a separate `PendingAsk` channel, and the second carries a
-//! reply back — folding it into the narration would make "can this host
-//! answer" indistinguishable from "does it watch". Both drain here, and both
-//! end where the workspace does.
-//!
-//! `flow_ops.rs` keeps submission and the stop switch: it decides that a run
-//! may start, hands the channels' receiving ends to the two `watch_*` methods
-//! below, and holds the [`CancelToken`](daruda_flow::runner::CancelToken) that
-//! ends it.
+//! The run belongs to the process ([`crate::runs::RunsHost`]), which folds
+//! its notices and questions into the view every window reads and then tells
+//! the windows through [`crate::runs::RunsEffects`]. A window that holds the
+//! run's worktree repaints, recolours its graph and raises a question; one
+//! window — the lead — also speaks for the run's end: the toast, the refusal,
+//! the phone. Windows that do not hold the worktree are not touched at all.
 
 use std::path::{Path, PathBuf};
 
-use daruda_flow::event::{FlowEvent, RunEnd};
+use daruda_flow::event::RunEnd;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::project::LaneRef;
-use gpui::{Context, Window};
+use gpui::{App, Context, Window};
 
 use super::Workspace;
 use super::flow_ops::issue_report;
-use super::flow_runs::{Advanced, Parked, ParkedAsk};
+use crate::runs::{AnswerRefused, FlowChange, FlowChanged, FlowEnded, RunsHost};
 use crate::surface::strings as s;
+use crate::window_registry::WindowRegistry;
+
+/// Hand `change` to every window, with the one that speaks for the run
+/// chosen first: the window in front if it holds the worktree, else the
+/// first that does, else — for a run whose window closed — any window, so
+/// a phone that asked still hears how it ended.
+pub(in crate::workspace) fn deliver_flow_change(change: &FlowChange, cx: &mut App) {
+    let lead = match &change.what {
+        FlowChanged::Ended(_) => lead_window_for(&change.worktree, cx),
+        _ => None,
+    };
+    WindowRegistry::for_each_workspace(cx, |ws, window, cx| {
+        let is_lead = lead == Some(cx.entity_id());
+        ws.apply_flow_change(change, is_lead, window, cx);
+    });
+}
+
+fn lead_window_for(worktree: &Path, cx: &mut App) -> Option<gpui::EntityId> {
+    let mut holders = Vec::new();
+    let mut any = None;
+    WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
+        any.get_or_insert(cx.entity_id());
+        if ws.lane_at(worktree).is_some() {
+            holders.push(cx.entity_id());
+        }
+    });
+    let front = WindowRegistry::active_workspace(cx).map(|(_, weak)| weak.entity_id());
+    front
+        .filter(|front| holders.contains(front))
+        .or_else(|| holders.first().copied())
+        .or(any)
+}
 
 impl Workspace {
-    /// Drain the run's stream onto the UI. The channel is unbounded and the
-    /// engine never awaits it, so falling behind here cannot slow the run.
-    pub(in crate::workspace) fn watch_flow_events(
+    /// React to a change in the run at `change.worktree`.
+    fn apply_flow_change(
         &mut self,
-        lane_ref: daruda_store::project::LaneRef,
-        events: smol::channel::Receiver<daruda_flow::event::RunNotice>,
-        cx: &mut Context<Self>,
-    ) {
-        cx.spawn(async move |this, cx| {
-            while let Ok(notice) = events.recv().await {
-                // The record's seq is the engine's; this window still keys
-                // its state by lane, so only the event is applied.
-                let event = notice.into_event();
-                let is_end = matches!(event, FlowEvent::RunEnded { .. });
-                // An `Err` here is the workspace being gone, which ends the
-                // pump — the same shape the MCP and JSONL pumps use, and
-                // the reason this is not a silently discarded `Result`.
-                if this
-                    .update(cx, |workspace, cx| {
-                        workspace.apply_flow_event(lane_ref, &event, cx);
-                    })
-                    .is_err()
-                    || is_end
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
-    /// Drain the run's questions onto the UI. A second pump beside the
-    /// event one: the two carry different things in different directions,
-    /// and folding a reply channel into the narration stream would make
-    /// "can this host answer" indistinguishable from "does it watch".
-    pub(in crate::workspace) fn watch_flow_asks(
-        &mut self,
-        lane_ref: daruda_store::project::LaneRef,
-        run_dir: PathBuf,
-        asks: smol::channel::Receiver<daruda_flow::runner::PendingAsk>,
-        cx: &mut Context<Self>,
-    ) {
-        cx.spawn(async move |this, cx| {
-            while let Ok(pending) = asks.recv().await {
-                let run_dir = run_dir.clone();
-                // `update_in` rather than `update`: parking also raises the
-                // question as a modal when its lane is the one in view, and
-                // opening a dialog needs the window.
-                if this
-                    .update_in(cx, |workspace, window, cx| {
-                        workspace.park_flow_ask(lane_ref, &run_dir, pending, window, cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
-    /// Hold a question until somebody answers it.
-    ///
-    /// `run_dir` names the run the question came from. A channel drains
-    /// before it closes, so a question the engine queued as its run was
-    /// stopping can still arrive after the next run in that lane has taken
-    /// the slot — and `ask_id` restarts at 1 per run, so it would land on
-    /// the newcomer looking exactly like its own. Dropping it releases the
-    /// old run's engine, which is the only thing still waiting on it.
-    pub(in crate::workspace) fn park_flow_ask(
-        &mut self,
-        lane_ref: daruda_store::project::LaneRef,
-        run_dir: &Path,
-        pending: daruda_flow::runner::PendingAsk,
+        change: &FlowChange,
+        lead: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let parked = self
-            .flows
-            .runs
-            .park_ask(lane_ref, run_dir, ParkedAsk::new(pending));
-        cx.notify();
-
-        // Only for the question that is now on screen. A queued arrival would
-        // otherwise raise a modal for the *front* question — the one already
-        // being answered — stacking a second copy of it, with the click landing
-        // on whichever is on top.
-        if parked != Parked::Showing {
-            return;
-        }
-
-        // Rows for *this* lane, not the active one: whether it may take the
-        // window is the modal's rule, and pre-filtering here would enforce
-        // it twice — the copy that never runs is the one nothing tests.
-        if let Some(row) = self
-            .flow_rows_matching(|lane| lane == lane_ref)
-            .into_iter()
-            .find(|row| row.lane == lane_ref)
-            .and_then(|row| row.asking)
-        {
-            super::flow_ask_modal::FlowAskModal::raise_if_in_view(
-                cx.weak_entity(),
-                self.active,
-                lane_ref,
-                row,
-                window,
-                cx,
-            );
+        let lane = self.lane_at(&change.worktree);
+        match (&change.what, lane) {
+            (FlowChanged::Ended(ended), lane) => {
+                self.on_flow_run_ended(lane, &change.worktree, ended, lead, cx);
+            }
+            (_, None) => {}
+            (FlowChanged::Repainted, Some(_)) => cx.notify(),
+            (FlowChanged::Progressed { left_setup }, Some(lane)) => {
+                // Leaving setup is the first moment the run directory on
+                // disk is the swept one: retention runs after the run
+                // announces itself and before its first node.
+                if *left_setup {
+                    self.invalidate_flow_history(lane);
+                }
+                let colouring =
+                    RunsHost::flow_run(&change.worktree, cx).and_then(|run| run.view().colouring());
+                self.colour_flow_graph(lane, colouring, cx);
+                cx.notify();
+            }
+            (FlowChanged::Asked { ask_id, alone }, Some(lane)) => {
+                cx.notify();
+                // Only a question that is alone comes forward: a dialog
+                // stacked over one being answered would take the click.
+                if *alone {
+                    self.raise_flow_question(lane, &change.worktree, *ask_id, window, cx);
+                }
+            }
         }
     }
 
-    /// Answer the question `lane` is holding.
+    fn raise_flow_question(
+        &mut self,
+        lane: LaneRef,
+        worktree: &Path,
+        ask_id: u64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(row) = RunsHost::flow_run(worktree, cx)
+            .and_then(|run| run.view().question(ask_id))
+            .map(super::flow_rows::AskRowData::of)
+        else {
+            return;
+        };
+        super::flow_ask_modal::FlowAskModal::raise_if_in_view(
+            cx.weak_entity(),
+            self.active,
+            lane,
+            row,
+            window,
+            cx,
+        );
+    }
+
+    /// Answer question `ask_id` of the run in `lane`.
     ///
     /// `ask_id` is checked rather than trusted: a surface can still be
-    /// painted with a question that has already been answered, and a click
-    /// on that frame must do nothing instead of answering the *next* one.
+    /// painted with a question that has already been answered, and that
+    /// click does nothing. A question the run had already stopped waiting
+    /// for is said to have failed, rather than looking answered.
     pub(in crate::workspace) fn answer_flow_ask(
         &mut self,
-        lane: daruda_store::project::LaneRef,
+        lane: LaneRef,
         ask_id: u64,
         decision: daruda_acp::PermissionDecision,
         cx: &mut Context<Self>,
     ) {
-        if self.flows.runs.answer_ask(lane, ask_id, decision) {
-            cx.notify();
+        let Some(worktree) = self.lane_for(lane).map(|lane| lane.path.clone()) else {
+            return;
+        };
+        match RunsHost::answer_flow_ask(&worktree, ask_id, decision, cx) {
+            Ok(()) | Err(AnswerRefused::NotOpen) => {}
+            Err(AnswerRefused::Closed) => self.report_error(
+                ErrorReport::new(s::flow::ask_closed())
+                    .severity(ErrorSeverity::Warning)
+                    .at(file!(), line!())
+                    .dedup("flow.ask.closed")
+                    .build(),
+                cx,
+            ),
         }
     }
 
-    fn apply_flow_event(
+    /// A run in `worktree` ended. Every window holding it refreshes and marks
+    /// it; the lead alone says so.
+    fn on_flow_run_ended(
         &mut self,
-        lane_ref: daruda_store::project::LaneRef,
-        event: &FlowEvent,
+        lane: Option<LaneRef>,
+        worktree: &Path,
+        ended: &FlowEnded,
+        lead: bool,
         cx: &mut Context<Self>,
     ) {
-        self.colour_flow_graph(lane_ref, event, cx);
-        let FlowEvent::RunEnded { end } = event else {
-            self.advance_flow_stage(lane_ref, event, cx);
+        if let Some(lane) = lane {
+            // The run just wrote its completion marker, so the list that
+            // reads those markers is now wrong.
+            self.invalidate_flow_history(lane);
+            self.colour_flow_graph(lane, ended.colouring.clone(), cx);
+            cx.notify();
+        }
+        let refusal = end_refusal(&ended.end);
+        if lead {
+            if let Some(message) = refusal.clone() {
+                self.report_flow_end_refusal(message, worktree, &ended.end, cx);
+            }
+            // A run asked for from a phone has to be *told* how it ended. The
+            // toast and the report both stay on a desktop the caller is not at.
+            if ended.owes_remote_answer {
+                let notice = flow_outcome_notice(&ended.end, refusal, ended.overage.as_ref());
+                self.relay_notice_to_telegram(notice, cx);
+            }
+            // Whichever lane is on screen: the Flows list shows only
+            // "canceled", which reads like a Stop by hand.
+            if let (RunEnd::Canceled { .. }, Some(limit)) = (&ended.end, &ended.overage) {
+                self.toast_flow_overage_stop(limit, cx);
+            }
+        }
+        let Some(lane) = lane else {
             return;
         };
-        // Read before settling, which retires the handle that knows.
-        let overage = self.flows.runs.overage_stop(lane_ref);
-        let report = self.settle_flow_run(lane_ref, end, overage.as_ref(), cx);
-        // Whichever lane is on screen: the Flows list shows only "canceled",
-        // which reads like a Stop by hand.
-        if let (RunEnd::Canceled { .. }, Some(limit)) = (end, &overage) {
-            self.toast_flow_overage_stop(limit, cx);
-        }
-        if report.is_none() {
+        if report_to_open(&ended.end, &ended.run_dir).is_none() {
             return;
         }
         // The report waits in the Flows page's past runs; nothing opens over
         // what the person is looking at. A worktree off screen is marked
-        // unread, the way an agent's finished turn marks it — which is also
-        // what says *where* an overage stop landed; the one on screen, which
-        // no mark can reach, gets a toast instead.
-        if lane_ref == self.active {
-            self.toast_flow_run_end(lane_ref, end, cx);
-        } else {
-            self.mark_lane_unread(lane_ref, cx);
+        // unread, the way an agent's finished turn marks it; the one on
+        // screen, which no mark can reach, gets a toast instead.
+        if lane != self.active {
+            self.mark_lane_unread(lane, cx);
+        } else if lead {
+            self.toast_flow_run_end(lane, &ended.end, cx);
         }
+    }
+
+    /// Say why a run ended without telling its own story. The wording stays
+    /// short — the phone is told the same sentence — so where to look goes in
+    /// the detail.
+    fn report_flow_end_refusal(
+        &mut self,
+        message: String,
+        worktree: &Path,
+        end: &RunEnd,
+        cx: &mut Context<Self>,
+    ) {
+        let detail = match end {
+            RunEnd::LockHeld { .. } => super::flow_paths::lane_lock_dir(&self.lock_root, worktree)
+                .map(|dir| s::flow::lock_held_detail(dir.join(".lock").display().to_string())),
+            _ => None,
+        };
+        self.report_error(
+            ErrorReport::new(message)
+                .severity(ErrorSeverity::Warning)
+                .at(file!(), line!())
+                .with_context("detail", detail.unwrap_or_default())
+                .dedup("flow.run.ended")
+                .build(),
+            cx,
+        );
     }
 
     /// Say a run was stopped for extra usage. A limit is account-wide, so
@@ -233,119 +266,52 @@ impl Workspace {
         );
     }
 
-    /// Move the run's reported stage along. One `cx.notify()` per node
-    /// boundary, which is as often as the engine has anything new to say —
-    /// far too rarely to be a repaint concern.
-    pub(in crate::workspace) fn advance_flow_stage(
-        &mut self,
-        lane_ref: daruda_store::project::LaneRef,
-        event: &FlowEvent,
-        cx: &mut Context<Self>,
-    ) {
-        // Leaving `Starting` is the first moment the run directory on disk is
-        // the swept one: retention runs during start-up, after the run announces
-        // itself and before its first node. Refreshing on the announcement
-        // instead would read the pre-sweep listing and leave deleted runs on
-        // screen for the length of the run.
-        match self.flows.runs.advance_stage(lane_ref, event) {
-            Advanced::Nothing => return,
-            Advanced::Moved { left_setup } => {
-                if left_setup {
-                    self.invalidate_flow_history(lane_ref);
-                }
-            }
-        }
-        cx.notify();
+    /// The worktree `lane` names, for a test driving its run.
+    #[cfg(test)]
+    fn worktree_for_test(&self, lane: LaneRef) -> PathBuf {
+        self.lane_for(lane)
+            .expect("a lane of this window")
+            .path
+            .clone()
     }
 
-    /// Retire the run `lane_ref` was holding and say what it left to read:
-    /// which lane is released, and what the user is told. `overage` is the
-    /// billed report that stopped it, read by the caller before retiring.
-    pub(in crate::workspace) fn settle_flow_run(
-        &mut self,
-        lane_ref: daruda_store::project::LaneRef,
-        end: &RunEnd,
-        overage: Option<&daruda_acp::RateLimitView>,
-        cx: &mut Context<Self>,
-    ) -> Option<PathBuf> {
-        // Asked before `retire`, which drops the handle that knows.
-        let owes_remote_answer = self.flows.runs.owes_telegram_answer(lane_ref);
-        let run_dir = self.flows.runs.retire(lane_ref);
-        // The run just wrote its completion marker, so the list that reads
-        // those markers is now wrong.
-        self.invalidate_flow_history(lane_ref);
-        let refusal = end_refusal(end);
-        if let Some(message) = refusal.clone() {
-            // The wording stays short — the phone is told the same sentence
-            // below — so where to look goes in the detail instead.
-            let detail = match end {
-                RunEnd::LockHeld { .. } => self
-                    .lane_for(lane_ref)
-                    .map(|lane| lane.path.clone())
-                    .and_then(|cwd| super::flow_paths::lane_lock_dir(&self.lock_root, &cwd))
-                    .map(|dir| s::flow::lock_held_detail(dir.join(".lock").display().to_string())),
-                _ => None,
-            };
-            self.report_error(
-                ErrorReport::new(message)
-                    .severity(ErrorSeverity::Warning)
-                    .at(file!(), line!())
-                    .with_context("detail", detail.unwrap_or_default())
-                    .dedup("flow.run.ended")
-                    .build(),
-                cx,
-            );
-        }
-        // A run asked for from a phone has to be *told* how it ended. The
-        // report and the toast above both stay on a desktop the caller is
-        // not at, which is what left a `/flow` answer looking like a hang.
-        if owes_remote_answer {
-            self.relay_notice_to_telegram(flow_outcome_notice(end, refusal, overage), cx);
-        }
-        cx.notify();
-        run_dir.as_deref().and_then(|dir| report_to_open(end, dir))
-    }
-
-    /// Drive one stream event through the real stage machine, without the
-    /// `RunEnded` settling — what a test of the stage transitions needs.
+    /// Drive one stream event through the run's real path — `RunEnded`
+    /// included. What it does to the windows lands when this update ends.
     #[cfg(test)]
     pub(in crate::workspace) fn apply_flow_event_for_test(
         &mut self,
-        lane: daruda_store::project::LaneRef,
-        event: &FlowEvent,
+        lane: LaneRef,
+        event: &daruda_flow::event::FlowEvent,
         cx: &mut Context<Self>,
     ) {
-        // Both halves the real path runs for a run still going, in the same
-        // order.
-        self.colour_flow_graph(lane, event, cx);
-        self.advance_flow_stage(lane, event, cx);
-    }
-
-    /// The whole path, `RunEnded` included — settling the run and saying it
-    /// ended. Separate from [`Self::apply_flow_event_for_test`], which only
-    /// moves a run's stage along.
-    #[cfg(test)]
-    pub(in crate::workspace) fn apply_flow_event_whole_for_test(
-        &mut self,
-        lane: daruda_store::project::LaneRef,
-        event: &FlowEvent,
-        cx: &mut Context<Self>,
-    ) {
-        self.apply_flow_event(lane, event, cx);
+        let worktree = self.worktree_for_test(lane);
+        RunsHost::apply_flow_event_for_test(&worktree, event, cx);
     }
 
     /// Park a question on a seeded run, so a test can exercise answering
-    /// without an adapter.
+    /// without an adapter. A dialog it raises opens when this update ends.
     #[cfg(test)]
     pub(in crate::workspace) fn park_flow_ask_for_test(
         &mut self,
-        lane: daruda_store::project::LaneRef,
+        lane: LaneRef,
         run_dir: &Path,
         pending: daruda_flow::runner::PendingAsk,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.park_flow_ask(lane, run_dir, pending, window, cx);
+        let worktree = self.worktree_for_test(lane);
+        RunsHost::park_flow_ask(&worktree, run_dir, pending, cx);
+    }
+
+    /// Stop `lane`'s run for `limit` as its engine would.
+    #[cfg(test)]
+    pub(in crate::workspace) fn trip_flow_overage_for_test(
+        &mut self,
+        lane: LaneRef,
+        limit: &daruda_acp::RateLimitView,
+        cx: &mut Context<Self>,
+    ) {
+        let worktree = self.worktree_for_test(lane);
+        RunsHost::trip_flow_overage_for_test(&worktree, limit, cx);
     }
 }
 

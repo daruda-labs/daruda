@@ -78,11 +78,11 @@ impl Workspace {
             return Err(ControlError::FlowNeedsInteraction { name: label });
         }
         // Both halves of "a run is already going": the on-disk lock catches
-        // another process, and `runs` catches this one. Asking only the lock
+        // another process, and the run host catches this one. Asking only the lock
         // leaves the guard inside `run_flow_at` to answer the second case by
         // opening its "stop it?" picker — a desktop dialog raised by a phone
         // command, which is the one thing this surface must never do.
-        if self.lane_holder(&cwd).is_some() || self.flows.runs.is_running(lane) {
+        if self.lane_holder(&cwd).is_some() || self.is_flow_running_in(lane, cx) {
             return Err(ControlError::FlowLocked { name: label });
         }
         // Everything the run would refuse *after* dispatch surfaces on the
@@ -127,7 +127,7 @@ impl Workspace {
         // Marked after dispatch rather than threaded into the submission: the
         // run is inserted synchronously and nothing here awaits, so the event
         // pump cannot retire it in between.
-        if !self.flows.runs.answer_telegram_on_end(lane) {
+        if !crate::runs::RunsHost::owe_flow_outcome_remotely(&cwd, cx) {
             return Err(ControlError::FlowNotStarted { name: entry.name });
         }
         Ok(entry)
@@ -147,7 +147,7 @@ impl Workspace {
         if self.lane_for(lane).is_none() {
             return Err(ControlError::TargetGone);
         }
-        if !self.flows.runs.is_running(lane) {
+        if !self.is_flow_running_in(lane, cx) {
             return Ok(StopDisposition::AlreadyIdle);
         }
         self.stop_flow_run_in(lane, cx);

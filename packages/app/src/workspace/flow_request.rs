@@ -77,22 +77,8 @@ pub(in crate::workspace) enum FlowSubmitError {
     Resume(daruda_flow::resume::ResumeError),
 }
 
-/// Where a run came from, kept because `RunRequest` cannot say.
-///
-/// The graph is keyed by the flow file's path, so colouring one from a
-/// run means knowing which file the run was submitted for. A resumed run
-/// cannot answer that: `prepare` reads `run.yaml` and sets `flow_dir` to the
-/// run directory, so the original `.daruda/flows/x.yaml` is not recoverable
-/// from anything the request carries. That gap is deliberate here — closing
-/// it means writing the origin into the run directory at start, which is a
-/// host/engine contract change.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::workspace) enum FlowSource {
-    /// A fresh submission, which knows the file it was asked for.
-    File(PathBuf),
-    /// Picked up from a run directory; the originating file is unknown.
-    Resumed { run_dir: PathBuf },
-}
+// The run's origin travels with the run, which the process owns.
+pub(in crate::workspace) use crate::runs::FlowSource;
 
 /// Which part of a flow to spend money on this time.
 ///
@@ -114,7 +100,6 @@ pub(in crate::workspace) struct FlowSelection {
 /// separately because the sender lives inside the request, and the two are
 /// created together exactly once.
 pub(in crate::workspace) struct FlowSubmission {
-    pub lane: daruda_store::project::LaneRef,
     pub request: RunRequest,
     /// Which flow file this run is of, when that is knowable ([`FlowSource`]).
     pub source: FlowSource,
@@ -324,7 +309,6 @@ impl Workspace {
             resume: Some(continuation),
         };
         Ok(FlowSubmission {
-            lane: lane_ref,
             request,
             source: FlowSource::Resumed {
                 run_dir: run_dir.to_path_buf(),
@@ -399,7 +383,7 @@ impl Workspace {
             until: selection.until.clone(),
             pinned,
             loaded,
-            run_dir: super::flow_paths::runs_dir(&cwd).join(self.next_run_id()),
+            run_dir: super::flow_paths::runs_dir(&cwd).join(self.next_run_id(cx)),
             lock_dir: self.lock_root.clone(),
             flow_dir: flow_path
                 .parent()
@@ -418,7 +402,6 @@ impl Workspace {
             resume: None,
         };
         Ok(FlowSubmission {
-            lane: lane_ref,
             request,
             source: FlowSource::File(flow_path.to_path_buf()),
             node_install_dir,
@@ -531,8 +514,8 @@ impl Workspace {
         self.mirrors.flow_config.clone()
     }
 
-    fn next_run_id(&mut self) -> String {
-        let counter = self.flows.runs.next_run_id();
+    fn next_run_id(&mut self, cx: &mut Context<Self>) -> String {
+        let counter = crate::runs::RunsHost::next_flow_run_id(cx);
         run_id(
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

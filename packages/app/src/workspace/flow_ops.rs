@@ -6,12 +6,11 @@
 //! the way is worded in one place here, so a flow that cannot run says why
 //! in the same voice however it was started.
 //!
-//! The engine's `execute` blocks, so a run owns a thread and the workspace
-//! owns its [`CancelToken`]. Everything the run has to say comes back on
-//! one `FlowEvent` stream — there is no second completion channel, because
-//! two would be two things to keep in step. Draining that stream, and the
-//! questions beside it, is [`super::flow_events`]'s; a live run's display
-//! shape is [`super::flow_rows`]'s, and a finished one's is
+//! The engine's `execute` blocks, so a run owns a thread — and the process,
+//! not this window, owns the run ([`crate::runs::RunsHost`]): its thread, its
+//! stop switch and the one pump that drains its stream and questions. What a
+//! window does when the run changes is [`super::flow_events`]'s; a live run's
+//! display shape is [`super::flow_rows`]'s, and a finished one's is
 //! [`super::flow_history`]'s.
 //!
 //! The `--screenshot` and test seeds reach run state directly rather than
@@ -21,8 +20,7 @@
 use crate::agent::launch_resolve::ConnectCommandError;
 use std::path::{Path, PathBuf};
 
-use daruda_flow::event::RunEnd;
-use daruda_flow::runner::{AcpRunner, CancelToken, OverageStop, ProcessRunner, Runners};
+use daruda_flow::runner::{AcpRunner, OverageStop, ProcessRunner, Runners};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{Context, Window};
 
@@ -31,10 +29,9 @@ use super::command::flow_picker::{FlowPick, FlowPicker, FlowPurpose};
 use super::command::picker::PickerKey;
 use super::command::picker_key::picker_keystroke;
 use super::flow_request::{FlowSelection, FlowSubmission, FlowSubmitError, union_strip_env};
-use super::flow_runs::RunHandle;
 use crate::surface::strings as s;
 
-mod seeds;
+pub(in crate::workspace) mod seeds;
 
 /// Everything a dispatch has been told, once every question the picker asks
 /// has an answer. One value because the five always travel together, and
@@ -115,11 +112,10 @@ impl Workspace {
         }
         match self.lane_holder(&cwd) {
             // The stop switch is a `CancelToken`, so the only run we can
-            // stop is one whose token we are holding — for *this* lane.
-            // The map is the authority, not the lock's pid: a token for
-            // another lane belongs to this process too and would not stop
-            // this one.
-            Some(_) if self.flows.runs.is_running(lane) => {
+            // stop is one this process holds — for *this* worktree. The
+            // host is the authority, not the lock's pid: a token for another
+            // worktree belongs to this process too and would not stop this one.
+            Some(_) if self.is_flow_running_in(lane, cx) => {
                 self.overlays.flow_picker = FlowPicker::Stopping { lane };
                 cx.notify();
                 false
@@ -421,72 +417,39 @@ impl Workspace {
         }
     }
 
+    /// Hand the run to the process. Its thread, stop switch and pump live
+    /// there, so this window closing does not take the run with it.
     fn start_flow_thread(&mut self, submission: FlowSubmission, cx: &mut Context<Self>) {
         let FlowSubmission {
-            lane,
             request,
             source,
             node_install_dir,
             events,
             asks,
         } = submission;
-        let cancel = CancelToken::default();
         let overage = crate::overage_policy::OveragePolicy::stop_for_run(cx);
-        let run_dir = request.run_dir.clone();
-        let run_dir_for_asks = run_dir.clone();
-        // Before the thread takes the request.
-        let nodes_at_start: Vec<daruda_flow::NodeId> = request
-            .loaded
-            .flow()
-            .nodes
-            .iter()
-            .map(|node| node.id.clone())
-            .collect();
-        // Captured by the request builder: the run belongs to the lane it
-        // was submitted from, not to whichever one is active when it ends.
-        let lane_ref = lane;
-
-        let thread = {
-            let cancel = cancel.clone();
+        let runners = {
             let overage = overage.clone();
-            std::thread::spawn(move || {
-                let runners = runners_for(&request, node_install_dir, overage);
-                // A run the engine refuses before it starts — a lock another
-                // process holds, a runs directory it cannot create — takes
-                // nothing, so it rightly emits neither `RunStarted` nor
-                // `RunEnded`. It reports by *returning*. Without a last word
-                // from here the user picks a flow and sees nothing happen.
-                //
-                // Sent from a drop guard rather than after `execute`, so a
-                // panic inside the engine also produces one. Landing after the
-                // call meant a panic dropped the sender with nothing sent, and
-                // the watcher's `while let Ok` simply ended — leaving every
-                // surface waiting on that run, including a phone that was
-                // promised the outcome.
-                //
-                // Safe to send unconditionally: the watcher stops at the first
-                // `RunEnded`, so when the engine sent its own this one is
-                // never read.
-                let mut last_word = LastWord {
-                    events: request.events.clone(),
-                    end: None,
-                };
-                let report = daruda_flow::schedule::execute(&request, &runners, &cancel);
-                last_word.end = Some(RunEnd::from(&report.outcome));
+            Box::new(move |request: &daruda_flow::request::RunRequest| {
+                runners_for(request, node_install_dir, overage)
             })
         };
-        self.flows.runs.insert(
-            lane_ref,
-            RunHandle::started(cancel, overage, run_dir, source, nodes_at_start, thread),
+        crate::runs::RunsHost::start_flow(
+            crate::runs::FlowStart {
+                request,
+                source,
+                runners,
+                overage,
+                events,
+                asks,
+            },
+            cx,
         );
-        self.watch_flow_events(lane_ref, events, cx);
-        self.watch_flow_asks(lane_ref, run_dir_for_asks, asks, cx);
-        cx.notify();
     }
 
-    /// Stop the run a named lane holds. The status bar lists every run this
-    /// window started, including ones in lanes that are not active, so it
-    /// needs to say which — the active lane is not the answer there.
+    /// Stop the run a named lane holds. The status bar lists every run in
+    /// this window's lanes, including ones that are not active, so it needs
+    /// to say which — the active lane is not the answer there.
     pub(in crate::workspace) fn stop_flow_run_in(
         &mut self,
         lane: daruda_store::project::LaneRef,
@@ -494,8 +457,9 @@ impl Workspace {
     ) {
         // The engine releases its own side — the interrupt arm answers the
         // adapter `Cancelled`.
-        self.flows.runs.cancel(lane);
-        cx.notify();
+        if let Some(worktree) = self.lane_for(lane).map(|lane| lane.path.clone()) {
+            crate::runs::RunsHost::stop_flow(&worktree, cx);
+        }
     }
 
     /// Bring the run in `lane` into view: switch to its lane if needed,
@@ -580,30 +544,6 @@ impl Workspace {
                 .build(),
             cx,
         );
-    }
-}
-
-/// Guarantees the run says something on its way out, panic or not.
-///
-/// `end` is filled in once `execute` returns normally; a panic leaves it
-/// `None`, and `Drop` then reports the failure rather than nothing at all.
-struct LastWord {
-    events: Option<smol::channel::Sender<daruda_flow::event::RunNotice>>,
-    end: Option<RunEnd>,
-}
-
-impl Drop for LastWord {
-    fn drop(&mut self) {
-        let Some(events) = self.events.as_ref() else {
-            return;
-        };
-        let end = self.end.take().unwrap_or_else(|| RunEnd::Io {
-            site: daruda_flow::error::IoSite::Run,
-            doing: "running the flow".to_string(),
-            path: std::path::PathBuf::new(),
-            message: s::flow::run_panicked(),
-        });
-        let _ = events.try_send(daruda_flow::event::RunNotice::Unrecorded(end));
     }
 }
 

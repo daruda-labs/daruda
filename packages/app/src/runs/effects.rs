@@ -4,6 +4,9 @@ use gpui::App;
 pub(crate) trait RunsEffects {
     fn stop_execution(&self, exec: &ExecutionRef, cx: &mut App);
 
+    /// A flow run changed; the windows holding its worktree redraw it.
+    fn flow_changed(&self, _change: &super::FlowChange, _cx: &mut App) {}
+
     fn cli_event(
         &self,
         _pane: Option<super::RunPane>,

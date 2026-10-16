@@ -302,11 +302,12 @@ async fn a_run_colours_the_graph_of_the_flow_it_is_of(cx: &mut TestAppContext) {
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the graph just opened");
 
-    ws.update(&mut vcx, |ws, _| {
+    ws.update(&mut vcx, |ws, cx| {
         ws.seed_flow_run_of_for_test(
             here,
             lane.path().join("run"),
             crate::workspace::flow_request::FlowSource::File(flow_path.clone()),
+            cx,
         )
     });
 
@@ -396,11 +397,12 @@ async fn a_resumed_run_leaves_an_open_graph_alone(cx: &mut TestAppContext) {
         .expect("the graph just opened");
 
     let run_dir = lane.path().join("run");
-    ws.update(&mut vcx, |ws, _| {
+    ws.update(&mut vcx, |ws, cx| {
         ws.seed_flow_run_of_for_test(
             here,
             run_dir.clone(),
             crate::workspace::flow_request::FlowSource::Resumed { run_dir },
+            cx,
         )
     });
     ws.update(&mut vcx, |ws, cx| {
@@ -455,11 +457,12 @@ async fn one_run_event_costs_one_frame(cx: &mut TestAppContext) {
     let (lane, ws, flow_path, wh) = workspace_with_a_flow(cx, LONG_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     let here = ws.update(&mut vcx, |ws, _| ws.active);
-    ws.update(&mut vcx, |ws, _| {
+    ws.update(&mut vcx, |ws, cx| {
         ws.seed_flow_run_of_for_test(
             here,
             lane.path().join("run"),
             crate::workspace::flow_request::FlowSource::File(flow_path.clone()),
+            cx,
         )
     });
     ws.update_in(&mut vcx, |ws, window, cx| {
@@ -996,11 +999,12 @@ async fn a_reload_keeps_the_colours_of_the_run(cx: &mut TestAppContext) {
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the graph opened");
 
-    ws.update(&mut vcx, |ws, _| {
+    ws.update(&mut vcx, |ws, cx| {
         ws.seed_flow_run_of_for_test(
             here,
             lane.path().join("run"),
             crate::workspace::flow_request::FlowSource::File(flow_path.clone()),
+            cx,
         )
     });
     ws.update(&mut vcx, |ws, cx| {
@@ -1056,11 +1060,12 @@ async fn a_run_does_not_colour_a_flow_whose_nodes_have_changed(cx: &mut TestAppC
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the graph opened");
 
-    ws.update(&mut vcx, |ws, _| {
+    ws.update(&mut vcx, |ws, cx| {
         ws.seed_flow_run_of_for_test(
             here,
             lane.path().join("run"),
             crate::workspace::flow_request::FlowSource::File(flow_path.clone()),
+            cx,
         )
     });
     ws.update(&mut vcx, |ws, cx| {

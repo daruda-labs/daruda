@@ -11,7 +11,7 @@ app/src/
 ├── (top-level)           # App entry, window/menu lifecycle, PTY, config watcher, slot actions
 ├── startup/              # Desktop startup and optional replay, capture, and smoke flows
 ├── agent/                # Agent-side data models — MCP, skills — plus GPUI-free account + ACP launch resolution
-├── runs/                 # Process-wide task log owner, read-only projection, and host-installed execution effects
+├── runs/                 # Process-wide task log owner, flow runs in flight, read-only projections, and host-installed effects
 ├── surface/              # App-shell constants — name, shortcuts, strings, keybinding action map
 ├── title_bar/            # Window chrome — who draws the frame (GPUI-free `policy.rs`), the drag strip, the app-drawn caption controls, the application-menu button
 ├── ui/                   # Facade over `daruda_ui` (packages/ui/) + localized and agent-domain widgets
@@ -75,6 +75,15 @@ pane registrations but retains observed processes until their exit is confirmed.
 `TaskStore` imports an existing `tasks.json` once and never rewrites it.
 Commands and the app-quit flush target only the task log; older builds read
 the preserved, potentially stale legacy file.
+
+`RunsHost` also owns every flow run in flight (`runs/flows/`), keyed by
+worktree: its thread, stop switch, and one pump that folds the run's
+notices and questions into a `RunView`. Open questions are a set keyed by
+the log's ask id, and node states are checked against the run log at the
+run's start and end. Windows read the view through the lanes they hold and
+are told of changes through `RunsEffects::flow_changed`, deferred past the
+update that made them; only windows holding the worktree repaint, and one of
+them speaks for the run's end. Closing a window leaves its runs going.
 
 ## `surface/`
 

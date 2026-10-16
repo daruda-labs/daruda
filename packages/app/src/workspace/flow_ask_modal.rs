@@ -5,7 +5,7 @@
 //! is waiting, and clicking it goes there.
 //!
 //! Closing this is **not** an answer. The question lives on the run
-//! (`RunStage::Asking`), and this is one of two views onto it; dismissing
+//! (`crate::runs::RunView`), and this is one of two views onto it; dismissing
 //! leaves it in the Flows panel, which is where it can wait indefinitely
 //! without a clock the user cannot see.
 

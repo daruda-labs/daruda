@@ -1,6 +1,7 @@
 //! Lane create / remove: validation, the post-git finalize steps, lane-id
 //! allocation, and the remove-lane modal openers.
 
+use crate::runs::RunsHost;
 use daruda_store::project::{LaneId, LaneRef, ProjectId};
 use daruda_store::tasks::TaskAgentSurface;
 use gpui::{Context, Window};
@@ -29,6 +30,7 @@ impl Workspace {
     pub(in crate::workspace) fn validate_remove_lane(
         &self,
         target: LaneRef,
+        cx: &gpui::App,
     ) -> Result<RemoveWorktreePlan, String> {
         let wt = self
             .lane_for(target)
@@ -36,15 +38,14 @@ impl Workspace {
         if !Self::lane_removable(wt) {
             return Err(crate::surface::strings::modal::remove_lane_err_cannot_remove());
         }
-        // A run's cancel token and its thread are only handed back when the
-        // run ends on its own, so removing the lane would leave it working a
-        // checkout `git worktree remove` just deleted with no way left to stop
-        // it. Refusing matches what the shell-out does anyway: `git worktree
+        // A run is only retired when it ends on its own, so removing the lane
+        // would leave it working a checkout `git worktree remove` just deleted,
+        // with no lane left to show or stop it from. Refusing matches what the shell-out does anyway: `git worktree
         // remove` fails on a dirty checkout, and a running flow makes one.
-        if self.flows.runs.is_running(target) {
+        if RunsHost::flow_run(&wt.path, cx).is_some() {
             return Err(crate::surface::strings::modal::remove_lane_err_flow_running());
         }
-        // `runs` only knows this process. Another daruda — a debug build
+        // The run host only knows this process. Another daruda — a debug build
         // beside a release one, which is why the lock root is deliberately
         // profile-independent — leaves no trace here but the lock. Git's own
         // dirty check is not the backstop: a run's artifacts sit under the
@@ -356,7 +357,7 @@ impl Workspace {
         }
         let label = gpui::SharedString::from(wt.display_name());
         let path = gpui::SharedString::from(wt.path.to_string_lossy().into_owned());
-        let plan = match self.validate_remove_lane(target) {
+        let plan = match self.validate_remove_lane(target, cx) {
             Ok(p) => p,
             Err(msg) => {
                 let report = daruda_store::observability::error_report::ErrorReport::new(

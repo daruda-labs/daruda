@@ -1,14 +1,15 @@
 //! In-memory flow browser fixtures; never write into the restored repository.
 
 use super::{FlowGrouping, FlowScope, FlowTab, listing::FlowListing};
+use crate::runs::{ParkedAsk, RunView, RunsHost};
 use crate::workspace::{
     Workspace,
     flow_history::{FlowHistory, FlowRunEntry},
     flow_paths::{FlowOrigin, FoundFlow},
     flow_request::FlowSource,
-    flow_runs::{ParkedAsk, RunHandle, RunStage},
     pages::Page,
 };
+use daruda_flow::event::FlowEvent;
 use gpui::{Context, Window};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,6 +22,24 @@ pub(crate) enum FlowBrowserShot {
 }
 
 impl Workspace {
+    /// A placeholder project when none was restored: a run is held by a
+    /// worktree, so a capture needs one to show a run in.
+    pub(in crate::workspace) fn ensure_project_for_shot(&mut self) {
+        if !self.projects.is_empty() {
+            return;
+        }
+        let project = crate::project::Project::bootstrap_placeholder(
+            self.next_project_id,
+            self.data_dir.clone(),
+        );
+        self.next_project_id += 1;
+        self.set_active(daruda_store::project::LaneRef {
+            project: project.id,
+            lane: project.lanes[0].id,
+        });
+        self.projects.push(project);
+    }
+
     pub(in crate::workspace) fn seed_flow_browser_for_shot(
         &mut self,
         shot: FlowBrowserShot,
@@ -28,18 +47,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         use daruda_flow::marker::RunStatus;
-        if self.projects.is_empty() {
-            let project = crate::project::Project::bootstrap_placeholder(
-                self.next_project_id,
-                self.data_dir.clone(),
-            );
-            self.next_project_id += 1;
-            self.set_active(daruda_store::project::LaneRef {
-                project: project.id,
-                lane: project.lanes[0].id,
-            });
-            self.projects.push(project);
-        }
+        self.ensure_project_for_shot();
         self.flows.browser.state.scope = FlowScope::Current;
         let tab = match shot {
             FlowBrowserShot::Runs | FlowBrowserShot::Asking => FlowTab::Runs,
@@ -86,46 +94,37 @@ impl Workspace {
         }
         let millis = chrono::Utc::now().timestamp_millis() as u128;
         let live_dir = root.join(crate::workspace::flow_request::run_id(millis, 42, 7));
-        let stage = if shot == FlowBrowserShot::Asking {
-            let (reply, _rx) = smol::channel::bounded(1);
-            RunStage::Asking {
-                question: std::sync::Arc::new(ParkedAsk::new(daruda_flow::runner::PendingAsk {
-                    owner: daruda_flow::runner::AskOwner::Node {
-                        node: "release-check".into(),
-                        generation: 0,
-                        attempt: 1,
-                    },
-                    ask_id: 1,
-                    request: daruda_flow::runner::AskRequest {
-                        tool: "Bash".into(),
-                        detail: Some("cargo test -p daruda".into()),
-                        options: vec![
-                            daruda_acp::PermissionChoice {
-                                option_id: "once".into(),
-                                name: "Allow once".into(),
-                                kind: daruda_acp::PermissionKindView::AllowOnce,
-                            },
-                            daruda_acp::PermissionChoice {
-                                option_id: "reject".into(),
-                                name: "Reject".into(),
-                                kind: daruda_acp::PermissionKindView::RejectOnce,
-                            },
-                        ],
-                    },
-                    reply,
-                })),
-                queued: Default::default(),
-            }
-        } else {
-            RunStage::Node {
-                id: "release-check".into(),
-                attempt: 2,
-            }
-        };
-        self.flows.runs.insert(
-            self.active,
-            RunHandle::seeded(live_dir.clone(), source, stage),
+        // Two nodes running together, as a parallel wave does; asking, each
+        // holds a question of its own and both stay up at once. Folded into
+        // the view before it is seeded, so no dialog covers the page.
+        let nodes = [
+            ("release-check", 2, "cargo test -p daruda"),
+            ("docs-check", 1, "rm -rf target/doc"),
+        ];
+        let mut view = RunView::new(
+            live_dir.clone(),
+            source,
+            nodes.iter().map(|(node, _, _)| (*node).into()).collect(),
         );
+        for (ask_id, (node, attempt, detail)) in (1..).zip(nodes) {
+            view.advance(&FlowEvent::NodeStarted {
+                node: node.into(),
+                attempt,
+            });
+            if shot == FlowBrowserShot::Asking {
+                // The receiver stands in for the engine's waiting node; dropped,
+                // the question would read as abandoned and the next one parked
+                // would take it down. A capture process exits right after.
+                let (reply, waiting) = smol::channel::bounded(1);
+                std::mem::forget(waiting);
+                view.park(ParkedAsk::new(
+                    crate::workspace::flow_ops::seeds::shot_question(ask_id, node, detail, reply),
+                ));
+            }
+        }
+        if let Some(worktree) = self.lane_for(self.active).map(|lane| lane.path.clone()) {
+            RunsHost::seed_flow_run(worktree, view, cx);
+        }
         let history = [
             RunStatus::Running,
             RunStatus::Done,

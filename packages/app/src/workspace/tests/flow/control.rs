@@ -90,7 +90,8 @@ fn telegram_workspace_with_a_flow(
         ..daruda_config::Config::default()
     };
     let project = daruda_store::project::Project::from_path(lane.path());
-    let (wh, ws) = build_workspace_with(cx, &config, Some(project));
+    let built = build_workspace_with(cx, &config, Some(project));
+    let (wh, ws) = registered(cx, built);
     (lane, ws, flow_path, wh)
 }
 
@@ -301,7 +302,7 @@ async fn a_lane_already_running_a_flow_refuses_the_next(cx: &mut TestAppContext)
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             let lane_ref = ws.active_ref();
-            ws.seed_flow_run_for_test(lane_ref, std::path::PathBuf::from("/tmp/seeded-run"));
+            ws.seed_flow_run_for_test(lane_ref, std::path::PathBuf::from("/tmp/seeded-run"), cx);
             assert_eq!(
                 ws.control_flow_run(ws.active, "ship", window, cx),
                 Err(ControlError::FlowLocked {
@@ -386,7 +387,7 @@ async fn a_named_worktree_already_running_refuses_without_a_dialog(cx: &mut Test
 
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.seed_flow_run_for_test(other, std::path::PathBuf::from("/tmp/seeded-elsewhere"));
+            ws.seed_flow_run_for_test(other, std::path::PathBuf::from("/tmp/seeded-elsewhere"), cx);
             assert_eq!(
                 ws.control_flow_run(other, "deploy", window, cx),
                 Err(ControlError::FlowLocked {
@@ -424,59 +425,63 @@ async fn a_run_ending_opens_no_tab_and_marks_its_worktree_unread(cx: &mut TestAp
     let parked_run = run_in(other_dir.path(), "run-elsewhere");
     let here_run = run_in(here_dir.path(), "run-here");
 
-    cx.update_window(wh.into(), |_, _window, cx| {
+    let (active, before) = ws.update(cx, |ws, _| (ws.active, ws.active_runtime().panes.len()));
+    assert_ne!(other, active);
+    let end_in = |lane, dir: &std::path::PathBuf, cx: &mut TestAppContext| {
         ws.update(cx, |ws, cx| {
-            let active = ws.active;
-            assert_ne!(other, active);
-            let before = ws.active_runtime().panes.len();
-
-            ws.seed_flow_run_for_test(other, parked_run.clone());
-            ws.apply_flow_event_whole_for_test(other, &ended, cx);
-            assert!(!ws.flows.runs.is_running(other), "the run settled");
-            assert!(
-                ws.lane_for(other).is_some_and(|lane| lane.is_unread),
-                "the worktree off screen is marked unread"
-            );
-
-            ws.seed_flow_run_for_test(active, here_run.clone());
-            ws.apply_flow_event_whole_for_test(active, &ended, cx);
-            assert!(
-                ws.lane_for(active).is_some_and(|lane| !lane.is_unread),
-                "the one on screen is not"
-            );
-            let toasted = |ws: &Workspace| {
-                ws.error_history()
-                    .iter()
-                    .filter(|r| r.title == crate::surface::strings::flow::run_finished_toast())
-                    .count()
-            };
-            assert_eq!(toasted(ws), 1, "it is told by a toast instead");
-
-            // With the Flows page on that worktree, its list already says so.
-            ws.show_page(crate::workspace::pages::Page::Flows, cx);
-            ws.seed_flow_run_for_test(active, here_run.clone());
-            ws.apply_flow_event_whole_for_test(active, &ended, cx);
-            assert_eq!(toasted(ws), 1, "no toast over the page showing it");
-
-            assert_eq!(ws.active_runtime().panes.len(), before, "no tab opened");
-            assert!(
-                ws.main_area
-                    .runtimes
-                    .get(&other)
-                    .is_none_or(|rt| rt.tabs.is_empty()),
-                "not in the worktree it ran in either"
-            );
-            assert_eq!(ws.active, active, "and the screen did not move");
+            ws.seed_flow_run_for_test(lane, dir.clone(), cx)
         });
-    })
-    .expect("window is live");
+        ws.update(cx, |ws, cx| ws.apply_flow_event_for_test(lane, &ended, cx));
+    };
+    let toasted = |ws: &Workspace| {
+        ws.error_history()
+            .iter()
+            .filter(|r| r.title == crate::surface::strings::flow::run_finished_toast())
+            .count()
+    };
+
+    end_in(other, &parked_run, cx);
+    ws.read_with(cx, |ws, cx| {
+        assert!(!ws.is_flow_running_in(other, cx), "the run settled");
+        assert!(
+            ws.lane_for(other).is_some_and(|lane| lane.is_unread),
+            "the worktree off screen is marked unread"
+        );
+    });
+
+    end_in(active, &here_run, cx);
+    ws.read_with(cx, |ws, _| {
+        assert!(
+            ws.lane_for(active).is_some_and(|lane| !lane.is_unread),
+            "the one on screen is not"
+        );
+        assert_eq!(toasted(ws), 1, "it is told by a toast instead");
+    });
+
+    // With the Flows page on that worktree, its list already says so.
+    ws.update(cx, |ws, cx| {
+        ws.show_page(crate::workspace::pages::Page::Flows, cx)
+    });
+    end_in(active, &here_run, cx);
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(toasted(ws), 1, "no toast over the page showing it");
+        assert_eq!(ws.active_runtime().panes.len(), before, "no tab opened");
+        assert!(
+            ws.main_area
+                .runtimes
+                .get(&other)
+                .is_none_or(|rt| rt.tabs.is_empty()),
+            "not in the worktree it ran in either"
+        );
+        assert_eq!(ws.active, active, "and the screen did not move");
+    });
 }
 
 /// A run the overage switch stopped is toasted even over the Flows page,
 /// which shows it only as canceled; a run a person stopped is not.
 #[gpui::test]
 async fn a_run_stopped_for_extra_usage_is_toasted(cx: &mut TestAppContext) {
-    let (here_dir, ws, _path, wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
+    let (here_dir, ws, _path, _wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
     let canceled = daruda_flow::event::FlowEvent::RunEnded {
         end: daruda_flow::event::RunEnd::Canceled { node: None },
     };
@@ -485,26 +490,35 @@ async fn a_run_stopped_for_extra_usage_is_toasted(cx: &mut TestAppContext) {
     std::fs::write(run_dir.join(daruda_flow::record::RUN_REPORT_FILE), "# Run").expect("report");
     let limit = billed_limit();
 
-    cx.update_window(wh.into(), |_, _window, cx| {
-        ws.update(cx, |ws, cx| {
-            let active = ws.active;
-            ws.show_page(crate::workspace::pages::Page::Flows, cx);
+    let active = ws.update(cx, |ws, cx| {
+        ws.show_page(crate::workspace::pages::Page::Flows, cx);
+        ws.active
+    });
 
-            ws.seed_flow_run_for_test(active, run_dir.clone());
-            ws.apply_flow_event_whole_for_test(active, &canceled, cx);
-            assert_eq!(overage_toasts(ws), 0, "a Stop by hand needs no telling");
+    ws.update(cx, |ws, cx| {
+        ws.seed_flow_run_for_test(active, run_dir.clone(), cx)
+    });
+    ws.update(cx, |ws, cx| {
+        ws.apply_flow_event_for_test(active, &canceled, cx)
+    });
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(overage_toasts(ws), 0, "a Stop by hand needs no telling");
+    });
 
-            ws.seed_flow_run_for_test(active, run_dir.clone());
-            ws.flows.runs.trip_overage_for_test(active, &limit);
-            ws.apply_flow_event_whole_for_test(active, &canceled, cx);
-            assert_eq!(
-                overage_toasts(ws),
-                1,
-                "the switch's stop is said, page or not"
-            );
-        });
-    })
-    .expect("window is live");
+    ws.update(cx, |ws, cx| {
+        ws.seed_flow_run_for_test(active, run_dir.clone(), cx);
+        ws.trip_flow_overage_for_test(active, &limit, cx);
+    });
+    ws.update(cx, |ws, cx| {
+        ws.apply_flow_event_for_test(active, &canceled, cx)
+    });
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(
+            overage_toasts(ws),
+            1,
+            "the switch's stop is said, page or not"
+        );
+    });
 }
 
 /// Runs off screen that the overage switch stopped are toasted too — their
@@ -527,29 +541,32 @@ async fn runs_stopped_for_extra_usage_off_screen_are_toasted_once(cx: &mut TestA
     };
     let limit = billed_limit();
 
-    cx.update_window(wh.into(), |_, _window, cx| {
+    ws.read_with(cx, |ws, _| assert!(one != ws.active && two != ws.active));
+    for (lane, root) in [(one, one_dir.path()), (two, two_dir.path())] {
         ws.update(cx, |ws, cx| {
-            assert!(one != ws.active && two != ws.active);
-            for (lane, root) in [(one, one_dir.path()), (two, two_dir.path())] {
-                ws.seed_flow_run_for_test(lane, run_in(root));
-                ws.flows.runs.trip_overage_for_test(lane, &limit);
-                ws.apply_flow_event_whole_for_test(lane, &canceled, cx);
-                assert!(
-                    ws.lane_for(lane).is_some_and(|lane| lane.is_unread),
-                    "the stopped worktree is marked"
-                );
-            }
-            assert_eq!(overage_toasts(ws), 2, "each stop is said");
-            let merged: Vec<u32> = ws
-                .error_toasts(cx)
-                .iter()
-                .filter(|t| t.report.title == crate::surface::strings::flow::overage_stopped())
-                .map(|t| t.repeat_count)
-                .collect();
-            assert_eq!(merged, [2], "in one toast with a count");
+            ws.seed_flow_run_for_test(lane, run_in(root), cx);
+            ws.trip_flow_overage_for_test(lane, &limit, cx);
         });
-    })
-    .expect("window is live");
+        ws.update(cx, |ws, cx| {
+            ws.apply_flow_event_for_test(lane, &canceled, cx)
+        });
+        ws.read_with(cx, |ws, _| {
+            assert!(
+                ws.lane_for(lane).is_some_and(|lane| lane.is_unread),
+                "the stopped worktree is marked"
+            );
+        });
+    }
+    ws.update(cx, |ws, cx| {
+        assert_eq!(overage_toasts(ws), 2, "each stop is said");
+        let merged: Vec<u32> = ws
+            .error_toasts(cx)
+            .iter()
+            .filter(|t| t.report.title == crate::surface::strings::flow::overage_stopped())
+            .map(|t| t.repeat_count)
+            .collect();
+        assert_eq!(merged, [2], "in one toast with a count");
+    });
 }
 
 fn billed_limit() -> daruda_acp::RateLimitView {
@@ -628,20 +645,15 @@ async fn the_stop_prompt_stops_the_run_it_was_raised_for(cx: &mut TestAppContext
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             let active = ws.active;
-            ws.seed_flow_run_for_test(active, runs.join("run-here"));
-            ws.seed_flow_run_for_test(other, runs.join("run-elsewhere"));
+            ws.seed_flow_run_for_test(active, runs.join("run-here"), cx);
+            ws.seed_flow_run_for_test(other, runs.join("run-elsewhere"), cx);
 
             // Raised for `other`, answered with Enter.
             ws.overlays.flow_picker =
                 crate::workspace::command::flow_picker::FlowPicker::Stopping { lane: other };
             ws.execute_flow_picker_selection(window, cx);
 
-            let canceled: Vec<(daruda_store::project::LaneRef, bool)> = ws
-                .flows
-                .runs
-                .iter()
-                .map(|(l, handle)| (l, handle.cancel.is_canceled()))
-                .collect();
+            let canceled = stopping(ws, [active, other], cx);
             assert!(
                 canceled.contains(&(other, true)),
                 "the prompt stopped a different run than it named: {canceled:?}"
@@ -664,21 +676,16 @@ async fn a_stop_reaches_the_named_worktree_not_the_active_one(cx: &mut TestAppCo
 
     ws.update(cx, |ws, cx| {
         let active = ws.active;
-        ws.seed_flow_run_for_test(active, lane.path().join("run-here"));
-        ws.seed_flow_run_for_test(other, lane.path().join("run-elsewhere"));
+        ws.seed_flow_run_for_test(active, lane.path().join("run-here"), cx);
+        ws.seed_flow_run_for_test(other, lane.path().join("run-elsewhere"), cx);
 
         assert_eq!(
             ws.control_flow_stop(other, cx),
             Ok(crate::control::result::StopDisposition::Stopped)
         );
         // The token is the stop; the entry stays until the event pump retires
-        // it, so cancellation is what to read — not `is_running`.
-        let canceled: Vec<(daruda_store::project::LaneRef, bool)> = ws
-            .flows
-            .runs
-            .iter()
-            .map(|(lane, handle)| (lane, handle.cancel.is_canceled()))
-            .collect();
+        // it, so cancellation is what to read — not whether a run is there.
+        let canceled = stopping(ws, [active, other], cx);
         assert!(
             canceled.contains(&(other, true)),
             "the named worktree's run was not stopped: {canceled:?}"
@@ -718,10 +725,7 @@ async fn stopping_a_worktree_with_no_run_is_an_ok_disposition(cx: &mut TestAppCo
 /// person to look at different things.
 #[gpui::test]
 async fn the_default_target_separates_no_flow_from_no_worktree(cx: &mut TestAppContext) {
-    let (_lane, ws, _path, wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
-    cx.update(|cx| {
-        crate::window_registry::WindowRegistry::register(wh.into(), ws.downgrade(), cx);
-    });
+    let (_lane, _ws, _path, _wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
     cx.update(|cx| {
         assert!(
             crate::control::exec::first_lane_offering("ship", cx).is_ok(),
@@ -753,7 +757,8 @@ async fn a_phone_started_run_reports_its_outcome_back(cx: &mut TestAppContext) {
     config.telegram.enabled = true;
     config.telegram.authorized_chat_id = Some(42);
     let project = daruda_store::project::Project::from_path(lane.path());
-    let (wh, ws) = build_workspace_with(cx, &config, Some(project));
+    let built = build_workspace_with(cx, &config, Some(project));
+    let (wh, ws) = registered(cx, built);
 
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
@@ -792,11 +797,20 @@ async fn a_desktop_started_run_stays_off_the_phone(cx: &mut TestAppContext) {
         cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
     let (lane, ws, _path, _wh) = telegram_workspace_with_a_flow(cx, COMMAND_ONLY);
 
-    ws.update(cx, |ws, cx| {
+    let lane_ref = ws.update(cx, |ws, cx| {
         let lane_ref = ws.active_ref();
         // Seeded, i.e. not marked as owing anyone an answer.
-        ws.seed_flow_run_for_test(lane_ref, lane.path().join("run"));
-        let _ = ws.settle_flow_run(lane_ref, &daruda_flow::event::RunEnd::Done, None, cx);
+        ws.seed_flow_run_for_test(lane_ref, lane.path().join("run"), cx);
+        lane_ref
+    });
+    ws.update(cx, |ws, cx| {
+        ws.apply_flow_event_for_test(
+            lane_ref,
+            &daruda_flow::event::FlowEvent::RunEnded {
+                end: daruda_flow::event::RunEnd::Done,
+            },
+            cx,
+        )
     });
 
     assert!(
@@ -817,10 +831,10 @@ async fn a_cancelled_phone_started_run_still_reports_back(cx: &mut TestAppContex
         ws.update(cx, |ws, cx| {
             ws.control_flow_run(ws.active, "ship", window, cx)
                 .expect("dispatched");
-            // `cancel` trips the token and leaves the handle in place, so the
+            // A stop trips the token and leaves the run in place, so the
             // engine returns and the run still gets to say how it ended.
             let lane_ref = ws.active_ref();
-            ws.flows.runs.cancel(lane_ref);
+            ws.stop_flow_run_in(lane_ref, cx);
         });
     })
     .expect("window is live");
@@ -833,3 +847,71 @@ async fn a_cancelled_phone_started_run_still_reports_back(cx: &mut TestAppContex
         "the phone is told something rather than left waiting"
     );
 }
+
+/// Whether each of `lanes`' runs has been told to stop.
+fn stopping(
+    ws: &Workspace,
+    lanes: [daruda_store::project::LaneRef; 2],
+    cx: &gpui::App,
+) -> Vec<(daruda_store::project::LaneRef, bool)> {
+    lanes
+        .into_iter()
+        .filter_map(|lane| Some((lane, ws.flow_run_in(lane, cx)?.is_stopping())))
+        .collect()
+}
+
+/// F6: closing the window that started a run used to leave the run going
+/// with no stop switch anywhere — the token lived in that window. The
+/// process holds the run now, so another window on the same worktree sees it
+/// and stops it.
+#[gpui::test]
+async fn closing_the_window_that_started_a_run_keeps_it_stoppable(cx: &mut TestAppContext) {
+    let (lane, first, flow_path, first_wh) = workspace_with_a_flow(cx, LONG_COMMAND);
+    let config = daruda_config::Config::default();
+    let built = build_workspace_with(
+        cx,
+        &config,
+        Some(daruda_store::project::Project::from_path(lane.path())),
+    );
+    let (_second_wh, second) = registered(cx, built);
+
+    cx.update_window(first_wh.into(), |_, window, cx| {
+        first.update(cx, |ws, cx| {
+            assert!(ws.run_flow_at(
+                ws.active,
+                &flow_path,
+                crate::workspace::command::flow_picker::FlowPurpose::Run,
+                crate::workspace::flow_request::FlowSelection::default(),
+                window,
+                cx,
+            ));
+        });
+    })
+    .expect("window is live");
+    drop(first);
+    cx.update_window(first_wh.into(), |_, window, _| window.remove_window())
+        .expect("window is live");
+    cx.run_until_parked();
+    assert!(
+        run_is_held(cx, lane.path()),
+        "closing the window ended the run"
+    );
+
+    let here = second.read_with(cx, |ws, _| ws.active);
+    let rows = second.read_with(cx, |ws, cx| ws.flow_rows_for_active_lane(cx));
+    assert_eq!(rows.len(), 1, "the other window does not see the run");
+    second.update(cx, |ws, cx| ws.stop_flow_run_in(here, cx));
+    assert!(
+        wait_for_run(cx, |cx| !run_is_held(cx, lane.path())),
+        "the run did not stop from the window that is left"
+    );
+}
+
+/// Long enough that only a stop ends it within a test's patience.
+const LONG_COMMAND: &str = "\
+version: 1
+nodes:
+  - id: wait
+    kind: command
+    run: \"sleep 30\"
+";

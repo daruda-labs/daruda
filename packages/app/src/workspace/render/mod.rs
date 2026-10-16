@@ -368,7 +368,7 @@ impl Workspace {
             })
             .filter(|(_, outcome)| outcome.has_numbers())
             .collect();
-        let flows = self.flow_status_rows();
+        let flows = self.flow_status_rows(cx);
         let status_data = StatusBarData {
             orchestrator: self.orchestrator_chip_state(cx),
             project_branch: self.active_project_branch_label().map(Into::into),

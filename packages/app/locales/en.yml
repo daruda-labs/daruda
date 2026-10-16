@@ -1707,10 +1707,9 @@ flow:
   # The prompt over the profile list.
   picker_prompt_profile: "Run %{flow} as…"
   picker_empty: "No flows here yet — add one under .daruda/flows/"
-  # Said under a question when more are behind it. Without it a person
-  # answers, sees a different question appear, and cannot tell whether they
-  # answered the wrong one.
-  more_questions_waiting: "%{n} more waiting"
+  # An answer the run could not take: the question had already closed —
+  # its node was stopped or timed out — so nothing acted on the click.
+  ask_closed: "The flow had stopped waiting for that answer, so it was not used"
   # The modal's way out that is not an answer. Names the object because
   # "Stop" alone, beside three answer buttons, reads as stopping the tool
   # call rather than the run.

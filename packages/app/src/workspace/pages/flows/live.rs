@@ -6,23 +6,22 @@ use crate::workspace::flow_browser::FlowPageSnapshot;
 use crate::workspace::flow_rows::FlowRunRow;
 use gpui::{IntoElement, SharedString, div, prelude::*, px};
 
+/// One open question with its own answers. A run can hold several — nodes
+/// running together ask independently — so each says who is asking.
 pub(super) fn ask_block(
     lane: daruda_store::project::LaneRef,
     ask: &crate::workspace::flow_rows::AskRowData,
-    also_waiting: usize,
     snap: &FlowPageSnapshot,
     cx: &gpui::App,
 ) -> impl IntoElement {
     let t = theme::current(cx);
     let ask_id = ask.ask_id;
-    // No heading naming the tool: the summary line above already reads
-    // "<node> is waiting on you — <tool>", and saying it twice in a 290px
-    // column pushes the buttons off the first screenful.
     div()
         .flex()
         .flex_col()
         .gap(px(theme::GAP_SM))
         .px(px(theme::LIST_ROW_PAD_X))
+        .child(div().text_color(t.text_body).child(ask.asked.clone()))
         .children(ask.detail.clone().map(|detail| {
             div()
                 .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
@@ -42,16 +41,6 @@ pub(super) fn ask_block(
                         .map(|(ix, choice)| answer_button(lane, ask_id, ix, choice, snap)),
                 ),
         )
-        // Only when there are: a line saying "0 more waiting" under every
-        // ordinary question is noise on the common case.
-        .when(also_waiting > 0, |block| {
-            block.child(
-                div()
-                    .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
-                    .text_color(t.text_subtle)
-                    .child(strings::flow::more_questions_waiting(also_waiting)),
-            )
-        })
 }
 
 /// One answer. Allow kinds take the primary treatment and reject kinds the

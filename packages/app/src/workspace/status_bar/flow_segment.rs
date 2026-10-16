@@ -42,7 +42,7 @@ pub(super) fn render(
     if runs.is_empty() {
         return None;
     }
-    let asking = runs.iter().any(|run| run.asking.is_some());
+    let asking = runs.iter().any(|run| !run.asking.is_empty());
     let label = SharedString::from(trigger_label(runs, density));
     let summary = SharedString::from(crate::surface::strings::flow::chip_summary(runs.len()));
     let rows = runs.to_vec();
@@ -73,9 +73,7 @@ pub(super) fn render(
 fn waiting_count(runs: &[FlowRunRow]) -> usize {
     // Questions, not runs: one run can hold several once its nodes run
     // together.
-    runs.iter()
-        .map(|run| usize::from(run.asking.is_some()) + run.also_waiting)
-        .sum()
+    runs.iter().map(|run| run.asking.len()).sum()
 }
 
 /// The panel header's state and its tone: the waiting count, tinted, while
@@ -263,19 +261,23 @@ mod tests {
             },
             lane_label: "temp / main".into(),
             doing: doing.to_string().into(),
-            asking: None,
-            also_waiting: 0,
+            asking: Vec::new(),
+        }
+    }
+
+    fn question(ask_id: u64) -> crate::workspace::flow_rows::AskRowData {
+        crate::workspace::flow_rows::AskRowData {
+            ask_id,
+            asked: "implement is waiting".into(),
+            tool: "Bash".into(),
+            detail: None,
+            options: Vec::new(),
         }
     }
 
     fn waiting_row() -> FlowRunRow {
         FlowRunRow {
-            asking: Some(crate::workspace::flow_rows::AskRowData {
-                ask_id: 1,
-                tool: "Bash".into(),
-                detail: None,
-                options: Vec::new(),
-            }),
+            asking: vec![question(1)],
             ..row("implement")
         }
     }
@@ -289,7 +291,7 @@ mod tests {
         assert!(matches!(tone, super::super::menu::Tone::Plain));
 
         let parallel = FlowRunRow {
-            also_waiting: 2,
+            asking: (1..=3).map(question).collect(),
             ..waiting_row()
         };
         let (state, tone) = header_state(&[row("verdict"), parallel]);

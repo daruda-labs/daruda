@@ -115,7 +115,7 @@ fn removing_a_lane_drops_its_scoped_state_and_preserves_its_sibling(cx: &mut Tes
         ws.update(cx, |ws, cx| {
             let survivor = ws.active;
             let removed = add_removable_lane(ws);
-            assert!(ws.validate_remove_lane(removed).is_ok());
+            assert!(ws.validate_remove_lane(removed, cx).is_ok());
             seed_git_state(ws, survivor);
             seed_git_state(ws, removed);
             seed_files_state(ws, survivor);

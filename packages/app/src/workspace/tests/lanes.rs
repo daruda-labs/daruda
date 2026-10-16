@@ -17,7 +17,7 @@ fn test_workspace_with_project_bootstraps_one_default_lane(cx: &mut TestAppConte
         )
     });
     let ws = wh.root(cx).unwrap();
-    ws.read_with(cx, |ws, _| {
+    ws.read_with(cx, |ws, cx| {
         assert_eq!(ws.active_lanes().len(), 1);
         assert_eq!(ws.active_lanes()[0].id, 0);
         assert_eq!(ws.active.lane, 0);
@@ -39,14 +39,14 @@ fn test_workspace_with_project_bootstraps_one_default_lane(cx: &mut TestAppConte
             project: proj,
             lane: 999,
         };
-        let err = ws.validate_remove_lane(unknown).unwrap_err();
+        let err = ws.validate_remove_lane(unknown, cx).unwrap_err();
         assert!(err.contains("not found"));
 
         let default_lane = daruda_store::project::LaneRef {
             project: proj,
             lane: 0,
         };
-        let err = ws.validate_remove_lane(default_lane).unwrap_err();
+        let err = ws.validate_remove_lane(default_lane, cx).unwrap_err();
         assert!(err.contains("cannot be removed"));
     });
 
@@ -1182,9 +1182,6 @@ fn closing_last_tab_of_only_lane_closes_window(cx: &mut TestAppContext) {
 /// worktree remove` just deleted, with nothing left on screen to stop it.
 #[gpui::test]
 fn a_lane_a_flow_is_running_in_cannot_be_removed(cx: &mut TestAppContext) {
-    use crate::workspace::flow_request::FlowSource;
-    use crate::workspace::flow_runs::{RunHandle, RunStage};
-
     let config = daruda_config::Config::default();
     let root = std::path::PathBuf::from("/tmp/test_remove_lane_running_flow");
     let project = daruda_store::project::Project::from_path(&root);
@@ -1221,28 +1218,20 @@ fn a_lane_a_flow_is_running_in_cannot_be_removed(cx: &mut TestAppContext) {
         }
     });
 
-    ws.read_with(cx, |ws, _| {
+    ws.read_with(cx, |ws, cx| {
         assert!(
-            ws.validate_remove_lane(target).is_ok(),
+            ws.validate_remove_lane(target, cx).is_ok(),
             "the lane is removable while nothing is running in it"
         );
     });
 
-    ws.update(cx, |ws, _| {
-        let run_dir = checkout.join("run");
-        ws.flows.runs.insert(
-            target,
-            RunHandle::seeded(
-                run_dir.clone(),
-                FlowSource::Resumed { run_dir },
-                RunStage::Starting,
-            ),
-        );
+    ws.update(cx, |ws, cx| {
+        ws.seed_flow_run_for_test(target, checkout.join("run"), cx);
     });
 
-    ws.read_with(cx, |ws, _| {
+    ws.read_with(cx, |ws, cx| {
         let err = ws
-            .validate_remove_lane(target)
+            .validate_remove_lane(target, cx)
             .expect_err("a running flow blocks removal");
         assert_eq!(
             err,
@@ -1296,9 +1285,9 @@ async fn a_flow_another_process_runs_here_blocks_removing_the_lane(cx: &mut Test
         }
     });
 
-    ws.read_with(cx, |ws, _| {
+    ws.read_with(cx, |ws, cx| {
         assert!(
-            ws.validate_remove_lane(target).is_ok(),
+            ws.validate_remove_lane(target, cx).is_ok(),
             "the lane is removable while nothing holds it"
         );
     });
@@ -1319,9 +1308,9 @@ async fn a_flow_another_process_runs_here_blocks_removing_the_lane(cx: &mut Test
     )
     .expect("plant a lock");
 
-    ws.read_with(cx, |ws, _| {
+    ws.read_with(cx, |ws, cx| {
         assert_eq!(
-            ws.validate_remove_lane(target)
+            ws.validate_remove_lane(target, cx)
                 .expect_err("another process's run blocks removal"),
             crate::surface::strings::modal::remove_lane_err_flow_elsewhere(holder_process.id()),
         );

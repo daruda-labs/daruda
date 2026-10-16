@@ -98,6 +98,8 @@ pub(crate) struct RunsHost {
     pub(super) delivery: super::delivery::Delivery,
     pub(super) cli: Option<super::cli::CliTracker>,
     pub(super) effects: Option<Rc<dyn RunsEffects>>,
+    /// The flow runs in flight; they belong to the process, not to a log.
+    pub(super) flows: super::flows::FlowRuns,
     /// Closes once the newest proposal has reached the projection; the next
     /// proposal waits on it, so projections apply in proposal order.
     tail: smol::channel::Receiver<()>,
@@ -190,6 +192,7 @@ impl RunsHost {
                 delivery: Default::default(),
                 cli: None,
                 effects: None,
+                flows: Default::default(),
                 tail: settled_tail(),
                 #[cfg(any(test, feature = "screenshot"))]
                 _scratch: None,
@@ -354,8 +357,17 @@ impl RunsHost {
         .detach();
     }
 
-    /// Install the opened host and its projection.
-    pub(crate) fn install(opened: OpenedRuns, cx: &mut App) {
+    /// Install the opened host and its projection. Flow runs already in
+    /// flight and the windows' effects move to the new host: they belong to
+    /// the process, not to the task log being swapped.
+    pub(crate) fn install(mut opened: OpenedRuns, cx: &mut App) {
+        if cx.try_global::<RunsHost>().is_some() {
+            let (flows, effects) = cx.update_global::<RunsHost, _>(|host, _| {
+                (std::mem::take(&mut host.flows), host.effects.take())
+            });
+            opened.host.flows = flows;
+            opened.host.effects = opened.host.effects.take().or(effects);
+        }
         cx.set_global(opened.projection);
         cx.set_global(opened.host);
         Self::install_cli_tracker(cx);
@@ -460,6 +472,7 @@ impl OpenedRuns {
                 delivery: Default::default(),
                 cli: None,
                 effects: None,
+                flows: Default::default(),
                 tail: settled_tail(),
                 #[cfg(any(test, feature = "screenshot"))]
                 _scratch: None,

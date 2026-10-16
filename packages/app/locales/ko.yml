@@ -1186,7 +1186,7 @@ flow:
   picker_profile_defaults: "기본값"
   picker_prompt_profile: "%{flow} 실행 프로필"
   picker_empty: "아직 플로우가 없습니다 — .daruda/flows/ 아래에 만들어 주세요"
-  more_questions_waiting: "%{n}건 더 대기 중"
+  ask_closed: "플로우가 이미 그 응답을 기다리지 않아 응답이 쓰이지 않았습니다"
   ask_modal_stop: "플로우 중단"
   panel_stop: "중단하기"
   ask_modal_title: "플로우가 권한을 묻고 있습니다"

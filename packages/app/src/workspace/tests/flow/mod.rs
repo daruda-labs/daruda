@@ -35,7 +35,8 @@ fn workspace_with_a_flow(
 
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path(lane.path());
-    let (wh, ws) = build_workspace_with(cx, &config, Some(project));
+    let built = build_workspace_with(cx, &config, Some(project));
+    let (wh, ws) = registered(cx, built);
     (lane, ws, flow_path, wh)
 }
 
@@ -62,7 +63,8 @@ fn workspace_with_a_flow_and_agents(
         ..daruda_config::Config::default()
     };
     let project = daruda_store::project::Project::from_path(lane.path());
-    let (wh, ws) = build_workspace_with(cx, &config, Some(project));
+    let built = build_workspace_with(cx, &config, Some(project));
+    let (wh, ws) = registered(cx, built);
     (lane, ws, flow_path, wh)
 }
 
@@ -157,6 +159,24 @@ async fn a_flow_naming_an_unlaunchable_agent_is_refused_with_the_reason(cx: &mut
         reason,
         crate::agent::launch_resolve::ConnectCommandError::JsonStdioEnv
     );
+}
+
+/// A window the run host can reach. A run belongs to the process, which
+/// tells windows through the registry — the one production windows join.
+fn registered(
+    cx: &mut TestAppContext,
+    (wh, ws): (
+        gpui::WindowHandle<gpui_component::Root>,
+        gpui::Entity<Workspace>,
+    ),
+) -> (
+    gpui::WindowHandle<gpui_component::Root>,
+    gpui::Entity<Workspace>,
+) {
+    cx.update(|cx| {
+        crate::window_registry::WindowRegistry::register(wh.into(), ws.downgrade(), cx);
+    });
+    (wh, ws)
 }
 
 const ONE_AGENT: &str = "\
@@ -287,8 +307,31 @@ nodes:
     on_fail: halt
 ";
 
+/// A question from `node`, answered on `reply`.
+fn question(
+    ask_id: u64,
+    node: &str,
+    reply: smol::channel::Sender<daruda_acp::PermissionDecision>,
+) -> daruda_flow::runner::PendingAsk {
+    daruda_flow::runner::PendingAsk {
+        owner: daruda_flow::runner::AskOwner::Node {
+            node: node.into(),
+            generation: 0,
+            attempt: 1,
+        },
+        ask_id,
+        request: daruda_flow::runner::AskRequest {
+            tool: "Bash".to_string(),
+            detail: None,
+            options: Vec::new(),
+        },
+        reply,
+    }
+}
+
 /// Park a question on `lane`, with the reply channel handed back so a test
-/// can see whether it was ever answered.
+/// can see whether it was ever answered. Whatever it raises is up once this
+/// returns.
 fn park_question(
     ws: &gpui::Entity<Workspace>,
     cx: &mut gpui::VisualTestContext,
@@ -297,31 +340,39 @@ fn park_question(
     ask_id: u64,
 ) -> smol::channel::Receiver<daruda_acp::PermissionDecision> {
     let (reply, rx) = smol::channel::bounded(1);
-    cx.update(|window, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.park_flow_ask_for_test(
-                lane,
-                run_dir,
-                daruda_flow::runner::PendingAsk {
-                    owner: daruda_flow::runner::AskOwner::Node {
-                        node: format!("node-{ask_id}").into(),
-                        generation: 0,
-                        attempt: 1,
-                    },
-                    ask_id,
-                    request: daruda_flow::runner::AskRequest {
-                        tool: "Bash".to_string(),
-                        detail: None,
-                        options: Vec::new(),
-                    },
-                    reply,
-                },
-                window,
-                cx,
-            );
-        });
+    let pending = question(ask_id, &format!("node-{ask_id}"), reply);
+    ws.update(cx, |ws, cx| {
+        ws.park_flow_ask_for_test(lane, run_dir, pending, cx)
     });
     rx
+}
+
+/// Seed a run with no engine behind it in `lane`.
+fn seed_run(
+    ws: &gpui::Entity<Workspace>,
+    cx: &mut gpui::VisualTestContext,
+    lane: daruda_store::project::LaneRef,
+    run_dir: &std::path::Path,
+) {
+    let run_dir = run_dir.to_path_buf();
+    ws.update(cx, |ws, cx| ws.seed_flow_run_for_test(lane, run_dir, cx));
+}
+
+/// `lane`'s row in the Flows panel and the chip.
+fn row_of(
+    ws: &gpui::Entity<Workspace>,
+    cx: &mut gpui::VisualTestContext,
+    lane: daruda_store::project::LaneRef,
+) -> Option<crate::workspace::flow_rows::FlowRunRow> {
+    ws.read_with(cx, |ws, cx| {
+        ws.flow_status_rows(cx)
+            .into_iter()
+            .find(|row| row.lane == lane)
+    })
+}
+
+fn has_dialog(cx: &mut gpui::VisualTestContext) -> bool {
+    cx.update(crate::ui::WindowExt::has_active_dialog)
 }
 
 /// A chain long enough that, unfitted, its tail sits past the right edge of
@@ -460,4 +511,27 @@ fn add_lane_with_a_flow(
     })
     .expect("window is live");
     (dir, target)
+}
+
+/// Let a real run's thread get on with it until `done` holds, for at most a
+/// few seconds. The engine wakes the app from its own thread, so the test
+/// scheduler has to be told to allow it.
+fn wait_for_run(
+    cx: &mut TestAppContext,
+    mut done: impl FnMut(&mut TestAppContext) -> bool,
+) -> bool {
+    cx.executor().allow_parking();
+    for _ in 0..200 {
+        cx.run_until_parked();
+        if done(cx) {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    false
+}
+
+/// Whether this process holds a run in `worktree`.
+fn run_is_held(cx: &mut TestAppContext, worktree: &std::path::Path) -> bool {
+    cx.update(|cx| crate::runs::RunsHost::flow_run(worktree, cx).is_some())
 }

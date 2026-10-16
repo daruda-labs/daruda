@@ -135,6 +135,10 @@ fn report_commit_error(ws: &WeakEntity<Workspace>, e: &TaskCommitError, cx: &mut
 struct WorkspaceEffects;
 
 impl RunsEffects for WorkspaceEffects {
+    fn flow_changed(&self, change: &crate::runs::FlowChange, cx: &mut App) {
+        crate::workspace::flow_events::deliver_flow_change(change, cx);
+    }
+
     fn cli_event(
         &self,
         pane: Option<crate::runs::RunPane>,

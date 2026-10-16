@@ -76,7 +76,7 @@ main.rs → menus.rs, windows.rs → workspace/
   → title_bar/ → ui/, surface/
   → runs/, agent/, project/, lane/, surface/, config_watcher.rs
 
-runs/ → daruda_store, daruda_agent, daruda_terminal::pty
+runs/ → daruda_store, daruda_flow, daruda_agent, daruda_terminal::pty
 
 project/ → lane/
 agent/ → lane/
@@ -86,7 +86,8 @@ agent/ → lane/
 - `lane/` imports nothing from `workspace/`, `project/`, or `agent/`.
 - `project/` imports `lane/` only; nothing from `workspace/` or `agent/`.
 - `agent/` imports `lane/` only; nothing from `workspace/` or `project/`.
-- `runs/` owns the process-wide task log, execution bindings and CLI tracker.
+- `runs/` owns the process-wide task log, execution bindings, CLI tracker
+  and the flow runs in flight.
   It never imports this crate's `workspace/`, `project/` or `lane/`. Workspace installs
   `RunsEffects` callbacks for window operations and reads the task projection;
   only RunsHost writes it. `tasks.json` is read-only migration input.

@@ -66,7 +66,7 @@ impl RunRow<'_> {
 
     pub fn filter(&self) -> RunFilter {
         match self {
-            Self::Live(run) if run.asking.is_some() => RunFilter::Asking,
+            Self::Live(run) if !run.asking.is_empty() => RunFilter::Asking,
             Self::Live(_) => RunFilter::Running,
             Self::Past(run) => RunFilter::for_status(run.status),
         }
@@ -128,11 +128,7 @@ impl<'a> RunList<'a> {
             rank(a).cmp(&rank(b)).then_with(|| b.dir().cmp(a.dir()))
         });
         let total = rows.len();
-        let waiting = live
-            .iter()
-            .filter(|run| run.asking.is_some())
-            .map(|run| 1 + run.also_waiting)
-            .sum();
+        let waiting = live.iter().map(|run| run.asking.len()).sum();
         let query = query.trim().to_lowercase();
         let mut counts = [0; 8];
         let visible = rows
@@ -191,8 +187,7 @@ mod tests {
             source: FlowSource::File("ship.yaml".into()),
             lane_label: "main".into(),
             doing: "build".into(),
-            asking: None,
-            also_waiting: 0,
+            asking: Vec::new(),
         }];
         let list = RunList::project(&live, Some(&history), RunFilter::All, "");
         assert_eq!(list.total, 3);
@@ -242,13 +237,15 @@ mod tests {
             source: FlowSource::File("ship.yaml".into()),
             lane_label: "project / main".into(),
             doing: "build".into(),
-            asking: Some(crate::workspace::flow_rows::AskRowData {
-                ask_id: 1,
-                tool: "tool".into(),
-                detail: None,
-                options: Vec::new(),
-            }),
-            also_waiting: 2,
+            asking: (1..=3)
+                .map(|ask_id| crate::workspace::flow_rows::AskRowData {
+                    ask_id,
+                    asked: "build is waiting".into(),
+                    tool: "tool".into(),
+                    detail: None,
+                    options: Vec::new(),
+                })
+                .collect(),
         }];
         let filtered = RunList::project(&runs, None, RunFilter::Failed, "nothing");
         assert_eq!(filtered.waiting, 3);

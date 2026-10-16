@@ -451,11 +451,12 @@ async fn a_previous_runs_colours_do_not_erase_why_a_pin_went(cx: &mut TestAppCon
     let here = ws.update(&mut vcx, |ws, _| ws.active);
     let view = graph_view(&ws, &vcx);
 
-    ws.update(&mut vcx, |ws, _| {
+    ws.update(&mut vcx, |ws, cx| {
         ws.seed_flow_run_of_for_test(
             here,
             lane.path().join("run"),
             crate::workspace::flow_request::FlowSource::File(flow_path.clone()),
+            cx,
         )
     });
     ws.update(&mut vcx, |ws, cx| {

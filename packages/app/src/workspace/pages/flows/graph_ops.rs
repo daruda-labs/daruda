@@ -11,7 +11,6 @@ use std::path::PathBuf;
 
 #[cfg(feature = "screenshot")]
 use daruda_flow::NodeId;
-use daruda_flow::event::FlowEvent;
 use daruda_store::project::LaneRef;
 use gpui::{AppContext as _, Context, Entity, Focusable as _, Window};
 
@@ -77,7 +76,10 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let path = view.read(cx).path().to_path_buf();
-        if let Some(colouring) = self.flows.runs.colouring_of(lane, &path) {
+        if let Some(colouring) = self
+            .flow_run_in(lane, cx)
+            .and_then(|run| run.view().colouring_of(&path))
+        {
             view.update(cx, |view, cx| view.set_run_states(&colouring, cx));
         }
     }
@@ -314,12 +316,12 @@ impl Workspace {
         }
     }
 
-    /// Fold the event into this run's per-node states and hand the result to
-    /// the graph, if it draws that flow for that lane.
+    /// Hand a run's colouring to the graph, if it draws that flow for that
+    /// lane.
     ///
     /// Matched by lane *and* path: two lanes can run the same flow. A resumed
     /// run matches nothing — it cannot say which file it is of
-    /// ([`FlowSource`]) — so the graph stays the static picture it was.
+    /// ([`crate::runs::FlowSource`]) — so the graph stays the static picture it was.
     ///
     /// The view is `.cached()`, so what makes a colour change visible is a
     /// notify on the canvas entity inside it — `set_run_states` raises it.
@@ -328,10 +330,10 @@ impl Workspace {
     pub(in crate::workspace) fn colour_flow_graph(
         &mut self,
         lane_ref: LaneRef,
-        event: &FlowEvent,
+        colouring: Option<(std::path::PathBuf, crate::runs::RunColouring)>,
         cx: &mut Context<Self>,
     ) {
-        let Some((path, colouring)) = self.flows.runs.colour_after(lane_ref, event) else {
+        let Some((path, colouring)) = colouring else {
             return;
         };
         if let Some((_, lane, view)) = self.open_graph_of(&path, cx)
@@ -360,11 +362,13 @@ impl Workspace {
         };
         let lane = self.active;
         self.open_flow_graph(lane, &path, window, cx);
+        use daruda_flow::event::FlowEvent;
         let run_dir = self.active_lane_root().unwrap_or_default();
         self.seed_flow_run_of_for_test(
             lane,
-            run_dir,
+            run_dir.clone(),
             crate::workspace::flow_request::FlowSource::File(path.clone()),
+            cx,
         );
 
         let nodes: Vec<NodeId> = self
@@ -396,10 +400,13 @@ impl Workspace {
                 _ => {}
             }
         }
+        let worktree = self
+            .lane_for(lane)
+            .map(|lane| lane.path.clone())
+            .unwrap_or_default();
         for event in &script {
-            // The two halves the real pump runs for a non-terminal event.
-            self.colour_flow_graph(lane, event, cx);
-            self.advance_flow_stage(lane, event, cx);
+            // The path the real pump takes for a non-terminal event.
+            crate::runs::RunsHost::apply_flow_event(&worktree, &run_dir, event, None, cx);
         }
     }
 

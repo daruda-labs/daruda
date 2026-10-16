@@ -15,18 +15,19 @@ use crate::workspace::flow_request::FlowSelection;
 /// never be one of those in the first place.
 #[gpui::test]
 async fn every_path_the_app_puts_in_a_request_is_absolute(cx: &mut TestAppContext) {
-    let (_lane, ws, flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let (lane, ws, flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
 
-    let (lane_ref, issues) = ws.update(cx, |ws, cx| {
+    let (worktree, issues) = ws.update(cx, |ws, cx| {
         let submission = ws
             .build_flow_request(ws.active, &flow_path, None, &FlowSelection::default(), cx)
             .unwrap_or_else(|_| panic!("a local lane with a valid flow builds a request"));
         (
-            submission.lane,
+            submission.request.cwd.clone(),
             daruda_flow::request::validate_request(&submission.request),
         )
     });
-    assert_eq!(lane_ref, ws.update(cx, |ws, _cx| ws.active_ref()));
+    // The run is held by its worktree, so the request must name the lane's.
+    assert_eq!(worktree, lane.path());
 
     let relative: Vec<_> = issues
         .iter()
@@ -314,40 +315,42 @@ async fn a_lock_at_its_new_home_is_found_with_nothing_left_inside_the_tree(
 /// and opened the report of — whichever lane happened to be active.
 #[gpui::test]
 async fn a_run_ending_settles_its_own_lane_and_leaves_the_others_alone(cx: &mut TestAppContext) {
-    let (lane, ws, _flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let (lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let (other, elsewhere) = add_lane_with_a_flow(&ws, wh, cx, "deploy.yaml", ONE_AGENT);
     let dir_here = lane.path().join("run-here");
-    let dir_elsewhere = lane.path().join("run-elsewhere");
+    let dir_elsewhere = other.path().join("run-elsewhere");
     for dir in [&dir_here, &dir_elsewhere] {
         std::fs::create_dir_all(dir).expect("run dir");
         std::fs::write(dir.join(daruda_flow::record::RUN_REPORT_FILE), "# Run").expect("report");
     }
 
-    ws.update(cx, |ws, cx| {
+    let here = ws.update(cx, |ws, cx| {
         let here = ws.active;
-        let elsewhere = daruda_store::project::LaneRef {
-            project: here.project,
-            lane: here.lane + 1,
-        };
-        ws.seed_flow_run_for_test(here, dir_here.clone());
-        ws.seed_flow_run_for_test(elsewhere, dir_elsewhere.clone());
+        ws.seed_flow_run_for_test(here, dir_here.clone(), cx);
+        ws.seed_flow_run_for_test(elsewhere, dir_elsewhere.clone(), cx);
+        here
+    });
+    // The run in the *other* lane ends while this one is active.
+    ws.update(cx, |ws, cx| {
+        ws.apply_flow_event_for_test(
+            elsewhere,
+            &daruda_flow::event::FlowEvent::RunEnded {
+                end: daruda_flow::event::RunEnd::Done,
+            },
+            cx,
+        )
+    });
 
-        // The run in the *other* lane ends while this one is active.
-        let report = ws.settle_flow_run(elsewhere, &daruda_flow::event::RunEnd::Done, None, cx);
-
-        assert_eq!(
-            report.as_deref(),
-            Some(
-                dir_elsewhere
-                    .join(daruda_flow::record::RUN_REPORT_FILE)
-                    .as_path()
-            ),
-            "opened the active lane's report instead of the one that ended"
-        );
+    ws.read_with(cx, |ws, cx| {
         assert!(
-            ws.flows.runs.is_running(here),
-            "settling one lane dropped another lane's cancel token"
+            ws.is_flow_running_in(here, cx),
+            "settling one lane dropped another lane's run"
         );
-        assert!(!ws.flows.runs.is_running(elsewhere));
+        assert!(!ws.is_flow_running_in(elsewhere, cx));
+        assert!(
+            ws.lane_for(elsewhere).is_some_and(|lane| lane.is_unread),
+            "the report that waits is the ended run's, in its own worktree"
+        );
     });
 }
 
@@ -358,26 +361,23 @@ async fn a_run_ending_settles_its_own_lane_and_leaves_the_others_alone(cx: &mut 
 async fn the_panel_lists_only_the_active_lane_while_the_chip_lists_every_one(
     cx: &mut TestAppContext,
 ) {
-    let (lane, ws, _flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let (lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let (other, elsewhere) = add_lane_with_a_flow(&ws, wh, cx, "deploy.yaml", ONE_AGENT);
 
-    ws.update(cx, |ws, _cx| {
+    ws.update(cx, |ws, cx| {
         let here = ws.active;
-        let elsewhere = daruda_store::project::LaneRef {
-            project: here.project,
-            lane: here.lane + 1,
-        };
-        ws.seed_flow_run_for_test(here, lane.path().join("run-here"));
-        ws.seed_flow_run_for_test(elsewhere, lane.path().join("run-elsewhere"));
+        ws.seed_flow_run_for_test(here, lane.path().join("run-here"), cx);
+        ws.seed_flow_run_for_test(elsewhere, other.path().join("run-elsewhere"), cx);
 
         let panel: Vec<_> = ws
-            .flow_rows_for_active_lane()
+            .flow_rows_for_active_lane(cx)
             .into_iter()
             .map(|row| row.lane)
             .collect();
         assert_eq!(panel, vec![here], "the panel reached into another lane");
 
         assert_eq!(
-            ws.flow_status_rows().len(),
+            ws.flow_status_rows(cx).len(),
             2,
             "the chip must still see both — it is the cross-lane surface"
         );
@@ -405,7 +405,7 @@ async fn a_started_run_updates_the_flow_page_independently_of_the_right_dock(
         );
         let before = ws.prepare_right_dock_snapshot(cx);
         let here = ws.active;
-        ws.seed_flow_run_for_test(here, lane.path().join("run-here"));
+        ws.seed_flow_run_for_test(here, lane.path().join("run-here"), cx);
         ws.stage_flow_page(cx);
         assert_eq!(
             ws.flows.browser.page_snapshot.as_ref().unwrap().flows.len(),
@@ -500,36 +500,40 @@ async fn only_a_run_leaving_setup_refreshes_the_history(cx: &mut TestAppContext)
     let here = ws.update(cx, |ws, cx| {
         let here = ws.active;
         ws.show_page(crate::workspace::pages::Page::Flows, cx);
-        ws.seed_flow_run_for_test(here, lane.path().join("run-here"));
+        ws.seed_flow_run_for_test(here, lane.path().join("run-here"), cx);
         ws.flow_history_for_panel(cx);
         here
     });
     cx.run_until_parked();
     ws.update(cx, |ws, cx| {
         ws.flow_history_for_panel(cx).expect("primed");
-
         // Leaving `Starting`: the sweep has happened, so the list is stale.
         ws.apply_flow_event_for_test(here, &started("design"), cx);
+    });
+    ws.update(cx, |ws, cx| {
         assert!(
             ws.flows.history.get(here).is_none(),
             "a swept run would stay on screen for the length of the run"
         );
-
         ws.flow_history_for_panel(cx);
     });
     cx.run_until_parked();
     ws.update(cx, |ws, cx| {
         ws.flow_history_for_panel(cx).expect("re-read");
-        // Every node after the first: the directory has not changed, and
-        // re-reading it per node is the cost this cache exists to avoid.
-        for node in ["test", "review"] {
-            ws.apply_flow_event_for_test(here, &started(node), cx);
+    });
+    // Every node after the first: the directory has not changed, and
+    // re-reading it per node is the cost this cache exists to avoid.
+    for node in ["test", "review"] {
+        ws.update(cx, |ws, cx| {
+            ws.apply_flow_event_for_test(here, &started(node), cx)
+        });
+        ws.read_with(cx, |ws, _| {
             assert!(
                 ws.flows.history.get(here).is_some(),
                 "re-read the directory at node `{node}`"
             );
-        }
-    });
+        });
+    }
 }
 
 /// The panel is lane-scoped, so a question raised in a lane you are not
@@ -544,8 +548,8 @@ async fn revealing_a_run_lands_on_its_lane_with_the_panel_open(cx: &mut TestAppC
     let (wh, ws) = build_workspace_with(cx, &config, Some(project));
 
     let here = ws.update(cx, |ws, _cx| ws.active);
-    ws.update(cx, |ws, _cx| {
-        ws.seed_flow_run_for_test(here, lane.path().join("run"));
+    ws.update(cx, |ws, cx| {
+        ws.seed_flow_run_for_test(here, lane.path().join("run"), cx);
     });
 
     wh.update(cx, |_, window, cx| {
@@ -798,15 +802,14 @@ async fn a_killed_run_is_continued_from_its_own_directory(cx: &mut TestAppContex
     // The flow file says something else entirely by now.
     std::fs::write(&flow_path, "version: 1\nnodes: []\n").expect("rewrite");
 
-    let (lane_ref, request) = ws.update(cx, |ws, cx| {
+    let request = ws.update(cx, |ws, cx| {
         let lane_ref = ws.active_ref();
-        let submission = ws
-            .build_resume_request(lane_ref, &run_dir, cx)
-            .unwrap_or_else(|e| panic!("a killed run should be resumable: {e:?}"));
-        (submission.lane, submission.request)
+        ws.build_resume_request(lane_ref, &run_dir, cx)
+            .unwrap_or_else(|e| panic!("a killed run should be resumable: {e:?}"))
+            .request
     });
 
-    assert_eq!(lane_ref, ws.update(cx, |ws, _cx| ws.active_ref()));
+    assert_eq!(request.cwd, lane.path(), "resumed in another worktree");
     assert_eq!(request.run_dir, run_dir, "a resume took a new directory");
     assert!(
         request.resume.is_some(),
@@ -862,7 +865,6 @@ async fn a_resume_request_uses_the_lane_that_owned_the_row(cx: &mut TestAppConte
             .unwrap_or_else(|e| panic!("a killed run should be resumable: {e:?}"))
     });
 
-    assert_eq!(submission.lane, original);
     assert_eq!(submission.request.cwd, lane.path().to_path_buf());
     assert_ne!(ws.update(cx, |ws, _cx| ws.active_ref()), original);
 }
@@ -1025,7 +1027,7 @@ async fn naming_a_flow_while_one_runs_offers_to_stop_it(cx: &mut TestAppContext)
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             let lane_ref = ws.active_ref();
-            ws.seed_flow_run_for_test(lane_ref, runs.join("0000000000000001-00000001-0001"));
+            ws.seed_flow_run_for_test(lane_ref, runs.join("0000000000000001-00000001-0001"), cx);
             assert!(
                 !ws.run_flow_at(
                     ws.active,
@@ -1068,18 +1070,17 @@ async fn the_stop_prompt_stops_the_run_on_enter_and_leaves_it_on_escape(cx: &mut
         is_held: false,
         prefer_character_input: false,
     };
-    let canceled = |ws: &crate::workspace::Workspace| {
-        ws.flows
-            .runs
-            .iter()
-            .map(|(_, handle)| handle.cancel.is_canceled())
+    let canceled = |ws: &crate::workspace::Workspace, cx: &gpui::App| {
+        ws.flow_run_in(ws.active, cx)
+            .map(crate::runs::FlowRun::is_stopping)
+            .into_iter()
             .collect::<Vec<_>>()
     };
 
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             let lane_ref = ws.active_ref();
-            ws.seed_flow_run_for_test(lane_ref, runs.join("0000000000000001-00000001-0001"));
+            ws.seed_flow_run_for_test(lane_ref, runs.join("0000000000000001-00000001-0001"), cx);
 
             // Escape: the prompt goes away and the run keeps going.
             ws.overlays.flow_picker =
@@ -1089,7 +1090,7 @@ async fn the_stop_prompt_stops_the_run_on_enter_and_leaves_it_on_escape(cx: &mut
                 !ws.overlays.flow_picker.is_open(),
                 "Escape left the prompt up"
             );
-            assert_eq!(canceled(ws), vec![false], "Escape stopped the run");
+            assert_eq!(canceled(ws, cx), vec![false], "Escape stopped the run");
 
             // Enter: the stop. Nothing else in the prompt can reach it.
             ws.overlays.flow_picker =
@@ -1099,7 +1100,7 @@ async fn the_stop_prompt_stops_the_run_on_enter_and_leaves_it_on_escape(cx: &mut
                 !ws.overlays.flow_picker.is_open(),
                 "Enter left the prompt up"
             );
-            assert_eq!(canceled(ws), vec![true], "Enter did not stop the run");
+            assert_eq!(canceled(ws, cx), vec![true], "Enter did not stop the run");
         });
     })
     .expect("the test window is live");
@@ -1127,7 +1128,7 @@ async fn a_list_key_in_the_stop_prompt_changes_nothing(cx: &mut TestAppContext) 
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             let lane_ref = ws.active_ref();
-            ws.seed_flow_run_for_test(lane_ref, runs.join("0000000000000001-00000001-0001"));
+            ws.seed_flow_run_for_test(lane_ref, runs.join("0000000000000001-00000001-0001"), cx);
             ws.overlays.flow_picker =
                 crate::workspace::command::flow_picker::FlowPicker::Stopping { lane: ws.active };
 
@@ -1146,10 +1147,8 @@ async fn a_list_key_in_the_stop_prompt_changes_nothing(cx: &mut TestAppContext) 
                     "{k} closed the stop prompt"
                 );
                 assert!(
-                    ws.flows
-                        .runs
-                        .iter()
-                        .all(|(_, handle)| !handle.cancel.is_canceled()),
+                    ws.flow_run_in(ws.active, cx)
+                        .is_some_and(|run| !run.is_stopping()),
                     "{k} stopped the run"
                 );
             }
@@ -1210,5 +1209,112 @@ async fn the_run_button_on_a_row_does_not_also_open_the_graph(cx: &mut TestAppCo
     assert!(
         ws.read_with(&vcx, |ws, _| ws.open_graph().is_none()),
         "the press went through the button to the row underneath"
+    );
+}
+
+/// F12: a resumed run never re-announces the nodes an earlier process
+/// passed, so a view built from its stream alone drew them pending. The
+/// run's view is checked against its log when it starts.
+#[gpui::test]
+async fn a_resumed_run_colours_carried_nodes_from_the_log(cx: &mut TestAppContext) {
+    let gate = tempfile::tempdir().expect("tempdir");
+    let go = gate.path().join("go");
+    std::fs::write(&go, "").expect("go");
+    // `slow` is quick the first time; on the resume it waits, which is the
+    // window this test reads the run in.
+    let flow = format!(
+        "version: 1\nnodes:\n  - id: carried\n    kind: command\n    run: \"true\"\n  - id: slow\n    kind: command\n    deps: [carried]\n    run: \"test -f {} || sleep 30\"\n",
+        go.display()
+    );
+    let (lane, ws, flow_path, wh) = workspace_with_a_flow(cx, &flow);
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            assert!(ws.run_flow_at(
+                ws.active,
+                &flow_path,
+                crate::workspace::command::flow_picker::FlowPurpose::Run,
+                FlowSelection::default(),
+                window,
+                cx,
+            ));
+        });
+    })
+    .expect("window is live");
+    assert!(
+        wait_for_run(cx, |cx| !run_is_held(cx, lane.path())),
+        "the first run did not finish"
+    );
+
+    // Make it a run a crash cut off right after `carried` passed.
+    let runs = crate::workspace::flow_paths::runs_dir(lane.path());
+    let run_dir = std::fs::read_dir(&runs)
+        .expect("runs")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| path.is_dir())
+        .expect("the run's directory");
+    let log = daruda_flow::run_log::log_dir(&run_dir).join("log.0.jsonl");
+    let text = std::fs::read_to_string(&log).expect("the run log");
+    let cut = text
+        .lines()
+        .position(|line| line.contains("\"attempt_passed\"") && line.contains("\"carried\""))
+        .expect("`carried` passed");
+    let kept: String = text
+        .lines()
+        .take(cut + 1)
+        .map(|line| format!("{line}\n"))
+        .collect();
+    std::fs::write(&log, kept).expect("cut the log");
+    // The marker is written after the end is recorded, so a crash leaves
+    // none — and leaves its lock naming a pid that is gone (0 never lives).
+    std::fs::remove_file(run_dir.join("DONE")).expect("the end's marker");
+    let lock_dir = ws.read_with(cx, |ws, _| {
+        crate::workspace::flow_paths::lane_lock_dir(&ws.lock_root, lane.path())
+            .expect("the lane resolves")
+    });
+    std::fs::create_dir_all(&lock_dir).expect("lock dir");
+    let run_id = run_dir.file_name().expect("id").to_string_lossy();
+    std::fs::write(
+        lock_dir.join(".lock"),
+        format!("pid: 0\nrun_id: {run_id}\nstarted_unix_secs: 1\n"),
+    )
+    .expect("lock");
+    std::fs::remove_file(&go).expect("slow down");
+
+    let here = ws.read_with(cx, |ws, _| ws.active);
+    ws.update(cx, |ws, cx| ws.resume_flow_run(here, &run_dir, cx));
+    let slow_running = wait_for_run(cx, |cx| {
+        cx.update(|cx| {
+            crate::runs::RunsHost::flow_run(lane.path(), cx).is_some_and(|run| {
+                matches!(
+                    run.view().node_state("slow"),
+                    crate::runs::NodeRunState::Running { .. }
+                )
+            })
+        })
+    });
+    let errors = ws.read_with(cx, |ws, _| {
+        ws.error_history()
+            .iter()
+            .map(|r| format!("{} {:?}", r.title, r.context))
+            .collect::<Vec<_>>()
+    });
+    assert!(
+        slow_running,
+        "the resumed run never started `slow`: {errors:?}"
+    );
+    let carried = cx.update(|cx| {
+        crate::runs::RunsHost::flow_run(lane.path(), cx).map(|run| run.view().node_state("carried"))
+    });
+    assert_eq!(
+        carried,
+        Some(crate::runs::NodeRunState::Passed),
+        "a node the earlier process passed reads as never run"
+    );
+
+    ws.update(cx, |ws, cx| ws.stop_flow_run_in(here, cx));
+    assert!(
+        wait_for_run(cx, |cx| !run_is_held(cx, lane.path())),
+        "the resumed run did not stop"
     );
 }
