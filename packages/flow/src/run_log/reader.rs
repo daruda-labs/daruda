@@ -62,13 +62,22 @@ pub fn started(run_dir: &Path) -> bool {
 /// What a run directory says it finished. A missing record is an empty
 /// replay: a crash before the first line is a run with nothing done.
 pub fn read(run_dir: &Path) -> Replay {
-    if !has_log(run_dir) {
+    if !has_log(run_dir) || awaits_import(run_dir) {
         return crate::journal::read(run_dir);
     }
     let lines = read_records(run_dir);
     let mut replay = replay_events(lines.records.iter().filter_map(event_of));
     replay.torn = lines.torn;
     replay
+}
+
+/// Whether an older build's journal still holds this run's progress: the
+/// journal is there and the log, if any, has recorded nothing of the run. A
+/// resume that crashed between opening the log and importing the journal
+/// leaves exactly that, and the journal is still the record.
+pub(crate) fn awaits_import(run_dir: &Path) -> bool {
+    crate::journal::exists(run_dir)
+        && state(run_dir).is_none_or(|state| state.phase() == RunPhase::Fresh)
 }
 
 /// The state the log replays to, or `None` when the run keeps no log.
@@ -81,6 +90,20 @@ pub fn state(run_dir: &Path) -> Option<FlowRunState> {
         FlowRunMachine::apply(&mut state, event);
     }
     Some(state)
+}
+
+/// When the log was last written, for a run it says is still going: the
+/// moment a dead holder stopped. `None` for a run that ended or keeps no log.
+pub(crate) fn last_written_while_running(run_dir: &Path) -> Option<u64> {
+    let records = read_records(run_dir).records;
+    let mut state = FlowRunState::default();
+    for event in records.iter().filter_map(event_of) {
+        FlowRunMachine::apply(&mut state, event);
+    }
+    if state.phase() != RunPhase::Running {
+        return None;
+    }
+    records.last().map(|record| record.at_ms)
 }
 
 /// How a run ended, as its log says. The log wins over a marker.

@@ -27,6 +27,8 @@ pub enum FlowRunRejected {
     WrongNumber,
     #[error("`{0}` has not passed, so it cannot lose or give up an output")]
     NotPassed(NodeId),
+    #[error("`{0}` leaves no output file, so it has none to lose")]
+    NoOutput(NodeId),
     #[error("`{0}` has no fix session in that state")]
     NoFix(NodeId),
     #[error("question {0} is not open")]

@@ -438,6 +438,49 @@ fn a_stopped_attempt_still_counts() {
     assert_eq!(attempts, [2], "the stop did not count");
 }
 
+/// **D4-2.** A stop that used up the node's only try still blocks it: picked
+/// up after a crash that kept the stop but lost the run's end, the node does
+/// not run past its cap, and the run ends the way that stop would have.
+#[test]
+fn a_stop_that_used_up_the_cap_is_not_run_past_it() {
+    // No retry policy: one try, which the stop spends.
+    let flow = "\
+version: 1
+defaults: { agent: { id: claude } }
+nodes:
+  - id: design
+    kind: agent
+    output: design.md
+    prompt: write
+";
+    let loaded = load(flow, None).expect("valid flow");
+    let stopping = || FakeRunner::new().cancel_at("design", 1);
+    let probe = FaultBackend::new();
+    let _ = process(
+        probe.clone(),
+        &loaded,
+        tempfile::tempdir().expect("t").path(),
+        &stopping(),
+    );
+    let ended = append_index(&probe, |e| matches!(e, FlowRunEvent::RunEnded { .. }));
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let first = FaultBackend::new().with_fault(Fault::TornAppend { k: ended, keep: 0 });
+    let _ = process(first.clone(), &loaded, dir.path(), &stopping());
+    let runner = FakeRunner::new();
+
+    let Process::Drove(report) = process(first.crash(), &loaded, dir.path(), &runner) else {
+        panic!("the run could not be picked up");
+    };
+
+    assert!(
+        matches!(&report.outcome, RunOutcome::Canceled { node: Some(node) } if node == "design"),
+        "{:?}",
+        report.outcome
+    );
+    assert!(runner.calls().is_empty(), "the node ran past its cap");
+}
+
 /// **F4.** A pass whose output is gone when the run is picked up is undone,
 /// and only that node runs again.
 #[test]

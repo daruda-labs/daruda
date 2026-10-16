@@ -399,6 +399,77 @@ fn a_pin_counts_as_passed_and_cannot_be_lost() {
     ));
 }
 
+/// **§5.5 step 6.** Only an agent node leaves an output a resume can find
+/// gone; a passed command has none to lose.
+#[test]
+fn a_command_cannot_lose_an_output() {
+    let (state, _) = run(vec![
+        started(),
+        FlowRunEvent::attempt_started(id("gate"), 0),
+        FlowRunEvent::AttemptPassed {
+            node: id("gate"),
+            record: line(1, 1),
+        },
+    ]);
+    assert!(matches!(
+        FlowRunMachine::check(&state, &FlowRunEvent::OutputLost { node: id("gate") }),
+        Err(FlowRunRejected::NoOutput(_))
+    ));
+}
+
+/// **D4-2.** A rerun's generation spends its own tries: an attempt a crash
+/// interrupted in an earlier generation does not discount the new one.
+#[test]
+fn a_rerun_resets_what_a_crash_did_not_spend() {
+    let (state, _) = run(vec![
+        started(),
+        FlowRunEvent::attempt_started(id("design"), 0),
+        FlowRunEvent::Resumed { carried: 0 },
+        FlowRunEvent::attempt_started(id("design"), 0),
+        FlowRunEvent::AttemptPassed {
+            node: id("design"),
+            record: line(2, 2),
+        },
+        FlowRunEvent::RerunScheduled {
+            gate: id("gate"),
+            members: vec![id("design")],
+        },
+        FlowRunEvent::attempt_started(id("design"), 1),
+        FlowRunEvent::Resumed { carried: 0 },
+    ]);
+    let design = state.node(&id("design")).expect("design");
+    assert_eq!(design.generation, 1);
+    assert_eq!(design.crashed, 1, "only this generation's crash is left");
+    assert_eq!(design.spent(), 0);
+
+    let (rerun, _) = run(vec![
+        started(),
+        FlowRunEvent::attempt_started(id("design"), 0),
+        FlowRunEvent::Resumed { carried: 0 },
+        FlowRunEvent::attempt_started(id("design"), 0),
+        FlowRunEvent::AttemptPassed {
+            node: id("design"),
+            record: line(2, 2),
+        },
+        FlowRunEvent::RerunScheduled {
+            gate: id("gate"),
+            members: vec![id("design")],
+        },
+        FlowRunEvent::attempt_started(id("design"), 1),
+        FlowRunEvent::AttemptFailed {
+            node: id("design"),
+            failure: FailureLine::Exit { code: Some(1) },
+            record: line(1, 3),
+        },
+    ]);
+    let design = rerun.node(&id("design")).expect("design");
+    assert_eq!(
+        (design.crashed, design.spent()),
+        (0, 1),
+        "the earlier generation's crash was carried into the rerun"
+    );
+}
+
 /// Only a run that stopped without ending, or ended stalled, resumes.
 #[test]
 fn only_a_crashed_or_stalled_run_resumes() {

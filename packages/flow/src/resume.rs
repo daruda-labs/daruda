@@ -97,19 +97,6 @@ pub(crate) fn settle_wait(last_ms: u64, now_ms: u64, settle: Duration) -> Durati
     settle.saturating_sub(since)
 }
 
-/// When the process before this one last wrote the log: the newest record
-/// ahead of this process's `opened`. `None` when that cannot be read, which
-/// only costs the wait.
-pub(crate) fn last_written_ms<B: LogBackend>(log: &RunLog<FlowRunMachine, B>) -> Option<u64> {
-    let Ok(daruda_runlog::CatchUp::Records(records)) = log.since(0) else {
-        return None;
-    };
-    let opened = records
-        .iter()
-        .rposition(|record| matches!(record.body, daruda_runlog::Body::Opened { .. }))?;
-    records[..opened].last().map(|record| record.at_ms)
-}
-
 /// Why a run directory cannot be picked up.
 #[derive(Debug)]
 pub enum ResumeError {
@@ -181,21 +168,47 @@ pub fn prepare(
     })
 }
 
+/// Whether a resume may go on once the settle window is behind it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Settled {
+    Go,
+    /// Stopped before the run was taken. Nothing was locked or written, so
+    /// the run is left resumable exactly as it was.
+    Stopped,
+}
+
 /// Wait out what is left of the settle window after a dead run's last
 /// record, so its agent processes exit before the run starts beside them.
 /// Only for a run that stopped without ending; a stop cuts the wait short.
-pub(crate) fn settle_after_crash<B: LogBackend>(
-    log: &RunLog<FlowRunMachine, B>,
+///
+/// Before the lock, and reading only when the log was last written: a
+/// stop during the wait must leave no trace. Under the lock it would have
+/// to give the lock back, and a crashed run whose lock is gone reads as
+/// `Unknown`, which nobody can resume.
+pub(crate) fn settle_after_crash(
+    run_dir: &Path,
+    settle: Duration,
+    events: Option<&smol::channel::Sender<crate::event::RunNotice>>,
+    cancel: &crate::runner::CancelToken,
+) -> Settled {
+    if let Some(last_ms) = reader::last_written_while_running(run_dir) {
+        wait_out(last_ms, settle, events, cancel);
+    }
+    // Also with no wait at all: a stop that lands before the run is taken
+    // must not end, in its log, a run that never ran again.
+    if cancel.is_canceled() {
+        Settled::Stopped
+    } else {
+        Settled::Go
+    }
+}
+
+fn wait_out(
+    last_ms: u64,
     settle: Duration,
     events: Option<&smol::channel::Sender<crate::event::RunNotice>>,
     cancel: &crate::runner::CancelToken,
 ) {
-    if log.state().phase() != crate::run_log::machine::RunPhase::Running {
-        return;
-    }
-    let Some(last_ms) = last_written_ms(log) else {
-        return;
-    };
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |since| {
@@ -233,13 +246,18 @@ pub(crate) fn open_under_lock(
     run_dir: &Path,
     loaded: &LoadedFlow,
 ) -> Result<RunLog<FlowRunMachine, daruda_runlog::FileBackend>, RunOutcome> {
-    if reader::has_log(run_dir) {
-        return crate::run_log::store::open_file_log(run_dir);
-    }
-    if !crate::journal::exists(run_dir) {
+    if !reader::started(run_dir) {
         return Err(refused(run_dir, ResumeError::NothingStarted));
     }
     let mut log = crate::run_log::store::open_file_log(run_dir)?;
+    // Decided on what the opened log holds, not on whether it exists: a
+    // crash between opening it and committing the import leaves a log with
+    // nothing in it, and the journal is still the run's record (O3).
+    if log.state().phase() != crate::run_log::machine::RunPhase::Fresh
+        || !crate::journal::exists(run_dir)
+    {
+        return Ok(log);
+    }
     log.commit(import_journal(run_dir, loaded)).map_err(|e| {
         RunOutcome::Io(FlowIoError {
             site: IoSite::Run,

@@ -1,5 +1,5 @@
 //! Fixtures for tests that drive a run below `execute`: a started log, and a
-//! way to make a finished run look killed.
+//! way to make a stopped run look killed.
 
 use std::path::Path;
 
@@ -50,14 +50,19 @@ fn spawn(run_dir: &Path) -> FlowRunStore {
     FlowRunStore::spawn(log, run_dir, None).unwrap_or_else(|e| panic!("the log spawns: {e:?}"))
 }
 
-/// Make a finished run look killed: drop its `RunEnded` and every record
-/// after it, the way a `kill -9` before that commit would have left the log.
-pub(crate) fn forget_end(run_dir: &Path) {
+/// Make a run stopped mid-attempt look killed mid-attempt instead: drop the
+/// stop's settle, the run's end and every record after them, the way a
+/// `kill -9` before those commits would have left the log. A stop that was
+/// recorded spends a try (D4-2); a kill does not.
+pub(crate) fn forget_stop(run_dir: &Path) {
     let path = super::log_dir(run_dir).join(super::FIRST_LOG_FILE);
     let text = std::fs::read_to_string(&path).expect("the run's log");
     let kept: Vec<&str> = text
         .lines()
-        .take_while(|line| !line.contains("\"type\":\"run_ended\""))
+        .take_while(|line| {
+            !line.contains("\"type\":\"attempt_canceled\"")
+                && !line.contains("\"type\":\"run_ended\"")
+        })
         .collect();
     let mut body = kept.join("\n");
     body.push('\n');

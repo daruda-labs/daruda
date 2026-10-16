@@ -28,9 +28,11 @@ impl Run<'_> {
         self.log.state().node(id).map_or(0, |node| node.spent())
     }
 
-    /// A resumed node whose last attempt failed, with no attempts left in
-    /// its generation: it fails without running again. One a crash
-    /// interrupted runs again, since that attempt did not count.
+    /// A resumed node with no attempts left in its generation ends the run
+    /// the way its last attempt did, without running again: a failure fails
+    /// it, and a stop (the user's or the overage switch's) cancels it — the
+    /// end that stop would have recorded had the process lived to. One a
+    /// crash interrupted runs again, since that attempt did not count.
     pub(super) fn attempts_spent_before(
         &self,
         id: &NodeId,
@@ -38,14 +40,19 @@ impl Run<'_> {
     ) -> Option<RunOutcome> {
         let state = self.log.state();
         let node = state.node(id)?;
-        let failure = match &node.last {
-            AttemptState::Failed { failure, .. } => failure.into(),
-            _ => return None,
-        };
-        (node.spent() >= policy.max_attempts).then(|| RunOutcome::Failed {
-            node: id.clone(),
-            failure,
-        })
+        if node.spent() < policy.max_attempts {
+            return None;
+        }
+        match &node.last {
+            AttemptState::Failed { failure, .. } => Some(RunOutcome::Failed {
+                node: id.clone(),
+                failure: failure.into(),
+            }),
+            AttemptState::Canceled { .. } => Some(RunOutcome::Canceled {
+                node: Some(id.clone()),
+            }),
+            _ => None,
+        }
     }
 
     /// Commit `AttemptStarted` and hand back the numbers the log gave it.
@@ -201,7 +208,12 @@ impl Run<'_> {
         if let Some(output) = output {
             let stamp = crate::archive::CancelStamp::Evidence(ctx.evidence_seq);
             match crate::archive::archive_canceled(&self.log_dir, id, output, stamp) {
-                Ok(moved) => archived.extend(moved),
+                Ok(moved) => {
+                    // O1: the move is on disk before the record naming it.
+                    let set = [(id.clone(), Some(output.to_path_buf()))];
+                    super::durable::sync_dirs(&set, &self.log_dir).await;
+                    archived.extend(moved);
+                }
                 Err(e) => {
                     let settled = self
                         .settle(

@@ -1,9 +1,9 @@
 //! Picking a run up where a killed process left it.
 //!
 //! The crash is simulated by *cancelling* mid-run and then removing the
-//! marker and the end its log recorded: what a `kill -9` leaves is a
-//! directory with a log that never ended, a spec, some outputs and no
-//! marker, and that is exactly what these build. Nothing here can be tested by resuming a run this process
+//! marker, the stop's settle and the end its log recorded: what a `kill -9`
+//! leaves is a directory with a log that never ended, a spec, some outputs
+//! and no marker, and that is exactly what these build. Nothing here can be tested by resuming a run this process
 //! finished — the whole question is what survives one that did not.
 
 use super::*;
@@ -65,8 +65,9 @@ fn killed_after(
     for marker in ["DONE", "FAILED", "CANCELED"] {
         let _ = std::fs::remove_file(report.run_dir.join(marker));
     }
-    // The log, not the marker, says the run ended; a kill leaves no end.
-    crate::run_log::testing::forget_end(&report.run_dir);
+    // The log, not the marker, says the run ended; a kill leaves no end
+    // and no settle for the attempt it interrupted.
+    crate::run_log::testing::forget_stop(&report.run_dir);
     // A lock naming this run, whose holder the resume will be told is gone.
     std::fs::create_dir_all(&lock_dir).expect("lock dir");
     std::fs::write(
@@ -198,9 +199,12 @@ fn the_resumed_half_never_reuses_an_evidence_number() {
         unique.len(),
         "an evidence number came round again: {seqs:?}"
     );
-    assert!(
-        seqs.len() >= 4,
-        "too few attempts to be evidence of anything: {seqs:?}"
+    // Two attempts of `one`, the attempt of `two` the kill interrupted
+    // (settled nowhere, but its number taken), then its retry.
+    assert_eq!(
+        seqs,
+        [1, 2, 4],
+        "the interrupted attempt's number came back"
     );
 }
 
@@ -445,8 +449,9 @@ nodes:
     for marker in ["DONE", "FAILED", "CANCELED"] {
         let _ = std::fs::remove_file(report.run_dir.join(marker));
     }
-    // The log, not the marker, says the run ended; a kill leaves no end.
-    crate::run_log::testing::forget_end(&report.run_dir);
+    // The log, not the marker, says the run ended; a kill leaves no end
+    // and no settle for the attempt it interrupted.
+    crate::run_log::testing::forget_stop(&report.run_dir);
     let lock_dir = super::lock_dir_of(&request);
     std::fs::create_dir_all(&lock_dir).expect("lock dir");
     std::fs::write(

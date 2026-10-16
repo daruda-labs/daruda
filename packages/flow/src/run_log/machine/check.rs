@@ -3,7 +3,7 @@
 
 use super::FlowRunRejected as R;
 use super::event::FlowRunEvent as E;
-use super::state::{AttemptState, FlowRunState, NodeState, RunPhase};
+use super::state::{AttemptState, FlowRunState, NodeState, Produces, RunPhase};
 use crate::NodeId;
 use crate::run_log::line::AttemptLine;
 use crate::runner::AskOwner;
@@ -53,6 +53,10 @@ pub(super) fn check(state: &FlowRunState, event: &E) -> Result<(), R> {
         | E::AttemptCanceled { node, record } => in_flight(state, node, record),
         E::OutputLost { node } => {
             let current = running_node(state, node)?;
+            // Only an agent node's output file can go missing (§5.5 step 6).
+            if current.produces != Produces::File {
+                return Err(R::NoOutput(node.clone()));
+            }
             match current.last {
                 AttemptState::Passed { .. } => Ok(()),
                 _ => Err(R::NotPassed(node.clone())),
