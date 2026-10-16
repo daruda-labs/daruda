@@ -39,6 +39,7 @@ fn fixture(window: &mut Window, cx: &mut gpui::App) -> LeftDockSnapshot {
         cached_visible: ByPointer(Arc::new(Vec::new())),
         root_kind: None,
         agent_status_per_lane: std::collections::HashMap::new(),
+        agent_outcome_per_lane: std::collections::HashMap::new(),
         agent_per_session_per_lane: std::collections::HashMap::new(),
         agent_active_session_id: None,
         agent_install_banner_visible: false,
@@ -224,6 +225,23 @@ fn claude_status_change_differs(cx: &mut TestAppContext) {
             a.content_differs(&b),
             "a changed agent_status_per_lane must trip content_differs"
         );
+        gpui::Empty
+    });
+}
+
+#[gpui::test]
+fn agent_outcome_change_differs(cx: &mut TestAppContext) {
+    crate::test_support::init_gpui_component(cx);
+    cx.add_window(|window, cx| {
+        let before = fixture(window, cx);
+        let mut after = fixture(window, cx);
+        after.cached_visible = ByPointer(before.cached_visible.clone());
+        after.agent_outcome_per_lane.insert(
+            daruda_store::project::LaneRef::default(),
+            daruda_agent::AgentOutcome::Completed,
+        );
+        assert!(before.content_differs(&after));
+        assert!(after.content_differs(&before));
         gpui::Empty
     });
 }

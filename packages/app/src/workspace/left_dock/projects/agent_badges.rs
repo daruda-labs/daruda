@@ -10,16 +10,21 @@
 //!   user can tell which sibling their terminal is talking to.
 
 use crate::ui::theme;
-use daruda_agent::SessionStatus;
+use daruda_agent::{AgentOutcome, SessionStatus};
 use gpui::{AnyElement, IntoElement, ParentElement, Styled, div, prelude::*, px};
 
 use crate::surface::strings as surface_strings;
 use crate::ui::{AgentStatusBadge, IndicatorSize};
+use crate::workspace::tab_indicator::TabIndicator;
 
 /// Fixed-width cell that holds the leading agent-status indicator.
-/// Empty (just the spacer width) when no agent session is associated
-/// with the lane.
-pub(super) fn agent_status_cell(state: Option<SessionStatus>, cx: &gpui::App) -> AnyElement {
+/// Empty (just the spacer width) when no agent session or unseen outcome
+/// is associated with the lane.
+pub(super) fn agent_status_cell(
+    state: Option<SessionStatus>,
+    outcome: Option<AgentOutcome>,
+    cx: &gpui::App,
+) -> AnyElement {
     let cell = div()
         .flex_none()
         .w(px(theme::STATUS_INDICATOR_CELL_WIDTH))
@@ -27,12 +32,20 @@ pub(super) fn agent_status_cell(state: Option<SessionStatus>, cx: &gpui::App) ->
         .flex()
         .items_center()
         .justify_center();
-    match state {
-        Some(s) => cell
-            .child(AgentStatusBadge::for_status(s, IndicatorSize::Leading, cx))
-            .into_any_element(),
-        None => cell.into_any_element(),
-    }
+    let badge = match TabIndicator::resolve(state, outcome) {
+        Some(TabIndicator::Done) => Some(AgentStatusBadge::new(
+            SessionStatus::Idle,
+            IndicatorSize::Leading,
+            theme::current(cx).status_idle_dark,
+        )),
+        Some(TabIndicator::Errored) => Some(AgentStatusBadge::for_status(
+            SessionStatus::Failed,
+            IndicatorSize::Leading,
+            cx,
+        )),
+        _ => state.map(|status| AgentStatusBadge::for_status(status, IndicatorSize::Leading, cx)),
+    };
+    cell.children(badge).into_any_element()
 }
 
 /// Sub-row badge strip shown when a lane has ≥ 2 concurrent agent
@@ -105,34 +118,4 @@ pub(super) fn agent_badges_row(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[gpui::test]
-    fn empty_active_id_means_no_outline(cx: &mut gpui::TestAppContext) {
-        crate::test_support::init_gpui_component(cx);
-        cx.update(|cx| {
-            // Sanity: passing None for active_session_id never panics
-            // and produces a valid element. We can't assert the visual
-            // outcome here without a render harness, but we can guard
-            // against shape regressions.
-            let sessions = vec![("abc".to_string(), SessionStatus::Idle)];
-            let _ = agent_badges_row(&sessions, None, cx);
-        });
-    }
-
-    #[gpui::test]
-    fn cell_width_is_consistent_across_states(cx: &mut gpui::TestAppContext) {
-        crate::test_support::init_gpui_component(cx);
-        cx.update(|cx| {
-            // Both populated and empty cells must reserve the same
-            // horizontal space so lane rows in the list don't visually
-            // shift when a session attaches.
-            let with = agent_status_cell(Some(SessionStatus::Working), cx);
-            let without = agent_status_cell(None, cx);
-            // Smoke check — each call returns an AnyElement; the actual
-            // width is enforced by `STATUS_INDICATOR_CELL_WIDTH`.
-            let _ = (with, without);
-        });
-    }
-}
+mod tests;

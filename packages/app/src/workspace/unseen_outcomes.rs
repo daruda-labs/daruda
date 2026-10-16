@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 
 use daruda_agent::AgentOutcome;
+use daruda_store::project::LaneRef;
 
 use super::main_area::pane_tree::PaneId;
 
@@ -44,44 +45,27 @@ impl UnseenOutcomes {
             .iter()
             .filter_map(|pane| self.by_pane.get(pane).copied())
     }
+
+    pub(in crate::workspace) fn by_lane(
+        &self,
+        pane_lane: &[(PaneId, LaneRef)],
+    ) -> HashMap<LaneRef, AgentOutcome> {
+        let mut outcomes = HashMap::new();
+        for (pane, lane) in pane_lane {
+            if let Some(outcome) = self.by_pane.get(pane) {
+                outcomes
+                    .entry(*lane)
+                    .and_modify(|current| {
+                        if *outcome == AgentOutcome::Errored {
+                            *current = *outcome;
+                        }
+                    })
+                    .or_insert(*outcome);
+            }
+        }
+        outcomes
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const A: PaneId = 1;
-    const B: PaneId = 2;
-
-    #[test]
-    fn a_later_outcome_replaces_an_earlier_one() {
-        let mut unseen = UnseenOutcomes::default();
-        unseen.record(A, AgentOutcome::Errored);
-        unseen.record(A, AgentOutcome::Completed);
-        assert_eq!(
-            unseen.for_panes(&[A]).collect::<Vec<_>>(),
-            [AgentOutcome::Completed]
-        );
-    }
-
-    #[test]
-    fn only_the_asked_panes_are_reported() {
-        let mut unseen = UnseenOutcomes::default();
-        unseen.record(A, AgentOutcome::Completed);
-        unseen.record(B, AgentOutcome::Errored);
-        assert_eq!(
-            unseen.for_panes(&[B]).collect::<Vec<_>>(),
-            [AgentOutcome::Errored]
-        );
-        assert_eq!(unseen.for_panes(&[]).count(), 0);
-    }
-
-    #[test]
-    fn forgetting_reports_whether_anything_went() {
-        let mut unseen = UnseenOutcomes::default();
-        unseen.record(A, AgentOutcome::Completed);
-        assert!(!unseen.forget(&[B]));
-        assert!(unseen.forget(&[A, B]));
-        assert_eq!(unseen.panes().count(), 0);
-    }
-}
+mod tests;

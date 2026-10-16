@@ -143,6 +143,7 @@ impl Workspace {
                 .and_then(|t| t.entry(t.root_id))
                 .map(|e| e.kind),
             agent_status_per_lane,
+            agent_outcome_per_lane: self.unseen_outcomes.by_lane(&pane_lane),
             agent_per_session_per_lane,
             agent_active_session_id: self
                 .claude_sessions

@@ -89,6 +89,15 @@ fn unseen(
     ws.read_with(cx, |ws, _| ws.unseen_outcomes.for_panes(&[pane]).next())
 }
 
+fn dock_outcome(ws: &gpui::Entity<Workspace>, cx: &mut TestAppContext) -> Option<AgentOutcome> {
+    ws.update(cx, |ws, cx| {
+        ws.prepare_left_dock_snapshot(cx)
+            .agent_outcome_per_lane
+            .get(&ws.active_ref())
+            .copied()
+    })
+}
+
 fn tab_of(ws: &gpui::Entity<Workspace>, pane: PaneId, cx: &mut TestAppContext) -> usize {
     ws.read_with(cx, |ws, _| {
         ws.active_runtime()
@@ -117,6 +126,7 @@ async fn a_turn_ending_in_a_hidden_tab_stays_until_the_tab_is_shown(cx: &mut Tes
     let (wh, ws, agent) = agent_behind_a_terminal(cx);
     finish(&ws, agent, TurnOutcome::Completed, cx);
     assert_eq!(unseen(&ws, agent, cx), Some(AgentOutcome::Completed));
+    assert_eq!(dock_outcome(&ws, cx), Some(AgentOutcome::Completed));
 
     let index = tab_of(&ws, agent, cx);
     activate_tab(wh, &ws, index, cx);
@@ -125,6 +135,7 @@ async fn a_turn_ending_in_a_hidden_tab_stays_until_the_tab_is_shown(cx: &mut Tes
         None,
         "the user is looking at it now"
     );
+    assert_eq!(dock_outcome(&ws, cx), None);
 }
 
 #[gpui::test]
@@ -132,6 +143,7 @@ async fn a_failed_turn_is_kept_as_an_error(cx: &mut TestAppContext) {
     let (_wh, ws, agent) = agent_behind_a_terminal(cx);
     finish(&ws, agent, TurnOutcome::Errored, cx);
     assert_eq!(unseen(&ws, agent, cx), Some(AgentOutcome::Errored));
+    assert_eq!(dock_outcome(&ws, cx), Some(AgentOutcome::Errored));
 }
 
 #[gpui::test]
@@ -270,6 +282,7 @@ async fn a_terminal_claude_stopping_out_of_view_leaves_a_completion(cx: &mut Tes
     let (ws, pane, dir) = claude_terminal_behind_a_tab(cx);
     hook(&ws, &dir, SESSION, SessionStatus::Idle, "Stop", cx);
     assert_eq!(unseen(&ws, pane, cx), Some(AgentOutcome::Completed));
+    assert_eq!(dock_outcome(&ws, cx), Some(AgentOutcome::Completed));
 }
 
 #[gpui::test]

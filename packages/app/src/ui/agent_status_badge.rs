@@ -57,7 +57,7 @@ pub fn color_for_status(status: SessionStatus, cx: &App) -> Hsla {
         SessionStatus::Working => t.status_working_dark,
         SessionStatus::ExecutingTool => t.status_executing_tool_dark,
         SessionStatus::NeedsAttention => t.status_needs_attention_dark,
-        SessionStatus::Idle => t.status_idle_dark,
+        SessionStatus::Idle => t.text_muted,
         SessionStatus::Connecting => t.status_connecting_dark,
         SessionStatus::Failed => t.status_failed_dark,
     }

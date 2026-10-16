@@ -154,6 +154,8 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     /// running, or the lane has no matching cwd.
     pub agent_status_per_lane:
         std::collections::HashMap<daruda_store::project::LaneRef, daruda_agent::SessionStatus>,
+    pub agent_outcome_per_lane:
+        std::collections::HashMap<daruda_store::project::LaneRef, daruda_agent::AgentOutcome>,
     /// Per-session statuses for lanes that have ≥ 2 active agent
     /// sessions. Sub-row badges read this. Lanes with 0 or 1 sessions are
     /// absent (the leading indicator covers them).

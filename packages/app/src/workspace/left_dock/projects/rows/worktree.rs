@@ -92,7 +92,6 @@ pub(in crate::workspace::left_dock::projects) fn worktree_row(
     // Snapshot every row colour from the live theme so the closures
     // below (hover, drag_over) capture stable values.
     let t = theme::current(cx);
-    let unread_dot_color = theme::WARNING;
     let label_active = t.text_primary;
     let label_inactive = t.text_muted;
     let badge_pill_bg = t.overlay_prominent;
@@ -110,28 +109,20 @@ pub(in crate::workspace::left_dock::projects) fn worktree_row(
     let sublabel = wt.description.as_deref().filter(|s| !s.trim().is_empty());
 
     // Inaccessible lanes (Missing / AccessDenied) render muted: the
-    // label greys out, the unread dot + git badge are suppressed (a
+    // label greys out, the git badge is suppressed (a
     // dead root has no meaningful git state), and the path sublabel is
     // replaced by the state chip. The row stays clickable so the user
     // can select it and Remove.
     let avail_badge = availability_badge(wt.availability);
     let is_unavailable = avail_badge.is_some();
 
-    // Unread marker sits to the right of the label.
-    let unread_dot = div()
-        .flex_none()
-        .w(px(theme::LANE_UNREAD_DOT_SIZE))
-        .h(px(theme::LANE_UNREAD_DOT_SIZE))
-        .rounded(px(theme::LANE_UNREAD_DOT_RADIUS))
-        .bg(unread_dot_color);
-
+    let lane_ref = daruda_store::project::LaneRef {
+        project: project_id,
+        lane: wt.id,
+    };
     let status_cell = agent_status_cell(
-        snap.agent_status_per_lane
-            .get(&daruda_store::project::LaneRef {
-                project: project_id,
-                lane: wt.id,
-            })
-            .copied(),
+        snap.agent_status_per_lane.get(&lane_ref).copied(),
+        snap.agent_outcome_per_lane.get(&lane_ref).copied(),
         cx,
     );
 
@@ -159,7 +150,6 @@ pub(in crate::workspace::left_dock::projects) fn worktree_row(
                     label_inactive
                 })
                 .child(div().flex_1().text_ellipsis().child(label.clone()))
-                .when(wt.is_unread && !is_unavailable, |d| d.child(unread_dot))
                 .when_some(git_badge.filter(|_| !is_unavailable), |d, badge| {
                     d.child(git_badge_view(
                         badge,
