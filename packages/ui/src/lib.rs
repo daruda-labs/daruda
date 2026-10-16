@@ -72,12 +72,13 @@ pub use badge::Badge;
 pub use button::{
     Button, button, button_add_tile, button_bare, button_bare_compact,
     button_bare_compact_on_surface, button_bare_on_surface, button_chip, button_chip_on_surface,
-    button_compact, button_danger, button_edit_cancel_glyph, button_edit_glyph,
-    button_header_action, button_icon, button_icon_danger, button_icon_glyph,
-    button_icon_on_surface, button_on_surface, button_primary, button_status_pill,
+    button_compact, button_compact_sized, button_danger, button_edit_cancel_glyph,
+    button_edit_glyph, button_header_action, button_icon, button_icon_danger,
+    button_icon_danger_sized, button_icon_glyph, button_icon_on_surface, button_icon_sized,
+    button_on_surface, button_primary, button_sized, button_split_caret_sized, button_status_pill,
     button_status_pill_bare, button_toggle_icon, button_window_control,
-    button_window_control_danger, button_with_icon, button_with_surface, compact_button,
-    compact_icon_button, field_trigger,
+    button_window_control_danger, button_with_icon, button_with_icon_sized, button_with_surface,
+    compact_button, compact_icon_button, field_trigger,
 };
 pub use button_group::{ButtonGroup, button_group, button_group_on_surface, choice_variant};
 pub use cached_image::CachedImage;
@@ -122,7 +123,9 @@ pub use section_header::SectionHeader;
 pub use selectable_text::{SelectableText, selectable_text};
 pub use spinner::{Spinner, spinner};
 pub use switch::{switch, switch_compact};
-pub use tab_bar::{Tab, TabBar, dock_tab, dock_tab_bar, tab, tab_bar};
+pub use tab_bar::{
+    Tab, TabBar, dock_tab, dock_tab_bar, dock_tab_bar_sized, dock_tab_sized, tab, tab_bar,
+};
 
 pub use daruda_core::text::{CharType, char_cell_hit_x, logical_line_range, word_range};
 pub use gpui_component::button::{

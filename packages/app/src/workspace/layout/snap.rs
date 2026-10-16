@@ -83,6 +83,7 @@ pub(in crate::workspace) struct GroupSnapshot {
 /// a [`diff_policy`](super::diff_policy) marker saying why it must not.
 #[derive(PartialEq)]
 pub(in crate::workspace) struct LeftDockSnapshot {
+    pub metrics: crate::ui::theme::UiMetrics,
     pub expanded: bool,
     pub open_tabs: std::collections::HashMap<daruda_store::project::LaneRef, usize>,
     pub named_sessions: std::collections::HashMap<

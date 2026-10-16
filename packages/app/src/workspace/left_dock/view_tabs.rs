@@ -8,7 +8,7 @@ use daruda_store::project::LeftDockView;
 use gpui::{AnyElement, Context, IntoElement, div, prelude::*};
 
 use crate::surface::strings;
-use crate::ui::{Icon, IconName, dock_tab, dock_tab_bar, icons};
+use crate::ui::{Icon, IconName, dock_tab_bar_sized, dock_tab_sized, icons};
 
 use super::super::layout::Dock;
 use super::super::layout::LeftDockSnapshot;
@@ -58,11 +58,11 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
         .unwrap_or(0);
     let workspace = snap.workspace.clone();
 
-    let tabs = dock_tab_bar("left-dock-view-switcher")
+    let tabs = dock_tab_bar_sized("left-dock-view-switcher", snap.metrics)
         .selected_index(active_ix)
         .children(
             all.into_iter()
-                .map(|(view, label)| dock_tab(view_icon(view), label)),
+                .map(|(view, label)| dock_tab_sized(view_icon(view), label, snap.metrics)),
         )
         .on_click(move |ix, _window, cx| {
             let view = view_by_index(*ix);

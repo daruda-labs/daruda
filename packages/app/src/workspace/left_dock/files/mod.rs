@@ -7,6 +7,7 @@
 //! the current viewport range — directories with thousands of
 //! children pay the same per-frame cost as small ones.
 
+use crate::ui::Sizable as _;
 use crate::ui::theme;
 use daruda_config::IconColorMode;
 use daruda_store::project::{LaneId, LaneRef};
@@ -26,6 +27,7 @@ use crate::workspace::path_drag::PathDrag;
 use gpui::UniformListScrollHandle;
 
 pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
+    let metrics = snap.metrics;
     let active_id = snap.active.lane;
     let active_ref = snap.active;
     let visible = snap.cached_visible.clone();
@@ -46,9 +48,9 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
     body = body.child(view_header(active_id, snap, cx));
 
     if show_loading {
-        body = body.child(loading_placeholder(cx));
+        body = body.child(loading_placeholder(snap.metrics, cx));
     } else if show_empty {
-        body = body.child(empty_dir_placeholder(cx));
+        body = body.child(empty_dir_placeholder(snap.metrics, cx));
     } else {
         let color_mode = snap.files_icon_color_mode.clone();
         let scroll_handle = snap.files_scroll_handle.clone();
@@ -79,6 +81,7 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
                             active_ref,
                             &worktree_root,
                             &color_mode,
+                            metrics,
                             workspace_for_renderer.clone(),
                             cx,
                         )
@@ -154,15 +157,17 @@ fn view_header(
     cx: &mut Context<Dock>,
 ) -> impl IntoElement {
     let workspace = snap.workspace.clone();
-    let refresh = crate::ui::button_icon("files-refresh", crate::ui::icons::REFRESH, cx)
-        .tooltip(strings::usage::refresh())
-        .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
-            if let Some(ws) = workspace.upgrade() {
-                ws.update(cx, |ws, cx| ws.refresh_files_root(cx));
-            }
-        }));
+    let refresh =
+        crate::ui::button_icon_sized("files-refresh", crate::ui::icons::REFRESH, snap.metrics, cx)
+            .tooltip(strings::usage::refresh())
+            .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+                if let Some(ws) = workspace.upgrade() {
+                    ws.update(cx, |ws, cx| ws.refresh_files_root(cx));
+                }
+            }));
 
     SectionHeader::new(strings::ui::files_header())
+        .with_metrics(snap.metrics)
         .padding(theme::GIT_HEADER_PAD_X, theme::GIT_HEADER_PAD_Y)
         .truncate_label(true)
         .actions(refresh)
@@ -177,6 +182,7 @@ fn render_row(
     wt_ref: LaneRef,
     worktree_root: &std::path::Path,
     color_mode: &IconColorMode,
+    metrics: theme::UiMetrics,
     workspace: gpui::WeakEntity<crate::workspace::Workspace>,
     cx: &mut Context<Dock>,
 ) -> AnyElement {
@@ -204,11 +210,11 @@ fn render_row(
         .flex()
         .flex_row()
         .items_center()
-        .h(px(theme::FILES_ROW_HEIGHT))
-        .pr(px(theme::FILES_ROW_PAD_X))
+        .h(px(metrics.row(theme::FILES_ROW_HEIGHT)))
+        .pr(px(metrics.space(theme::FILES_ROW_PAD_X)))
         .pl(px(theme::FILES_ROW_PAD_X + indent_px))
-        .gap(px(theme::FILES_ROW_GAP))
-        .text_size(px(theme::FILES_ROW_FONT_SIZE))
+        .gap(px(metrics.space(theme::FILES_ROW_GAP)))
+        .text_size(px(metrics.text(theme::FILES_ROW_FONT_SIZE)))
         .text_color(row_text_color)
         .cursor_pointer()
         .when(is_keyboard_focused, move |d| d.bg(row_selected_bg))
@@ -228,8 +234,8 @@ fn render_row(
                 });
             }
         }))
-        .child(chevron_element(kind, v.is_expanded, faint))
-        .child(file_icon(icon_asset, row_text_color, color_mode))
+        .child(chevron_element(kind, v.is_expanded, faint, metrics))
+        .child(file_icon(icon_asset, row_text_color, color_mode, metrics))
         .child(
             div()
                 .flex_1()
@@ -246,7 +252,7 @@ fn render_row(
         row = row.child(
             div()
                 .flex_none()
-                .w(px(theme::FILES_CHEVRON_W))
+                .w(px(metrics.icon(theme::FILES_CHEVRON_W)))
                 .text_color(colour)
                 .child(symbol),
         );
@@ -271,10 +277,15 @@ fn render_row(
 /// Leading slot for a file row: chevron icon for directories, the
 /// pending glyph while a directory is loading, or an empty slot for
 /// regular files (preserves indent alignment).
-fn chevron_element(kind: EntryKind, is_expanded: bool, color: Hsla) -> AnyElement {
+fn chevron_element(
+    kind: EntryKind,
+    is_expanded: bool,
+    color: Hsla,
+    metrics: theme::UiMetrics,
+) -> AnyElement {
     let slot = div()
         .flex_none()
-        .w(px(theme::FILES_CHEVRON_W))
+        .w(px(metrics.icon(theme::FILES_CHEVRON_W)))
         .flex()
         .items_center()
         .justify_center()
@@ -286,8 +297,12 @@ fn chevron_element(kind: EntryKind, is_expanded: bool, color: Hsla) -> AnyElemen
             } else {
                 crate::ui::icons::CHEVRON_RIGHT
             };
-            slot.child(crate::ui::icons::icon(icon).text_color(color))
-                .into_any_element()
+            slot.child(
+                crate::ui::icons::icon(icon)
+                    .with_size(px(metrics.icon(theme::CONTROL_ICON_SIZE)))
+                    .text_color(color),
+            )
+            .into_any_element()
         }
         EntryKind::PendingDir => slot
             .child(crate::surface::glyphs::FILES_CHEVRON_PENDING)
@@ -296,17 +311,22 @@ fn chevron_element(kind: EntryKind, is_expanded: bool, color: Hsla) -> AnyElemen
     }
 }
 
-fn file_icon(path: &'static str, mono_color: Hsla, mode: &IconColorMode) -> AnyElement {
+fn file_icon(
+    path: &'static str,
+    mono_color: Hsla,
+    mode: &IconColorMode,
+    metrics: theme::UiMetrics,
+) -> AnyElement {
     match mode {
         IconColorMode::Color => img(path)
             .flex_none()
-            .w(px(theme::FILES_ICON_W))
-            .h(px(theme::FILES_ICON_W))
+            .w(px(metrics.icon(theme::FILES_ICON_W)))
+            .h(px(metrics.icon(theme::FILES_ICON_W)))
             .into_any_element(),
         IconColorMode::Monochrome => svg()
             .flex_none()
-            .w(px(theme::FILES_ICON_W))
-            .h(px(theme::FILES_ICON_W))
+            .w(px(metrics.icon(theme::FILES_ICON_W)))
+            .h(px(metrics.icon(theme::FILES_ICON_W)))
             .path(path)
             .text_color(mono_color)
             .into_any_element(),
@@ -317,25 +337,25 @@ fn file_icon(path: &'static str, mono_color: Hsla, mode: &IconColorMode) -> AnyE
 // Placeholders
 // ----------------------------------------------------------------
 
-fn loading_placeholder(cx: &gpui::App) -> AnyElement {
+fn loading_placeholder(metrics: theme::UiMetrics, cx: &gpui::App) -> AnyElement {
     div()
         .flex_1()
         .flex()
         .items_center()
         .justify_center()
-        .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
+        .text_size(px(metrics.text(theme::DOCK_PLACEHOLDER_FONT_SIZE)))
         .text_color(theme::current(cx).text_subtle)
         .child(crate::ui::placeholder_text(strings::common::loading()))
         .into_any_element()
 }
 
-fn empty_dir_placeholder(cx: &gpui::App) -> AnyElement {
+fn empty_dir_placeholder(metrics: theme::UiMetrics, cx: &gpui::App) -> AnyElement {
     div()
         .flex_1()
         .flex()
         .items_center()
         .justify_center()
-        .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
+        .text_size(px(metrics.text(theme::DOCK_PLACEHOLDER_FONT_SIZE)))
         .text_color(theme::current(cx).text_subtle)
         .child(crate::ui::placeholder_text(strings::ui::files_empty_dir()))
         .into_any_element()

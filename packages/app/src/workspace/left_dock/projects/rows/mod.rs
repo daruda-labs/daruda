@@ -100,17 +100,22 @@ fn availability_badge(availability: LaneAvailability) -> Option<(IconName, Strin
 /// Inline `⚠ <label>` chip rendered in place of the normal sublabel /
 /// git badge for an inaccessible lane or project. Icon carries the
 /// warning color; the label is muted.
-fn availability_chip(icon: IconName, label: String, label_color: gpui::Hsla) -> impl IntoElement {
+fn availability_chip(
+    icon: IconName,
+    label: String,
+    label_color: gpui::Hsla,
+    metrics: theme::UiMetrics,
+) -> impl IntoElement {
     div()
         .flex()
         .flex_row()
         .items_center()
         .gap(px(theme::LANE_LABEL_GAP))
-        .text_size(px(theme::LANE_SUB_FONT_SIZE))
+        .text_size(px(metrics.text(theme::LANE_SUB_FONT_SIZE)))
         .text_color(label_color)
         .child(
             Icon::new(icon)
-                .with_size(px(theme::LANE_SUB_FONT_SIZE))
+                .with_size(px(metrics.text(theme::LANE_SUB_FONT_SIZE)))
                 .text_color(theme::WARNING),
         )
         .child(SharedString::from(label))
@@ -120,7 +125,11 @@ fn availability_chip(icon: IconName, label: String, label_color: gpui::Hsla) -> 
 /// (e.g. `⎇ main`). Uses `GalleryVerticalEnd` as the branch glyph — the
 /// closest available icon to the standard branch symbol; no dedicated
 /// `GitBranch` variant exists in the current icon set.
-fn branch_chip(branch: SharedString, label_color: gpui::Hsla) -> impl IntoElement {
+fn branch_chip(
+    branch: SharedString,
+    label_color: gpui::Hsla,
+    metrics: theme::UiMetrics,
+) -> impl IntoElement {
     div()
         .flex()
         .flex_none() // must not stretch: sits right-aligned after the flex_1 name and keeps its intrinsic width
@@ -128,17 +137,17 @@ fn branch_chip(branch: SharedString, label_color: gpui::Hsla) -> impl IntoElemen
         .items_center()
         .gap(px(theme::LANE_LABEL_GAP))
         .px(px(theme::LANE_BRANCH_CHIP_PAD_X))
-        .text_size(px(theme::LANE_SUB_FONT_SIZE))
+        .text_size(px(metrics.text(theme::LANE_SUB_FONT_SIZE)))
         .text_color(label_color)
         .child(
             Icon::new(IconName::GalleryVerticalEnd)
-                .with_size(px(theme::LANE_SUB_FONT_SIZE))
+                .with_size(px(metrics.text(theme::LANE_SUB_FONT_SIZE)))
                 .text_color(label_color),
         )
         .child(branch)
 }
 
-pub(super) fn non_git_placeholder(cx: &gpui::App) -> impl IntoElement {
+pub(super) fn non_git_placeholder(metrics: theme::UiMetrics, cx: &gpui::App) -> impl IntoElement {
     let t = theme::current(cx);
     let hint_color = t.text_subtle;
     let init_color = t.text_muted;
@@ -147,7 +156,7 @@ pub(super) fn non_git_placeholder(cx: &gpui::App) -> impl IntoElement {
         .flex_col()
         .gap(px(theme::LANE_PLACEHOLDER_LINE_GAP))
         .p(px(theme::LANE_PLACEHOLDER_PAD))
-        .text_size(px(theme::LANE_SUB_FONT_SIZE))
+        .text_size(px(metrics.text(theme::LANE_SUB_FONT_SIZE)))
         .text_color(hint_color)
         .child(surface_strings::terminal::lane_non_git_hint())
         .child(

@@ -125,7 +125,7 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
 
     // Non-git project hint — surfaces the `git init` path.
     if !any_git {
-        roots = roots.child(non_git_placeholder(cx));
+        roots = roots.child(non_git_placeholder(snap.metrics, cx));
     }
 
     // Thumb overlay needs a `.relative()` parent; the tree's own

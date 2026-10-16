@@ -83,6 +83,7 @@ pub(crate) enum ScreenshotScenario {
     LeftDockExpanded,
     LeftDockGroups,
     LeftDockWorktrees,
+    LeftDockGit,
     /// Open the command palette (`CommandPaletteState::open`).
     CommandPalette,
     /// Open the Lane switcher with a real candidate whose label is
@@ -613,6 +614,9 @@ pub(crate) fn drive(
         }
         ScreenshotScenario::OrchestratorTab => {
             workspace.update(cx, |ws, cx| ws.seed_orchestrator_for_shot(true, window, cx));
+        }
+        ScreenshotScenario::LeftDockGit => {
+            workspace.update(cx, |ws, cx| ws.seed_left_dock_git_for_shot(window, cx));
         }
         ScreenshotScenario::LeftDockGroups | ScreenshotScenario::LeftDockWorktrees => {
             workspace.update(cx, |ws, cx| {

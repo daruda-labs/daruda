@@ -9,6 +9,11 @@ agent_chat:
   source_agent_set: "Set for this agent"
 
 settings:
+  label_left_dock_size: "Display size"
+  hint_left_dock_size: "Adjust text, icons, and row spacing in the left dock."
+  ui_size_small: "Small"
+  ui_size_normal: "Normal"
+  ui_size_large: "Large"
   toggle_on: "On"
   toggle_off: "Off"
   group_application: "Application"

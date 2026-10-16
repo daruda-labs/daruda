@@ -24,12 +24,33 @@ fn tree_root() -> Div {
     div().flex().flex_col().mx(px(theme::LANE_TREE_MARGIN_X))
 }
 
+/// Coupled columns shared by project marks and lane status cells.
+pub(in crate::workspace::left_dock) struct RowMetrics {
+    pub leading_width: f32,
+    pub leading_gap: f32,
+    pub lane_inset: f32,
+    pub subrow_indent: f32,
+}
+
+impl RowMetrics {
+    pub fn new(metrics: theme::UiMetrics) -> Self {
+        let leading_width = metrics.target(theme::CONTROL_TARGET_SIZE);
+        let leading_gap = metrics.space(theme::LANE_LABEL_GAP);
+        Self {
+            leading_width,
+            leading_gap,
+            lane_inset: metrics.space(theme::LANE_ROW_PAD_X) - theme::LANE_ACTIVE_BORDER_W,
+            subrow_indent: leading_width + leading_gap,
+        }
+    }
+}
+
 /// One row rhythm for groups, projects and lanes; each owns its interactions.
-pub(super) fn row() -> Div {
+pub(super) fn row(metrics: theme::UiMetrics) -> Div {
     div()
-        .px(px(theme::LANE_ROW_PAD_X))
-        .py(px(theme::DOCK_TREE_ROW_PAD_Y))
-        .min_h(px(theme::DOCK_TREE_ROW_HEIGHT))
+        .px(px(metrics.space(theme::LANE_ROW_PAD_X)))
+        .py(px(metrics.space(theme::DOCK_TREE_ROW_PAD_Y)))
+        .min_h(px(metrics.row(theme::DOCK_TREE_ROW_HEIGHT)))
         .rounded(px(theme::LANE_ROW_RADIUS))
 }
 
@@ -46,13 +67,18 @@ mod tests {
 
     #[test]
     fn lane_column_lines_up_with_project_header() {
-        let cell_start = theme::LANE_ACTIVE_BORDER_W + theme::LANE_ROW_INSET_L;
-        let label_start = cell_start + theme::STATUS_INDICATOR_CELL_WIDTH + theme::LANE_ROW_GAP;
-        assert_eq!(label_start, theme::LANE_PROJECT_NAME_INSET);
-        let folder_centre = theme::LANE_PROJECT_NAME_INSET
-            - theme::LANE_LABEL_GAP
-            - theme::LANE_PROJECT_ICON_SIZE / 2.0;
-        let cell_centre = cell_start + theme::STATUS_INDICATOR_CELL_WIDTH / 2.0;
-        assert_eq!(cell_centre, folder_centre);
+        for size in daruda_config::UiSize::ALL {
+            let metrics = theme::UiMetrics(size);
+            let row = super::RowMetrics::new(metrics);
+            let project_start = metrics.space(theme::LANE_ROW_PAD_X);
+            let lane_start = theme::LANE_ACTIVE_BORDER_W + row.lane_inset;
+            assert_eq!(lane_start, project_start, "leading slots align at {size:?}");
+            assert_eq!(
+                lane_start + row.subrow_indent,
+                project_start + row.leading_width + row.leading_gap,
+                "labels and session rows align at {size:?}"
+            );
+            assert!(row.leading_width >= metrics.icon(theme::STATUS_INDICATOR_SIZE));
+        }
     }
 }

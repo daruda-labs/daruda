@@ -1,5 +1,6 @@
 //! Collapsed navigation with one group fold level and typed worktree/session choices.
 
+use crate::ui::Sizable as _;
 mod ops;
 mod projects;
 
@@ -40,7 +41,7 @@ pub(in crate::workspace) fn render(
     for page in [Page::Tasks, Page::Flows] {
         let ws = snap.workspace.clone();
         nav = nav.child(
-            ui::button_icon(page.icon(), page.icon(), cx)
+            ui::button_icon_sized(page.icon(), page.icon(), snap.metrics, cx)
                 .tab_stop(true)
                 .tooltip(page.label())
                 .on_click(move |_, window, cx| {
@@ -69,7 +70,7 @@ pub(in crate::workspace) fn render(
     ] {
         let ws = snap.workspace.clone();
         nav = nav.child(
-            ui::button_icon(icon, icon, cx)
+            ui::button_icon_sized(icon, icon, snap.metrics, cx)
                 .tab_stop(true)
                 .tooltip(label)
                 .on_click(move |_, window, cx| {
@@ -117,12 +118,12 @@ pub(in crate::workspace) fn render(
                     .tab_stop(true)
                     .cursor_pointer()
                     .mt(px(theme::GAP_LG))
-                    .h(px(theme::CONTROL_TARGET_SIZE))
+                    .h(px(snap.metrics.target(theme::CONTROL_TARGET_SIZE)))
                     .flex()
                     .items_center()
                     .justify_center()
                     .gap(px(theme::GAP_XS))
-                    .text_size(px(theme::FONT_SIZE_XS))
+                    .text_size(px(snap.metrics.text(theme::FONT_SIZE_XS)))
                     .text_color(t.text_muted)
                     .hover(|el| el.bg(t.lane_row_hover_bg))
                     .child(
@@ -131,7 +132,10 @@ pub(in crate::workspace) fn render(
                             .text_ellipsis()
                             .child(group_abbreviation(&g.name)),
                     )
-                    .child(ui::icons::icon(icon))
+                    .child(
+                        ui::icons::icon(icon)
+                            .with_size(px(snap.metrics.icon(theme::CONTROL_ICON_SIZE))),
+                    )
                     .tooltip(ui::tooltip::text(g.name.clone()))
                     .on_key_down(move |event, window, cx| {
                         if let Some(ws) = key_ws.upgrade() {
@@ -172,7 +176,7 @@ pub(in crate::workspace) fn render(
                 .border_t_1()
                 .border_color(t.border)
                 .child(
-                    ui::button_icon("rail-settings", ui::icons::SETTINGS, cx)
+                    ui::button_icon_sized("rail-settings", ui::icons::SETTINGS, snap.metrics, cx)
                         .tab_stop(true)
                         .tooltip(s::dock::settings())
                         .on_click(|_, window, cx| {
@@ -193,19 +197,28 @@ mod tests;
 
 pub(super) fn lane_indicator(
     status: Option<daruda_agent::SessionStatus>,
+    metrics: theme::UiMetrics,
     cx: &gpui::App,
 ) -> AnyElement {
     if status.is_some() {
-        return super::projects::agent_badges::agent_status_cell(status, cx);
+        return super::projects::agent_badges::agent_status_cell(
+            status,
+            metrics,
+            metrics.icon(theme::STATUS_INDICATOR_CELL_WIDTH),
+            cx,
+        );
     }
     div()
         .flex_none()
-        .w(px(theme::STATUS_INDICATOR_CELL_WIDTH))
+        .w(px(metrics.icon(theme::STATUS_INDICATOR_CELL_WIDTH)))
         .flex()
         .items_center()
         .justify_center()
         .text_color(theme::current(cx).text_muted)
-        .child(ui::icons::icon(ui::icons::RADIO_OFF))
+        .child(
+            ui::icons::icon(ui::icons::RADIO_OFF)
+                .with_size(px(metrics.icon(theme::CONTROL_ICON_SIZE))),
+        )
         .into_any_element()
 }
 

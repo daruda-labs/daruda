@@ -5,8 +5,11 @@
 //! Checking/unchecking stages or unstages the file without changing its
 //! position in the list.
 
+use crate::ui::Sizable as _;
 mod against_base_section;
 mod file_row;
+#[cfg(feature = "screenshot")]
+mod screenshot;
 pub(super) mod unified_list;
 
 use std::path::PathBuf;
@@ -19,7 +22,7 @@ use gpui::{
 };
 
 use crate::surface::strings as app_strings;
-use crate::ui::{SectionHeader, button};
+use crate::ui::{SectionHeader, button_sized};
 use crate::workspace::layout::Dock;
 use crate::workspace::layout::LeftDockSnapshot;
 use unified_list::{
@@ -81,7 +84,7 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
         }
         // A clean working tree still lists what the lane committed.
         Some(s) if s.staged.is_empty() && s.unstaged.is_empty() && base_rows.is_empty() => {
-            body = body.child(clean_placeholder(cx));
+            body = body.child(clean_placeholder(snap.metrics, cx));
         }
         Some(s) => {
             let staged_count = s.staged.len();
@@ -233,24 +236,25 @@ fn view_header(
         .map(|t| (t.ahead, t.behind))
         .unwrap_or((0, 0));
 
-    let refresh_icon = crate::ui::button_icon("git-refresh", crate::ui::icons::REFRESH, cx)
-        .tooltip(app_strings::usage::refresh())
-        .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
-            if let Some(ws) = workspace_refresh.upgrade() {
-                ws.update(cx, |ws, cx| ws.refresh_git_status(active_ref, cx));
-            }
-        }));
+    let refresh_icon =
+        crate::ui::button_icon_sized("git-refresh", crate::ui::icons::REFRESH, snap.metrics, cx)
+            .tooltip(app_strings::usage::refresh())
+            .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+                if let Some(ws) = workspace_refresh.upgrade() {
+                    ws.update(cx, |ws, cx| ws.refresh_git_status(active_ref, cx));
+                }
+            }));
 
     let tracking_color = theme::current(cx).text_muted;
     let mut header_actions = div()
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(theme::GIT_REMOTE_BTN_GAP));
+        .gap(px(snap.metrics.space(theme::GIT_REMOTE_BTN_GAP)));
     if let Some(text) = tracking_indicator_text(ahead, behind) {
         header_actions = header_actions.child(
             div()
-                .text_size(px(theme::GIT_DIR_HEADER_FONT_SIZE))
+                .text_size(px(snap.metrics.text(theme::GIT_DIR_HEADER_FONT_SIZE)))
                 .text_color(tracking_color)
                 .child(text),
         );
@@ -258,18 +262,20 @@ fn view_header(
     let header_actions = header_actions.child(refresh_icon);
 
     let remote_btn = match remote_primary_action(behind) {
-        RemotePrimaryAction::Fetch => {
-            crate::ui::button_compact("git-fetch", app_strings::git::fetch_btn())
-                .loading(in_flight)
-                .disabled(in_flight)
-                .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
-                    if let Some(ws) = workspace_remote.upgrade() {
-                        ws.update(cx, |ws, cx| ws.on_fetch(cx));
-                    }
-                }))
-        }
+        RemotePrimaryAction::Fetch => crate::ui::button_compact_sized(
+            "git-fetch",
+            app_strings::git::fetch_btn(),
+            snap.metrics,
+        )
+        .loading(in_flight)
+        .disabled(in_flight)
+        .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+            if let Some(ws) = workspace_remote.upgrade() {
+                ws.update(cx, |ws, cx| ws.on_fetch(cx));
+            }
+        })),
         RemotePrimaryAction::Pull => {
-            crate::ui::button_compact("git-pull", app_strings::git::pull_btn())
+            crate::ui::button_compact_sized("git-pull", app_strings::git::pull_btn(), snap.metrics)
                 .loading(in_flight)
                 .disabled(in_flight)
                 .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
@@ -280,21 +286,22 @@ fn view_header(
         }
     };
 
-    let push_btn = crate::ui::button_compact("git-push", app_strings::git::push_btn())
-        .loading(in_flight)
-        .disabled(in_flight)
-        .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
-            if let Some(ws) = workspace_push.upgrade() {
-                ws.update(cx, |ws, cx| ws.trigger_push(window, cx));
-            }
-        }));
+    let push_btn =
+        crate::ui::button_compact_sized("git-push", app_strings::git::push_btn(), snap.metrics)
+            .loading(in_flight)
+            .disabled(in_flight)
+            .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
+                if let Some(ws) = workspace_push.upgrade() {
+                    ws.update(cx, |ws, cx| ws.trigger_push(window, cx));
+                }
+            }));
 
     let actions_row = div()
         .flex()
         .flex_row()
         .items_center()
         .justify_end()
-        .gap(px(theme::GIT_REMOTE_BTN_GAP))
+        .gap(px(snap.metrics.space(theme::GIT_REMOTE_BTN_GAP)))
         .pt(px(theme::GIT_HEADER_PAD_Y / 2.0))
         .child(remote_btn)
         .child(push_btn);
@@ -302,11 +309,12 @@ fn view_header(
     div()
         .flex()
         .flex_col()
-        .px(px(theme::GIT_HEADER_PAD_X))
-        .pt(px(theme::GIT_HEADER_PAD_Y))
+        .px(px(snap.metrics.space(theme::GIT_HEADER_PAD_X)))
+        .pt(px(snap.metrics.space(theme::GIT_HEADER_PAD_Y)))
         .pb(px(theme::GIT_HEADER_PAD_Y / 2.0))
         .child(
             SectionHeader::new(label)
+                .with_metrics(snap.metrics)
                 .truncate_label(true)
                 .actions(header_actions),
         )
@@ -358,6 +366,7 @@ fn summary_bar(
         "git-discard-all",
         app_strings::git::discard_all(),
         in_flight,
+        snap.metrics,
         colors,
         cx.listener(move |_dock, _: &MouseDownEvent, window, cx| {
             if let Some(ws) = discard_ws.upgrade() {
@@ -369,6 +378,7 @@ fn summary_bar(
         "git-stage-toggle",
         btn_label,
         in_flight,
+        snap.metrics,
         colors,
         cx.listener(move |_dock, _: &MouseDownEvent, _window, cx| {
             let Some(ws) = workspace.upgrade() else {
@@ -383,20 +393,27 @@ fn summary_bar(
     );
 
     div()
+        .debug_selector(|| "git-summary".into())
         .flex()
-        .flex_row()
-        .items_center()
-        .justify_between()
-        .px(px(theme::GIT_HEADER_PAD_X))
-        .py(px(theme::LANE_SECTION_PAD_Y))
-        .text_size(px(theme::GIT_SECTION_FONT_SIZE))
+        .flex_col()
+        .items_start()
+        .px(px(snap.metrics.space(theme::GIT_HEADER_PAD_X)))
+        .py(px(snap.metrics.space(theme::LANE_SECTION_PAD_Y)))
+        .text_size(px(snap.metrics.text(theme::GIT_SECTION_FONT_SIZE)))
         .text_color(summary_text_color)
-        .child(label)
+        .child(
+            div()
+                .debug_selector(|| "git-summary-counts".into())
+                .child(label),
+        )
         .child(
             div()
                 .flex()
                 .flex_row()
-                .gap(px(theme::GIT_HEADER_PAD_X))
+                .flex_wrap()
+                .w_full()
+                .justify_end()
+                .gap(px(snap.metrics.space(theme::GIT_HEADER_PAD_X)))
                 .child(discard_all)
                 .child(stage_toggle),
         )
@@ -408,11 +425,16 @@ fn summary_action(
     id: &'static str,
     label: String,
     in_flight: bool,
+    metrics: theme::UiMetrics,
     (inflight, idle, hover): (gpui::Hsla, gpui::Hsla, gpui::Hsla),
     on_press: impl Fn(&MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static,
 ) -> impl IntoElement {
     div()
         .id(id)
+        .debug_selector(move || id.into())
+        .min_h(px(metrics.target(theme::CONTROL_TARGET_SIZE)))
+        .flex()
+        .items_center()
         .text_color(if in_flight { inflight } else { idle })
         .when(!in_flight, move |d| {
             d.cursor_pointer()
@@ -476,8 +498,8 @@ fn dir_header(
     let checkbox = div()
         .id(checkbox_id)
         .flex_none()
-        .w(px(theme::CONTROL_TARGET_SIZE))
-        .h(px(theme::CONTROL_TARGET_SIZE))
+        .w(px(snap.metrics.target(theme::CONTROL_TARGET_SIZE)))
+        .h(px(snap.metrics.target(theme::CONTROL_TARGET_SIZE)))
         .flex()
         .items_center()
         .justify_center()
@@ -486,11 +508,14 @@ fn dir_header(
         } else {
             checkbox_checked_bg
         })
-        .child(crate::ui::icons::icon(match state {
-            DirStageState::AllStaged => crate::ui::icons::CHECKBOX_ON,
-            DirStageState::Mixed => crate::ui::icons::CHECKBOX_MIXED,
-            DirStageState::NoneStaged => crate::ui::icons::CHECKBOX_OFF,
-        }))
+        .child(
+            crate::ui::icons::icon(match state {
+                DirStageState::AllStaged => crate::ui::icons::CHECKBOX_ON,
+                DirStageState::Mixed => crate::ui::icons::CHECKBOX_MIXED,
+                DirStageState::NoneStaged => crate::ui::icons::CHECKBOX_OFF,
+            })
+            .with_size(px(snap.metrics.icon(theme::CONTROL_ICON_SIZE))),
+        )
         .when(!in_flight && !stage_paths.is_empty(), |d| {
             d.cursor_pointer().on_mouse_down(
                 MouseButton::Left,
@@ -514,16 +539,16 @@ fn dir_header(
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(theme::GIT_FILE_ROW_GAP))
-        .px(px(theme::GIT_HEADER_PAD_X))
+        .gap(px(snap.metrics.space(theme::GIT_FILE_ROW_GAP)))
+        .px(px(snap.metrics.space(theme::GIT_HEADER_PAD_X)))
         // Claims its width for the same reason the file row does.
         .w_full()
         // Same height as a file row: `uniform_list` measures one item and
         // applies it to every row, so a header that sized itself from its
         // padding would clip or leave a gap. The label keeps its own smaller
         // font — only the box grows (this is how zed's git panel does it).
-        .h(px(theme::GIT_FILE_ROW_HEIGHT))
-        .text_size(px(theme::GIT_DIR_HEADER_FONT_SIZE))
+        .h(px(snap.metrics.row(theme::GIT_FILE_ROW_HEIGHT)))
+        .text_size(px(snap.metrics.text(theme::GIT_DIR_HEADER_FONT_SIZE)))
         .text_color(dir_label_color)
         // Chevron + dir name on the left (clickable to toggle collapse),
         // checkbox right-aligned to mirror the file rows below.
@@ -533,7 +558,7 @@ fn dir_header(
                 .flex()
                 .flex_row()
                 .items_center()
-                .gap(px(theme::GIT_FILE_ROW_GAP))
+                .gap(px(snap.metrics.space(theme::GIT_FILE_ROW_GAP)))
                 .flex_1()
                 .overflow_hidden()
                 .cursor_pointer()
@@ -547,7 +572,11 @@ fn dir_header(
                         }
                     }),
                 )
-                .child(crate::ui::icons::icon(chevron_icon).text_color(dir_label_color))
+                .child(
+                    crate::ui::icons::icon(chevron_icon)
+                        .with_size(px(snap.metrics.icon(theme::CONTROL_ICON_SIZE)))
+                        .text_color(dir_label_color),
+                )
                 .child(
                     div()
                         .flex_1()
@@ -570,7 +599,7 @@ fn commit_footer(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> impl IntoEl
         .flex()
         .flex_col()
         .flex_none()
-        .h(px(theme::GIT_COMMIT_FOOTER_H))
+        .h(px(snap.metrics.space(theme::GIT_COMMIT_FOOTER_H)))
         .border_t_1()
         .border_color(border)
         .child(snap.git_commit_input.clone())
@@ -620,20 +649,23 @@ fn loading_placeholder(
     let text_color = theme::current(cx).text_subtle;
     let workspace = snap.workspace.clone();
     let active_ref = snap.active;
-    let refresh_btn = button("git-refresh-fallback", app_strings::common::refresh()).on_click(
-        cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
-            if let Some(ws) = workspace.upgrade() {
-                ws.update(cx, |ws, cx| ws.refresh_git_status(active_ref, cx));
-            }
-        }),
-    );
+    let refresh_btn = button_sized(
+        "git-refresh-fallback",
+        app_strings::common::refresh(),
+        snap.metrics,
+    )
+    .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+        if let Some(ws) = workspace.upgrade() {
+            ws.update(cx, |ws, cx| ws.refresh_git_status(active_ref, cx));
+        }
+    }));
     div()
         .flex()
         .flex_col()
         .items_center()
         .gap(px(theme::GIT_COMMIT_PAD))
         .p(px(theme::LANE_PLACEHOLDER_PAD))
-        .text_size(px(theme::LANE_SUB_FONT_SIZE))
+        .text_size(px(snap.metrics.text(theme::LANE_SUB_FONT_SIZE)))
         .text_color(text_color)
         .child(crate::ui::placeholder_text(
             app_strings::git::loading_changes(),
@@ -641,13 +673,13 @@ fn loading_placeholder(
         .child(refresh_btn)
 }
 
-fn clean_placeholder(cx: &gpui::App) -> impl IntoElement {
+fn clean_placeholder(metrics: theme::UiMetrics, cx: &gpui::App) -> impl IntoElement {
     div()
         .flex_1()
         .flex()
         .items_center()
         .justify_center()
-        .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
+        .text_size(px(metrics.text(theme::DOCK_PLACEHOLDER_FONT_SIZE)))
         .text_color(theme::current(cx).text_subtle)
         .child(crate::ui::placeholder_text(app_strings::git::no_changes()))
 }
@@ -660,13 +692,13 @@ fn non_git_placeholder(
     let workspace = snap.workspace.clone();
     let in_flight = snap.git_op_in_flight;
 
-    let init_btn = button("git-init", app_strings::git::init_btn()).on_click(cx.listener(
-        move |_dock, _: &ClickEvent, _window, cx| {
+    let init_btn = button_sized("git-init", app_strings::git::init_btn(), snap.metrics).on_click(
+        cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
             if let Some(ws) = workspace.upgrade() {
                 ws.update(cx, |ws, cx| ws.init_git_repo(target, cx));
             }
-        },
-    ));
+        }),
+    );
     use crate::ui::Disableable as _;
     let init_btn = init_btn.disabled(in_flight).loading(in_flight);
 
@@ -678,7 +710,7 @@ fn non_git_placeholder(
         .items_center()
         .justify_center()
         .gap(px(theme::GIT_COMMIT_PAD))
-        .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
+        .text_size(px(snap.metrics.text(theme::DOCK_PLACEHOLDER_FONT_SIZE)))
         .text_color(text_color)
         .child(crate::ui::placeholder_text(
             app_strings::git::not_a_repository(),
@@ -694,5 +726,46 @@ mod tests {
     fn remote_primary_action_pulls_once_fetch_finds_remote_work() {
         assert_eq!(remote_primary_action(0), RemotePrimaryAction::Fetch);
         assert_eq!(remote_primary_action(1), RemotePrimaryAction::Pull);
+    }
+    #[cfg(feature = "screenshot")]
+    #[gpui::test]
+    async fn summary_actions_fit_the_dock_at_every_size(cx: &mut gpui::TestAppContext) {
+        let root = std::env::temp_dir().join("daruda-git-summary-sizing");
+        std::fs::create_dir_all(&root).unwrap();
+        let (wh, workspace) = crate::workspace::tests::build_workspace_with(
+            cx,
+            &daruda_config::Config::default(),
+            Some(daruda_store::project::Project::from_path(&root)),
+        );
+        let vcx = &mut gpui::VisualTestContext::from_window(wh.into(), cx);
+        vcx.update(|window, cx| {
+            workspace.update(cx, |ws, cx| ws.seed_left_dock_git_for_shot(window, cx));
+        });
+        for size in daruda_config::UiSize::ALL {
+            workspace.update(vcx, |ws, cx| {
+                let mut config = daruda_config::Config::default();
+                config.left_dock.size = size;
+                ws.apply_config(&config, cx);
+            });
+            vcx.run_until_parked();
+            // WORKAROUND: GPUI cached paint omits debug_bounds replay. This
+            // checks geometry; the separate cache test never forces a refresh.
+            vcx.update(|window, _| window.refresh());
+            vcx.run_until_parked();
+            let summary = vcx.debug_bounds("git-summary").unwrap();
+            let counts = vcx.debug_bounds("git-summary-counts").unwrap();
+            for selector in ["git-discard-all", "git-stage-toggle"] {
+                let action = vcx.debug_bounds(selector).unwrap();
+                assert!(
+                    counts.bottom() <= action.top(),
+                    "counts overlap {selector} at {size:?}"
+                );
+                assert!(
+                    action.left() >= summary.left() && action.right() <= summary.right(),
+                    "{selector} overflows the dock at {size:?}"
+                );
+                assert!(action.size.height >= gpui::px(crate::ui::theme::CONTROL_TARGET_SIZE));
+            }
+        }
     }
 }

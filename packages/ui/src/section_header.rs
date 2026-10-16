@@ -18,6 +18,7 @@ pub struct SectionHeader {
     pad_y: Option<f32>,
     truncate_label: bool,
     prominent: bool,
+    metrics: theme::UiMetrics,
 }
 
 impl SectionHeader {
@@ -30,7 +31,14 @@ impl SectionHeader {
             pad_y: None,
             truncate_label: false,
             prominent: false,
+            metrics: theme::UiMetrics::default(),
         }
+    }
+
+    /// Opt into the host surface's presentation size.
+    pub fn with_metrics(mut self, metrics: theme::UiMetrics) -> Self {
+        self.metrics = metrics;
+        self
     }
 
     /// Panel-level title; section labels keep their quieter default styling.
@@ -81,6 +89,7 @@ impl RenderOnce for SectionHeader {
             pad_y,
             truncate_label,
             prominent,
+            metrics,
         } = self;
 
         let label_node = if truncate_label {
@@ -98,11 +107,11 @@ impl RenderOnce for SectionHeader {
             .flex_row()
             .items_center()
             .justify_between()
-            .text_size(px(LABEL_FONT_SIZE))
+            .text_size(px(metrics.text(LABEL_FONT_SIZE)))
             .text_color(theme::current(cx).text_muted)
             .when(prominent, |row| {
-                row.min_h(px(theme::DOCK_TREE_ROW_HEIGHT))
-                    .text_size(px(theme::FONT_SIZE_MD))
+                row.min_h(px(metrics.target(theme::DOCK_TREE_ROW_HEIGHT)))
+                    .text_size(px(metrics.text(theme::FONT_SIZE_MD)))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .text_color(theme::current(cx).text_primary)
             });

@@ -4,6 +4,7 @@ use super::{
     SessionRow,
     entries::{Entry, Target},
 };
+use crate::ui::Sizable as _;
 use crate::{
     surface::strings as s,
     ui::{AgentStatusBadge, IndicatorSize, theme},
@@ -33,6 +34,7 @@ fn session_row(
     current: bool,
     selected: bool,
     workspace: WeakEntity<Workspace>,
+    metrics: theme::UiMetrics,
     cx: &App,
 ) -> impl IntoElement + use<> {
     let t = theme::current(cx);
@@ -42,7 +44,7 @@ fn session_row(
         .flex()
         .items_center()
         .gap(px(theme::GAP_LG))
-        .min_h(px(theme::DOCK_SESSION_ROW_H))
+        .min_h(px(metrics.row(theme::DOCK_SESSION_ROW_H)))
         .px(px(theme::PAD_STANDARD))
         .border_l(px(theme::LANE_ACTIVE_BORDER_W))
         .border_color(if selected {
@@ -57,11 +59,10 @@ fn session_row(
         })
         .hover(|style| style.bg(t.lane_row_hover_bg))
         .cursor_pointer()
-        .child(AgentStatusBadge::for_status(
-            row.status,
-            IndicatorSize::Leading,
-            cx,
-        ))
+        .child(
+            AgentStatusBadge::for_status(row.status, IndicatorSize::Leading, cx)
+                .with_metrics(metrics),
+        )
         .child(
             div()
                 .flex_1()
@@ -70,20 +71,23 @@ fn session_row(
                 .flex_col()
                 .child(
                     div()
-                        .text_size(px(theme::FONT_SIZE_MD))
+                        .text_size(px(metrics.text(theme::FONT_SIZE_MD)))
                         .text_color(t.text_primary)
                         .text_ellipsis()
                         .child(row.title.clone()),
                 )
                 .child(
                     div()
-                        .text_size(px(theme::FONT_SIZE_SM))
+                        .text_size(px(metrics.text(theme::FONT_SIZE_SM)))
                         .text_color(t.text_muted)
                         .child(status_label(row.status)),
                 ),
         )
         .when(current, |el| {
-            el.child(crate::ui::icons::icon(crate::ui::icons::CHECK))
+            el.child(
+                crate::ui::icons::icon(crate::ui::icons::CHECK)
+                    .with_size(px(metrics.icon(theme::CONTROL_ICON_SIZE))),
+            )
         })
         .tooltip(crate::ui::tooltip::text(row.title.clone()))
         .on_click(move |_, window, cx| {
@@ -117,6 +121,7 @@ pub(in crate::workspace) fn named_rows(
                             && snap.agent_active_session_id.as_deref() == Some(&row.id),
                         false,
                         snap.workspace.clone(),
+                        snap.metrics,
                         cx,
                     )
                 }),
@@ -132,6 +137,7 @@ pub(in crate::workspace) fn chooser_overlay(
     let Some(chooser) = &ws.docks.session_chooser else {
         return div().into_any_element();
     };
+    let metrics = theme::UiMetrics(ws.mirrors.left_dock_size);
     let rows = ws.rail_chooser_entries(chooser.target, cx);
     let t = theme::current(cx);
     let (title, subtitle) = match chooser.target {
@@ -185,12 +191,17 @@ pub(in crate::workspace) fn chooser_overlay(
                 |header, project| {
                     let bounds = chooser.trigger_bounds;
                     header.child(
-                        crate::ui::button_icon("dock-worktrees-back", crate::ui::icons::BACK, cx)
-                            .tooltip(s::dock::sidebar_tab_worktrees())
-                            .debug_selector(|| "dock-worktrees-back".into())
-                            .on_click(cx.listener(move |ws, _, window, cx| {
-                                ws.choose_project_from_rail(project, bounds, window, cx)
-                            })),
+                        crate::ui::button_icon_sized(
+                            "dock-worktrees-back",
+                            crate::ui::icons::BACK,
+                            metrics,
+                            cx,
+                        )
+                        .tooltip(s::dock::sidebar_tab_worktrees())
+                        .debug_selector(|| "dock-worktrees-back".into())
+                        .on_click(cx.listener(move |ws, _, window, cx| {
+                            ws.choose_project_from_rail(project, bounds, window, cx)
+                        })),
                     )
                 },
             )
@@ -202,14 +213,14 @@ pub(in crate::workspace) fn chooser_overlay(
                     .flex_col()
                     .child(
                         div()
-                            .text_size(px(theme::FONT_SIZE_MD))
+                            .text_size(px(metrics.text(theme::FONT_SIZE_MD)))
                             .text_color(t.text_primary)
                             .text_ellipsis()
                             .child(title),
                     )
                     .child(
                         div()
-                            .text_size(px(theme::FONT_SIZE_SM))
+                            .text_size(px(metrics.text(theme::FONT_SIZE_SM)))
                             .text_color(t.text_muted)
                             .child(subtitle),
                     ),
@@ -233,6 +244,7 @@ pub(in crate::workspace) fn chooser_overlay(
                         ws.active == *lane && ws.active_runtime().focused_pane_id == row.pane,
                         chooser.target.is_selected(entry),
                         weak.clone(),
+                        metrics,
                         cx,
                     )
                     .into_any_element(),
@@ -254,7 +266,7 @@ pub(in crate::workspace) fn chooser_overlay(
                             .flex()
                             .items_center()
                             .gap(px(theme::GAP_LG))
-                            .min_h(px(theme::DOCK_SESSION_ROW_H))
+                            .min_h(px(metrics.row(theme::DOCK_SESSION_ROW_H)))
                             .px(px(theme::PAD_STANDARD))
                             .border_l(px(theme::LANE_ACTIVE_BORDER_W))
                             .border_color(if selected {
@@ -265,7 +277,7 @@ pub(in crate::workspace) fn chooser_overlay(
                             .when(selected, |el| el.bg(t.lane_card_active_bg))
                             .hover(|el| el.bg(t.lane_row_hover_bg))
                             .cursor_pointer()
-                            .child(super::super::rail::lane_indicator(*status, cx))
+                            .child(super::super::rail::lane_indicator(*status, metrics, cx))
                             .child(
                                 div()
                                     .flex_1()
@@ -274,13 +286,13 @@ pub(in crate::workspace) fn chooser_overlay(
                                     .flex_col()
                                     .child(
                                         div()
-                                            .text_size(px(theme::FONT_SIZE_MD))
+                                            .text_size(px(metrics.text(theme::FONT_SIZE_MD)))
                                             .text_ellipsis()
                                             .child(title.clone()),
                                     )
                                     .child(
                                         div()
-                                            .text_size(px(theme::FONT_SIZE_SM))
+                                            .text_size(px(metrics.text(theme::FONT_SIZE_SM)))
                                             .text_color(t.text_muted)
                                             .child(if *open_tabs == 0 {
                                                 s::dock::no_open_tabs()
@@ -289,7 +301,10 @@ pub(in crate::workspace) fn chooser_overlay(
                                             }),
                                     ),
                             )
-                            .child(crate::ui::icons::icon(crate::ui::icons::CHEVRON_RIGHT))
+                            .child(
+                                crate::ui::icons::icon(crate::ui::icons::CHEVRON_RIGHT)
+                                    .with_size(px(metrics.icon(theme::CONTROL_ICON_SIZE))),
+                            )
                             .tooltip(crate::ui::tooltip::text(title.clone()))
                             .on_click(move |_, window, cx| {
                                 if let Some(ws) = weak.upgrade() {

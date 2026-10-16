@@ -135,3 +135,61 @@ fn bounds(
     vcx.run_until_parked();
     vcx.debug_bounds(selector)
 }
+
+#[gpui::test]
+async fn live_size_reload_reflows_the_cached_rail_without_changing_width(
+    cx: &mut gpui::TestAppContext,
+) {
+    let root = std::env::temp_dir().join("daruda-rail-size-test");
+    std::fs::create_dir_all(&root).unwrap();
+    let (wh, entity) = crate::workspace::tests::build_workspace_with(
+        cx,
+        &daruda_config::Config::default(),
+        Some(daruda_store::project::Project::from_path(&root)),
+    );
+    entity.update(cx, |ws, cx| {
+        ws.docks.left.update(cx, |dock, cx| {
+            dock.is_open = false;
+            cx.notify();
+        });
+        cx.notify();
+    });
+    let vcx = &mut gpui::VisualTestContext::from_window(wh.into(), cx);
+    vcx.run_until_parked();
+    let dock = entity.read_with(vcx, |ws, _| ws.docks.left.clone());
+    let original_width = dock.read_with(vcx, |d, _| d.display_size());
+    for size in daruda_config::UiSize::ALL {
+        let before = dock.read_with(vcx, |d, _| d.render_count.get());
+        entity.update(vcx, |ws, cx| {
+            let mut config = daruda_config::Config::default();
+            config.left_dock.size = size;
+            ws.apply_config(&config, cx);
+        });
+        vcx.run_until_parked();
+        dock.read_with(vcx, |d, _| {
+            let crate::workspace::layout::DockSnapshot::Left(snap) = &d.snap else {
+                panic!("the rail must retain its left dock snapshot");
+            };
+            assert_eq!(
+                snap.metrics,
+                crate::ui::theme::UiMetrics(size),
+                "snapshot must advance before painting"
+            );
+            assert!(
+                d.render_count.get() > before,
+                "{size:?}: cached dock renders {before} -> {}, snapshot {:?}",
+                d.render_count.get(),
+                snap.metrics
+            );
+            assert_eq!(d.display_size(), original_width);
+        });
+    }
+    let before = dock.read_with(vcx, |d, _| d.render_count.get());
+    entity.update(vcx, |_, cx| cx.notify());
+    vcx.run_until_parked();
+    assert_eq!(
+        dock.read_with(vcx, |d, _| d.render_count.get()),
+        before,
+        "an unchanged snapshot must retain its cached paint"
+    );
+}

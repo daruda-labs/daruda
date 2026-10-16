@@ -134,9 +134,7 @@ impl Workspace {
         // status pulse, which advances badge animation frames not present in
         // the snapshot and so keeps its explicit notify. Per Pitfall #10.
         self.docks.left.update(cx, |d, cx| {
-            if d.stage(DockSnapshot::Left(Box::new(left_snap))) {
-                cx.notify();
-            }
+            d.stage_for_render(DockSnapshot::Left(Box::new(left_snap)), cx)
         });
         // Bottom dock is wrapped in `.cached()` (see `body`/`main_area`
         // below), so it must be marked dirty only when its snapshot
@@ -145,14 +143,10 @@ impl Workspace {
         // by repainting on every 250 ms status-pulse tick (which leaves
         // this snapshot identical). Per root AGENTS.md Pitfall #10.
         self.docks.bottom.update(cx, |d, cx| {
-            if d.stage(DockSnapshot::Bottom(Box::new(bottom_snap))) {
-                cx.notify();
-            }
+            d.stage_for_render(DockSnapshot::Bottom(Box::new(bottom_snap)), cx)
         });
         self.docks.right.update(cx, |d, cx| {
-            if d.stage(DockSnapshot::Right(Box::new(right_snap))) {
-                cx.notify();
-            }
+            d.stage_for_render(DockSnapshot::Right(Box::new(right_snap)), cx)
         });
 
         // Read dock display state after staging snapshots.

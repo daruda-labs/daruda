@@ -1,6 +1,7 @@
 //! One working-tree row of the Git Changes list: status letter, file name
 //! and diffstat, the stage checkbox, and the row's context menu.
 
+use crate::ui::Sizable as _;
 use std::path::PathBuf;
 
 use daruda_store::project::LaneRef;
@@ -113,8 +114,8 @@ pub(super) fn unified_file_row(
     let checkbox = div()
         .id(checkbox_id)
         .flex_none()
-        .w(px(theme::CONTROL_TARGET_SIZE))
-        .h(px(theme::CONTROL_TARGET_SIZE))
+        .w(px(snap.metrics.target(theme::CONTROL_TARGET_SIZE)))
+        .h(px(snap.metrics.target(theme::CONTROL_TARGET_SIZE)))
         .flex()
         .items_center()
         .justify_center()
@@ -123,11 +124,14 @@ pub(super) fn unified_file_row(
         } else {
             t.text_muted
         })
-        .child(crate::ui::icons::icon(if is_staged {
-            crate::ui::icons::CHECKBOX_ON
-        } else {
-            crate::ui::icons::CHECKBOX_OFF
-        }))
+        .child(
+            crate::ui::icons::icon(if is_staged {
+                crate::ui::icons::CHECKBOX_ON
+            } else {
+                crate::ui::icons::CHECKBOX_OFF
+            })
+            .with_size(px(snap.metrics.icon(theme::CONTROL_ICON_SIZE))),
+        )
         .when(!in_flight, |d| {
             d.cursor_pointer().on_mouse_down(
                 MouseButton::Left,
@@ -158,9 +162,9 @@ pub(super) fn unified_file_row(
         // width itself — without it `flex_1` below has no slack and the
         // right-aligned checkbox collapses back against the filename.
         .w_full()
-        .h(px(theme::GIT_FILE_ROW_HEIGHT))
-        .px(px(theme::GIT_FILE_ROW_PAD_X))
-        .gap(px(theme::GIT_FILE_ROW_GAP))
+        .h(px(snap.metrics.row(theme::GIT_FILE_ROW_HEIGHT)))
+        .px(px(snap.metrics.space(theme::GIT_FILE_ROW_PAD_X)))
+        .gap(px(snap.metrics.space(theme::GIT_FILE_ROW_GAP)))
         .cursor_pointer()
         .when(is_cursor, move |d| {
             d.border_l_2().border_color(cursor_border_color)
@@ -194,7 +198,7 @@ pub(super) fn unified_file_row(
             div()
                 .flex_none()
                 .w(px(theme::GIT_STATUS_CHAR_W))
-                .text_size(px(theme::GIT_SECTION_FONT_SIZE))
+                .text_size(px(snap.metrics.text(theme::GIT_SECTION_FONT_SIZE)))
                 .text_color(status_color)
                 .child(status_symbol),
         )
@@ -210,14 +214,14 @@ pub(super) fn unified_file_row(
                 .flex()
                 .flex_row()
                 .items_center()
-                .gap(px(theme::GIT_FILE_ROW_GAP))
+                .gap(px(snap.metrics.space(theme::GIT_FILE_ROW_GAP)))
                 .overflow_hidden()
                 .child(
                     div()
                         .flex_shrink()
                         .overflow_hidden()
                         .whitespace_nowrap()
-                        .text_size(px(theme::LANE_SUB_FONT_SIZE))
+                        .text_size(px(snap.metrics.text(theme::LANE_SUB_FONT_SIZE)))
                         .text_color(filename_color)
                         .child(file_name),
                 )
@@ -230,8 +234,8 @@ pub(super) fn unified_file_row(
                                 .flex()
                                 .flex_row()
                                 .items_center()
-                                .gap(px(theme::FILE_DIFF_STAT_GAP))
-                                .text_size(px(theme::FILE_DIFF_STAT_FONT_SIZE))
+                                .gap(px(snap.metrics.space(theme::FILE_DIFF_STAT_GAP)))
+                                .text_size(px(snap.metrics.text(theme::FILE_DIFF_STAT_FONT_SIZE)))
                                 .child(
                                     div()
                                         .flex_none()

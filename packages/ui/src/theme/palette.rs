@@ -282,9 +282,9 @@ pub const LANE_DRAG_GHOST_PAD_Y: f32 = PAD_XS;
 pub const DRAG_PILL_CURSOR_OFFSET: f32 = 4.0;
 
 // ── Lanes and project tree (left dock) ──────────────────────────────────────
-// A lane's inset lands its label on the project name and centres its status
-// cell under the folder glyph. Group presets are stored as hex on
-// `SerializedGroup::color`, so the header decodes them without a lookup.
+// Coupled project/lane columns are resolved beside the tree component.
+// Group presets are stored as hex on `SerializedGroup::color`, so the
+// header decodes them without a lookup.
 
 pub const LANE_ROW_PAD_X: f32 = PAD_LG;
 pub const LANE_ROW_GAP: f32 = GAP_SM;
@@ -305,10 +305,6 @@ pub const LANE_PLACEHOLDER_LINE_GAP: f32 = GAP_STANDARD;
 pub const LANE_UNREAD_DOT_SIZE: f32 = 6.0;
 pub const LANE_UNREAD_DOT_RADIUS: f32 = RADIUS_XS;
 pub const LANE_BRANCH_CHIP_PAD_X: f32 = PAD_XS;
-pub const LANE_PROJECT_ICON_SIZE: f32 = 14.0;
-pub const LANE_PROJECT_NAME_INSET: f32 = LANE_ROW_PAD_X + LANE_PROJECT_ICON_SIZE + LANE_LABEL_GAP;
-pub const LANE_ROW_INSET_L: f32 =
-    LANE_PROJECT_NAME_INSET - LANE_ACTIVE_BORDER_W - STATUS_INDICATOR_CELL_WIDTH - LANE_ROW_GAP;
 pub const LANE_GROUP_LABEL_FONT_SIZE: f32 = FONT_SIZE_SM;
 pub const LANE_GROUP_COLOR_DOT_SIZE: f32 = 8.0;
 pub const LANE_GROUP_COLOR_DOT_RADIUS: f32 = RADIUS_SM;

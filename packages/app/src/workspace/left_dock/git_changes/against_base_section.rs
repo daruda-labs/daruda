@@ -2,6 +2,7 @@
 //! the files the lane committed since its base. Read-only — no checkbox, no
 //! staging — and never on the keyboard cursor's path.
 
+use crate::ui::Sizable as _;
 use gpui::{
     AnyElement, ClickEvent, Context, IntoElement, MouseButton, MouseDownEvent, div, prelude::*, px,
 };
@@ -32,12 +33,12 @@ pub(super) fn base_header(
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(theme::GIT_FILE_ROW_GAP))
-        .px(px(theme::GIT_HEADER_PAD_X))
+        .gap(px(snap.metrics.space(theme::GIT_FILE_ROW_GAP)))
+        .px(px(snap.metrics.space(theme::GIT_HEADER_PAD_X)))
         .w_full()
         // One height for every row: `uniform_list` measures a single item.
-        .h(px(theme::GIT_FILE_ROW_HEIGHT))
-        .text_size(px(theme::GIT_DIR_HEADER_FONT_SIZE))
+        .h(px(snap.metrics.row(theme::GIT_FILE_ROW_HEIGHT)))
+        .text_size(px(snap.metrics.text(theme::GIT_DIR_HEADER_FONT_SIZE)))
         .text_color(label_color);
 
     match row {
@@ -63,7 +64,11 @@ pub(super) fn base_header(
                         }
                     }),
                 )
-                .child(crate::ui::icons::icon(chevron).text_color(label_color))
+                .child(
+                    crate::ui::icons::icon(chevron)
+                        .with_size(px(snap.metrics.icon(theme::CONTROL_ICON_SIZE)))
+                        .text_color(label_color),
+                )
                 .child(
                     div()
                         .flex_1()
@@ -144,9 +149,9 @@ pub(super) fn base_file_row(
         .flex_row()
         .items_center()
         .w_full()
-        .h(px(theme::GIT_FILE_ROW_HEIGHT))
-        .px(px(theme::GIT_FILE_ROW_PAD_X))
-        .gap(px(theme::GIT_FILE_ROW_GAP))
+        .h(px(snap.metrics.row(theme::GIT_FILE_ROW_HEIGHT)))
+        .px(px(snap.metrics.space(theme::GIT_FILE_ROW_PAD_X)))
+        .gap(px(snap.metrics.space(theme::GIT_FILE_ROW_GAP)))
         .cursor_pointer()
         .when(is_selected, move |d| d.bg(row_selected_bg))
         .when(!is_selected, move |d| d.hover(move |d| d.bg(row_hover_bg)))
@@ -162,7 +167,7 @@ pub(super) fn base_file_row(
             div()
                 .flex_none()
                 .w(px(theme::GIT_STATUS_CHAR_W))
-                .text_size(px(theme::GIT_SECTION_FONT_SIZE))
+                .text_size(px(snap.metrics.text(theme::GIT_SECTION_FONT_SIZE)))
                 .text_color(status_color)
                 .child(git_status_symbol(file.status)),
         )
@@ -172,14 +177,14 @@ pub(super) fn base_file_row(
                 .flex()
                 .flex_row()
                 .items_center()
-                .gap(px(theme::GIT_FILE_ROW_GAP))
+                .gap(px(snap.metrics.space(theme::GIT_FILE_ROW_GAP)))
                 .overflow_hidden()
                 .child(
                     div()
                         .flex_shrink()
                         .overflow_hidden()
                         .whitespace_nowrap()
-                        .text_size(px(theme::LANE_SUB_FONT_SIZE))
+                        .text_size(px(snap.metrics.text(theme::LANE_SUB_FONT_SIZE)))
                         .text_color(filename_color)
                         .child(file_name),
                 )
@@ -190,8 +195,8 @@ pub(super) fn base_file_row(
                             .flex()
                             .flex_row()
                             .items_center()
-                            .gap(px(theme::FILE_DIFF_STAT_GAP))
-                            .text_size(px(theme::FILE_DIFF_STAT_FONT_SIZE))
+                            .gap(px(snap.metrics.space(theme::FILE_DIFF_STAT_GAP)))
+                            .text_size(px(snap.metrics.text(theme::FILE_DIFF_STAT_FONT_SIZE)))
                             .child(div().text_color(diff_add_color).child(format!("+{added}")))
                             .child(
                                 div()

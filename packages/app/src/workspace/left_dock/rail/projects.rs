@@ -45,12 +45,12 @@ pub(super) fn project(
             )
             .focusable()
             .tab_stop(true)
-            .h(px(theme::DOCK_RAIL_ROW_H))
+            .h(px(snap.metrics.row(theme::DOCK_RAIL_ROW_H)))
             .flex()
             .items_center()
             .justify_center()
             .cursor_pointer()
-            .text_size(px(theme::FONT_SIZE_MD))
+            .text_size(px(snap.metrics.text(theme::FONT_SIZE_MD)))
             .text_color(t.text_primary)
             .hover(|el| el.bg(t.lane_row_hover_bg))
             .child(
@@ -63,11 +63,11 @@ pub(super) fn project(
                     } else {
                         t.border
                     })
-                    .size(px(theme::DOCK_RAIL_INITIAL_SIZE))
+                    .size(px(snap.metrics.row(theme::DOCK_RAIL_INITIAL_SIZE)))
                     .flex()
                     .items_center()
                     .justify_center()
-                    .text_size(px(theme::CONTROL_ICON_SIZE))
+                    .text_size(px(snap.metrics.icon(theme::CONTROL_ICON_SIZE)))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .child(project_initial(&project.name)),
             )
@@ -153,7 +153,7 @@ pub(super) fn project(
                         .inset_0()
                         .size_full(),
                     )
-                    .h(px(theme::DOCK_RAIL_ROW_H))
+                    .h(px(snap.metrics.row(theme::DOCK_RAIL_ROW_H)))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -169,12 +169,13 @@ pub(super) fn project(
                     .hover(|el| el.bg(t.lane_row_hover_bg))
                     .child(lane_indicator(
                         snap.agent_status_per_lane.get(&target).copied(),
+                        snap.metrics,
                         cx,
                     ))
                     .when(count > 1, |el| {
                         el.child(
                             div()
-                                .text_size(px(theme::FONT_SIZE_SM))
+                                .text_size(px(snap.metrics.text(theme::FONT_SIZE_SM)))
                                 .text_color(t.text_primary)
                                 .child(count.to_string()),
                         )

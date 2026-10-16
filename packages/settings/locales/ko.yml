@@ -11,6 +11,11 @@ agent_chat:
   source_agent_set: "에이전트 기본값 지정됨"
 
 settings:
+  label_left_dock_size: "표시 크기"
+  hint_left_dock_size: "왼쪽 독의 글자, 아이콘, 행 간격을 조절합니다."
+  ui_size_small: "작게"
+  ui_size_normal: "보통"
+  ui_size_large: "크게"
   toggle_on: "켜짐"
   toggle_off: "꺼짐"
   group_application: "애플리케이션"

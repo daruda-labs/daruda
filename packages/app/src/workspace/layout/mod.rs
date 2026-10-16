@@ -114,6 +114,20 @@ impl Dock {
         changed
     }
 
+    /// Snapshot changes discovered during parent paint must schedule a later
+    /// frame: GPUI queues dirty views during paint without marking the window
+    /// dirty. Deferring the notify invalidates this cached child after paint.
+    pub(in crate::workspace) fn stage_for_render(
+        &mut self,
+        next: DockSnapshot,
+        cx: &mut Context<Self>,
+    ) {
+        if self.stage(next) {
+            let id = cx.entity_id();
+            cx.defer(move |cx| cx.notify(id));
+        }
+    }
+
     pub fn new(position: DockPosition, workspace: WeakEntity<Workspace>) -> Self {
         let (size, min_size, max_size) = match position {
             DockPosition::Left => (
@@ -233,7 +247,10 @@ impl Render for Dock {
                     .size_full()
                     .overflow_hidden()
                     .child(div().flex_1().overflow_hidden().child(body))
-                    .child(crate::workspace::left_dock::footer::render(cx))
+                    .child(crate::workspace::left_dock::footer::render(
+                        snap.metrics,
+                        cx,
+                    ))
                     .into_any_element();
                 (header, content)
             }

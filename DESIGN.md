@@ -1454,3 +1454,18 @@ How to apply this doc when changing daruda's UI:
 - **§Border Radius's `md` row is aspirational.** It assigns 6px to "Buttons, text inputs, tab pills"; every shipped button constant is `RADIUS_SM` (4px). New controls should match their neighbours at 4px until the table is reconciled.
 - **Disabled controls on pane-local surfaces take a UI-theme colour.** The vendored button's disabled tone is `mute` at 50% regardless of the surface, so a light terminal preset under a dark UI theme (or the reverse) gets an unverified pair. Every other state on those controls derives from the pane.
 - **Custom user palettes are out of scope.** The syntax palette is a curated set; there is no user-defined-palette format documented.
+
+### Left dock presentation size
+
+The left dock supports Small, Normal, and Large presentation sizes. Normal
+preserves the existing recipes. Text, artwork, and row geometry change together;
+small text stays at least 10px and controls retain at least 24px targets. The
+compact rail keeps its 48px width. Terminal and chat reading sizes are independent.
+The shared `UiSize` preference and `UiMetrics` recipes are opt-in per surface;
+component factories own geometry, and hosts supply the selected size through
+snapshots rather than changing global pixel tokens.
+
+Git action buttons and the commit composer follow the dock presentation size.
+A live change reflows the existing input, preserving its draft and focus.
+Project marks and lane status artwork share a leading slot so names and nested
+session rows stay aligned at every size.

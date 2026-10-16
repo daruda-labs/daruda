@@ -45,6 +45,7 @@ impl Workspace {
             .map(|(lane, sessions)| (*lane, self.named_lane_sessions(*lane, sessions, cx)))
             .collect();
         LeftDockSnapshot {
+            metrics: crate::ui::theme::UiMetrics(self.mirrors.left_dock_size),
             expanded: self.docks.left.read(cx).is_open,
             named_sessions,
             open_tabs: self

@@ -12,7 +12,10 @@ use crate::ui::ButtonVariants as _;
 use crate::ui::theme;
 use crate::workspace::OpenSettings;
 
-pub(in crate::workspace) fn render(cx: &mut Context<Dock>) -> AnyElement {
+pub(in crate::workspace) fn render(
+    metrics: theme::UiMetrics,
+    cx: &mut Context<Dock>,
+) -> AnyElement {
     let t = theme::current(cx);
 
     div()
@@ -25,13 +28,14 @@ pub(in crate::workspace) fn render(cx: &mut Context<Dock>) -> AnyElement {
         .border_t_1()
         .border_color(t.border)
         .child(
-            crate::ui::button_with_icon(
+            crate::ui::button_with_icon_sized(
                 "left-dock-settings",
                 crate::surface::strings::dock::settings(),
                 crate::ui::icons::SETTINGS,
+                metrics,
             )
             .ghost()
-            .text_size(px(theme::DOCK_VIEW_TAB_FONT_SIZE))
+            .text_size(px(metrics.text(theme::DOCK_VIEW_TAB_FONT_SIZE)))
             // The View dispatches; `Workspace::on_open_settings` owns the
             // body, and the global fallback answers where it does not.
             .on_click(|_, window, cx| {

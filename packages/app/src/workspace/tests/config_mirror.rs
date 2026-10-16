@@ -14,6 +14,7 @@ async fn apply_config_syncs_all_mirrors(cx: &mut TestAppContext) {
     new_config.panels.grid_columns = baseline.panels_grid_columns.wrapping_add(1);
     new_config.shell.close_pane_on_exit = !baseline.close_pane_on_exit;
     new_config.shell.program = Some("/bin/test-shell".into());
+    new_config.left_dock.size = daruda_config::UiSize::Large;
     new_config.left_dock.files_show_hidden = !baseline.files_show_hidden;
     new_config.left_dock.files_use_gitignore = !baseline.files_use_gitignore;
     new_config.left_dock.file_icon_color_mode = match baseline.files_icon_color_mode {
@@ -36,6 +37,7 @@ async fn apply_config_syncs_all_mirrors(cx: &mut TestAppContext) {
             new_config.shell.close_pane_on_exit
         );
         assert_eq!(ws.mirrors.shell_program.as_deref(), Some("/bin/test-shell"));
+        assert_eq!(ws.mirrors.left_dock_size, new_config.left_dock.size);
         assert_eq!(
             ws.mirrors.files_show_hidden,
             new_config.left_dock.files_show_hidden

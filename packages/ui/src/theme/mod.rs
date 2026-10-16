@@ -8,7 +8,9 @@ pub mod daruda_theme;
 pub mod list_metrics;
 pub mod metrics;
 pub mod palette;
+mod sizing;
 pub mod syntax;
+pub use sizing::UiMetrics;
 
 mod config_mirror;
 mod pane_surface;

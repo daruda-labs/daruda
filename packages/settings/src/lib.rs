@@ -345,6 +345,7 @@ pub struct SettingsView {
     clipboard_streaming_input: Entity<InputState>,
     // External Editor
     editor_select: Entity<SelectState>,
+    left_dock_size_select: Entity<SelectState>,
     file_icon_color_select: Entity<SelectState>,
     // Panels (bottom-dock macro grid)
     panels_grid_columns_input: Entity<InputState>,

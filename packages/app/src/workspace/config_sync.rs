@@ -33,6 +33,7 @@ pub(in crate::workspace) struct ConfigMirrors {
 
     /// Mirror of `daruda_config::LeftDockConfig::file_icon_color_mode`.
     pub files_icon_color_mode: IconColorMode,
+    pub left_dock_size: daruda_config::UiSize,
 
     /// PTY-output batch / repaint interval derived from
     /// `daruda_config::RenderConfig::max_fps` (`1000 / max_fps` ms).
@@ -198,6 +199,7 @@ impl ConfigMirrors {
             files_show_hidden: config.left_dock.files_show_hidden,
             files_use_gitignore: config.left_dock.files_use_gitignore,
             files_icon_color_mode: config.left_dock.file_icon_color_mode.clone(),
+            left_dock_size: config.left_dock.size,
             terminal_redraw_interval: config.render.redraw_interval(),
             painted_ui_preset,
             status_bar: config.status_bar.clone(),

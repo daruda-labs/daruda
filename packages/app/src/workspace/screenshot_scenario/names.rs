@@ -23,6 +23,7 @@ const NAME_LANDING: &str = "landing";
 /// `settings:<slug>` opens a specific section (e.g. `settings:font`).
 const NAME_SETTINGS: &str = "settings";
 /// CLI token for the Settings window showing a failed action's banner.
+const NAME_LEFT_DOCK_GIT: &str = "left-dock-git";
 const NAME_SETTINGS_ERROR: &str = "settings-error";
 /// CLI token for Settings with a search query typed: the results page.
 const NAME_SETTINGS_SEARCH: &str = "settings-search";
@@ -195,6 +196,7 @@ impl ScreenshotScenario {
             NAME_LEFT_DOCK_SESSIONS_SIX => Some(Self::LeftDockSessionsSix),
             NAME_LEFT_DOCK_SESSIONS => Some(Self::LeftDockSessions),
             NAME_LEFT_DOCK_GROUPS => Some(Self::LeftDockGroups),
+            NAME_LEFT_DOCK_GIT => Some(Self::LeftDockGit),
             NAME_LEFT_DOCK_WORKTREES => Some(Self::LeftDockWorktrees),
             NAME_LEFT_DOCK_RAIL => Some(Self::LeftDockRail),
             NAME_LEFT_DOCK_EXPANDED => Some(Self::LeftDockExpanded),
