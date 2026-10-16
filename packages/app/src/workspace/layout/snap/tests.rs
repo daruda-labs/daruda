@@ -14,6 +14,9 @@ fn fixture(window: &mut Window, cx: &mut gpui::App) -> LeftDockSnapshot {
         crate::ui::InputPanel::new(crate::ui::InputPanelLayout::ActionsBelow, window, cx)
     });
     LeftDockSnapshot {
+        expanded: true,
+        open_tabs: Default::default(),
+        named_sessions: Default::default(),
         left_dock_view: daruda_store::project::LeftDockView::default(),
         workspace_page: None,
         lanes: Vec::new(),

@@ -6,6 +6,23 @@ use gpui::Context;
 use super::{Workspace, main_area};
 
 impl Workspace {
+    pub(in crate::workspace) fn reveal_left_dock_view(
+        &mut self,
+        view: daruda_store::project::LeftDockView,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_session_chooser(false, window, cx);
+        self.set_left_dock_view(view, cx);
+        if !self.docks.left.read(cx).is_open {
+            self.mutate_durable(cx, |ws, cx| {
+                ws.docks.left.update(cx, |d, _| d.open());
+                ws.main_area.pending_resize = true;
+            });
+        }
+        cx.notify();
+    }
+
     pub(in crate::workspace) fn set_left_dock_view(
         &mut self,
         view: daruda_store::project::LeftDockView,
@@ -55,11 +72,14 @@ impl Workspace {
     /// builds one row element per changed file, so on a large branch that is a
     /// full rebuild of the list four times a second to animate nothing.
     pub(crate) fn left_dock_paints_status_pulse(&self, cx: &gpui::App) -> bool {
-        self.docks.left.read(cx).is_open
-            && self.docks.left_view == daruda_store::project::LeftDockView::Lanes
+        !self.docks.left.read(cx).is_open
+            || self.docks.left_view == daruda_store::project::LeftDockView::Lanes
     }
 
     pub(crate) fn notify_left_dock(&self, cx: &mut Context<Self>) {
+        if self.docks.session_chooser.is_some() {
+            cx.notify();
+        }
         let dock_id = self.docks.left.entity_id();
         gpui::App::notify(cx, dock_id);
     }

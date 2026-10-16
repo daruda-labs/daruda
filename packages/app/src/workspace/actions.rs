@@ -154,28 +154,28 @@ impl Workspace {
     pub(in crate::workspace) fn on_show_left_dock_worktrees(
         &mut self,
         _: &ShowLeftDockLanes,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_left_dock_view(daruda_store::project::LeftDockView::Lanes, cx);
+        self.reveal_left_dock_view(daruda_store::project::LeftDockView::Lanes, window, cx);
     }
 
     pub(in crate::workspace) fn on_show_left_dock_git(
         &mut self,
         _: &ShowLeftDockGit,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_left_dock_view(daruda_store::project::LeftDockView::GitChanges, cx);
+        self.reveal_left_dock_view(daruda_store::project::LeftDockView::GitChanges, window, cx);
     }
 
     pub(in crate::workspace) fn on_show_left_dock_files(
         &mut self,
         _: &ShowLeftDockFiles,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_left_dock_view(daruda_store::project::LeftDockView::Files, cx);
+        self.reveal_left_dock_view(daruda_store::project::LeftDockView::Files, window, cx);
     }
 
     // ---- Right panel view switches ----

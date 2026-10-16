@@ -110,6 +110,7 @@ impl Workspace {
             None => FrameBody::Workspace(self.stage_docks(cx)),
         };
 
+        self.reconcile_session_chooser(window, cx);
         let has_project_config = self.project_layer_overrides();
 
         FramePrep {
@@ -164,6 +165,9 @@ impl Workspace {
             // it notifies only itself when toasts change, sparing the
             // full Workspace repaint.
             .child(self.toast_layer.clone())
+            .child(super::left_dock::sessions::chooser_overlay(
+                self, window, cx,
+            ))
             .child(command_palette::CommandPaletteOverlay::new(
                 self.overlays.palette.clone(),
                 cx.listener(|this, _, _, cx| this.close_command_palette(cx)),

@@ -220,6 +220,11 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
         shortcut: k::SHORTCUT_PREV_TAB,
     },
     PaletteEntry {
+        id: "reset_left_dock_width",
+        label: s::command::reset_left_dock_width,
+        shortcut: "",
+    },
+    PaletteEntry {
         id: "toggle_left_dock",
         label: s::command::toggle_left_dock,
         shortcut: k::SHORTCUT_TOGGLE_LEFT_DOCK,

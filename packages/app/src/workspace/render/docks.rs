@@ -77,12 +77,8 @@ pub(super) fn dock_resize_handle(
 
     handle.on_mouse_down(
         MouseButton::Left,
-        cx.listener(move |this, ev: &MouseDownEvent, _window, cx| {
-            let anchor_px: f32 = match position {
-                DockPosition::Left | DockPosition::Right => ev.position.x.into(),
-                DockPosition::Bottom => ev.position.y.into(),
-            };
-            this.begin_dock_drag(position, anchor_px, cx);
+        cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
+            this.on_dock_resize_press(position, ev, window, cx)
         }),
     )
 }
@@ -114,7 +110,10 @@ impl Workspace {
 
         // Ensure the file tree is primed before snapshotting its state.
         let active_ref = self.active_ref();
-        if self.lane_file_tree(active_ref).is_none() {
+        if self.docks.left.read(cx).is_open
+            && self.docks.left_view == daruda_store::project::LeftDockView::Files
+            && self.lane_file_tree(active_ref).is_none()
+        {
             self.ensure_file_tree(active_ref, cx);
         }
 
@@ -161,7 +160,7 @@ impl Workspace {
         let dragged_dock = self.docks.drag.map(|drag| drag.position);
         let (left_dock_open, left_dock_size) = {
             let d = self.docks.left.read(cx);
-            (d.is_open, d.size)
+            (d.is_open, d.display_size())
         };
         let (bottom_dock_open, bottom_dock_size) = {
             let d = self.docks.bottom.read(cx);

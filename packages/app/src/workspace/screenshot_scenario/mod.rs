@@ -77,6 +77,12 @@ pub(crate) enum ScreenshotScenario {
     /// outcomes — behind a resting tab. Colour is all that tells them apart,
     /// which only a capture can judge.
     TabIndicators,
+    LeftDockSessions,
+    LeftDockSessionsSix,
+    LeftDockRail,
+    LeftDockExpanded,
+    LeftDockGroups,
+    LeftDockWorktrees,
     /// Open the command palette (`CommandPaletteState::open`).
     CommandPalette,
     /// Open the Lane switcher with a real candidate whose label is
@@ -607,6 +613,33 @@ pub(crate) fn drive(
         }
         ScreenshotScenario::OrchestratorTab => {
             workspace.update(cx, |ws, cx| ws.seed_orchestrator_for_shot(true, window, cx));
+        }
+        ScreenshotScenario::LeftDockGroups | ScreenshotScenario::LeftDockWorktrees => {
+            workspace.update(cx, |ws, cx| {
+                ws.seed_left_dock_groups_for_shot(
+                    scenario == ScreenshotScenario::LeftDockWorktrees,
+                    window,
+                    cx,
+                )
+            });
+        }
+        ScreenshotScenario::LeftDockSessions
+        | ScreenshotScenario::LeftDockSessionsSix
+        | ScreenshotScenario::LeftDockRail
+        | ScreenshotScenario::LeftDockExpanded => {
+            workspace.update(cx, |ws, cx| {
+                ws.seed_left_dock_for_shot(
+                    matches!(
+                        scenario,
+                        ScreenshotScenario::LeftDockSessions
+                            | ScreenshotScenario::LeftDockSessionsSix
+                    ),
+                    scenario == ScreenshotScenario::LeftDockExpanded,
+                    scenario == ScreenshotScenario::LeftDockSessionsSix,
+                    window,
+                    cx,
+                )
+            });
         }
         ScreenshotScenario::TabIndicators => {
             workspace.update(cx, |ws, cx| ws.seed_tab_indicators_for_shot(window, cx));

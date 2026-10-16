@@ -225,6 +225,16 @@ pub const PANEL_BODY_GAP: f32 = GAP_STANDARD;
 // Dock sizes. The right default fits all five tab labels in the widest
 // locale. Bottom presets are `TAB_BAR_HEIGHT + 2*PANEL_BODY_PAD_Y +
 // N*BUTTON_WIDGET_HEIGHT + (N-1)*PANEL_BODY_GAP`, one per macro row count.
+pub const DOCK_LEFT_RAIL_W: f32 = 48.0;
+pub const DOCK_RAIL_ROW_H: f32 = 36.0;
+pub const DOCK_RAIL_INITIAL_SIZE: f32 = 28.0;
+/// Opaque project marks need more separation than hover surfaces in a compact rail.
+pub const RAIL_PROJECT_BG: Hsla = hsla(215.45455, 11.0 / 59.0, 59.0 / 255.0, 1.0);
+pub const DOCK_SESSION_ROW_H: f32 = 44.0;
+pub const DOCK_SESSION_PANEL_W: f32 = 330.0;
+pub const DOCK_SESSION_PANEL_H: f32 = 360.0;
+pub const DOCK_LEFT_COLLAPSE_W: f32 = (DOCK_LEFT_RAIL_W + DOCK_LEFT_MIN_W) / 2.0;
+pub const DOCK_LEFT_EXPAND_W: f32 = DOCK_LEFT_COLLAPSE_W + CONTROL_ICON_SIZE;
 pub const DOCK_LEFT_DEFAULT_W: f32 = 250.0;
 pub const DOCK_LEFT_MIN_W: f32 = 220.0;
 pub const DOCK_LEFT_MAX_W: f32 = 400.0;

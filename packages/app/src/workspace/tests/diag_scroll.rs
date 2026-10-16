@@ -144,6 +144,10 @@ fn diag_wheel_after_drag_then_lane_swap(cx: &mut TestAppContext) {
 
     let project_id = ws.read_with(cx, |ws, _| ws.active_ref().project);
     let selector: &'static str = Box::leak(format!("lane-row-{project_id}-1").into_boxed_str());
+    // WORKAROUND: GPUI cached paint omits debug_bounds replay; force a fresh
+    // test frame rather than changing vendored instrumentation here.
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
     let row = cx
         .debug_bounds(selector)
         .expect("lane 1 row must be rendered in the left dock");

@@ -153,6 +153,14 @@ impl Dock {
         self.panels.push(Box::new(panel));
     }
 
+    pub(in crate::workspace) fn display_size(&self) -> f32 {
+        if self.position == DockPosition::Left && !self.is_open {
+            theme::DOCK_LEFT_RAIL_W
+        } else {
+            self.size
+        }
+    }
+
     pub fn toggle(&mut self) {
         self.is_open = !self.is_open;
     }
@@ -184,13 +192,18 @@ impl Dock {
 impl Render for Dock {
     fn render(
         &mut self,
-        _window: &mut gpui::Window,
+        window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
         #[cfg(test)]
         self.render_count.set(self.render_count.get() + 1);
         if !self.is_open {
-            return div().into_any_element();
+            return match &self.snap {
+                DockSnapshot::Left(snap) => {
+                    crate::workspace::left_dock::rail::render(snap, window, cx)
+                }
+                _ => div().into_any_element(),
+            };
         }
 
         let t = theme::current(cx);

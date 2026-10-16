@@ -195,9 +195,7 @@ pub(in crate::workspace::left_dock::projects) struct ProjectHeaderArgs {
 /// per-project "create lane" affordance, so the row carries every
 /// project-scoped action.
 ///
-/// `is_collapsed` flips the leading glyph between an open folder
-/// (expanded) and a closed one (collapsed). The glyph carries its own click
-/// handler that toggles the flag; the rest of the row stays bound to
+/// The project initial toggles its fold state; the rest of the row stays bound to
 /// `activate_lane(last_active)` so a header click still snaps the focus.
 pub(in crate::workspace::left_dock::projects) fn project_header_row(
     args: ProjectHeaderArgs,
@@ -311,23 +309,16 @@ pub(in crate::workspace::left_dock::projects) fn project_header_row(
         // whatever weight the name carries.
         .child({
             let ws_for_toggle = snap.workspace.clone();
-            let folder_icon = if is_collapsed {
-                crate::ui::icons::FOLDER
-            } else {
-                crate::ui::icons::FOLDER_OPEN
-            };
-            crate::ui::button_icon_glyph(
-                ("project-fold", project_id as usize),
-                folder_icon,
-                theme::LANE_PROJECT_ICON_SIZE,
-                cx,
-            )
-            .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
-                cx.stop_propagation();
-                if let Some(ws) = ws_for_toggle.upgrade() {
-                    ws.update(cx, |ws, cx| ws.toggle_project_collapse(project_id, cx));
-                }
-            }))
+            crate::ui::button_bare_compact(("project-fold", project_id as usize))
+                .label(crate::workspace::left_dock::rail::project_initial(&name))
+                .when(is_collapsed, |button| button.bg(t.overlay_prominent))
+                .tooltip(name.clone())
+                .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+                    cx.stop_propagation();
+                    if let Some(ws) = ws_for_toggle.upgrade() {
+                        ws.update(cx, |ws, cx| ws.toggle_project_collapse(project_id, cx));
+                    }
+                }))
         })
         .child(div().flex_1().text_ellipsis().child(name))
         // Keep branch metadata quiet beside the project name.

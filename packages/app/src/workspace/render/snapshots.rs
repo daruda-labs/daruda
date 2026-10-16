@@ -11,6 +11,10 @@ use crate::workspace::layout::diff_policy::{ByPointer, Handle, PerFrame};
 use crate::workspace::layout::snap::{BottomDockSnapshot, LeftDockSnapshot, RightDockSnapshot};
 use crate::workspace::left_dock::git_ops::lock::GitLock;
 
+static EMPTY_VISIBLE_ENTRIES: std::sync::LazyLock<
+    std::sync::Arc<Vec<crate::workspace::left_dock::file_tree_ops::VisibleEntry>>,
+> = std::sync::LazyLock::new(|| std::sync::Arc::new(Vec::new()));
+
 impl Workspace {
     pub(in crate::workspace) fn prepare_left_dock_snapshot(
         &mut self,
@@ -36,7 +40,28 @@ impl Workspace {
                 &self.claude_sessions.status,
                 &acp_statuses,
             );
+        let named_sessions = agent_per_session_per_lane
+            .iter()
+            .map(|(lane, sessions)| (*lane, self.named_lane_sessions(*lane, sessions, cx)))
+            .collect();
         LeftDockSnapshot {
+            expanded: self.docks.left.read(cx).is_open,
+            named_sessions,
+            open_tabs: self
+                .main_area
+                .runtimes
+                .iter()
+                .map(|(lane, runtime)| {
+                    (
+                        *lane,
+                        runtime
+                            .tabs
+                            .iter()
+                            .filter(|tab| !self.is_orchestrator_tab(tab))
+                            .count(),
+                    )
+                })
+                .collect(),
             left_dock_view: self.docks.left_view,
             workspace_page: self.active_page(),
             lanes: self.active_lanes().to_vec(),
@@ -137,7 +162,15 @@ impl Workspace {
             files_panel_focus: Handle(self.file_tree.files_panel_focus.clone()),
             files_scroll_handle: Handle(self.file_tree.files_scroll_handle.clone()),
             files_icon_color_mode: self.mirrors.files_icon_color_mode.clone(),
-            cached_visible: ByPointer(self.cached_or_rebuild_visible(self.active_ref())),
+            cached_visible: ByPointer(
+                if self.docks.left.read(cx).is_open
+                    && self.docks.left_view == daruda_store::project::LeftDockView::Files
+                {
+                    self.cached_or_rebuild_visible(self.active_ref())
+                } else {
+                    EMPTY_VISIBLE_ENTRIES.clone()
+                },
+            ),
             root_kind: self
                 .lane_file_tree(self.active_ref())
                 .and_then(|t| t.entry(t.root_id))

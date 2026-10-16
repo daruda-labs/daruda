@@ -399,6 +399,20 @@ border-right: 1px hairline  (LeftDock)
 border-left:  1px hairline  (RightDock)
 ```
 
+The left dock collapses to a 48px rail instead of disappearing. Projects keep
+initial badges; lanes keep the same 16px status indicators and show a total
+session count only when multiple sessions are represented. Clicking that lane
+opens a root-deployed session chooser beside the rail without resizing the
+terminal. The chooser shows named rows, status text, and the current session;
+Clicking the same trigger again, Escape, or an outside press dismisses it.
+Selecting a session updates the input target and tab focus together, revealing
+the chosen pane if a sibling was zoomed. Expanded lanes show named session
+child rows. In the rail, only groups fold: a short group label accompanies the
+chevron, with no vertical group guide. Project initials use bordered 28px tiles
+and open a worktree chooser without changing the expanded tree's fold state.
+Worktrees with no open tabs take no rail row but remain reachable in that chooser;
+terminal-only worktrees retain a neutral marker. Full names remain on hover.
+
 **ViewSwitcher (icon tab strip at top)**
 ```
 tab-default:  background transparent,  icon mute,    height 32px, padding 0 sm

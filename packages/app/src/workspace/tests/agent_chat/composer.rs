@@ -588,7 +588,9 @@ async fn empty_composer_enter_twice_resumes_the_parked_queue(cx: &mut TestAppCon
 
             let lane_ref = ws.active_ref();
             assert!(
-                !ws.lane_scoped[&lane_ref].input_history.has_entries(),
+                ws.lane_scoped
+                    .get(&lane_ref)
+                    .is_none_or(|state| !state.input_history.has_entries()),
                 "an empty submit must not push an entry onto the input history"
             );
         });

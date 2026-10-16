@@ -205,3 +205,51 @@ fn every_right_panel_action_opens_the_dock_it_selects_in(cx: &mut TestAppContext
 fn ws_is_open(ws: &Workspace, cx: &gpui::App) -> bool {
     ws.docks.right.read(cx).is_open
 }
+
+#[gpui::test]
+async fn collapsing_and_resetting_left_dock_preserves_the_active_page(cx: &mut TestAppContext) {
+    let (wh, ws) = build_workspace(cx);
+    cx.run_until_parked();
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_page(crate::workspace::pages::Page::Tasks, window, cx);
+            ws.on_toggle_left_dock(&crate::workspace::ToggleLeftDock, window, cx);
+            assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Tasks));
+            assert_eq!(
+                ws.docks.left.read(cx).display_size(),
+                crate::ui::theme::DOCK_LEFT_RAIL_W
+            );
+            ws.on_reset_left_dock_width(&crate::workspace::ResetLeftDockWidth, window, cx);
+            assert!(ws.docks.left.read(cx).is_open);
+            assert_eq!(
+                ws.docks.left.read(cx).size,
+                crate::ui::theme::DOCK_LEFT_DEFAULT_W
+            );
+            assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Tasks));
+        })
+    })
+    .unwrap();
+}
+
+#[gpui::test]
+async fn left_dock_drag_snaps_without_losing_the_expanded_width(cx: &mut TestAppContext) {
+    let (wh, ws) = build_workspace(cx);
+    cx.run_until_parked();
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.docks.left.update(cx, |dock, _| {
+                dock.is_open = true;
+                dock.resize(321.0);
+            });
+            ws.begin_dock_drag(layout::DockPosition::Left, 321.0, cx);
+            ws.update_dock_drag(40.0, window, cx);
+            assert!(!ws.docks.left.read(cx).is_open);
+            assert_eq!(ws.docks.left.read(cx).size, 321.0);
+            ws.update_dock_drag(300.0, window, cx);
+            assert!(ws.docks.left.read(cx).is_open);
+            assert_eq!(ws.docks.left.read(cx).size, 300.0);
+            ws.end_dock_drag(cx);
+        })
+    })
+    .unwrap();
+}

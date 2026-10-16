@@ -76,6 +76,8 @@ pub(super) mod footer;
 pub(super) mod git_changes;
 pub(in crate::workspace) mod git_ops;
 pub(super) mod projects;
+pub(in crate::workspace) mod rail;
+pub(in crate::workspace) mod sessions;
 pub(super) mod view_tabs;
 
 /// Shared scaffold for a left-dock view body: a full-size vertical flex
