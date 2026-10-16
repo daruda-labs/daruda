@@ -193,6 +193,66 @@ fn a_failed_connect_reports_every_tagged_prompt_it_drops(cx: &mut TestAppContext
     );
 }
 
+/// A session that had connected and then failed is not a failed connect:
+/// the prompts it drops say the session failed.
+#[gpui::test]
+fn a_session_failing_after_connect_reports_its_drops_as_a_session_failure(cx: &mut TestAppContext) {
+    let (view, log) = observed(cx);
+    let _probe = connect(&view, cx);
+
+    view.update(cx, |v, cx| {
+        v.queue.pending_prompts.push(tagged(1, "queued"));
+        v.apply_event(
+            AcpEvent::Error(AcpFailure::unclassified("adapter exited")),
+            "",
+            false,
+            cx,
+        );
+    });
+
+    assert_eq!(
+        *log.borrow(),
+        vec![Signal::Dropped(
+            vec![run("queued")],
+            PromptDropReason::SessionFailed
+        )]
+    );
+}
+
+/// A task's prompt arriving while the composer edits a queued prompt is
+/// queued with its tag, and leaves the slot being edited and the editing
+/// mode as they were.
+#[gpui::test]
+fn a_task_prompt_never_lands_in_the_slot_being_edited(cx: &mut TestAppContext) {
+    let (view, _log) = observed(cx);
+
+    view.update(cx, |v, cx| {
+        v.queue
+            .pending_prompts
+            .push(untagged(1, PromptOrigin::InApp));
+        v.begin_edit(PromptId(1), cx);
+        let dispatch = v.send_task_prompt_text("task text".into(), run("t1"), cx);
+
+        assert_eq!(dispatch, PromptDispatch::Queued);
+        assert_eq!(v.queue.editing_prompt, Some(PromptId(1)), "the edit ended");
+        let edited = v
+            .queue
+            .pending_prompts
+            .iter()
+            .find(|q| q.id == PromptId(1))
+            .expect("the edited prompt is still queued");
+        assert_eq!(edited.text, "prompt 1", "the task's text overwrote it");
+        assert!(edited.task.is_none());
+        let queued = v
+            .queue
+            .pending_prompts
+            .iter()
+            .find(|q| q.task == Some(run("t1")))
+            .expect("the task's prompt was not queued");
+        assert_eq!(queued.text, "task text");
+    });
+}
+
 #[gpui::test]
 fn a_session_teardown_reports_dropped_tagged_prompts(cx: &mut TestAppContext) {
     let (view, log) = observed(cx);

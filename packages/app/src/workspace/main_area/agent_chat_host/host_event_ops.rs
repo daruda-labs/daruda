@@ -89,6 +89,7 @@ fn record_task_delivery(event: &AgentChatEvent, cx: &mut App) {
             let reason = match reason {
                 PromptDropReason::StartFailed => UndeliveredReason::StartFailed,
                 PromptDropReason::ConnectFailed => UndeliveredReason::ConnectFailed,
+                PromptDropReason::SessionFailed => UndeliveredReason::SessionFailed,
                 PromptDropReason::SessionTornDown => UndeliveredReason::SessionTornDown,
                 PromptDropReason::RemovedByUser => UndeliveredReason::RemovedByUser,
             };

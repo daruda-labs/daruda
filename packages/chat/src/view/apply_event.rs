@@ -392,6 +392,13 @@ impl AgentChatView {
                 self.pump_pending_prompt(cx);
             }
             AcpEvent::Error(failure) => {
+                // Read before `set_error` replaces it: what the queue is told
+                // depends on whether this session ever connected.
+                let drop_reason = if self.status == AgentSessionStatus::Connected {
+                    super::PromptDropReason::SessionFailed
+                } else {
+                    super::PromptDropReason::ConnectFailed
+                };
                 let message = super::super::agent_chat_helpers::failure_message(&failure);
                 let error_message = match &self.cwd {
                     Some(PaneCwd::Remote(_)) => {
@@ -429,7 +436,7 @@ impl AgentChatView {
                 // button that can't send (they were never echoed, so nothing
                 // dangles in the transcript).
                 let dropped = self.queue.discard_all();
-                self.report_dropped(dropped, super::PromptDropReason::ConnectFailed, cx);
+                self.report_dropped(dropped, drop_reason, cx);
                 // Drop the now-dead handle. The connection task has ended (this
                 // `Error` is its terminal signal), so its command channel is
                 // closed — a lingering `Some(handle)` would let `send_prompt_text`

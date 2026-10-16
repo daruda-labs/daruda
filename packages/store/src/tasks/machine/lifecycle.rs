@@ -94,7 +94,10 @@ pub enum StartFailure {
 #[serde(rename_all = "snake_case")]
 pub enum UndeliveredReason {
     QueueFull,
+    /// The agent's session never connected.
     ConnectFailed,
+    /// The agent's session failed after it had connected.
+    SessionFailed,
     SessionTornDown,
     RemovedByUser,
     PaneClosed,

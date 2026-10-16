@@ -95,6 +95,7 @@ fn undelivered_text(reason: UndeliveredReason) -> String {
     match reason {
         UndeliveredReason::QueueFull => t::undelivered_queue_full(),
         UndeliveredReason::ConnectFailed => t::undelivered_connect_failed(),
+        UndeliveredReason::SessionFailed => t::undelivered_session_failed(),
         UndeliveredReason::SessionTornDown => t::undelivered_session_ended(),
         UndeliveredReason::RemovedByUser => t::undelivered_removed(),
         UndeliveredReason::PaneClosed => t::undelivered_pane_closed(),

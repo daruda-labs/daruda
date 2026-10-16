@@ -367,6 +367,7 @@ task:
   # Why a prompt never reached its agent, shown after the Not delivered label.
   undelivered_queue_full: "the chat queue was full"
   undelivered_connect_failed: "the agent could not connect"
+  undelivered_session_failed: "the agent's session failed"
   undelivered_session_ended: "the session ended first"
   undelivered_removed: "removed from the queue"
   undelivered_pane_closed: "the pane closed first"

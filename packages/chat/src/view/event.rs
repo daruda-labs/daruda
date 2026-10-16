@@ -53,8 +53,11 @@ pub enum AgentChatEvent {
 pub enum PromptDropReason {
     /// The session stopped accepting a prompt before its turn started.
     StartFailed,
-    /// The session failed terminally, so nothing queued can be delivered.
+    /// The session never connected, so nothing queued can be delivered.
     ConnectFailed,
+    /// The session failed terminally after it had connected, so nothing
+    /// still queued can be delivered.
+    SessionFailed,
     /// `/clear` or a reconnect replaced the session the prompts waited on.
     SessionTornDown,
     /// The user removed the prompt from the strip or cleared the queue.

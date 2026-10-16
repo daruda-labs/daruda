@@ -1195,3 +1195,65 @@ fn every_lifecycle_and_event_round_trips_through_json() {
         );
     }
 }
+
+/// Why a prompt went undelivered survives the task log as written: a
+/// session that failed after connecting reads back as that, not as one that
+/// never connected.
+#[test]
+fn an_undelivered_reason_round_trips_through_the_task_log() {
+    for reason in [
+        UndeliveredReason::ConnectFailed,
+        UndeliveredReason::SessionFailed,
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let open = || {
+            daruda_store::tasks::TaskStore::in_directory(
+                dir.path(),
+                None,
+                "test",
+                Box::new(|_, _| {}),
+            )
+            .unwrap()
+        };
+        let store = open();
+        let events = [
+            TaskEvent::Created { spec: spec() },
+            TaskEvent::DispatchRequested {
+                id: ID.into(),
+                execution_id: RUN.into(),
+                source: source_of(Source::Chat),
+                at: at(1),
+            },
+            TaskEvent::LanePrepared {
+                exec: exec(),
+                worktree: worktree(),
+                agent_id: "claude".into(),
+                account_id: None,
+                cwd: worktree(),
+                at: at(2),
+            },
+            TaskEvent::Undelivered {
+                exec: exec(),
+                reason,
+                at: at(3),
+            },
+        ];
+        for event in events {
+            smol::block_on(store.propose(event)).unwrap();
+        }
+        drop(store);
+
+        let (_, book) = open().current().unwrap();
+        assert!(
+            matches!(
+                book.get(ID).unwrap().lifecycle,
+                Lifecycle::Undelivered { reason: read, .. } if read == reason
+            ),
+            "{reason:?} did not survive the log"
+        );
+    }
+    assert_eq!(
+        serde_json::to_string(&UndeliveredReason::SessionFailed).unwrap(),
+        "\"session_failed\""
+    );
+}

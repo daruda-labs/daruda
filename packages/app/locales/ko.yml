@@ -334,6 +334,7 @@ task:
   error_start_account_unavailable: "계정을 사용할 수 없음"
   undelivered_queue_full: "채팅 대기열이 가득 참"
   undelivered_connect_failed: "에이전트에 연결하지 못함"
+  undelivered_session_failed: "에이전트 세션이 실패함"
   undelivered_session_ended: "세션이 먼저 끝남"
   undelivered_removed: "대기열에서 제거됨"
   undelivered_pane_closed: "패널이 먼저 닫힘"
