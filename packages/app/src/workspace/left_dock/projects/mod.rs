@@ -5,7 +5,6 @@
 //! single render and survive view-tab switches.
 
 pub(super) mod agent_badges;
-pub(super) mod banner;
 pub(super) mod context_menu;
 pub(super) mod create_modal;
 

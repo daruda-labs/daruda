@@ -645,6 +645,10 @@ brew install create-dmg
 ./scripts/build-dmg.sh
 ```
 
+Local packaging contains the native architecture of the build host. GitHub
+Releases combine native Apple Silicon and Intel builds into a Universal app
+inside `daruda-<version>.dmg`, so the same download runs on either architecture.
+
 Build the Linux x86_64 packages — a portable tar.gz and a `.deb` — on a
 Debian or Ubuntu host:
 
@@ -763,10 +767,12 @@ GitHub Actions produces Windows downloads in two ways:
 
 - **CI** (push, pull request, or **Run workflow**): the Windows job uploads
   `daruda-windows-x86_64-debug` under the run's **Artifacts**, retained for 14 days.
-- **Release**: pushing a `v<version>` tag matching `Cargo.toml` builds the macOS
-  DMG, the Windows release ZIP and per-user installer, and the Linux `.deb` and
-  tar.gz, then publishes them after every build succeeds. **Run workflow** builds downloadable release artifacts
-  without publishing a GitHub Release.
+- **Release**: pushing a `v<version>` tag matching `Cargo.toml` builds native
+  Apple Silicon and Intel apps and combines them into one Universal macOS DMG,
+  plus the Windows release ZIP and per-user installer and the Linux `.deb` and
+  tar.gz, then publishes them after every
+  build succeeds. **Run workflow** builds downloadable release artifacts without
+  publishing a GitHub Release.
 
 Both Windows workflows use the same Zig installer and package script as local
 builds. The installer verifies the pinned archive's SHA256. Missing package

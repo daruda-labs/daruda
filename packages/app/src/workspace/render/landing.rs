@@ -22,7 +22,7 @@ use gpui::{AnyElement, Context, SharedString, div, prelude::*, px};
 use crate::surface::keybindings as k;
 use crate::surface::shortcut_display::display;
 use crate::surface::strings as s;
-use crate::ui::{button, button_primary, picker_row, theme};
+use crate::ui::{button_primary, picker_row, theme};
 use crate::workspace::Workspace;
 
 /// One cheat-sheet row: the binding as the app declares it, and the label
@@ -77,10 +77,6 @@ pub(super) fn render(cx: &mut Context<Workspace>) -> AnyElement {
         .w_full()
         .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::OpenFolder), cx));
 
-    let new_empty_btn = button("landing-new-empty", s::welcome::new_empty())
-        .w_full()
-        .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::NewEmptyWindow), cx));
-
     let panel = div()
         .flex()
         .flex_col()
@@ -91,7 +87,6 @@ pub(super) fn render(cx: &mut Context<Workspace>) -> AnyElement {
         .child(title)
         .child(open_folder_btn)
         .child(recent_section(faint, muted, cx))
-        .child(new_empty_btn)
         .child(cheat_sheet(faint, muted));
 
     div()

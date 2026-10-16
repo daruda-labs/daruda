@@ -193,8 +193,6 @@ impl Workspace {
                         .find(|(pid, _)| *pid == focused)
                         .map(|(pid, _)| format!("acp:{pid}"))
                 }),
-            agent_install_banner_visible: self.mirrors.claude_status_enabled
-                && !self.claude_sessions.hooks_installed,
             workspace: Handle(self.docks.left.read(cx).workspace.clone()),
         }
     }

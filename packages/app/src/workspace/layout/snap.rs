@@ -177,10 +177,6 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     /// focused pane has no agent descendant or the tracker hasn't
     /// resolved it yet.
     pub agent_active_session_id: Option<String>,
-    /// Show the "Agent integration disabled" banner above the
-    /// lanes list. True when status is enabled in config but
-    /// hooks aren't yet installed in `~/.claude/settings.json`.
-    pub agent_install_banner_visible: bool,
     pub workspace: Handle<WeakEntity<Workspace>>,
 }
 
