@@ -337,9 +337,19 @@ impl RunsHost {
         }
     }
 
-    /// Wait for every queued task commit to become durable before quitting.
+    /// Wait for every queued task commit to become durable before quitting,
+    /// and for running flows to end what they started.
     pub(crate) fn install_quit_flush(cx: &mut App) {
         cx.on_app_quit(|cx| {
+            if !Self::shut_down_flows(QUIT_FLUSH_DEADLINE, cx) {
+                LogWriter::log(
+                    ErrorReport::new("A flow run was still ending its processes at quit")
+                        .severity(ErrorSeverity::Warning)
+                        .at(file!(), line!())
+                        .dedup("flows.quit_shutdown")
+                        .build(),
+                );
+            }
             if let Access::Writable(store) = &cx.global::<RunsHost>().access
                 && let Err(error) = store.flush(QUIT_FLUSH_DEADLINE)
             {

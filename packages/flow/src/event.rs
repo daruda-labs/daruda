@@ -110,6 +110,8 @@ pub enum RunEnd {
     Stalled {
         nodes: Vec<crate::NodeId>,
     },
+    /// The app quit mid-run; nothing about an ending was recorded.
+    ShutDown,
 }
 
 /// A value and its place in the run log that recorded it.
@@ -183,6 +185,7 @@ impl From<&RunOutcome> for RunEnd {
             RunOutcome::Stalled { nodes } => RunEnd::Stalled {
                 nodes: nodes.clone(),
             },
+            RunOutcome::ShutDown => RunEnd::ShutDown,
         }
     }
 }
@@ -207,6 +210,7 @@ mod tests {
             RunEnd::Invalid { .. } => "Invalid",
             RunEnd::Unprovisioned { .. } => "Unprovisioned",
             RunEnd::Stalled { .. } => "Stalled",
+            RunEnd::ShutDown => "ShutDown",
         }
     }
 
@@ -225,6 +229,8 @@ mod tests {
             RunOutcome::Invalid { .. } => ("Invalid", None),
             RunOutcome::Unprovisioned { .. } => ("Unprovisioned", Some(RunStatus::Failed)),
             RunOutcome::Stalled { .. } => ("Stalled", Some(RunStatus::Stalled)),
+            // No marker and no `RunEnded`: the run reads as crashed.
+            RunOutcome::ShutDown => ("ShutDown", None),
         }
     }
 
@@ -271,6 +277,7 @@ mod tests {
             RunOutcome::Stalled {
                 nodes: vec!["review".into()],
             },
+            RunOutcome::ShutDown,
         ]
     }
 
@@ -289,7 +296,7 @@ mod tests {
         }
         assert_eq!(
             names.len(),
-            9,
+            10,
             "a variant added to `expected` needs a sample here too"
         );
     }

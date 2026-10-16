@@ -467,7 +467,9 @@ impl EndLine {
             RunOutcome::Stalled { nodes } => Self::Stalled {
                 nodes: nodes.clone(),
             },
-            RunOutcome::LockHeld { .. } | RunOutcome::Invalid { .. } => return None,
+            RunOutcome::LockHeld { .. } | RunOutcome::Invalid { .. } | RunOutcome::ShutDown => {
+                return None;
+            }
         })
     }
 

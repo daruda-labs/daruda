@@ -64,6 +64,8 @@ pub(crate) struct FakeRunner {
     /// Node id to the attempt whose own report stops the run, the way an
     /// overage stop does: it cancels the run and says so in its result.
     stops_run_at: HashMap<String, u32>,
+    /// Node id to the attempt during which the app quits.
+    shuts_down_at: HashMap<String, u32>,
     /// Nodes whose call asks the run for more turns, through the same door
     /// the real runner asks for one. The value is how many *extra* it asks
     /// for — a node allowed five turns asks four times.
@@ -94,6 +96,7 @@ impl FakeRunner {
             default_cost: None,
             cancel_at: HashMap::new(),
             stops_run_at: HashMap::new(),
+            shuts_down_at: HashMap::new(),
             corrects: HashMap::new(),
             granted: Cell::new(0),
             cost: HashMap::new(),
@@ -127,6 +130,12 @@ impl FakeRunner {
     /// would — the attempt still ends however its `Step` says.
     pub(crate) fn stops_run_at(mut self, node: &str, attempt: u32) -> Self {
         self.stops_run_at.insert(node.to_string(), attempt);
+        self
+    }
+
+    /// Quit the app from inside this node's nth attempt.
+    pub(crate) fn shuts_down_at(mut self, node: &str, attempt: u32) -> Self {
+        self.shuts_down_at.insert(node.to_string(), attempt);
         self
     }
 
@@ -219,6 +228,9 @@ impl FakeRunner {
         let stopped_the_run = self.stops_run_at.get(ctx.node_id.as_str()) == Some(&ctx.attempt);
         if stopped_the_run {
             ctx.cancel.cancel();
+        }
+        if self.shuts_down_at.get(ctx.node_id.as_str()) == Some(&ctx.attempt) {
+            ctx.cancel.shut_down();
         }
         // Every extra turn asks, and stops at the first refusal — which is
         // what the real loop does when the budget will not grant another.

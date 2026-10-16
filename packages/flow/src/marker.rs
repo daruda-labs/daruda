@@ -87,6 +87,9 @@ pub fn status_of(outcome: &RunOutcome) -> Option<RunStatus> {
         // Neither took the directory, so neither has anything to say
         // about it.
         RunOutcome::LockHeld { .. } | RunOutcome::Invalid { .. } => None,
+        // No marker, like a crash: the evidence a resume reads is the log
+        // and a lock whose holder is gone.
+        RunOutcome::ShutDown => None,
     }
 }
 

@@ -369,7 +369,8 @@ fn flow_outcome_notice(
         | RunEnd::LockHeld { .. }
         | RunEnd::Invalid { .. }
         | RunEnd::Unprovisioned { .. }
-        | RunEnd::Stalled { .. } => s::control::flow_failed_notice(),
+        | RunEnd::Stalled { .. }
+        | RunEnd::ShutDown => s::control::flow_failed_notice(),
     }
 }
 
@@ -409,6 +410,7 @@ fn end_refusal(end: &RunEnd) -> Option<String> {
         RunEnd::Invalid { issues } => Some(issue_report(issues)),
         RunEnd::Unprovisioned { agent, message } => Some(s::flow::unprovisioned(agent, message)),
         RunEnd::Stalled { nodes } => Some(s::flow::stalled(node_list(nodes))),
+        RunEnd::ShutDown => Some(s::flow::shut_down()),
     }
 }
 

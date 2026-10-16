@@ -434,6 +434,67 @@ fn an_imported_node_with_no_attempts_left_fails_as_journaled() {
     assert_eq!(failure.to_string(), "timed out after 9 seconds");
 }
 
+/// **Quit is not a stop.** The app quitting mid-node records no ending, no
+/// marker and no settle, and keeps the lock: the run reads as crashed, and
+/// a resume re-runs the cut attempt without spending a try on it (D4-2).
+#[test]
+fn a_quit_mid_node_leaves_the_run_to_resume_like_a_crash() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let request = request_for(CHAIN, dir.path());
+    let first = execute(
+        &request,
+        &FakeRunner::new().shuts_down_at("test", 1),
+        &CancelToken::default(),
+    );
+
+    assert!(
+        matches!(first.outcome, RunOutcome::ShutDown),
+        "{:?}",
+        first.outcome
+    );
+    let state = crate::run_log::reader::state(&first.run_dir).expect("a log");
+    assert_eq!(
+        state.phase(),
+        crate::run_log::machine::RunPhase::Running,
+        "a quit recorded an ending"
+    );
+    for marker in ["DONE", "FAILED", "CANCELED", "STALLED"] {
+        assert!(!first.run_dir.join(marker).exists(), "{marker} was written");
+    }
+    let lock_dir = super::lock_dir_of(&request);
+    assert!(
+        crate::lock::read_holder(&lock_dir).is_some(),
+        "the lock was given back, so the run would read as Unknown"
+    );
+    let status = crate::marker::run_status(&first.run_dir, Some(&lock_dir), &|_| false);
+    assert_eq!(status, crate::marker::RunStatus::Crashed);
+
+    let resumed = resume_request(CHAIN, dir.path(), &first.run_dir).expect("resumable");
+    let runner = FakeRunner::new();
+    let report = execute(&resumed, &runner, &CancelToken::default());
+
+    assert!(
+        matches!(report.outcome, RunOutcome::Done),
+        "{:?}",
+        report.outcome
+    );
+    let test = runner
+        .calls()
+        .into_iter()
+        .find(|call| call.node.as_str() == "test")
+        .expect("test ran again");
+    assert_eq!(test.attempt, 2, "the cut attempt's number was reused");
+}
+
+/// A Stop that lands after the app began to quit leaves it a quit.
+#[test]
+fn a_stop_after_a_quit_does_not_end_the_run() {
+    let cancel = CancelToken::default();
+    cancel.shut_down();
+    cancel.cancel();
+    assert_eq!(cancel.kind(), Some(crate::runner::StopKind::ShutDown));
+}
+
 fn as_if_killed_without_log(request: &crate::request::RunRequest, run_dir: &Path) {
     let lock_dir = super::lock_dir_of(request);
     std::fs::create_dir_all(&lock_dir).expect("lock dir");

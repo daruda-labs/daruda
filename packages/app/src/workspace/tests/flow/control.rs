@@ -907,6 +907,73 @@ async fn closing_the_window_that_started_a_run_keeps_it_stoppable(cx: &mut TestA
     );
 }
 
+/// Quitting is not a Stop: the command the run started is ended, but the
+/// run records no ending, so it is left to resume like a crashed one.
+#[cfg(unix)]
+#[gpui::test]
+async fn quitting_ends_a_runs_command_and_leaves_it_resumable(cx: &mut TestAppContext) {
+    const RECORDS_ITS_PID: &str = "\
+version: 1
+nodes:
+  - id: wait
+    kind: command
+    run: \"echo $$ > quit.pid; sleep 30\"
+";
+    let (lane, ws, flow_path, wh) = workspace_with_a_flow(cx, RECORDS_ITS_PID);
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            assert!(ws.run_flow_at(
+                ws.active,
+                &flow_path,
+                crate::workspace::command::flow_picker::FlowPurpose::Run,
+                crate::workspace::flow_request::FlowSelection::default(),
+                window,
+                cx,
+            ));
+        });
+    })
+    .expect("window is live");
+    let pid_file = lane.path().join("quit.pid");
+    let mut pid = None;
+    assert!(
+        wait_for_run(cx, |_| {
+            pid = std::fs::read_to_string(&pid_file)
+                .ok()
+                .and_then(|text| text.trim().parse::<u32>().ok());
+            pid.is_some()
+        }),
+        "the command never started"
+    );
+    let run_dir = cx.update(|cx| {
+        crate::runs::RunsHost::flow_run(lane.path(), cx)
+            .expect("a run")
+            .view()
+            .run_dir()
+            .to_path_buf()
+    });
+
+    let ended = cx.update(|cx| {
+        crate::runs::RunsHost::shut_down_flows(std::time::Duration::from_secs(10), cx)
+    });
+
+    assert!(ended, "the run was still going at quit");
+    let pid = pid.expect("a pid");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while daruda_core::process::is_alive(pid) && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(
+        !daruda_core::process::is_alive(pid),
+        "the command outlived the quit"
+    );
+    let state = daruda_flow::run_log::reader::state(&run_dir).expect("a log");
+    assert_eq!(
+        state.phase(),
+        daruda_flow::run_log::machine::RunPhase::Running,
+        "a quit recorded how the run ended"
+    );
+}
+
 /// Long enough that only a stop ends it within a test's patience.
 const LONG_COMMAND: &str = "\
 version: 1

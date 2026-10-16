@@ -134,6 +134,10 @@ impl Run<'_> {
         // sealed here instead. A clean turn whose own billed report stopped
         // the run finished its edits: record it as such, then stop anyway.
         let stopped_here = result.stopped_the_run && result.outcome.is_ok();
+        // As for a node: a quit leaves the fix open, for a resume to close.
+        if self.cancel.is_shutting_down() {
+            return Err(RunOutcome::ShutDown);
+        }
         let interrupted = self.cancel.is_canceled() && !stopped_here;
         let recorded = if interrupted {
             AttemptOutcome::Canceled

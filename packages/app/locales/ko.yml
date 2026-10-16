@@ -1352,6 +1352,7 @@ flow:
   run_panicked: "실행이 예기치 않게 중단되었습니다"
   unprovisioned: "%{agent}을(를) 돌릴 런타임이 없습니다: %{message}"
   stalled: "할 일이 남은 채 실행이 멈췄습니다: %{nodes}의 폴더를 읽을 수 없습니다"
+  shut_down: "플로우가 실행되는 중에 daruda가 종료되었습니다. 이어서 실행하면 계속됩니다"
   lane_unresolvable: "이 worktree 폴더를 읽을 수 없습니다: %{path}"
   read_failed_title: "플로우 파일을 읽지 못했습니다"
   parse_failed_title: "플로우 파일 형식이 아닙니다"

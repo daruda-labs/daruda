@@ -9,7 +9,7 @@ fn run_in(run_dir: &str) -> FlowRun {
         cancel: CancelToken::default(),
         overage: OverageStop::default(),
         caller: Caller::Desktop,
-        _thread: None,
+        thread: None,
     }
 }
 

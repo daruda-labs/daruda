@@ -1985,6 +1985,8 @@ flow:
   # The nodes a run stopped short of, already joined — the engine names
   # them all, and a reader needs the list rather than a count.
   stalled: "The run stopped with work left: the folder for %{nodes} could not be read"
+  # A flow the app was running when it quit; nothing about it ended.
+  shut_down: "daruda quit while this flow was running; resume it to continue"
   # The lane whose path would not resolve. Shows the path because the
   # person has to look at it to see what happened to it.
   lane_unresolvable: "That worktree folder could not be read: %{path}"

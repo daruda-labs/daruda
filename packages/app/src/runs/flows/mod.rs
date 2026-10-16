@@ -48,10 +48,16 @@ pub(crate) struct FlowRun {
     overage: OverageStop,
     caller: Caller,
     /// Seeded runs have no engine behind them.
-    _thread: Option<std::thread::JoinHandle<()>>,
+    thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl FlowRun {
+    fn has_ended(&self) -> bool {
+        self.thread
+            .as_ref()
+            .is_none_or(std::thread::JoinHandle::is_finished)
+    }
+
     pub(crate) fn view(&self) -> &RunView {
         &self.view
     }
@@ -117,6 +123,24 @@ impl FlowRuns {
         self.runs.insert(tree, run);
         self.spellings.get_mut().clear();
         Ok(())
+    }
+
+    /// Tell every run the app is quitting and wait, up to `deadline`, for
+    /// their threads to end their processes and drain their logs. `false`
+    /// when one was still going; the resume's orphan clean-up is the
+    /// backstop for what it leaves.
+    pub(super) fn shut_down(&self, deadline: std::time::Duration) -> bool {
+        for run in self.runs.values() {
+            run.cancel.shut_down();
+        }
+        let until = std::time::Instant::now() + deadline;
+        while !self.runs.values().all(FlowRun::has_ended) {
+            if std::time::Instant::now() >= until {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        true
     }
 
     fn remove(&mut self, tree: &Path) -> Option<FlowRun> {
@@ -245,7 +269,7 @@ impl RunsHost {
             cancel,
             overage,
             caller: Caller::Desktop,
-            _thread: Some(thread),
+            thread: Some(thread),
         };
         cx.update_global::<RunsHost, _>(|host, _| host.flows.insert(tree.clone(), run))?;
         Self::tell_windows(tree.clone(), FlowChanged::Repainted, cx);
@@ -266,6 +290,12 @@ impl RunsHost {
             }
             None => false,
         })
+    }
+
+    /// The app is quitting: every run ends what it started and stays
+    /// resumable. `false` when one was still going after `deadline`.
+    pub(crate) fn shut_down_flows(deadline: std::time::Duration, cx: &App) -> bool {
+        cx.global::<RunsHost>().flows.shut_down(deadline)
     }
 
     /// Stop the run in `worktree`. Its questions go with it: they belong to
@@ -409,7 +439,7 @@ impl RunsHost {
             cancel: CancelToken::default(),
             overage: OverageStop::default(),
             caller: Caller::Desktop,
-            _thread: None,
+            thread: None,
         };
         // A seed lands on whatever a test left there: it stands in for
         // state, not for a start.

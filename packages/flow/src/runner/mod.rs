@@ -304,15 +304,54 @@ pub(crate) async fn canceled(cancel: &CancelToken) {
 /// while the run holds the other; the engine spawns nothing, so this is
 /// the whole of what the engine offers for stopping a run.
 #[derive(Debug, Clone, Default)]
-pub struct CancelToken(std::sync::Arc<std::sync::atomic::AtomicBool>);
+pub struct CancelToken(std::sync::Arc<std::sync::atomic::AtomicU8>);
+
+/// Why a run was told to stop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopKind {
+    /// A person's Stop or the overage switch: the run ends `Canceled`.
+    Stop,
+    /// The app is quitting. Its processes end, and nothing about an ending
+    /// is recorded, so the run reads as crashed and resumes like one.
+    ShutDown,
+}
+
+const RUNNING: u8 = 0;
+const STOPPED: u8 = 1;
+const SHUT_DOWN: u8 = 2;
 
 impl CancelToken {
+    /// A stop. One that lands after a shutdown leaves it a shutdown: the
+    /// app is going either way, and the run should stay resumable.
     pub fn cancel(&self) {
-        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        // SILENT-OK: a token already stopped or shut down stays as it is.
+        let _ = self.0.compare_exchange(
+            RUNNING,
+            STOPPED,
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+        );
+    }
+
+    /// The app is quitting; it outranks a stop that has not ended the run.
+    pub fn shut_down(&self) {
+        self.0.store(SHUT_DOWN, std::sync::atomic::Ordering::SeqCst);
     }
 
     pub fn is_canceled(&self) -> bool {
-        self.0.load(std::sync::atomic::Ordering::SeqCst)
+        self.kind().is_some()
+    }
+
+    pub fn kind(&self) -> Option<StopKind> {
+        match self.0.load(std::sync::atomic::Ordering::SeqCst) {
+            RUNNING => None,
+            SHUT_DOWN => Some(StopKind::ShutDown),
+            _ => Some(StopKind::Stop),
+        }
+    }
+
+    pub(crate) fn is_shutting_down(&self) -> bool {
+        self.kind() == Some(StopKind::ShutDown)
     }
 }
 

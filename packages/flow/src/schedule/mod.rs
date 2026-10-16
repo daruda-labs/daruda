@@ -405,6 +405,8 @@ impl<'a> Run<'a> {
                 let reserve = || self.reserve_extra_turn();
                 // Queued, not awaited: the runner reports from inside its
                 // spawn, and the committer keeps this ahead of the settle.
+                // Awaiting would not narrow the gap a crash can fall into:
+                // the identity exists only once the child already runs.
                 let spawned = |group: crate::runner::SpawnedGroup| {
                     self.log.commit_detached(FlowRunEvent::ProcessSpawned {
                         node: id.clone(),
@@ -449,6 +451,11 @@ impl<'a> Run<'a> {
                 // The exception is a clean turn whose own report stopped the
                 // run: it is judged and kept, and the run ends after it.
                 let stopped_here = result.stopped_the_run && result.outcome.is_ok();
+                // A quit records nothing and moves nothing: the attempt stays
+                // started, so a resume finds it crash-interrupted (D4-2).
+                if self.cancel.is_shutting_down() {
+                    return Err(RunOutcome::ShutDown);
+                }
                 if self.cancel.is_canceled() && !stopped_here {
                     return Err(self
                         .settle_cancel(&ctx, id, output.as_deref(), &result)

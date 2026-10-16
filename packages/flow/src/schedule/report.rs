@@ -58,6 +58,9 @@ pub enum RunOutcome {
     Stalled {
         nodes: Vec<NodeId>,
     },
+    /// The app quit while the run was going. Its processes were ended and
+    /// no ending was recorded, so the run reads as crashed and resumes.
+    ShutDown,
 }
 
 /// Which of the three defences stopped the run.

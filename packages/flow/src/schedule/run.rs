@@ -106,7 +106,12 @@ fn execute_with(
             cancel,
         );
         if settled == crate::resume::Settled::Stopped {
-            return not_started(request, RunOutcome::Canceled { node: None });
+            let outcome = if cancel.is_shutting_down() {
+                RunOutcome::ShutDown
+            } else {
+                RunOutcome::Canceled { node: None }
+            };
+            return not_started(request, outcome);
         }
     }
     let lock = match RunLock::acquire(&lock_dir, &run_id_of(&request.run_dir), &*request.is_alive) {
@@ -175,6 +180,20 @@ fn execute_with(
     // before the first node. None of them touches `RunOutcome`: a run
     // directory that could not be tidied or audited still ran.
     report.warn_from_setup(setup_warnings);
+    // A quit that cut the run short is not how it ended. Leaving it as a
+    // crash leaves it resumable: no `RunEnded`, no `run.md` or marker, and
+    // the lock kept, so its dead holder is what reads the run as crashed.
+    if cancel.is_shutting_down() && !matches!(report.outcome, RunOutcome::Done) {
+        report.outcome = RunOutcome::ShutDown;
+        // The committer drains here, so what the run did commit is on disk.
+        drop(store);
+        lock.keep_for_resume();
+        emit(
+            request.events.as_ref(),
+            RunNotice::Unrecorded(RunEnd::ShutDown),
+        );
+        return report;
+    }
     // The log first: the marker below is only its cache (F8).
     let ended = match smol::block_on(record_end(&store, &report.outcome)) {
         Ok(seq) => seq,
@@ -328,6 +347,13 @@ struct HeldLock(Option<RunLock>);
 impl HeldLock {
     fn new(lock: RunLock) -> Self {
         Self(Some(lock))
+    }
+
+    /// Leave the lock naming this process, as a crash would. Once the
+    /// process is gone its holder is dead, which is what makes the run read
+    /// as crashed and resumable rather than `Unknown`.
+    fn keep_for_resume(mut self) {
+        self.0.take();
     }
 
     fn release(mut self) -> Result<(), FlowIoError> {

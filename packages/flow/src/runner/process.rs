@@ -481,6 +481,30 @@ mod tests {
         assert!(wait_until_gone(pid), "the grandchild outlived the cancel");
     }
 
+    /// The app quitting ends a command's whole tree, as a stop does: nothing
+    /// it started may outlive the app that started it.
+    #[cfg(unix)]
+    #[test]
+    fn a_quit_ends_the_command_tree() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pid_file = dir.path().join("child.pid");
+        let fixture = Fixture::new(dir.path());
+
+        let cancel = fixture.cancel.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            cancel.shut_down();
+        });
+
+        fixture.run(
+            &ProcessRunner::new(Vec::new()),
+            &long_running_tree(&pid_file),
+        );
+
+        let pid = grandchild_pid(&pid_file);
+        assert!(wait_until_gone(pid), "the grandchild outlived the quit");
+    }
+
     /// The group is reported while it runs, led by the shell itself, so a
     /// resume after a crash knows which group to end.
     #[cfg(unix)]
