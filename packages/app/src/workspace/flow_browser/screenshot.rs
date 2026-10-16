@@ -90,8 +90,11 @@ impl Workspace {
             let (reply, _rx) = smol::channel::bounded(1);
             RunStage::Asking {
                 question: std::sync::Arc::new(ParkedAsk::new(daruda_flow::runner::PendingAsk {
-                    node: "release-check".into(),
-                    attempt: 1,
+                    owner: daruda_flow::runner::AskOwner::Node {
+                        node: "release-check".into(),
+                        generation: 0,
+                        attempt: 1,
+                    },
                     ask_id: 1,
                     request: daruda_flow::runner::AskRequest {
                         tool: "Bash".into(),

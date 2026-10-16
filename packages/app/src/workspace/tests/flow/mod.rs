@@ -303,8 +303,11 @@ fn park_question(
                 lane,
                 run_dir,
                 daruda_flow::runner::PendingAsk {
-                    node: format!("node-{ask_id}").into(),
-                    attempt: 1,
+                    owner: daruda_flow::runner::AskOwner::Node {
+                        node: format!("node-{ask_id}").into(),
+                        generation: 0,
+                        attempt: 1,
+                    },
                     ask_id,
                     request: daruda_flow::runner::AskRequest {
                         tool: "Bash".to_string(),

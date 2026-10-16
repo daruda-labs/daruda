@@ -7,9 +7,9 @@
 use super::policy::PolicyKind;
 use super::{Run, doing};
 use crate::model::{Node, NodeKind, Prompt};
-use crate::runner::{NodeFailure, RunContext};
+use crate::runner::NodeFailure;
 use crate::template::{Surface, TemplateContext, render};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// A read that failed, labelled and with the path it was given. Everything
 /// a `FlowIoError` needs except the node and attempt, which the reader does
@@ -28,13 +28,13 @@ impl Run<'_> {
     pub(super) fn node_text(
         &self,
         node: &Node,
-        ctx: &RunContext<'_>,
+        output: Option<&Path>,
         evidence: &[PathBuf],
         failure: Option<&NodeFailure>,
     ) -> Result<String, ReadFailure> {
         let tctx = TemplateContext {
             run_dir: self.run_dir,
-            output: ctx.output,
+            output,
             node_outputs: &self.node_outputs,
             failure,
             attempts: evidence,
@@ -63,7 +63,7 @@ impl Run<'_> {
                 // Keyed on the file being owed rather than on the node's
                 // kind, so a repair's fix session — an agent run with no
                 // output — is never told to write one.
-                if let Some(output) = ctx.output {
+                if let Some(output) = output {
                     push_channel(
                         &mut text,
                         &crate::contract::prompt::block(

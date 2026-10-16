@@ -232,7 +232,9 @@ fn run_watched(
     let report = execute(&request, runner, &CancelToken::default());
     // Drained rather than awaited: the run is over and the sender is still
     // alive inside `request`, so there is no close to wait for.
-    let events = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+    let events = std::iter::from_fn(|| rx.try_recv().ok())
+        .map(crate::event::RunNotice::into_event)
+        .collect();
     (report, events, dir)
 }
 
@@ -523,7 +525,9 @@ fn a_run_that_loses_the_lock_narrates_nothing() {
         "{:?}",
         report.outcome
     );
-    let events: Vec<FlowEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+    let events: Vec<FlowEvent> = std::iter::from_fn(|| rx.try_recv().ok())
+        .map(crate::event::RunNotice::into_event)
+        .collect();
     assert!(events.is_empty(), "{events:?}");
     held.release().expect("the original holder still owns it");
 }
@@ -769,7 +773,9 @@ fn an_io_failure_writes_the_same_marker_and_still_says_what_it_was() {
         &Vanisher(prompt, FakeRunner::new()),
         &CancelToken::default(),
     );
-    let events: Vec<FlowEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+    let events: Vec<FlowEvent> = std::iter::from_fn(|| rx.try_recv().ok())
+        .map(crate::event::RunNotice::into_event)
+        .collect();
 
     assert_eq!(
         crate::marker::run_status(&report.run_dir, report.run_dir.parent(), &|_| true),
@@ -849,7 +855,7 @@ fn a_run_leaves_a_journal_of_what_it_finished() {
         &CancelToken::default(),
     );
 
-    let replay = crate::journal::read(&report.run_dir);
+    let replay = crate::run_log::reader::read(&report.run_dir);
     assert_eq!(replay.passed, vec![NodeId::from("design")]);
     assert_eq!(replay.profile.as_deref(), Some("cheap"));
     assert_eq!(replay.spent.node_runs, report.node_runs);
@@ -896,7 +902,7 @@ fn the_journal_keeps_the_attempts_that_failed_too() {
         &CancelToken::default(),
     );
 
-    let replay = crate::journal::read(&report.run_dir);
+    let replay = crate::run_log::reader::read(&report.run_dir);
     let design = replay
         .records
         .iter()

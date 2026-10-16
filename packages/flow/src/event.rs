@@ -75,9 +75,10 @@ pub enum RunEnd {
         limit: BudgetLimit,
     },
     /// Rendered on the way in, because the source error cannot be cloned.
+    /// `doing` is owned so a replayed end reads the same as the live one.
     Io {
         site: IoSite,
-        doing: &'static str,
+        doing: String,
         path: PathBuf,
         message: String,
     },
@@ -106,13 +107,41 @@ pub enum RunEnd {
     },
 }
 
-/// The one place an event is handed over. Emitting can never fail a run: a
+/// A value and its place in the run log that recorded it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Sequenced<T> {
+    pub seq: u64,
+    pub event: T,
+}
+
+/// What a run's watcher receives.
+#[derive(Debug, Clone)]
+pub enum RunNotice {
+    /// The narration of a durable record, sent only once it is on disk.
+    Recorded(Sequenced<FlowEvent>),
+    /// An end no record carries: a run whose log failed before it could
+    /// record its end, or a host's last word for a run its thread returned
+    /// without starting or lost to a panic.
+    Unrecorded(RunEnd),
+}
+
+impl RunNotice {
+    /// The event, whichever way it came.
+    pub fn into_event(self) -> FlowEvent {
+        match self {
+            RunNotice::Recorded(sequenced) => sequenced.event,
+            RunNotice::Unrecorded(end) => FlowEvent::RunEnded { end },
+        }
+    }
+}
+
+/// The one place a notice is handed over. Emitting can never fail a run: a
 /// full channel is impossible (unbounded) and a closed one means the host
-/// stopped listening, which is not this crate's problem to report. Never
-/// `send().await` — a subscriber must not be able to pause the scheduler.
-pub(crate) fn emit(events: Option<&smol::channel::Sender<FlowEvent>>, event: FlowEvent) {
+/// stopped listening. Never `send().await`: a subscriber must not be able to
+/// pause the run.
+pub(crate) fn emit(events: Option<&smol::channel::Sender<RunNotice>>, notice: RunNotice) {
     if let Some(tx) = events {
-        let _ = tx.try_send(event);
+        let _ = tx.try_send(notice);
     }
 }
 
@@ -128,7 +157,7 @@ impl From<&RunOutcome> for RunEnd {
             RunOutcome::BudgetExhausted { limit } => RunEnd::BudgetExhausted { limit: *limit },
             RunOutcome::Io(e) => RunEnd::Io {
                 site: e.site.clone(),
-                doing: e.doing,
+                doing: e.doing.to_string(),
                 path: e.path.clone(),
                 message: e.source.to_string(),
             },

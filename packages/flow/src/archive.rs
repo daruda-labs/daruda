@@ -81,22 +81,49 @@ pub fn archive_attempt(
     Ok(archived)
 }
 
+/// What tells one stopped output's archive name from another's when the
+/// plain `<id>.canceled` name is already taken (F9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancelStamp {
+    /// A live cancel: the interrupted attempt's evidence number.
+    Evidence(u32),
+    /// A resume sweeping what a dead process left: that resume's count.
+    Resume(u32),
+}
+
 /// Move the output of the node a cancel interrupted. Distinct from
 /// `archive_attempt` in its naming only: a cancel has no attempt number
 /// worth recording — nothing will retry it.
 ///
 /// `None` when the node wrote nothing: there is then nothing to move, and
-/// that is not an error.
+/// that is not an error. Never overwrites an earlier cancel's evidence.
 pub fn archive_canceled(
     log_dir: &Path,
     node: &NodeId,
     output: &Path,
+    stamp: CancelStamp,
 ) -> Result<Option<PathBuf>, ArchiveError> {
     std::fs::create_dir_all(log_dir).map_err(|source| ArchiveError::Io {
         path: log_dir.to_path_buf(),
         source,
     })?;
-    move_aside(log_dir, node, "canceled", output)
+    let plain = "canceled";
+    let taken = log_dir.join(archive_name(node, plain, output));
+    if std::fs::symlink_metadata(&taken).is_err() {
+        return move_aside(log_dir, node, plain, output);
+    }
+    let stamp = match stamp {
+        CancelStamp::Evidence(seq) => format!("evidence-{seq}.canceled"),
+        CancelStamp::Resume(count) => format!("resume-{count}.canceled"),
+    };
+    move_aside(log_dir, node, &stamp, output)
+}
+
+fn archive_name(id: &NodeId, stamp: &str, output: &Path) -> String {
+    match output.extension().and_then(|e| e.to_str()) {
+        Some(ext) => format!("{id}.{stamp}.{ext}"),
+        None => format!("{id}.{stamp}"),
+    }
 }
 
 /// Rename `output` into `log_dir` under `<id>.<stamp>[.<ext>]`, or `None`
@@ -122,10 +149,7 @@ fn move_aside(
         Ok(meta) if !meta.is_file() => return Ok(None),
         Ok(_) => {}
     }
-    let name = match output.extension().and_then(|e| e.to_str()) {
-        Some(ext) => format!("{id}.{stamp}.{ext}"),
-        None => format!("{id}.{stamp}"),
-    };
+    let name = archive_name(id, stamp, output);
     // The name is built from a node id, so this function's reach depends
     // on a rule enforced elsewhere. `validate` rejects an id that is not
     // a plain filename; refusing here too keeps a caller that skipped it
@@ -140,6 +164,17 @@ fn move_aside(
         });
     }
     let destination = log_dir.join(name);
+    // `rename` replaces silently on Unix; an archive is evidence, so a name
+    // already in use is refused rather than written over.
+    if std::fs::symlink_metadata(&destination).is_ok() {
+        return Err(ArchiveError::Io {
+            path: destination,
+            source: std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "an archived file already has this name",
+            ),
+        });
+    }
     // `rename` keeps the bytes and clears the live path in one step, so
     // there is no window where both exist.
     std::fs::rename(output, &destination).map_err(|source| ArchiveError::Io {
@@ -269,8 +304,13 @@ mod tests {
         let output = dir.path().join("design.md");
         write(&output, "half a thought");
 
-        let archived =
-            archive_canceled(&log_dir, &"design".into(), &output).expect("archiving succeeds");
+        let archived = archive_canceled(
+            &log_dir,
+            &"design".into(),
+            &output,
+            CancelStamp::Evidence(7),
+        )
+        .expect("archiving succeeds");
 
         assert!(!output.exists(), "the live output must be gone");
         assert_eq!(archived, Some(log_dir.join("design.canceled.md")));
@@ -282,9 +322,46 @@ mod tests {
     fn a_cancel_with_nothing_written_archives_nothing() {
         let dir = tempfile::tempdir().expect("tempdir");
         let log_dir = dir.path().join("logs");
-        let archived = archive_canceled(&log_dir, &"design".into(), &dir.path().join("design.md"))
-            .expect("archiving succeeds");
+        let archived = archive_canceled(
+            &log_dir,
+            &"design".into(),
+            &dir.path().join("design.md"),
+            CancelStamp::Evidence(1),
+        )
+        .expect("archiving succeeds");
         assert_eq!(archived, None);
+    }
+
+    /// **F9.** A second stop of the same node keeps the first one's evidence:
+    /// the fixed name used to be written over.
+    #[test]
+    fn a_second_cancel_of_one_node_does_not_overwrite_the_first() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log_dir = dir.path().join("logs");
+        let output = dir.path().join("design.md");
+        let mut kept = Vec::new();
+        for (text, stamp) in [
+            ("first", CancelStamp::Evidence(3)),
+            ("second", CancelStamp::Evidence(5)),
+            ("third", CancelStamp::Resume(1)),
+        ] {
+            write(&output, text);
+            let moved = archive_canceled(&log_dir, &"design".into(), &output, stamp)
+                .expect("archiving succeeds")
+                .expect("a file was moved");
+            kept.push((moved, text));
+        }
+        for (path, text) in &kept {
+            assert_eq!(std::fs::read_to_string(path).expect("read"), *text);
+        }
+        assert_eq!(
+            kept.iter().map(|(p, _)| p.clone()).collect::<Vec<_>>(),
+            vec![
+                log_dir.join("design.canceled.md"),
+                log_dir.join("design.evidence-5.canceled.md"),
+                log_dir.join("design.resume-1.canceled.md"),
+            ]
+        );
     }
 
     /// `validate` rejects these ids, so reaching here means a caller built a

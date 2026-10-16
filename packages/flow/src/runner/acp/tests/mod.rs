@@ -255,7 +255,16 @@ impl Fixture {
             permission: match (self.permission, self.ask.as_ref()) {
                 (PermissionPolicy::Deny, _) => crate::runner::Permission::Deny,
                 (PermissionPolicy::AllowOnce, _) => crate::runner::Permission::AllowOnce,
-                (PermissionPolicy::Ask, Some(channel)) => crate::runner::Permission::Ask(channel),
+                (PermissionPolicy::Ask, Some(channel)) => {
+                    crate::runner::Permission::Ask(crate::runner::AskPort::new(
+                        channel,
+                        crate::runner::AskOwner::Node {
+                            node: self.node.clone(),
+                            generation: 0,
+                            attempt: 1,
+                        },
+                    ))
+                }
                 (PermissionPolicy::Ask, None) => crate::runner::Permission::Deny,
             },
             cancel: &self.cancel,
@@ -347,7 +356,10 @@ impl Fixture {
     ) -> (RunResult, Vec<(u64, crate::runner::AskRequest)>) {
         let (tx, rx) = smol::channel::unbounded();
         self.permission = PermissionPolicy::Ask;
-        self.ask = Some(crate::runner::AskChannel::new(tx));
+        // A question is committed to the run's log before it is put, so the
+        // node it asks for has to be in flight there.
+        let log = crate::run_log::testing::attempt_in_flight(&self.run_dir, &self.node);
+        self.ask = Some(crate::runner::AskChannel::new(tx, log));
 
         let asked = RefCell::new(Vec::new());
         let held = RefCell::new(Vec::new());

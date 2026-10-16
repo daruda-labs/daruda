@@ -1,7 +1,7 @@
 //! One run's event stream and its parked questions: everything the engine
 //! reports, arriving in workspace state.
 //!
-//! Two pumps, not one. The engine narrates on a `FlowEvent` channel and asks
+//! Two pumps, not one. The engine narrates on a `RunNotice` channel and asks
 //! permission on a separate `PendingAsk` channel, and the second carries a
 //! reply back — folding it into the narration would make "can this host
 //! answer" indistinguishable from "does it watch". Both drain here, and both
@@ -30,11 +30,14 @@ impl Workspace {
     pub(in crate::workspace) fn watch_flow_events(
         &mut self,
         lane_ref: daruda_store::project::LaneRef,
-        events: smol::channel::Receiver<FlowEvent>,
+        events: smol::channel::Receiver<daruda_flow::event::RunNotice>,
         cx: &mut Context<Self>,
     ) {
         cx.spawn(async move |this, cx| {
-            while let Ok(event) = events.recv().await {
+            while let Ok(notice) = events.recv().await {
+                // The record's seq is the engine's; this window still keys
+                // its state by lane, so only the event is applied.
+                let event = notice.into_event();
                 let is_end = matches!(event, FlowEvent::RunEnded { .. });
                 // An `Err` here is the workspace being gone, which ends the
                 // pump — the same shape the MCP and JSONL pumps use, and

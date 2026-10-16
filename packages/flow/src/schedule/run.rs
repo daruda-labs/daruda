@@ -3,11 +3,15 @@
 
 use super::{RunInputs, RunOutcome, RunReport, run_flow};
 use crate::error::{FlowIoError, IoSite};
-use crate::event::{FlowEvent, RunEnd, emit};
+use crate::event::{FlowEvent, RunEnd, RunNotice, Sequenced, emit};
 use crate::lock::{LockError, RunLock};
 use crate::marker::{DEFAULT_KEEP_RUNS, sweep_old_runs, write_marker};
 use crate::model::Flow;
 use crate::request::RunRequest;
+use crate::run_log::line::EndLine;
+use crate::run_log::machine::FlowRunEvent;
+use crate::run_log::reader::Replay;
+use crate::run_log::store::FlowRunStore;
 use crate::runner::{CancelToken, NodeRunner};
 use daruda_acp::LaunchSpec;
 use std::borrow::Cow;
@@ -31,6 +35,7 @@ const GITIGNORE: &str = ".gitignore";
 const GITIGNORE_BODY: &str = "*\n";
 const WRITE_GITIGNORE: &str = "hiding the run directory from git";
 const SWEEP_RUNS: &str = "clearing out old run directories";
+const START_LOG: &str = "starting the run's progress log";
 /// Resolving the working tree so its lock can be named. A tree that
 /// cannot be resolved is one this run cannot be sure it excludes anything
 /// in.
@@ -93,7 +98,7 @@ fn execute_with(
     };
     let lock_dir = crate::lock::lock_dir_for(&request.lock_dir, &tree);
     let lock = match RunLock::acquire(&lock_dir, &run_id_of(&request.run_dir), &*request.is_alive) {
-        Ok(lock) => lock,
+        Ok(lock) => HeldLock::new(lock),
         // Neither refusal took the directory, so neither writes a marker
         // and neither releases: the run that is going owns both.
         Err(LockError::Held(holder)) => {
@@ -102,79 +107,32 @@ fn execute_with(
         Err(LockError::Io(e)) => return not_started(request, RunOutcome::Io(e)),
     };
 
-    // Only past the lock is there a run to announce: the two refusals above
-    // took nothing, so a host watching them would see a run start and end
-    // that never existed.
-    emit(
-        request.events.as_ref(),
-        FlowEvent::RunStarted {
-            run_dir: request.run_dir.clone(),
-            nodes: request.loaded.graph().topological_order(),
-        },
-    );
-
-    // Both belong to whoever sets a run directory up, and both go here for
-    // the same reason as `run.yaml` below: past the lock, so no other run's
-    // directory is touched, and before the first node, so a run that never
-    // finishes is still hidden from git and still counted for retention.
+    // Past the lock, so no other run's directory is touched, and before the
+    // first node, so a run that never finishes is still hidden from git and
+    // still counted for retention.
     let mut setup_warnings = prepare_runs_dir(request.run_dir.parent());
 
-    let resume = request.resume.clone();
-
-    // Only a fresh run copies: a continuation's pins were copied by the
-    // process that started it, and the journal already lists them as passed.
-    let (pinned_ids, pin_warnings) = if resume.is_none() {
-        copy_pinned_outputs(request)
-    } else {
-        (Vec::new(), Vec::new())
+    // Only past the lock is the log opened: a continuation reads what the
+    // run had finished here, never before the lock (F14).
+    let begun = match &request.resume {
+        None => begin(request, &mut setup_warnings),
+        Some(_) => continue_run(request, &mut setup_warnings),
     };
-    setup_warnings.extend(pin_warnings);
-
-    // A continuation writes neither setup file again: the spec already in
-    // the directory is the authority it reads back, and the journal it is
-    // about to append to already has its opening line. Rewriting either
-    // would replace the record of what the run *is* with this process's
-    // idea of it.
-    let (spec_warning, journal_warning) = match &resume {
-        Some(replay) => {
-            // Whatever the interrupted node had half-written is evidence,
-            // not a result — `judge` cannot tell the two apart, and left
-            // live it would be accepted as that node's output.
-            setup_warnings.extend(
-                crate::journal::resumed(&request.run_dir, replay.passed.len())
-                    .err()
-                    .map(|e| format!("this run's progress could not be marked as continued: {e}")),
-            );
-            setup_warnings.extend(crate::resume::archive_unclaimed_outputs(
-                &request.run_dir,
-                &request.run_dir.join(crate::schedule::LOG_DIR_NAME),
-                &crate::schedule::node_outputs(request.loaded.flow(), &request.run_dir),
-                &replay.passed,
-            ));
-            (None, None)
+    let Begun {
+        store,
+        pinned,
+        resume,
+    } = match begun {
+        Ok(begun) => begun,
+        // Nothing was recorded, so the directory is left for the next try.
+        Err(outcome) => {
+            let mut report = not_started(request, outcome);
+            report.warn_from_setup(setup_warnings);
+            if let Err(e) = lock.release() {
+                report.warn(e.to_string());
+            }
+            return report;
         }
-        None => (
-            // After the lock and before the first node: earlier would write
-            // into a directory another run owns, later would leave a
-            // crashed run — the one whose settings someone needs — with no
-            // spec at all.
-            write_run_yaml(&request.run_dir, request.loaded.flow(), &request.flow_dir)
-                .err()
-                .map(|e| e.to_string()),
-            // Beside `run.yaml` and for the same reason, plus one of its
-            // own: its presence is what tells a later resume that the crash
-            // was not in setup.
-            crate::journal::start(
-                &request.run_dir,
-                request.loaded.flow().profile.as_deref(),
-                request.until.as_ref(),
-                &pinned_ids,
-            )
-            .err()
-            .map(|e| {
-                format!("this run's progress cannot be written, so it cannot be resumed: {e}")
-            }),
-        ),
     };
 
     // Last of the setup steps, so a run that cannot be provisioned still
@@ -189,20 +147,11 @@ fn execute_with(
                 run_dir: &request.run_dir,
                 cancel,
                 budget: &request.budget,
-                git_status: request
-                    .git_status
-                    .as_ref()
-                    .map(|ask| &**ask as &dyn Fn(&std::path::Path) -> Option<String>),
-                events: request.events.as_ref(),
+                git_status: request.git_status.clone(),
+                log: &store,
                 ask: request.ask.as_ref(),
                 until: request.effective_until().cloned(),
-                // A continuation reads its pins back from the journal — where
-                // `absorb` kept them apart from `passed` precisely so the
-                // record can still say which nodes were reused rather than run.
-                pinned: match &resume {
-                    Some(replay) => replay.pinned.clone(),
-                    None => pinned_ids.clone(),
-                },
+                pinned,
                 resume,
             },
             runner,
@@ -210,12 +159,18 @@ fn execute_with(
         Err(outcome) => not_started(request, outcome),
     };
 
-    // In front, because they happened first — all three are setup steps that
-    // ran before the first node. None of them touches `RunOutcome`: a run
+    // In front, because they happened first — all are setup steps that ran
+    // before the first node. None of them touches `RunOutcome`: a run
     // directory that could not be tidied or audited still ran.
-    setup_warnings.extend(spec_warning);
-    setup_warnings.extend(journal_warning);
     report.warn_from_setup(setup_warnings);
+    // The log first: the marker below is only its cache (F8).
+    let ended = match smol::block_on(record_end(&store, &report.outcome)) {
+        Ok(seq) => seq,
+        Err(e) => {
+            report.warn(e);
+            None
+        }
+    };
     // Before the marker, and after the warning above so the record carries
     // it: the marker is the "it is all over" signal, and a reader that acts
     // on it must not find a finished run with no account of itself.
@@ -224,11 +179,12 @@ fn execute_with(
     }
     // Both of these run on every exit path, and neither replaces the
     // outcome: the run has already ended and that is what the user needs.
-    // A `?` here would skip the release while this process stays alive, and
-    // `is_alive` would then wedge the directory until `STALE_AFTER`.
     if let Err(e) = write_marker(&report.run_dir, &report.outcome) {
         report.warn(e.to_string());
     }
+    // The committer drains and stops here, so nothing writes this run's
+    // log once another process may take the lock.
+    drop(store);
     // After the marker, never before: in the window between a freed lock
     // and an unwritten marker a reader sees neither and calls a finished
     // run `Unknown`. A leaked lock is recovered by the next run's reclaim.
@@ -237,15 +193,147 @@ fn execute_with(
     }
     // Last, after the marker: a host that reacts to this by opening the run
     // directory would otherwise find no marker and read a finished run as
-    // `Unknown`. The end carries why, not just that — the marker folds
-    // `Failed`, `BudgetExhausted` and `Io` into one word.
+    // `Unknown`. The end carries why, not just that.
+    let end = RunEnd::from(&report.outcome);
     emit(
         request.events.as_ref(),
-        FlowEvent::RunEnded {
-            end: RunEnd::from(&report.outcome),
+        match ended {
+            Some(seq) => RunNotice::Recorded(Sequenced {
+                seq,
+                event: FlowEvent::RunEnded { end },
+            }),
+            None => RunNotice::Unrecorded(end),
         },
     );
     report
+}
+
+/// What a started run hands the scheduler.
+struct Begun {
+    store: FlowRunStore,
+    /// Nodes reused rather than run.
+    pinned: Vec<crate::NodeId>,
+    /// What an earlier process finished, for a continuation.
+    resume: Option<Replay>,
+}
+
+/// A fresh run: pins, spec and an empty log holding `RunStarted`.
+fn begin(request: &RunRequest, warnings: &mut Vec<String>) -> Result<Begun, RunOutcome> {
+    // First, before anything is written over: a directory that already
+    // holds a run is that run's, and starting another there would mix them.
+    if crate::run_log::reader::has_log(&request.run_dir) {
+        return Err(RunOutcome::Io(FlowIoError {
+            site: IoSite::Run,
+            doing: START_LOG,
+            path: crate::run_log::log_dir(&request.run_dir),
+            source: std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "this run directory already holds a run",
+            ),
+        }));
+    }
+    let (pinned, pin_warnings) = copy_pinned_outputs(request);
+    warnings.extend(pin_warnings);
+    // After the lock and before the first node: earlier would write into a
+    // directory another run owns, later would leave a crashed run — the one
+    // whose settings someone needs — with no spec at all.
+    if let Err(e) = write_run_yaml(&request.run_dir, request.loaded.flow(), &request.flow_dir) {
+        warnings.push(e.to_string());
+    }
+    let log = crate::run_log::store::open_file_log(&request.run_dir)?;
+    let store = FlowRunStore::spawn(log, &request.run_dir, request.events.clone())?;
+    // Its presence is what tells a later resume that the crash was not in
+    // setup. Narrated as `RunStarted`.
+    let started = FlowRunEvent::RunStarted {
+        nodes: crate::run_log::node_starts(&request.loaded),
+        until: request.until.clone(),
+        pinned: pinned.clone(),
+        profile: request.loaded.flow().profile.clone(),
+    };
+    smol::block_on(store.commit(started)).map_err(|e| store.failure(IoSite::Run, e))?;
+    Ok(Begun {
+        store,
+        pinned,
+        resume: None,
+    })
+}
+
+/// A continuation: the log replayed and tidied under the lock (§5.5).
+fn continue_run(request: &RunRequest, warnings: &mut Vec<String>) -> Result<Begun, RunOutcome> {
+    let log = crate::resume::open_under_lock(&request.run_dir, &request.loaded)?;
+    let (store, replay) = crate::resume::pick_up(
+        log,
+        &request.loaded,
+        &request.run_dir,
+        request.events.clone(),
+        warnings,
+    )?;
+    Ok(Begun {
+        store,
+        // Read back from the record, where pins are kept apart from passes so
+        // it can still say which nodes were reused rather than run.
+        pinned: replay.pinned.clone(),
+        resume: Some(replay),
+    })
+}
+
+/// Close what is still open and commit how the run ended. `None` for a run
+/// whose end is not the log's to record; `Err` is a warning.
+pub(super) async fn record_end(
+    store: &FlowRunStore,
+    outcome: &RunOutcome,
+) -> Result<Option<u64>, String> {
+    let Some(end) = EndLine::of(outcome) else {
+        return Ok(None);
+    };
+    let unrecorded = |e: crate::run_log::store::FlowCommitError| {
+        format!("how this run ended could not be recorded, so it may read as unfinished: {e}")
+    };
+    // A question whose wait was cut short can still be open; a run cannot
+    // end with one (B5).
+    let open = store.state().open_ask_ids();
+    for id in open {
+        let reason = crate::run_log::machine::AbandonReason::RunEnded;
+        let abandoned = store
+            .commit(FlowRunEvent::AskAbandoned { id, reason })
+            .await;
+        match abandoned {
+            Ok(_) | Err(daruda_runlog::CommitError::Rejected(_)) => {}
+            Err(e) => return Err(unrecorded(e)),
+        }
+    }
+    store
+        .commit(FlowRunEvent::RunEnded { end })
+        .await
+        .map(|committed| Some(committed.seq))
+        .map_err(unrecorded)
+}
+
+/// The run's lock, given back however the run thread ends. A panic used to
+/// leave it naming this live process until the app restarted (F5).
+struct HeldLock(Option<RunLock>);
+
+impl HeldLock {
+    fn new(lock: RunLock) -> Self {
+        Self(Some(lock))
+    }
+
+    fn release(mut self) -> Result<(), FlowIoError> {
+        match self.0.take() {
+            Some(lock) => lock.release(),
+            None => Ok(()),
+        }
+    }
+}
+
+impl Drop for HeldLock {
+    fn drop(&mut self) {
+        if let Some(lock) = self.0.take() {
+            // SILENT-OK: only reached while unwinding, where there is no
+            // report left to carry the failure; a leaked lock is reclaimed.
+            let _ = lock.release();
+        }
+    }
 }
 
 /// Prepare every runtime this run could need, before the first node — a
@@ -389,7 +477,7 @@ fn copy_pinned_outputs(request: &RunRequest) -> (Vec<crate::NodeId>, Vec<String>
     // A pin outside the selection is not this run's business. Copying it
     // anyway put a file in the run directory that no node here produced and
     // recorded it as reused, in a run whose own report says it stopped before
-    // that node — and the journal counts a pinned node as passed, so the next
+    // that node — and the run log counts a pinned node as passed, so the next
     // resume would skip it on the strength of an output it never saw made.
     let selected = crate::graph::Selection::of(request.loaded.flow(), request.effective_until());
     for pin in request

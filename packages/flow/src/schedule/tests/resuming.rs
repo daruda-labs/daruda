@@ -1,9 +1,9 @@
 //! Picking a run up where a killed process left it.
 //!
 //! The crash is simulated by *cancelling* mid-run and then removing the
-//! marker the cancel wrote: what a `kill -9` leaves is a directory with a
-//! journal, a spec, some outputs and no marker, and that is exactly what
-//! these build. Nothing here can be tested by resuming a run this process
+//! marker and the end its log recorded: what a `kill -9` leaves is a
+//! directory with a log that never ended, a spec, some outputs and no
+//! marker, and that is exactly what these build. Nothing here can be tested by resuming a run this process
 //! finished — the whole question is what survives one that did not.
 
 use super::*;
@@ -65,6 +65,8 @@ fn killed_after(
     for marker in ["DONE", "FAILED", "CANCELED"] {
         let _ = std::fs::remove_file(report.run_dir.join(marker));
     }
+    // The log, not the marker, says the run ended; a kill leaves no end.
+    crate::run_log::testing::forget_end(&report.run_dir);
     // A lock naming this run, whose holder the resume will be told is gone.
     std::fs::create_dir_all(&lock_dir).expect("lock dir");
     std::fs::write(
@@ -99,9 +101,9 @@ fn resume_run(run_dir: &std::path::Path, flow: &str, runner: &FakeRunner) -> Run
     let lock_dir = super::lock_dir_of(&request);
     let resumed =
         crate::resume::prepare(run_dir, Some(&lock_dir), &dead).expect("a killed run is resumable");
+    request.resume = Some(resumed.continuation());
     request.loaded = resumed.loaded;
     request.run_dir = run_dir.to_path_buf();
-    request.resume = Some(resumed.replay);
     request.is_alive = Box::new(dead);
     let report = execute(&request, runner, &CancelToken::default());
     // The stale lock was the resumed run's to reclaim. A run that took its
@@ -183,7 +185,7 @@ fn the_resumed_half_never_reuses_an_evidence_number() {
 
     resume_run(&run_dir, RETRIES_THEN_CHAINS, &FakeRunner::new());
 
-    let seqs: Vec<u32> = crate::journal::read(&run_dir)
+    let seqs: Vec<u32> = crate::run_log::reader::read(&run_dir)
         .records
         .iter()
         .flat_map(|node| node.attempts.iter().map(|a| a.evidence_seq))
@@ -236,10 +238,9 @@ fn a_resume_carries_the_spend_and_not_the_waiting() {
         .expect("resumable");
     let spent_before = resumed.replay.spent.node_runs;
     assert!(spent_before > 0, "the first half ran nothing");
-
+    request.resume = Some(resumed.continuation());
     request.loaded = resumed.loaded;
     request.run_dir = run_dir.clone();
-    request.resume = Some(resumed.replay);
     request.is_alive = Box::new(dead);
     // One more call than the run needs, so the ceiling is reached only if
     // the first half's calls counted.
@@ -287,10 +288,9 @@ fn waiting_done_before_the_crash_does_not_extend_the_new_clock() {
         "the first half's waiting did not read back: {:?}",
         resumed.replay.spent.parked
     );
-
+    request.resume = Some(resumed.continuation());
     request.loaded = resumed.loaded;
     request.run_dir = run_dir.clone();
-    request.resume = Some(resumed.replay);
     request.is_alive = Box::new(dead);
     request.budget = Budget {
         deadline: Some(std::time::Instant::now() - Duration::from_secs(10)),
@@ -332,12 +332,12 @@ fn a_continued_run_says_so_on_its_record() {
         rendered.contains("**Continued** — picked up with 1 node(s) already done"),
         "the report knows, the record does not say: {rendered}"
     );
-    // And the journal keeps the boundary, for whoever reads the directory
+    // And the run's log keeps the boundary, for whoever reads the directory
     // rather than the report.
-    let journal =
-        std::fs::read_to_string(run_dir.join(crate::journal::JOURNAL_FILE)).expect("journal");
+    let journal = std::fs::read_to_string(crate::run_log::log_dir(&run_dir).join("log.0.jsonl"))
+        .expect("journal");
     assert!(
-        journal.contains("\"kind\":\"resumed\""),
+        journal.contains("\"type\":\"resumed\""),
         "the journal does not show where it was taken over: {journal}"
     );
 }
@@ -445,6 +445,8 @@ nodes:
     for marker in ["DONE", "FAILED", "CANCELED"] {
         let _ = std::fs::remove_file(report.run_dir.join(marker));
     }
+    // The log, not the marker, says the run ended; a kill leaves no end.
+    crate::run_log::testing::forget_end(&report.run_dir);
     let lock_dir = super::lock_dir_of(&request);
     std::fs::create_dir_all(&lock_dir).expect("lock dir");
     std::fs::write(

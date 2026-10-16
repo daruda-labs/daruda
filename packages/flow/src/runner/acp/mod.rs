@@ -490,7 +490,7 @@ async fn drain(
                         session.respond_permission(id, PermissionDecision::Cancelled);
                         rec.park.answered(&PermissionDecision::Cancelled);
                     }
-                    Answering::Policy(Permission::Ask(channel)) => {
+                    Answering::Policy(Permission::Ask(port)) => {
                         // Converted here, through `daruda_acp`'s own seam, so
                         // the protocol request never leaves this arm.
                         let (options, detail) = match daruda_acp::permission_item(id, &request, &[])
@@ -508,7 +508,7 @@ async fn drain(
                             detail,
                             options,
                         };
-                        ask_a_person(session, channel, ctx, id, question, rec).await;
+                        ask_a_person(session, port, id, question, rec).await;
                     }
                     // Answered before anything else, so a policy that lets
                     // the turn continue never leaves the agent parked.
@@ -558,8 +558,7 @@ async fn drain(
 /// type to a host.
 async fn ask_a_person(
     session: &AcpSessionHandle,
-    channel: &crate::runner::AskChannel,
-    ctx: &RunContext<'_>,
+    port: &crate::runner::AskPort<'_>,
     id: u64,
     request: AskRequest,
     rec: &Recording<'_>,
@@ -570,10 +569,7 @@ async fn ask_a_person(
         .asked(&request.tool, request.detail.as_deref());
 
     park.begin(id);
-    let answer = match channel.ask(ctx.node_id, ctx.attempt, request) {
-        Some(reply) => reply.recv().await.unwrap_or(PermissionDecision::Cancelled),
-        None => PermissionDecision::Cancelled,
-    };
+    let answer = port.ask(request).await;
     park.end();
     park.answered(&answer);
 

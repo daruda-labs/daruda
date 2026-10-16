@@ -33,13 +33,19 @@ pub(super) struct Accounting {
     /// runner call consumes one, and every turn past its first reserves
     /// another — so a node allowed five turns can take five, not two.
     budget_units: Cell<u32>,
-    /// Time the run spent waiting for a person, summed over every call.
+    /// Time this process spent waiting for a person, summed over every call.
     ///
     /// The wall-clock ceiling is an absolute `Instant`, so a node clock
     /// that stops does nothing for it: without this, granting a permission
     /// after a long think would end the run at the next node boundary.
     /// Raised only by [`Accounting::account_result`] — the budget's own rule.
     parked: Cell<Duration>,
+    /// What earlier processes waited, kept for the record only: a resumed
+    /// run gets a fresh deadline, which old waiting must not extend.
+    parked_before: Duration,
+    /// Time the run has had a question open, read off the log. Covers a wait
+    /// still in progress, which `parked` only learns once its call returns.
+    clock: std::rc::Rc<crate::run_log::store::ParkClock>,
     /// The run's reported cost so far, in the first currency seen.
     cost: RefCell<Option<CostLimit>>,
     /// Set once a second currency appears: the total stops being a total,
@@ -55,15 +61,15 @@ impl Accounting {
     ///
     /// Cost and budget units carry: they are money and work that really
     /// happened, and a resume that forgot them would let a `max_node_runs`
-    /// of 50 run 50 more. **`parked` does not carry.** It exists only to
-    /// push out a wall-clock deadline that was set before the waiting
-    /// happened, and a resumed run is given a fresh deadline measured from
-    /// now — adding the old waiting to it would hand the run extra time for
-    /// a wait that is already behind it.
-    pub(super) fn resumed(spent: crate::journal::Spent, records: Vec<NodeRecord>) -> Self {
+    /// of 50 run 50 more. Waiting carries into the record only: a resumed
+    /// run gets a fresh deadline measured from now, and old waiting must not
+    /// buy it extra time.
+    pub(super) fn resumed(spent: crate::run_log::reader::Spent, records: Vec<NodeRecord>) -> Self {
         Self {
             budget_units: Cell::new(spent.node_runs),
             parked: Cell::new(Duration::ZERO),
+            parked_before: spent.parked,
+            clock: Default::default(),
             cost: RefCell::new(spent.cost),
             cost_mixed: Cell::new(spent.cost_mixed),
             warnings: RefCell::new(spent.warnings),
@@ -74,17 +80,26 @@ impl Accounting {
         }
     }
 
+    /// Read the run's open-question clock from `clock` (F15).
+    pub(super) fn with_clock(
+        mut self,
+        clock: std::rc::Rc<crate::run_log::store::ParkClock>,
+    ) -> Self {
+        self.clock = clock;
+        self
+    }
+
     pub(super) fn warn(&self, message: String) {
         self.warnings.borrow_mut().push(message);
     }
 
-    /// What the run has spent so far, for the journal. A copy, not a
+    /// What the run has spent so far, for the run log. A copy, not a
     /// handle: the cells stay private, which is the whole reason the
     /// counters live here.
-    pub(super) fn spent(&self) -> crate::journal::Spent {
-        crate::journal::Spent {
+    pub(super) fn spent(&self) -> crate::run_log::reader::Spent {
+        crate::run_log::reader::Spent {
             node_runs: self.budget_units.get(),
-            parked: self.parked.get(),
+            parked: self.parked_before + self.parked.get(),
             cost: self.cost.borrow().clone(),
             cost_mixed: self.cost_mixed.get(),
             warnings: self.warnings.borrow().clone(),
@@ -168,8 +183,14 @@ impl Accounting {
 
     /// The run's expiry, pushed out by whatever it spent waiting for a
     /// person. A budget bounds work, and waiting is the absence of it.
+    ///
+    /// The larger of the settled calls' waits and the time a question has
+    /// been open: the second sees a wait a sibling has not finished yet (F15).
     pub(super) fn deadline(&self, budget: &Budget) -> Option<std::time::Instant> {
-        budget.deadline.map(|deadline| deadline + self.parked.get())
+        let open = self.clock.parked(std::time::Instant::now());
+        budget
+            .deadline
+            .map(|deadline| deadline + self.parked.get().max(open))
     }
 
     /// The defence that tripped, if any.

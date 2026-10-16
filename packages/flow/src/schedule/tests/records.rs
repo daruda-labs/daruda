@@ -57,7 +57,7 @@ fn the_tree_state_is_recorded_for_each_attempt_the_host_answers_for() {
         Some(format!(" M file-{n}.rs"))
     };
     let mut request = request_for(CHAIN, dir.path());
-    request.git_status = Some(Box::new(git));
+    request.git_status = Some(std::sync::Arc::new(git));
 
     let runner = FakeRunner::new();
     let report = execute(&request, &runner, &CancelToken::default());
@@ -169,12 +169,19 @@ nodes:
 ",
         dir.path(),
     );
-    // `logs/` as a file, so the archive's `create_dir_all` cannot succeed.
-    std::fs::create_dir_all(&request.run_dir).expect("mkdir");
-    std::fs::write(request.run_dir.join(LOG_DIR_NAME), "not a directory").expect("write");
+    // The archive's name for the failed output already taken, so the move
+    // is refused. (`logs/` as a file no longer works: the run log is in it.)
+    let taken = request.run_dir.join(LOG_DIR_NAME);
+    std::fs::create_dir_all(&taken).expect("mkdir");
+    std::fs::write(taken.join("design.attempt-1.evidence-1.md"), "earlier").expect("write");
 
-    let runner =
-        FakeRunner::new().script("design", vec![Step::fail(NodeFailure::ContextExhausted)]);
+    let runner = FakeRunner::new().script(
+        "design",
+        vec![Step::Fail {
+            writes: Some("half".to_string()),
+            failure: NodeFailure::ContextExhausted,
+        }],
+    );
     let report = execute(&request, &runner, &CancelToken::default());
 
     assert!(

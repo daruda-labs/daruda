@@ -9,13 +9,16 @@
 use crate::NodeId;
 use crate::contract::file::FileContract;
 use crate::error::{FlowIoError, IoSite};
-use crate::event::FlowEvent;
 use crate::graph::FlowGraph;
 use crate::model::{Flow, Node, NodeKind};
-use crate::record::{AttemptOutcome, AttemptRecord, GitStatus, Invalidation, Reported};
-use crate::request::Budget;
-use crate::runner::{CancelToken, NodeFailure, NodeRunner, OutputContract, RunContext, RunResult};
-use std::cell::{Cell, RefCell};
+use crate::record::{AttemptOutcome, Invalidation, Reported};
+use crate::request::{AskGitStatus, Budget};
+use crate::run_log::machine::FlowRunEvent;
+use crate::run_log::store::FlowRunStore;
+use crate::runner::{
+    AskOwner, CancelToken, NodeFailure, NodeRunner, OutputContract, RunContext, RunResult,
+};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -58,7 +61,9 @@ struct Run<'a> {
     cancel: &'a CancelToken,
     budget: &'a Budget,
     /// Asked once per attempt, wherever that attempt's fate is sealed.
-    git_status: GitStatus<'a>,
+    git_status: Option<AskGitStatus>,
+    /// The run's log: every attempt and its numbers are committed here first.
+    log: FlowRunStore,
     /// Nodes an earlier process finished, empty for a run that is starting.
     already_passed: Vec<NodeId>,
     /// The profile this run went by, for its record.
@@ -68,8 +73,6 @@ struct Run<'a> {
     until: Option<NodeId>,
     /// Nodes reused rather than run, for its record.
     pinned: Vec<NodeId>,
-    /// Where the run narrates itself, or `None` when nobody is watching.
-    events: Option<&'a smol::channel::Sender<FlowEvent>>,
     /// Where a `permission: ask` node puts its question. `None` is a host
     /// that cannot answer, which `validate_request` has already refused
     /// for any flow that could reach `Ask`.
@@ -82,9 +85,6 @@ struct Run<'a> {
     /// set is intersected with this — a node that never ran has nothing to
     /// re-derive.
     executed: RefCell<Vec<NodeId>>,
-    /// Never reset, unlike a policy attempt, so archive names cannot
-    /// collide across repair generations.
-    next_seq: Cell<u32>,
     /// Nodes whose `drive` call is currently on the stack. Two gates that
     /// both re-run from a shared ancestor would otherwise drive each other
     /// forever — the recursion is bounded by structure, not by a counter,
@@ -111,9 +111,10 @@ pub(crate) struct RunInputs<'a> {
     /// How the host reports the working tree's state. `None` is a host with
     /// nothing to say, which the record treats as an absent note, not an
     /// error.
-    pub(crate) git_status: GitStatus<'a>,
-    /// Where the run narrates itself. `None` is a host that does not watch.
-    pub(crate) events: Option<&'a smol::channel::Sender<FlowEvent>>,
+    pub(crate) git_status: Option<AskGitStatus>,
+    /// The run's log, already holding `RunStarted` (or a resume's records).
+    /// It also narrates the run, once each record is durable.
+    pub(crate) log: &'a FlowRunStore,
     /// Where a person is asked for permission. `None` is a host with no
     /// answering surface.
     pub(crate) ask: Option<&'a smol::channel::Sender<crate::runner::PendingAsk>>,
@@ -125,7 +126,7 @@ pub(crate) struct RunInputs<'a> {
     /// asked for, the other is what a crash left behind.
     pub(crate) pinned: Vec<NodeId>,
     /// What an earlier process finished, when this is a continuation.
-    pub(crate) resume: Option<crate::journal::Replay>,
+    pub(crate) resume: Option<crate::run_log::reader::Replay>,
 }
 
 /// Run every node in topological order, judging each before the next.
@@ -138,7 +139,7 @@ pub(crate) async fn run_flow(inputs: RunInputs<'_>, runner: &dyn NodeRunner) -> 
         cancel,
         budget,
         git_status,
-        events,
+        log,
         ask,
         until,
         pinned,
@@ -147,25 +148,21 @@ pub(crate) async fn run_flow(inputs: RunInputs<'_>, runner: &dyn NodeRunner) -> 
     let (flow, graph) = (loaded.flow(), loaded.graph());
     // Destructured before the run is built: every one of these is a field
     // the run starts from rather than something it can ask for later.
-    let (passed, next_seq, spent, profile) = match resume {
+    let (passed, spent, profile) = match resume {
         Some(replay) => (
             replay.passed,
-            // Continued, never restarted: an attempt that re-used a
-            // number would write its evidence over the log that is the
-            // only account of the attempt before the crash.
-            replay.next_seq.max(1),
             budget::Accounting::resumed(replay.spent, replay.records),
-            // The journal's, not the spec's: `run.yaml` records the
+            // The record's, not the spec's: `run.yaml` records the
             // settings a profile produced and never the name.
             replay.profile,
         ),
         None => (
             Vec::new(),
-            1,
             budget::Accounting::default(),
             flow.profile.clone(),
         ),
     };
+    let spent = spent.with_clock(log.clock());
     let run = Run {
         flow,
         graph,
@@ -178,8 +175,10 @@ pub(crate) async fn run_flow(inputs: RunInputs<'_>, runner: &dyn NodeRunner) -> 
         cancel,
         budget,
         git_status,
-        events,
-        ask: ask.cloned().map(crate::runner::AskChannel::new),
+        log: log.clone(),
+        ask: ask
+            .cloned()
+            .map(|tx| crate::runner::AskChannel::new(tx, log.clone())),
         spent,
         profile,
         until: until.clone(),
@@ -188,7 +187,6 @@ pub(crate) async fn run_flow(inputs: RunInputs<'_>, runner: &dyn NodeRunner) -> 
         // and the ones from before the crash did.
         executed: RefCell::new(passed.clone()),
         already_passed: passed,
-        next_seq: Cell::new(next_seq),
         driving: RefCell::new(HashSet::new()),
     };
 
@@ -317,9 +315,12 @@ impl<'a> Run<'a> {
         id: &'s NodeId,
     ) -> Pin<Box<dyn Future<Output = Result<(), RunOutcome>> + 's>> {
         Box::pin(async move {
-            // A fresh generation: this node's own counter starts here and
-            // only ever increases, which is what `max_attempts` bounds.
-            let mut attempt = 1u32;
+            let policy = self.policy_of(node);
+            // A resume can find this node's attempts in this generation
+            // already spent, the interrupted one included (D4-2).
+            if let Some(spent) = self.attempts_spent_before(id, &policy) {
+                return Err(spent);
+            }
             // Accumulated across this generation's attempts, because a
             // repair reads "the previous attempts'" evidence.
             let mut evidence: Vec<PathBuf> = Vec::new();
@@ -334,7 +335,6 @@ impl<'a> Run<'a> {
                     return Err(outcome);
                 }
 
-                let seq = self.take_seq();
                 let output = self.node_outputs.get(id).cloned();
                 // The node's own, when it names one. Validation has already
                 // established it is inside the run's — which is what keeps
@@ -350,28 +350,9 @@ impl<'a> Run<'a> {
                         node.kind.continue_until(),
                     )
                 });
-                // A local because `ctx` borrows it, like `contract` above.
-                let reserve = || self.reserve_extra_turn();
-                let ctx = RunContext {
-                    max_turns: node.kind.max_turns(),
-                    node_id: id,
-                    attempt,
-                    started_at: std::time::SystemTime::now(),
-                    cwd: &cwd,
-                    run_dir: self.run_dir,
-                    log_dir: &self.log_dir,
-                    output: output.as_deref(),
-                    contract: contract.as_ref().map(|c| c as &dyn OutputContract),
-                    evidence_seq: seq,
-                    // The node's own budget, but never past the run's
-                    // deadline: a runner races only what it is given, so a
-                    // one-minute run ceiling would not stop a ten-minute
-                    // node if the node's number came through unclipped.
-                    timeout: self.bounded_timeout(node.timeout),
-                    permission: self.permission_for(node),
-                    cancel: self.cancel,
-                    reserve_extra_turn: &reserve,
-                };
+                // The number the attempt will get, for the failures below
+                // that happen before one exists.
+                let next = self.next_attempt(id);
 
                 // Before the directory is made and before the runner is
                 // called: `create_dir_all` follows a link an earlier node
@@ -380,14 +361,14 @@ impl<'a> Run<'a> {
                 if let Some(path) = output.as_deref()
                     && let Err(failure) = crate::contract::file::preflight(self.run_dir, path)
                 {
-                    // No session was paid for, so there is no attempt to
-                    // record. The node still stopped the run, and a host
-                    // drawing the graph has to be told which one.
-                    self.emit(FlowEvent::NodeFailed {
-                        node: id.clone(),
-                        attempt,
-                        failure: failure.clone(),
-                    });
+                    // No session was paid for, so there is no attempt. The
+                    // refusal is still recorded: a host drawing the graph
+                    // has to be told which node stopped the run.
+                    let refused = FlowRunEvent::node_refused(id.clone(), (&failure).into());
+                    self.log
+                        .commit(refused)
+                        .await
+                        .map_err(|e| self.log.failure(site(id, next), e))?;
                     return Err(RunOutcome::Failed {
                         node: id.clone(),
                         failure,
@@ -401,21 +382,53 @@ impl<'a> Run<'a> {
                 if let Some(parent) = output.as_deref().and_then(|p| p.parent())
                     && let Err(e) = std::fs::create_dir_all(parent)
                 {
-                    return Err(node_io(&ctx, doing::OUTPUT_PARENT, parent.to_path_buf(), e));
+                    return Err(io_at(
+                        id,
+                        next,
+                        doing::OUTPUT_PARENT,
+                        parent.to_path_buf(),
+                        e,
+                    ));
                 }
 
-                let prompt = match self.node_text(node, &ctx, &evidence, last_failure.as_ref()) {
-                    Ok(text) => text,
-                    Err((doing, path, e)) => return Err(node_io(&ctx, doing, path, e)),
-                };
-                // Emitted where the session is about to be paid for, so a
-                // `NodeStarted` is one runner call and one recorded attempt.
-                // Not the converse: the preflight above fails a node with
-                // neither.
-                self.emit(FlowEvent::NodeStarted {
+                let prompt =
+                    match self.node_text(node, output.as_deref(), &evidence, last_failure.as_ref())
+                    {
+                        Ok(text) => text,
+                        Err((doing, path, e)) => return Err(io_at(id, next, doing, path, e)),
+                    };
+
+                // O2: the attempt and its evidence number are durable before
+                // the session is paid for, so a crash cannot reuse them (F2).
+                let started = self.start_attempt(id, next).await?;
+                // A local because `ctx` borrows it, like `contract` above.
+                let reserve = || self.reserve_extra_turn();
+                let owner = AskOwner::Node {
                     node: id.clone(),
-                    attempt,
-                });
+                    generation: started.generation,
+                    attempt: started.attempt,
+                };
+                let ctx = RunContext {
+                    max_turns: node.kind.max_turns(),
+                    node_id: id,
+                    attempt: started.attempt,
+                    started_at: std::time::SystemTime::now(),
+                    cwd: &cwd,
+                    run_dir: self.run_dir,
+                    log_dir: &self.log_dir,
+                    output: output.as_deref(),
+                    contract: contract.as_ref().map(|c| c as &dyn OutputContract),
+                    evidence_seq: started.evidence,
+                    // The node's own budget, but never past the run's
+                    // deadline: a runner races only what it is given, so a
+                    // one-minute run ceiling would not stop a ten-minute
+                    // node if the node's number came through unclipped.
+                    timeout: self.bounded_timeout(node.timeout),
+                    permission: self.permission_for(node, owner),
+                    cancel: self.cancel,
+                    reserve_extra_turn: &reserve,
+                };
+                let attempt = ctx.attempt;
                 let result = self.call(node, &ctx, &prompt).await;
 
                 // Before `judge`, not after: a cancelled node judged as a
@@ -426,27 +439,30 @@ impl<'a> Run<'a> {
                 // run: it is judged and kept, and the run ends after it.
                 let stopped_here = result.stopped_the_run && result.outcome.is_ok();
                 if self.cancel.is_canceled() && !stopped_here {
-                    return Err(self.settle_cancel(&ctx, id, output.as_deref(), &result));
+                    return Err(self
+                        .settle_cancel(&ctx, id, output.as_deref(), &result)
+                        .await);
                 }
                 let artifacts = result.artifacts.clone();
                 // Captured before `judge` consumes the result, like
-                // `artifacts` — every `record` below is for this attempt.
+                // `artifacts` — every settle below is for this attempt.
                 let reported = Reported::from(&result);
 
                 let failure = match judge(&ctx, result) {
                     Ok(()) => {
+                        // O1: the output is on disk before its pass is.
+                        if let Some(path) = output.clone() {
+                            durable::sync_file(path).await;
+                        }
                         // A pass archives nothing: its output stays live for
                         // the nodes downstream to read.
-                        self.record(
+                        self.settle(
                             &ctx,
                             AttemptOutcome::Passed,
                             Invalidation::default(),
-                            reported.clone(),
-                        );
-                        self.emit(FlowEvent::NodePassed {
-                            node: id.clone(),
-                            attempt,
-                        });
+                            reported,
+                        )
+                        .await?;
                         let mut executed = self.executed.borrow_mut();
                         if !executed.contains(id) {
                             executed.push(id.clone());
@@ -458,28 +474,20 @@ impl<'a> Run<'a> {
                     }
                     Err(failure) => failure,
                 };
-                // One site for all three ways a failed attempt is disposed of
-                // — capped, archived, or archived unsuccessfully. What the
-                // record separates is `archived`, which no event carries.
-                self.emit(FlowEvent::NodeFailed {
-                    node: id.clone(),
-                    attempt,
-                    failure: failure.clone(),
-                });
 
-                let policy = self.policy_of(node);
                 // A refusal cannot be argued with, and a node with no retry
                 // policy has nothing to try. A run this node stopped retries
                 // nothing either; it ends `Canceled`.
                 if stopped_here || failure.forbids_retry() || attempt >= policy.max_attempts {
                     // This returns before any invalidation set is computed,
                     // so the attempt that ends the run archives nothing.
-                    self.record(
+                    self.settle(
                         &ctx,
                         AttemptOutcome::Failed(failure.clone()),
                         Invalidation::default(),
-                        reported.clone(),
-                    );
+                        reported,
+                    )
+                    .await?;
                     if stopped_here {
                         return Err(RunOutcome::Canceled { node: None });
                     }
@@ -493,32 +501,56 @@ impl<'a> Run<'a> {
                 // runs — a fix that starts first would read a live output
                 // instead of the evidence it is supposed to answer.
                 let set = self.invalidation_set(node, &policy);
-                match crate::archive::archive_attempt(&self.log_dir, &set, attempt, seq, &artifacts)
-                {
+                // O2: which outputs stop being current is durable before any
+                // of them is moved, so a crash in between is a resume's to
+                // finish rather than a pass with no output (F3).
+                let members: Vec<NodeId> = set
+                    .iter()
+                    .map(|(member, _)| member.clone())
+                    .filter(|member| member != id)
+                    .collect();
+                if !members.is_empty() {
+                    let gate = id.clone();
+                    self.log
+                        .commit(FlowRunEvent::Invalidated { gate, members })
+                        .await
+                        .map_err(|e| self.log.failure(site(id, attempt), e))?;
+                }
+                match crate::archive::archive_attempt(
+                    &self.log_dir,
+                    &set,
+                    attempt,
+                    ctx.evidence_seq,
+                    &artifacts,
+                ) {
                     Ok(paths) => {
+                        durable::sync_dirs(&set, &self.log_dir).await;
                         // The archive's own return, not a second derivation
                         // of it: two computations of the same set drift.
-                        self.record(
+                        let invalidation = Invalidation {
+                            nodes: set.iter().map(|(id, _)| id.clone()).collect(),
+                            archived: paths.clone(),
+                        };
+                        self.settle(
                             &ctx,
                             AttemptOutcome::Failed(failure.clone()),
-                            Invalidation {
-                                nodes: set.iter().map(|(id, _)| id.clone()).collect(),
-                                archived: paths.clone(),
-                            },
-                            reported.clone(),
-                        );
+                            invalidation,
+                            reported,
+                        )
+                        .await?;
                         evidence.extend(paths);
                     }
                     Err(e) => {
                         // Same reasoning as the cancel path: the attempt is
                         // in the accounting whether or not its evidence
                         // could be moved, so it is in the record too.
-                        self.record(
+                        self.settle(
                             &ctx,
                             AttemptOutcome::Failed(failure.clone()),
                             Invalidation::default(),
-                            reported.clone(),
-                        );
+                            reported,
+                        )
+                        .await?;
                         let (path, source) = e.into_io();
                         return Err(node_io(&ctx, doing::ARCHIVE, path, source));
                     }
@@ -546,57 +578,8 @@ impl<'a> Run<'a> {
                 }
 
                 last_failure = Some(failure);
-                attempt += 1;
             }
         })
-    }
-    /// Every node-level event goes through here; `execute` emits the two
-    /// run-level ones the same way, since only it sees the lock.
-    fn emit(&self, event: FlowEvent) {
-        crate::event::emit(self.events, event);
-    }
-
-    /// Called wherever an attempt's fate is sealed, including the arms that
-    /// return before `judge` or before any archiving. The `git_status` ask
-    /// happens here, so the number of asks equals the number of attempts.
-    fn record(
-        &self,
-        ctx: &RunContext<'_>,
-        outcome: AttemptOutcome,
-        invalidated: Invalidation,
-        reported: Reported,
-    ) {
-        let attempt = AttemptRecord {
-            attempt: ctx.attempt,
-            evidence_seq: ctx.evidence_seq,
-            at: std::time::SystemTime::now(),
-            // `Err` is a clock that moved backwards under us; the duration
-            // is then simply not shown, which beats a wrong one.
-            took: ctx.started_at.elapsed().unwrap_or_default(),
-            outcome,
-            invalidated,
-            git_status: self.git_status.and_then(|ask| ask(ctx.cwd)),
-            waited: reported.waited,
-            turns: reported.turns,
-            tools: reported.tools,
-            usage: reported.usage,
-        };
-        // On disk before the next node starts, through the same funnel the
-        // in-memory record goes through — a second write site is a second
-        // chance for the two to disagree about what happened.
-        //
-        // Best-effort: a journal that cannot be written costs a resume, and
-        // failing the run over it would cost the run. The warning is how
-        // someone finds out the run stopped being resumable.
-        if let Err(e) =
-            crate::journal::append_attempt(self.run_dir, ctx.node_id, &attempt, &self.spent.spent())
-        {
-            self.spent.warn(format!(
-                "this run's progress could not be written, so it cannot be resumed: {e}"
-            ));
-        }
-        self.spent
-            .record(|records| crate::record::push_attempt(records, ctx.node_id, attempt));
     }
 
     /// Where a node runs: its own directory, or the run's.
@@ -612,12 +595,6 @@ impl<'a> Run<'a> {
         }
     }
 
-    fn take_seq(&self) -> u32 {
-        let seq = self.next_seq.get();
-        self.next_seq.set(seq + 1);
-        seq
-    }
-
     /// Dispatch finished text through the runner and its accounting funnel.
     async fn call(&self, node: &Node, ctx: &RunContext<'_>, text: &str) -> RunResult {
         match &node.kind {
@@ -629,51 +606,6 @@ impl<'a> Run<'a> {
                 self.accounted_call(|| self.runner.run_command(ctx, text))
                     .await
             }
-        }
-    }
-
-    /// The user stopped the run while this node was in flight.
-    ///
-    /// Its output goes aside: everything left live in the run directory has
-    /// to be a completed node's, or the next reader cannot tell which is
-    /// which. The attempt is recorded either way — it happened and it cost
-    /// a runner call, whether or not its output could be moved.
-    fn settle_cancel(
-        &self,
-        ctx: &RunContext<'_>,
-        id: &NodeId,
-        output: Option<&Path>,
-        result: &RunResult,
-    ) -> RunOutcome {
-        let mut archived = Vec::new();
-        if let Some(output) = output {
-            match crate::archive::archive_canceled(&self.log_dir, id, output) {
-                Ok(moved) => archived.extend(moved),
-                Err(e) => {
-                    self.record(
-                        ctx,
-                        AttemptOutcome::Canceled,
-                        Invalidation::default(),
-                        Reported::from(result),
-                    );
-                    let (path, source) = e.into_io();
-                    return node_io(ctx, doing::ARCHIVE_CANCELED, path, source);
-                }
-            }
-        }
-        // A cancel invalidates only what it interrupted, so the set is this
-        // node and nothing downstream re-derives.
-        self.record(
-            ctx,
-            AttemptOutcome::Canceled,
-            Invalidation {
-                nodes: Vec::new(),
-                archived,
-            },
-            Reported::from(result),
-        );
-        RunOutcome::Canceled {
-            node: Some(id.clone()),
         }
     }
 }
@@ -708,7 +640,7 @@ pub(crate) fn node_outputs(flow: &Flow, run_dir: &Path) -> Vec<(NodeId, PathBuf)
         .collect()
 }
 
-fn node_output(node: &Node, run_dir: &Path) -> Option<PathBuf> {
+pub(crate) fn node_output(node: &Node, run_dir: &Path) -> Option<PathBuf> {
     match &node.kind {
         NodeKind::Agent(body) => Some(run_dir.join(&body.output)),
         NodeKind::Command { .. } => None,
@@ -760,6 +692,7 @@ fn judge(ctx: &RunContext<'_>, result: RunResult) -> Result<(), NodeFailure> {
 }
 
 mod budget;
+mod durable;
 mod permission;
 mod policy;
 mod prompt;
@@ -767,13 +700,16 @@ mod ready;
 mod repair;
 mod report;
 mod run;
+mod settle;
 
 pub use report::{BudgetLimit, RunOutcome, RunReport};
 
 pub use run::execute;
 
+use settle::{io_at, site};
+
 use policy::PolicyKind;
 use ready::take_ready_batch;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

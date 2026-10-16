@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use daruda_acp::LaunchSpec;
-use daruda_flow::event::FlowEvent;
+use daruda_flow::event::RunNotice;
 use daruda_flow::request::{Budget, CostLimit, RunRequest};
 use daruda_store::project::PaneCwd;
 use gpui::Context;
@@ -119,7 +119,7 @@ pub(in crate::workspace) struct FlowSubmission {
     /// Which flow file this run is of, when that is knowable ([`FlowSource`]).
     pub source: FlowSource,
     pub node_install_dir: PathBuf,
-    pub events: smol::channel::Receiver<FlowEvent>,
+    pub events: smol::channel::Receiver<RunNotice>,
     /// Where the run's permission questions arrive. A second pump rather
     /// than a `FlowEvent` variant: wiring this is what declares the app can
     /// answer, and the engine's validation reads exactly that field.
@@ -295,6 +295,9 @@ impl Workspace {
         let (tx, rx) = smol::channel::unbounded();
         let (ask_tx, ask_rx) = smol::channel::unbounded();
 
+        // Only what the run fixed when it started. What it had finished is
+        // read by the engine once it holds the lane's lock (F14).
+        let continuation = resumed.continuation();
         let request = RunRequest {
             until: None,
             pinned: Vec::new(),
@@ -315,10 +318,10 @@ impl Workspace {
             // spent is carried by the journal, not by this.
             budget: budget_from(&self.config_flow()),
             is_alive: Box::new(is_alive),
-            git_status: Some(Box::new(git_status)),
+            git_status: Some(std::sync::Arc::new(git_status)),
             events: Some(tx),
             ask: Some(ask_tx),
-            resume: Some(resumed.replay),
+            resume: Some(continuation),
         };
         Ok(FlowSubmission {
             lane: lane_ref,
@@ -407,7 +410,7 @@ impl Workspace {
             node_install_dir: node_install_dir.clone(),
             budget: budget_from(&self.config_flow()),
             is_alive: Box::new(process_is_alive),
-            git_status: Some(Box::new(git_status)),
+            git_status: Some(std::sync::Arc::new(git_status)),
             events: Some(tx),
             ask: Some(ask_tx),
             // This assembles a run that is starting. Picking one up reads

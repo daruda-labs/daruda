@@ -17,6 +17,7 @@ pub mod node_id;
 pub mod record;
 pub mod request;
 pub mod resume;
+pub mod run_log;
 pub mod runner;
 pub mod schedule;
 

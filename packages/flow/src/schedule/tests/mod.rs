@@ -91,7 +91,12 @@ fn run_pinned(
             cancel: &CancelToken::default(),
             budget: &Budget::unlimited(),
             git_status: None,
-            events: None,
+            log: &crate::run_log::testing::started_store(
+                &run_dir,
+                &loaded,
+                None,
+                vec![crate::NodeId::from(node)],
+            ),
             ask: None,
             resume: None,
         },
@@ -116,7 +121,12 @@ fn run_until(text: &str, runner: &dyn NodeRunner, target: &str) -> (RunReport, t
             cancel: &CancelToken::default(),
             budget: &Budget::unlimited(),
             git_status: None,
-            events: None,
+            log: &crate::run_log::testing::started_store(
+                &dir.path().join("run"),
+                &loaded,
+                Some(crate::NodeId::from(target)),
+                Vec::new(),
+            ),
             ask: None,
             resume: None,
         },
@@ -152,7 +162,12 @@ fn run_with(
             cancel,
             budget: &budget,
             git_status: None,
-            events: None,
+            log: &crate::run_log::testing::started_store(
+                &dir.path().join("run"),
+                &loaded,
+                None,
+                Vec::new(),
+            ),
             ask: None,
             resume: None,
         },
@@ -201,7 +216,7 @@ nodes:
 
 /// A run as the host submits it: the lock lives outside the working
 /// directory, and the run id is the run directory's own name.
-pub(super) fn request_for(text: &str, dir: &std::path::Path) -> crate::request::RunRequest {
+pub(crate) fn request_for(text: &str, dir: &std::path::Path) -> crate::request::RunRequest {
     request_for_profile(text, None, dir)
 }
 
@@ -322,14 +337,18 @@ impl NodeRunner for LockLoser {
 }
 
 mod artifacts;
+mod asks;
 mod budgets;
 mod cancel;
 mod contract;
+mod crash;
+mod generations;
 mod lifecycle;
 mod ordering;
 mod parallel;
 mod prompts;
 mod records;
 mod repair;
+mod resume_steps;
 mod resuming;
 mod working_dirs;

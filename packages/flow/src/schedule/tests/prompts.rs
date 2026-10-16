@@ -109,7 +109,7 @@ nodes:
             cancel: &CancelToken::default(),
             budget: &Budget::unlimited(),
             git_status: None,
-            events: None,
+            log: &crate::run_log::testing::started_store(&run_dir, &loaded, None, Vec::new()),
             ask: None,
             resume: None,
         },

@@ -74,7 +74,7 @@ pub(in crate::workspace) fn resolve_in(
     ) else {
         return unavailable();
     };
-    let passed: HashSet<NodeId> = daruda_flow::journal::read(run_dir)
+    let passed: HashSet<NodeId> = daruda_flow::run_log::reader::read(run_dir)
         .passed
         .into_iter()
         .collect();
@@ -229,6 +229,49 @@ nodes:
             }]
         );
         assert!(resolved.unavailable.is_empty());
+    }
+
+    /// A run that keeps a run log rather than a journal, as this build
+    /// writes: its passes resolve the same way.
+    #[test]
+    fn a_pass_recorded_in_a_run_log_resolves_too() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join(RUN_SPEC), TWO).expect("the run's spec");
+        let log_dir = daruda_flow::run_log::log_dir(dir.path());
+        std::fs::create_dir_all(&log_dir).expect("mkdir");
+        let event = |seq: u32, body: &str| {
+            format!("{{\"v\":1,\"seq\":{seq},\"at_ms\":0,\"kind\":\"event\",\"event\":{body}}}\n")
+        };
+        let mut log =
+            "{\"v\":1,\"seq\":1,\"at_ms\":0,\"kind\":\"opened\",\"epoch\":1,\"build\":\"t\"}\n"
+                .to_string();
+        log.push_str(&event(
+            2,
+            "{\"type\":\"run_started\",\"nodes\":[{\"id\":\"design\",\"produces\":\"file\"},\
+             {\"id\":\"gate\",\"produces\":\"nothing\"}]}",
+        ));
+        log.push_str(&event(
+            3,
+            "{\"type\":\"attempt_started\",\"node\":\"design\",\"generation\":0,\
+             \"attempt\":1,\"evidence\":1}",
+        ));
+        log.push_str(&event(
+            4,
+            "{\"type\":\"attempt_passed\",\"node\":\"design\",\"record\":{\"attempt\":1,\
+             \"evidence\":1,\"turns\":1,\"spent\":{\"node_runs\":1}}}",
+        ));
+        std::fs::write(log_dir.join("log.0.jsonl"), log).expect("log");
+        std::fs::write(dir.path().join("design.md"), "done\n").expect("output");
+
+        let resolved = resolve_in(&["design".into()], TWO, None, Some(dir.path()));
+
+        assert_eq!(
+            resolved.reuse,
+            vec![PinnedOutput {
+                node: "design".into(),
+                from: dir.path().join("design.md"),
+            }]
+        );
     }
 
     /// The defect this rule exists for: two flows in one lane can both declare

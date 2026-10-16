@@ -22,14 +22,24 @@ impl Run<'_> {
     /// `Ask` without a port cannot be built, so it degrades to `Deny` —
     /// unreachable in practice because `validate_request` refuses such a
     /// run before the lock, and safe rather than silent if it ever were.
-    pub(super) fn permission_for(&self, node: &Node) -> crate::runner::Permission<'_> {
-        self.permission_for_policy(permission_of(node))
+    pub(super) fn permission_for(
+        &self,
+        node: &Node,
+        owner: crate::runner::AskOwner,
+    ) -> crate::runner::Permission<'_> {
+        self.permission_for_policy(permission_of(node), owner)
     }
 
     /// The repair's `fix` runs as `flow.default_agent` and inherits its
     /// policy, so a flow whose defaults say `ask` asks during repair too.
-    pub(super) fn permission_for_fix(&self, agent: &AgentSpec) -> crate::runner::Permission<'_> {
-        self.permission_for_policy(agent.permission)
+    /// It asks as the gate whose repair it is: the session is not a node.
+    pub(super) fn permission_for_fix(
+        &self,
+        agent: &AgentSpec,
+        gate: &crate::NodeId,
+    ) -> crate::runner::Permission<'_> {
+        let owner = crate::runner::AskOwner::Fix { gate: gate.clone() };
+        self.permission_for_policy(agent.permission, owner)
     }
 
     /// A policy becomes a capability: `ask` is only one if this run has
@@ -38,12 +48,15 @@ impl Run<'_> {
     pub(super) fn permission_for_policy(
         &self,
         policy: crate::model::PermissionPolicy,
+        owner: crate::runner::AskOwner,
     ) -> crate::runner::Permission<'_> {
         match policy {
             crate::model::PermissionPolicy::Deny => crate::runner::Permission::Deny,
             crate::model::PermissionPolicy::AllowOnce => crate::runner::Permission::AllowOnce,
             crate::model::PermissionPolicy::Ask => match self.ask.as_ref() {
-                Some(channel) => crate::runner::Permission::Ask(channel),
+                Some(channel) => {
+                    crate::runner::Permission::Ask(crate::runner::AskPort::new(channel, owner))
+                }
                 None => crate::runner::Permission::Deny,
             },
         }

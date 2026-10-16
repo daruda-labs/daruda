@@ -259,15 +259,16 @@ fn a_resumed_selection_narrows_the_same_way_a_fresh_one_does() {
     let provisioned = RefCell::new(Vec::new());
     let mut request = request_for(TWO_AGENTS, dir.path());
     request.until = None;
-    request.resume = Some(crate::journal::Replay {
-        passed: Vec::new(),
-        next_seq: 1,
-        records: Vec::new(),
-        spent: Default::default(),
-        profile: None,
+    // A continuation reads its run back under the lock, so the run it
+    // continues has to be on disk: started with the selection, never ended.
+    drop(crate::run_log::testing::started_store(
+        &request.run_dir,
+        &request.loaded,
+        Some(crate::NodeId::from("design")),
+        Vec::new(),
+    ));
+    request.resume = Some(crate::resume::Continuation {
         until: Some(crate::NodeId::from("design")),
-        pinned: Vec::new(),
-        torn: Default::default(),
     });
 
     let report = execute_with(

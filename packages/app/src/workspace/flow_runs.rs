@@ -102,10 +102,8 @@ pub(in crate::workspace) enum RunStage {
 #[derive(Debug)]
 pub(in crate::workspace) struct ParkedAsk {
     pub ask_id: u64,
-    pub node: NodeId,
-    /// The attempt that asked — what the run goes back to being on once
-    /// the question is answered.
-    pub attempt: u32,
+    /// Who asked — what the run goes back to doing once it is answered.
+    pub owner: daruda_flow::runner::AskOwner,
     pub tool: String,
     pub detail: Option<String>,
     pub options: Vec<daruda_acp::PermissionChoice>,
@@ -173,12 +171,28 @@ impl ParkedAsk {
     pub(in crate::workspace) fn new(pending: daruda_flow::runner::PendingAsk) -> Self {
         Self {
             ask_id: pending.ask_id,
-            node: pending.node,
-            attempt: pending.attempt,
+            owner: pending.owner,
             tool: pending.request.tool,
             detail: pending.request.detail,
             options: pending.request.options,
             reply: pending.reply,
+        }
+    }
+
+    /// The node the question is shown against: the asker, or the gate whose
+    /// fix is asking.
+    pub(in crate::workspace) fn node(&self) -> &NodeId {
+        self.owner.node()
+    }
+
+    /// The stage the run returns to once this question is off screen.
+    fn stage_after(&self) -> RunStage {
+        match &self.owner {
+            daruda_flow::runner::AskOwner::Node { node, attempt, .. } => RunStage::Node {
+                id: node.clone(),
+                attempt: *attempt,
+            },
+            daruda_flow::runner::AskOwner::Fix { gate } => RunStage::Fixing { gate: gate.clone() },
         }
     }
 }
@@ -208,7 +222,7 @@ impl RunStage {
             // run is. For a repair's fix session the engine sends the gate's
             // name, which is what makes that case renderable at all.
             RunStage::Asking { question, .. } => {
-                s::flow::stage_asking(question.node.as_str(), &question.tool)
+                s::flow::stage_asking(question.node().as_str(), &question.tool)
             }
         }
     }
@@ -438,10 +452,7 @@ impl FlowRuns {
         };
         handle.cancel.cancel();
         if let RunStage::Asking { question, .. } = &handle.doing {
-            handle.doing = RunStage::Node {
-                id: question.node.clone(),
-                attempt: question.attempt,
-            };
+            handle.doing = question.stage_after();
         }
     }
 }
@@ -493,10 +504,7 @@ fn next_stage_after(
             question: next,
             queued: std::mem::take(queued),
         },
-        None => RunStage::Node {
-            id: answered.node.clone(),
-            attempt: answered.attempt,
-        },
+        None => answered.stage_after(),
     }
 }
 
@@ -537,8 +545,11 @@ mod tests {
         (
             ParkedAsk {
                 ask_id: id,
-                node: node.into(),
-                attempt: 1,
+                owner: daruda_flow::runner::AskOwner::Node {
+                    node: node.into(),
+                    generation: 0,
+                    attempt: 1,
+                },
                 tool: "write".into(),
                 detail: None,
                 options: Vec::new(),

@@ -1,5 +1,7 @@
-//! What a run has finished, written down as it happens, so a run that was
-//! killed can be picked up instead of started over.
+//! The progress journal older builds wrote, `progress.jsonl`. **Read-only
+//! now:** a run records its progress in its run log ([`crate::run_log`]);
+//! this is read so runs from before that stay listed, pinnable and
+//! resumable. The writers below exist only to build such runs in tests.
 //!
 //! Everything else a run leaves behind is already enough to *read* it: the
 //! resolved spec is in `run.yaml`, the outputs and the evidence logs are in
@@ -18,12 +20,11 @@
 //! without a resume refusing runs it half-understands.
 
 use serde::{Deserialize, Serialize};
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::NodeId;
-use crate::record::{AttemptOutcome, AttemptRecord, Invalidation, NodeRecord};
+use crate::record::{AttemptOutcome, AttemptRecord, Invalidation};
 use crate::request::CostLimit;
 use crate::runner::{AskAnswer, Waiting};
 
@@ -129,12 +130,14 @@ fn is_zero(ms: &u64) -> bool {
 /// only bites a run that actually waited: the journal of every other run
 /// reads back fine, which is exactly how it would reach a user.
 /// Milliseconds since the epoch, or zero for a clock set before it.
+#[cfg(test)]
 fn epoch_millis(at: std::time::SystemTime) -> u64 {
     at.duration_since(std::time::UNIX_EPOCH)
         .map(millis)
         .unwrap_or_default()
 }
 
+#[cfg(test)]
 fn millis(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
@@ -178,47 +181,10 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
-/// What the run had spent, in the scheduler's own terms.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Spent {
-    /// Budget units consumed. The journal key keeps its established name for
-    /// compatibility with existing run directories.
-    pub node_runs: u32,
-    pub parked: Duration,
-    pub cost: Option<CostLimit>,
-    pub cost_mixed: bool,
-    pub warnings: Vec<String>,
-}
+pub use crate::run_log::reader::{Replay, Spent};
 
-/// Everything a resumed run needs that is not already on disk elsewhere.
-#[derive(Debug, Clone, Default)]
-pub struct Replay {
-    /// The nodes that passed, in the order they did. A node listed here is
-    /// not run again.
-    pub passed: Vec<NodeId>,
-    /// Where the evidence counter got to. Continued rather than restarted,
-    /// or the first attempt after a resume overwrites an existing log.
-    pub next_seq: u32,
-    /// Every attempt the earlier process made, so the finished run's
-    /// `run.md` covers both halves rather than starting at the resume.
-    pub records: Vec<NodeRecord>,
-    pub spent: Spent,
-    pub profile: Option<String>,
-    /// The selection the earlier process ran under. Re-applied on resume, or
-    /// the continuation would run the nodes it was told to skip.
-    pub until: Option<NodeId>,
-    /// Nodes the earlier process reused rather than ran. Also in `passed`;
-    /// kept apart so the record can say which of the two it was.
-    pub pinned: Vec<NodeId>,
-    /// Whether the journal ended in a torn line — the crash landed
-    /// mid-write. Surfaced rather than swallowed: it is the one case where
-    /// an attempt really happened and the record cannot show it.
-    pub torn: bool,
-}
-
-/// Append one attempt. Best-effort by design: a journal that cannot be
-/// written costs a resume, and failing the run over it would cost the run.
-/// The caller turns the error into a warning.
+/// Append one attempt, the way an older build did.
+#[cfg(test)]
 pub(crate) fn append_attempt(
     run_dir: &Path,
     node: &NodeId,
@@ -274,20 +240,8 @@ pub(crate) fn append_attempt(
     )
 }
 
-/// Mark where a later process took the run over.
-pub(crate) fn resumed(run_dir: &Path, carried: usize) -> std::io::Result<()> {
-    append(
-        run_dir,
-        &Entry::Resumed {
-            v: JOURNAL_VERSION,
-            carried,
-        },
-    )
-}
-
-/// Open the journal for this run. Written past the lock and before the
-/// first node, so a directory with no journal at all is one whose crash
-/// came during setup — there is nothing to resume there.
+/// Open the journal for this run, the way an older build did.
+#[cfg(test)]
 pub(crate) fn start(
     run_dir: &Path,
     profile: Option<&str>,
@@ -305,10 +259,12 @@ pub(crate) fn start(
     )
 }
 
+#[cfg(test)]
 fn append(run_dir: &Path, entry: &Entry) -> std::io::Result<()> {
     let mut line = serde_json::to_string(entry).map_err(std::io::Error::other)?;
     line.push('\n');
     std::fs::create_dir_all(run_dir)?;
+    use std::io::Write as _;
     let mut file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)

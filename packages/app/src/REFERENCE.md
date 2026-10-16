@@ -212,7 +212,7 @@ daruda (app)  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
              →  daruda_store
              →  daruda_agent      →  daruda_store
              →  daruda_acp        →  daruda_core    # GPUI-free ACP client core
-             →  daruda_flow       →  daruda_acp, daruda_core
+             →  daruda_flow       →  daruda_acp, daruda_runlog, daruda_core  # flow runs kept in a run log
              →  daruda_flow_edit  →  daruda_flow   # YAML edits that keep comments and order
              →  daruda_project    →  daruda_config, daruda_store, daruda_core  # GPUI-free Project/Lane
              →  daruda_content    →  merman, resvg, image   # GPUI-free image + mermaid pipeline

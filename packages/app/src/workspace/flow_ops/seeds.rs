@@ -115,8 +115,11 @@ impl Workspace {
                 lane,
                 &run_dir,
                 daruda_flow::runner::PendingAsk {
-                    node: "implement".into(),
-                    attempt: 1,
+                    owner: daruda_flow::runner::AskOwner::Node {
+                        node: "implement".into(),
+                        generation: 0,
+                        attempt: 1,
+                    },
                     ask_id: 1,
                     request: daruda_flow::runner::AskRequest {
                         tool: "Bash".to_string(),

@@ -1,8 +1,9 @@
 //! How a run ended, written as a file, and read back as a status.
 //!
-//! A crash cannot write a record of itself, so `Crashed` is derived from a
-//! missing marker plus a dead lock holder rather than from a marker of its
-//! own.
+//! A marker is a cache of the run log's `RunEnded`, written after it; when
+//! the two disagree the log wins. A crash cannot write a record of itself,
+//! so `Crashed` is derived from an open log or no marker plus a dead lock
+//! holder rather than from a marker of its own.
 
 use crate::error::{FlowIoError, IoSite};
 use crate::lock::IsAlive;
@@ -19,6 +20,7 @@ const CANCELED: &str = "CANCELED";
 const STALLED: &str = "STALLED";
 
 const WRITE_MARKER: &str = "recording how the run ended";
+const CLEAR_MARKER: &str = "clearing how the run last ended";
 
 /// The four a run can write about itself, and the three that can only be
 /// derived. `Crashed` has no marker because a crash cannot write one.
@@ -110,18 +112,45 @@ fn marker_name(outcome: &RunOutcome) -> Option<&'static str> {
 /// `None` says the caller does not know where it is. `crate::resume` has
 /// the test that walks the whole path.
 pub fn run_status(run_dir: &Path, lock_dir: Option<&Path>, is_alive: IsAlive<'_>) -> RunStatus {
+    match crate::run_log::reader::ending(run_dir) {
+        crate::run_log::reader::Ending::Ended(kind) => return status_of_end(kind),
+        crate::run_log::reader::Ending::Open | crate::run_log::reader::Ending::NoLog => {}
+    }
+    if let Some(status) = marked(run_dir) {
+        return status;
+    }
+    lock_status(run_dir, lock_dir, is_alive)
+}
+
+fn status_of_end(kind: crate::run_log::machine::EndKind) -> RunStatus {
+    use crate::run_log::machine::EndKind;
+    match kind {
+        EndKind::Done => RunStatus::Done,
+        EndKind::Failed => RunStatus::Failed,
+        EndKind::Canceled => RunStatus::Canceled,
+        EndKind::Stalled => RunStatus::Stalled,
+    }
+}
+
+/// What the markers say, for a run whose log has no ending to give: one an
+/// older build ran, or one whose log failed before it could record its end.
+fn marked(run_dir: &Path) -> Option<RunStatus> {
     if run_dir.join(DONE).is_file() {
-        return RunStatus::Done;
+        return Some(RunStatus::Done);
     }
     if run_dir.join(FAILED).is_file() {
-        return RunStatus::Failed;
+        return Some(RunStatus::Failed);
     }
     if run_dir.join(CANCELED).is_file() {
-        return RunStatus::Canceled;
+        return Some(RunStatus::Canceled);
     }
     if run_dir.join(STALLED).is_file() {
-        return RunStatus::Stalled;
+        return Some(RunStatus::Stalled);
     }
+    None
+}
+
+fn lock_status(run_dir: &Path, lock_dir: Option<&Path>, is_alive: IsAlive<'_>) -> RunStatus {
     // `None` is a caller that could not resolve the tree, so it does not
     // know where the lock is — said as an absent argument rather than as a
     // path with no lock in it, which would read the same as "free".
@@ -135,6 +164,26 @@ pub fn run_status(run_dir: &Path, lock_dir: Option<&Path>, is_alive: IsAlive<'_>
         Some(_) => RunStatus::Crashed,
         None => RunStatus::Unknown,
     }
+}
+
+/// Remove every marker, so a resumed run no longer reads as how it last
+/// ended (F8). A marker already gone is not an error.
+pub(crate) fn clear_markers(run_dir: &Path) -> Result<(), FlowIoError> {
+    for name in [DONE, FAILED, CANCELED, STALLED] {
+        let path = run_dir.join(name);
+        match std::fs::remove_file(&path) {
+            Err(source) if source.kind() != std::io::ErrorKind::NotFound => {
+                return Err(FlowIoError {
+                    site: IoSite::Run,
+                    doing: CLEAR_MARKER,
+                    path,
+                    source,
+                });
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// The run's id is the name of its directory — the host builds

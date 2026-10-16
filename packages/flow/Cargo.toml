@@ -13,6 +13,9 @@ workspace = true
 [dependencies]
 daruda_acp = { workspace = true }
 daruda_core = { workspace = true }
+# A run's progress is committed to an event-sourced log, so a resume restores
+# numbers, outputs, invalidations and questions from one source.
+daruda_runlog = { workspace = true }
 # The record says when each attempt settled. Already in the tree through
 # `humantime-serde`; taken directly for `format_rfc3339_seconds`.
 humantime = { workspace = true }
@@ -34,6 +37,8 @@ thiserror = { workspace = true }
 yaml_serde = { workspace = true }
 
 [dev-dependencies]
+# The machine-law and crash harness for `FlowRunMachine`.
+daruda_runlog = { workspace = true, features = ["test-support"] }
 tempfile = { workspace = true }
 
 # Only for the example's SIGINT handler — a demo binary wanting Ctrl+C, not

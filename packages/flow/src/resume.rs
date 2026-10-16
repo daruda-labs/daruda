@@ -1,23 +1,36 @@
 //! Picking up a run that was killed, rather than starting it over.
 //!
 //! Everything a resume needs is in the run directory the first process left:
-//! the resolved spec in `run.yaml`, the outputs it had produced, and the
-//! journal saying which nodes those belong to. This module is what turns
-//! that directory back into something [`crate::schedule::execute`] can be
-//! handed.
+//! the resolved spec in `run.yaml`, the outputs it had produced, and the run
+//! log saying what happened to each node (or, for a run an older build
+//! started, the `progress.jsonl` journal).
+//!
+//! [`prepare`] reads only what was fixed at the start, and reads it before
+//! any lock. Everything that changes as a run goes is read inside `execute`,
+//! after the lock is taken (F14).
 //!
 //! **Node-level, and only node-level.** Whatever was in flight is gone — an
-//! ACP session cannot outlive the process that opened it, and a command
-//! node's process group dies with it. So the interrupted node runs again
-//! from the start, and its side effects happen again. That is the honest
-//! bound on this feature, not an implementation gap to close later.
+//! ACP session cannot outlive the process that opened it. So the interrupted
+//! node runs again from the start, as its next attempt, and its side effects
+//! happen again. That is the honest bound on this feature.
 
 use std::path::{Path, PathBuf};
 
-use crate::error::FlowError;
-use crate::journal::{self, Replay};
+use daruda_runlog::{LogBackend, RunLog};
+
+use crate::NodeId;
+use crate::error::{FlowError, FlowIoError, IoSite};
 use crate::load::LoadedFlow;
 use crate::marker::RunStatus;
+use crate::run_log::line::AttemptLine;
+use crate::run_log::machine::{
+    AbandonReason, AttemptState, FlowRunEvent, FlowRunMachine, Imported, ImportedAttempt,
+    ImportedOutcome, Produces,
+};
+use crate::run_log::reader::{self, Replay};
+use crate::run_log::store::FlowRunStore;
+use crate::runner::OutputContract;
+use crate::schedule::RunOutcome;
 
 /// The spec a run was executing, as the run itself recorded it.
 ///
@@ -26,6 +39,9 @@ use crate::marker::RunStatus;
 /// today. Editing it between the crash and the resume would otherwise
 /// silently change what the run is, halfway through.
 pub const RUN_SPEC_FILE: &str = "run.yaml";
+
+const RESUME: &str = "continuing the run";
+const IMPORT: &str = "taking over the run's progress journal";
 
 /// Whether a run may be picked up.
 ///
@@ -38,13 +54,30 @@ pub fn is_resumable(status: RunStatus) -> bool {
     matches!(status, RunStatus::Crashed | RunStatus::Stalled)
 }
 
-/// What a resumed run starts from.
+/// What a resumed run starts from, as read before its lock.
 pub struct Resumed {
     /// The flow as the earlier process resolved it, read back from
     /// `run.yaml`.
     pub loaded: LoadedFlow,
-    /// What that process had finished.
+    /// What the run directory said it had finished when this was read. For
+    /// display: the run itself reads it again once it holds the lock.
     pub replay: Replay,
+}
+
+impl Resumed {
+    /// What the request carries into `execute`.
+    pub fn continuation(&self) -> Continuation {
+        Continuation {
+            until: self.replay.until.clone(),
+        }
+    }
+}
+
+/// The part of a run fixed when it started, which a request to continue it
+/// needs before its lock: which nodes it reaches.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Continuation {
+    pub until: Option<NodeId>,
 }
 
 /// Why a run directory cannot be picked up.
@@ -52,7 +85,7 @@ pub struct Resumed {
 pub enum ResumeError {
     /// The run ended on purpose, or is still going.
     NotResumable(RunStatus),
-    /// No journal at all: the crash landed during setup, before the first
+    /// No record at all: the crash landed during setup, before the first
     /// node. There is nothing to continue — the run has to be started
     /// again from the flow file.
     NothingStarted,
@@ -103,36 +136,211 @@ pub fn prepare(
     if !is_resumable(status) {
         return Err(ResumeError::NotResumable(status));
     }
-    if !journal::exists(run_dir) {
+    if !reader::started(run_dir) {
         return Err(ResumeError::NothingStarted);
     }
     let text = std::fs::read_to_string(run_dir.join(RUN_SPEC_FILE))
         .map_err(|e| ResumeError::Spec(e.to_string()))?;
     // `None`: the profile was folded in when this spec was written, and
     // `run.yaml` deliberately carries no profile list to choose from. The
-    // name the run went by comes back from the journal instead.
+    // name the run went by comes back from its record instead.
     let loaded = crate::load::load(&text, None).map_err(ResumeError::Load)?;
     Ok(Resumed {
         loaded,
-        replay: journal::read(run_dir),
+        replay: reader::read(run_dir),
     })
 }
 
-/// Move aside whatever the interrupted node had written.
+/// A refusal found once the lock is held: nothing was recorded, so the run
+/// directory is left as it was.
+fn refused(run_dir: &Path, error: ResumeError) -> RunOutcome {
+    RunOutcome::Io(FlowIoError {
+        site: IoSite::Run,
+        doing: RESUME,
+        path: run_dir.to_path_buf(),
+        source: std::io::Error::other(error.to_string()),
+    })
+}
+
+/// Open the run's log under the lock (§5.5 steps 1–2), taking over the
+/// journal of a run an older build started.
+pub(crate) fn open_under_lock(
+    run_dir: &Path,
+    loaded: &LoadedFlow,
+) -> Result<RunLog<FlowRunMachine, daruda_runlog::FileBackend>, RunOutcome> {
+    if reader::has_log(run_dir) {
+        return crate::run_log::store::open_file_log(run_dir);
+    }
+    if !crate::journal::exists(run_dir) {
+        return Err(refused(run_dir, ResumeError::NothingStarted));
+    }
+    let mut log = crate::run_log::store::open_file_log(run_dir)?;
+    log.commit(import_journal(run_dir, loaded)).map_err(|e| {
+        RunOutcome::Io(FlowIoError {
+            site: IoSite::Run,
+            doing: IMPORT,
+            path: crate::run_log::log_dir(run_dir),
+            source: std::io::Error::other(e.to_string()),
+        })
+    })?;
+    Ok(log)
+}
+
+/// What the old journal knew, as one record. Only into an empty log.
+fn import_journal(run_dir: &Path, loaded: &LoadedFlow) -> FlowRunEvent {
+    let replay = crate::journal::read(run_dir);
+    let records = replay
+        .records
+        .iter()
+        .flat_map(|node| {
+            node.attempts.iter().map(|attempt| ImportedAttempt {
+                node: node.id.clone(),
+                outcome: match &attempt.outcome {
+                    crate::record::AttemptOutcome::Passed => ImportedOutcome::Passed,
+                    crate::record::AttemptOutcome::Canceled => ImportedOutcome::Canceled,
+                    crate::record::AttemptOutcome::Reported(reason) => ImportedOutcome::Reported {
+                        reason: reason.clone(),
+                    },
+                    crate::record::AttemptOutcome::Failed(failure) => ImportedOutcome::Reported {
+                        reason: format!("failed: {failure}"),
+                    },
+                },
+                record: AttemptLine::new(attempt, &Default::default()),
+            })
+        })
+        .collect();
+    FlowRunEvent::Imported(Box::new(Imported {
+        nodes: crate::run_log::node_starts(loaded),
+        until: replay.until.clone(),
+        passed: replay
+            .passed
+            .iter()
+            .filter(|id| !replay.pinned.contains(id))
+            .cloned()
+            .collect(),
+        pinned: replay.pinned.clone(),
+        profile: replay.profile.clone(),
+        next_evidence: replay.next_seq.max(1),
+        spent: (&replay.spent).into(),
+        records,
+    }))
+}
+
+/// The rest of §5.5 once the log is open: steps 3 and 5–7. Step 4, ending
+/// processes a dead run left behind, is not done here. Returns the store and
+/// what the scheduler starts from (step 8).
+pub(crate) fn pick_up<B: LogBackend + Send + 'static>(
+    log: RunLog<FlowRunMachine, B>,
+    loaded: &LoadedFlow,
+    run_dir: &Path,
+    events: Option<smol::channel::Sender<crate::event::RunNotice>>,
+    warnings: &mut Vec<String>,
+) -> Result<(FlowRunStore, Replay), RunOutcome> {
+    if !log.state().is_resumable() {
+        let why = match log.state().phase() {
+            crate::run_log::machine::RunPhase::Fresh => ResumeError::NothingStarted,
+            _ => ResumeError::NotResumable(crate::marker::run_status(run_dir, None, &|_| false)),
+        };
+        return Err(refused(run_dir, why));
+    }
+    // Step 3. A marker left in place would keep saying how the run last
+    // ended while it runs again (F8).
+    if let Err(e) = crate::marker::clear_markers(run_dir) {
+        warnings.push(e.to_string());
+    }
+    let store = FlowRunStore::spawn(log, run_dir, events)?;
+    smol::block_on(resume_steps(&store, loaded, run_dir, warnings))?;
+    let history = store.events().map_err(|e| store.failure(IoSite::Run, e))?;
+    Ok((store, reader::replay_events(&history)))
+}
+
+async fn resume_steps(
+    store: &FlowRunStore,
+    loaded: &LoadedFlow,
+    run_dir: &Path,
+    warnings: &mut Vec<String>,
+) -> Result<(), RunOutcome> {
+    let record = |e| store.failure(IoSite::Run, e);
+    // Step 5. The reply channels died with the process, so nothing can
+    // answer these; left open they would keep the run from ever ending (B5).
+    let open = store.state().open_ask_ids();
+    for id in open {
+        let reason = AbandonReason::AppRestart;
+        store
+            .commit(FlowRunEvent::AskAbandoned { id, reason })
+            .await
+            .map_err(record)?;
+    }
+    let carried = store.state().finished().len();
+    store
+        .commit(FlowRunEvent::Resumed { carried })
+        .await
+        .map_err(record)?;
+
+    // Step 6. A pass is only as good as the file it left; directory entries
+    // may not survive a power cut, so check (F4). Commands and pins leave
+    // nothing to check.
+    let outputs = crate::schedule::node_outputs(loaded.flow(), run_dir);
+    for node in &loaded.flow().nodes {
+        if !output_lost(store, run_dir, node) {
+            continue;
+        }
+        store
+            .commit(FlowRunEvent::OutputLost {
+                node: node.id.clone(),
+            })
+            .await
+            .map_err(record)?;
+    }
+
+    // Step 7. Whatever an unfinished or invalidated node left live is
+    // evidence, not a result (F3).
+    let passed: Vec<NodeId> = store.state().finished().into_iter().collect();
+    let resumes = store.state().resumes;
+    let log_dir = run_dir.join(crate::schedule::LOG_DIR_NAME);
+    warnings.extend(archive_unclaimed_outputs(
+        &log_dir, &outputs, &passed, resumes,
+    ));
+    Ok(())
+}
+
+/// Whether a passed agent node's output no longer meets its contract.
+fn output_lost(store: &FlowRunStore, run_dir: &Path, node: &crate::model::Node) -> bool {
+    let passed = store.state().node(&node.id).is_some_and(|state| {
+        state.produces == Produces::File
+            && !state.invalidated
+            && matches!(state.last, AttemptState::Passed { .. })
+    });
+    if !passed {
+        return false;
+    }
+    let Some(output) = crate::schedule::node_output(node, run_dir) else {
+        return false;
+    };
+    let contract = crate::contract::file::FileContract::new(
+        run_dir,
+        &output,
+        node.kind.output_schema(),
+        node.kind.continue_until(),
+    );
+    contract.check().is_err()
+}
+
+/// Move aside whatever an interrupted or invalidated node had written.
 ///
 /// A node that did not settle may have left a half-written output, and
 /// `judge` cannot tell that from a good one — it only asks whether the file
-/// is there and non-empty. Every live output that no journal line claims is
+/// is there and non-empty. Every live output that no pass claims is
 /// therefore evidence, not a result.
 ///
 /// Best-effort, and it reports rather than fails: the paths it could not
 /// move become warnings, because a resume that refuses over a stale file is
 /// worse than one that says which file is stale.
 pub(crate) fn archive_unclaimed_outputs(
-    run_dir: &Path,
     log_dir: &Path,
-    outputs: &[(crate::NodeId, PathBuf)],
-    passed: &[crate::NodeId],
+    outputs: &[(NodeId, PathBuf)],
+    passed: &[NodeId],
+    resume: u32,
 ) -> Vec<String> {
     let mut warnings = Vec::new();
     for (id, output) in outputs {
@@ -142,7 +350,8 @@ pub(crate) fn archive_unclaimed_outputs(
         if passed.contains(id) || std::fs::symlink_metadata(output).is_err() {
             continue;
         }
-        match crate::archive::archive_canceled(log_dir, id, output) {
+        let stamp = crate::archive::CancelStamp::Resume(resume);
+        match crate::archive::archive_canceled(log_dir, id, output, stamp) {
             Ok(_) => {}
             Err(e) => warnings.push(format!(
                 "`{id}` left a partial output that could not be moved aside, so it may be \
@@ -150,7 +359,6 @@ pub(crate) fn archive_unclaimed_outputs(
             )),
         }
     }
-    let _ = run_dir;
     warnings
 }
 
@@ -258,13 +466,13 @@ mod tests {
         std::fs::write(&partial, "half a th").expect("write");
 
         let warnings = archive_unclaimed_outputs(
-            dir.path(),
             &log_dir,
             &[
                 ("design".into(), done.clone()),
                 ("half".into(), partial.clone()),
             ],
             &["design".into()],
+            1,
         );
 
         assert!(warnings.is_empty(), "{warnings:?}");
@@ -293,12 +501,8 @@ mod tests {
             let output = dir.path().join(format!("{name}.md"));
             daruda_core::path::symlink(&target, &output).expect("symlink");
 
-            let warnings = archive_unclaimed_outputs(
-                dir.path(),
-                &log_dir,
-                &[(name.into(), output.clone())],
-                &[],
-            );
+            let warnings =
+                archive_unclaimed_outputs(&log_dir, &[(name.into(), output.clone())], &[], 1);
 
             assert_eq!(warnings.len(), 1, "{name}: {warnings:?}");
             assert!(warnings[0].contains(name), "{name}: {warnings:?}");

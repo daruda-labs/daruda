@@ -40,7 +40,7 @@ pub enum NodeFailure {
     /// the shape the node declared.
     ///
     /// One `problem` and a count, not the list: this reaches `run.md`, the
-    /// journal's `reason` and a repair's `{{failure}}`, all of which want a
+    /// run log's record and a repair's `{{failure}}`, all of which want a
     /// line. The whole list goes to the correction prompt, which is the only
     /// reader that can act on it.
     OutputSchema {
@@ -79,6 +79,9 @@ pub enum NodeFailure {
     Exit {
         code: Option<i32>,
     },
+    /// The process running the attempt died, and a resume found its
+    /// attempts already spent: nothing reached a verdict.
+    Interrupted,
 }
 
 impl NodeFailure {
@@ -166,6 +169,12 @@ impl std::fmt::Display for NodeFailure {
             ),
             NodeFailure::Exit { code: Some(c) } => write!(f, "exited with status {c}"),
             NodeFailure::Exit { code: None } => write!(f, "was killed by a signal"),
+            NodeFailure::Interrupted => {
+                write!(
+                    f,
+                    "was interrupted when the app stopped, and has no attempts left"
+                )
+            }
         }
     }
 }
@@ -183,7 +192,7 @@ pub trait OutputContract {
 ///
 /// Separate from [`NodeFailure`] because the two are read by different
 /// readers. A `NodeFailure`'s `Display` is deliberately one terse line —
-/// it is rendered into `run.md`, the journal's `reason`, and a repair
+/// it is rendered into `run.md`, the run log, and a repair
 /// prompt's `{{failure}}` — while an agent being asked to correct what it
 /// wrote needs every reason it was wrong, not the first one.
 ///
@@ -302,24 +311,57 @@ impl CancelToken {
     }
 }
 
+/// Who is asking. A repair's fix session is not a node, so it asks as the
+/// gate whose repair it is.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AskOwner {
+    Node {
+        node: NodeId,
+        generation: u32,
+        attempt: u32,
+    },
+    Fix {
+        gate: NodeId,
+    },
+}
+
+impl AskOwner {
+    /// The node a host shows the question against: the asking node, or the
+    /// gate whose fix is asking.
+    pub fn node(&self) -> &NodeId {
+        match self {
+            AskOwner::Node { node, .. } => node,
+            AskOwner::Fix { gate } => gate,
+        }
+    }
+}
+
 /// One permission request handed to a person, with the way back.
 ///
 /// The reply channel travels inside the request rather than being matched
-/// up by id afterwards: there is no correlation table to get wrong, and
-/// answering a question that is no longer live is impossible rather than
-/// merely unlikely. Bounded to one — the first answer wins, so two
-/// surfaces offering the same buttons cannot both send.
+/// up by id afterwards, so answering a question that is no longer live fails
+/// instead of landing elsewhere. Bounded to one: the first answer wins.
 #[derive(Debug, Clone)]
 pub struct PendingAsk {
-    /// The node, or the gate whose repair is asking (`FIX_SESSION_ID` is
-    /// not a node, so the gate's name is what makes it renderable).
-    pub node: NodeId,
-    pub attempt: u32,
-    /// Distinguishes this question from the next one in the same run —
-    /// what a host compares to tell a stale click from a live one.
+    pub owner: AskOwner,
+    /// The id the run log gave this question. Unique within the run, across
+    /// resumes too.
     pub ask_id: u64,
     pub request: AskRequest,
     pub reply: smol::channel::Sender<daruda_acp::PermissionDecision>,
+}
+
+/// The engine closed the question before this answer arrived (F13).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("the run is no longer waiting for this answer")]
+pub struct AskClosed;
+
+impl PendingAsk {
+    /// Answer the question. `Err` when the engine has already abandoned it.
+    pub fn answer(&self, decision: daruda_acp::PermissionDecision) -> Result<(), AskClosed> {
+        self.reply.try_send(decision).map_err(|_| AskClosed)
+    }
 }
 
 /// What a person said to one question. Coarser than the decision that went
@@ -368,42 +410,121 @@ pub struct AskRequest {
 }
 
 /// The host's answering port, narrowed to the one thing a runner may do
-/// with it. Holding the raw event sender instead would let a runner emit
-/// any event at all.
+/// with it. Every question is committed to the run log before the host sees
+/// it, and closed there however the wait ends.
 pub struct AskChannel {
     tx: smol::channel::Sender<PendingAsk>,
-    next_id: std::cell::Cell<u64>,
+    log: crate::run_log::store::FlowRunStore,
 }
 
 impl AskChannel {
-    pub(crate) fn new(tx: smol::channel::Sender<PendingAsk>) -> Self {
-        Self {
-            tx,
-            next_id: std::cell::Cell::new(1),
+    pub(crate) fn new(
+        tx: smol::channel::Sender<PendingAsk>,
+        log: crate::run_log::store::FlowRunStore,
+    ) -> Self {
+        Self { tx, log }
+    }
+
+    /// Put the question to the host and wait for the answer. A question the
+    /// log could not record, or a host that is gone, is no answer.
+    pub(crate) async fn ask(
+        &self,
+        owner: &AskOwner,
+        request: AskRequest,
+    ) -> daruda_acp::PermissionDecision {
+        use crate::run_log::machine::{AbandonReason, FlowRunEvent};
+        let cancelled = daruda_acp::PermissionDecision::Cancelled;
+        let raised = self
+            .log
+            .commit(FlowRunEvent::ask_raised(owner.clone(), (&request).into()))
+            .await;
+        let Ok(committed) = raised else {
+            return cancelled;
+        };
+        let FlowRunEvent::AskRaised { id, .. } = committed.event else {
+            return cancelled;
+        };
+        let mut open = OpenQuestion {
+            log: &self.log,
+            id: Some(id),
+        };
+        let (reply, answers) = smol::channel::bounded(1);
+        let sent = self.tx.try_send(PendingAsk {
+            owner: owner.clone(),
+            ask_id: id,
+            request,
+            reply,
+        });
+        if sent.is_err() {
+            open.close(AbandonReason::HostGone).await;
+            return cancelled;
+        }
+        match answers.recv().await {
+            Ok(decision) => {
+                open.answered(&decision).await;
+                decision
+            }
+            Err(_) => {
+                open.close(AbandonReason::HostGone).await;
+                cancelled
+            }
+        }
+    }
+}
+
+/// A question the log holds open. Dropped unanswered — the asking call was
+/// stopped or timed out — it closes itself, so no open question outlives
+/// the wait for it.
+struct OpenQuestion<'a> {
+    log: &'a crate::run_log::store::FlowRunStore,
+    id: Option<u64>,
+}
+
+impl OpenQuestion<'_> {
+    async fn answered(&mut self, decision: &daruda_acp::PermissionDecision) {
+        if let Some(id) = self.id.take() {
+            let answer = decision.into();
+            let event = crate::run_log::machine::FlowRunEvent::AskAnswered { id, answer };
+            // SILENT-OK: a failed commit closes the log; the attempt's own
+            // settle reports it.
+            let _ = self.log.commit(event).await;
         }
     }
 
-    /// Put the question to the host. `None` is a host that has gone away,
-    /// which the caller treats as no answer rather than waiting forever.
-    pub(crate) fn ask(
-        &self,
-        node: &NodeId,
-        attempt: u32,
-        request: AskRequest,
-    ) -> Option<smol::channel::Receiver<daruda_acp::PermissionDecision>> {
-        let ask_id = self.next_id.get();
-        self.next_id.set(ask_id + 1);
-        let (reply, rx) = smol::channel::bounded(1);
-        self.tx
-            .try_send(PendingAsk {
-                node: node.clone(),
-                attempt,
-                ask_id,
-                request,
-                reply,
-            })
-            .ok()
-            .map(|()| rx)
+    async fn close(&mut self, reason: crate::run_log::machine::AbandonReason) {
+        if let Some(id) = self.id.take() {
+            let event = crate::run_log::machine::FlowRunEvent::AskAbandoned { id, reason };
+            // SILENT-OK: as in `answered`.
+            let _ = self.log.commit(event).await;
+        }
+    }
+}
+
+impl Drop for OpenQuestion<'_> {
+    fn drop(&mut self) {
+        if let Some(id) = self.id.take() {
+            self.log
+                .commit_detached(crate::run_log::machine::FlowRunEvent::AskAbandoned {
+                    id,
+                    reason: crate::run_log::machine::AbandonReason::Interrupted,
+                });
+        }
+    }
+}
+
+/// One asker's way to the host: the run's channel and who is asking.
+pub struct AskPort<'a> {
+    channel: &'a AskChannel,
+    owner: AskOwner,
+}
+
+impl<'a> AskPort<'a> {
+    pub(crate) fn new(channel: &'a AskChannel, owner: AskOwner) -> Self {
+        Self { channel, owner }
+    }
+
+    pub(crate) async fn ask(&self, request: AskRequest) -> daruda_acp::PermissionDecision {
+        self.channel.ask(&self.owner, request).await
     }
 }
 
@@ -416,7 +537,7 @@ impl AskChannel {
 pub enum Permission<'a> {
     Deny,
     AllowOnce,
-    Ask(&'a AskChannel),
+    Ask(AskPort<'a>),
 }
 
 impl Permission<'_> {

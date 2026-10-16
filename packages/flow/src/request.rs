@@ -48,7 +48,7 @@ pub struct RunRequest {
     /// the run directory. Unbounded and never awaited, so a subscriber that
     /// stops reading cannot slow or stop the run; `None` is a host that does
     /// not watch, which is most of them.
-    pub events: Option<smol::channel::Sender<crate::event::FlowEvent>>,
+    pub events: Option<smol::channel::Sender<crate::event::RunNotice>>,
     /// Where a `permission: ask` node puts its question. Only a host that
     /// built somewhere to answer wires this, so **its presence is the
     /// capability declaration** — which is why `validate_request` reads it
@@ -63,7 +63,7 @@ pub struct RunRequest {
     ///
     /// A run-scoped axis rather than a flow-file one: the file describes what
     /// should happen, and a selection says which part of that to spend money
-    /// on this time. Recorded in the journal, not in `run.yaml`.
+    /// on this time. Recorded in the run log, not in `run.yaml`.
     pub until: Option<NodeId>,
     /// Outputs to reuse instead of recomputing. Each names a node and where
     /// its finished output lives now — a previous run's directory.
@@ -72,14 +72,12 @@ pub struct RunRequest {
     /// so every run directory stays self-contained: `archive` and
     /// `{{node.<id>.output}}` both assume the output is inside it.
     pub pinned: Vec<PinnedOutput>,
-    /// What an earlier process had already finished, when this is a run
-    /// being picked up rather than started.
+    /// Set when this run picks up the one in `run_dir` rather than starting.
     ///
-    /// Comes from [`crate::resume::prepare`], which produces it together
-    /// with the `loaded` above — they are two halves of one run directory
-    /// and pairing a replay with a different flow would skip nodes by name
-    /// in a graph that never had them.
-    pub resume: Option<crate::journal::Replay>,
+    /// Comes from [`crate::resume::prepare`] with the `loaded` above. It
+    /// carries only what was fixed when the run started; what the run had
+    /// finished is read after the lock is taken (F14).
+    pub resume: Option<crate::resume::Continuation>,
 }
 
 impl RunRequest {
@@ -87,7 +85,7 @@ impl RunRequest {
     ///
     /// Two sources, because a continuation is handed no selection of its own:
     /// `build_resume_request` sends `until: None` and the axis comes back off
-    /// the journal instead. Every question about which nodes this run will
+    /// the run's record instead. Every question about which nodes this run will
     /// reach — what to validate, what to provision, what to walk — has to ask
     /// this rather than the field, or a resumed run is refused over a node it
     /// was told to skip.
@@ -188,10 +186,9 @@ fn check_node_cwd(
 }
 
 /// How a host reports a working tree's state, asked about the directory an
-/// attempt ran in. Owned and `Send` because it crosses into the run's
-/// thread; named because the boxed signature is otherwise repeated at every
-/// site that builds one.
-pub type AskGitStatus = Box<dyn Fn(&std::path::Path) -> Option<String> + Send>;
+/// attempt ran in. Shared and `Sync` because the run asks it off its own
+/// thread, so a slow `git status` never stalls the rest of a wave (F11).
+pub type AskGitStatus = std::sync::Arc<dyn Fn(&std::path::Path) -> Option<String> + Send + Sync>;
 
 pub fn validate_request(request: &RunRequest) -> Vec<ValidationIssue> {
     let mut issues = Vec::new();

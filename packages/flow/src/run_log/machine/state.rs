@@ -1,0 +1,163 @@
+//! What a run log replays into: per node, which generation and attempt it is
+//! on and how its last attempt ended; per run, the numbers the log owns.
+
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
+
+use crate::NodeId;
+use crate::run_log::line::{AskLine, FailureLine, SpentLine};
+use crate::runner::AskOwner;
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct FlowRunState {
+    pub(crate) phase: RunPhase,
+    pub(crate) start: StartFacts,
+    pub(crate) nodes: BTreeMap<NodeId, NodeState>,
+    /// The next evidence number; never reused, across resumes too (F2).
+    pub(crate) next_evidence: u32,
+    pub(crate) next_ask: u64,
+    pub(crate) spent: SpentLine,
+    /// Every question still waiting, keyed by its id: a set, not one slot.
+    pub(crate) open_asks: BTreeMap<u64, OpenAsk>,
+    /// Gates whose fix session is running, with that session's evidence.
+    pub(crate) fixing: BTreeMap<NodeId, u32>,
+    pub(crate) resumes: u32,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunPhase {
+    /// Nothing committed yet.
+    #[default]
+    Fresh,
+    Running,
+    Ended(EndKind),
+}
+
+/// How an ended run classifies, the axis the markers write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EndKind {
+    Done,
+    Failed,
+    Canceled,
+    Stalled,
+}
+
+/// What a run was asked to be, fixed when it started.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct StartFacts {
+    /// Topological order, the order a host draws.
+    pub(crate) order: Vec<NodeId>,
+    pub(crate) until: Option<NodeId>,
+    pub(crate) pinned: Vec<NodeId>,
+    pub(crate) profile: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NodeState {
+    pub(crate) produces: Produces,
+    /// Raised by each repair rerun; attempts count from 1 within one.
+    pub(crate) generation: u32,
+    /// Attempts started in this generation, interrupted ones included.
+    pub(crate) attempts: u32,
+    pub(crate) last: AttemptState,
+    /// A repair took this node's output away; it is no longer current.
+    pub(crate) invalidated: bool,
+}
+
+/// Whether a passed node leaves a file the run can check is still there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Produces {
+    File,
+    Nothing,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum AttemptState {
+    NotRun,
+    /// Reused from an earlier run; counts as passed and has no attempt.
+    Pinned,
+    Started {
+        attempt: u32,
+        evidence: u32,
+    },
+    Passed {
+        attempt: u32,
+    },
+    Failed {
+        attempt: u32,
+        failure: FailureLine,
+    },
+    Canceled {
+        attempt: u32,
+    },
+    /// Started by a process that died before it settled.
+    Interrupted {
+        attempt: u32,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenAsk {
+    pub(crate) owner: AskOwner,
+    pub(crate) ask: AskLine,
+}
+
+impl FlowRunState {
+    pub fn phase(&self) -> RunPhase {
+        self.phase
+    }
+
+    pub(crate) fn node(&self, id: &NodeId) -> Option<&NodeState> {
+        self.nodes.get(id)
+    }
+
+    /// Nodes whose output stands: passed or pinned, and not invalidated.
+    pub(crate) fn finished(&self) -> BTreeSet<NodeId> {
+        self.nodes
+            .iter()
+            .filter(|(_, node)| node.counts_as_passed())
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+
+    pub fn open_ask_ids(&self) -> Vec<u64> {
+        self.open_asks.keys().copied().collect()
+    }
+
+    pub(crate) fn has_open_asks(&self) -> bool {
+        !self.open_asks.is_empty()
+    }
+
+    /// Whether `resume` may pick this run up: it stopped without saying it
+    /// ended, or it ended stalled.
+    pub(crate) fn is_resumable(&self) -> bool {
+        matches!(
+            self.phase,
+            RunPhase::Running | RunPhase::Ended(EndKind::Stalled)
+        )
+    }
+}
+
+impl NodeState {
+    pub(crate) fn new(produces: Produces) -> Self {
+        Self {
+            produces,
+            generation: 0,
+            attempts: 0,
+            last: AttemptState::NotRun,
+            invalidated: false,
+        }
+    }
+
+    pub(crate) fn counts_as_passed(&self) -> bool {
+        !self.invalidated
+            && matches!(
+                self.last,
+                AttemptState::Passed { .. } | AttemptState::Pinned
+            )
+    }
+}

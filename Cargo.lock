@@ -1927,6 +1927,7 @@ version = "0.2.18"
 dependencies = [
  "daruda_acp",
  "daruda_core",
+ "daruda_runlog",
  "humantime",
  "humantime-serde",
  "libc",

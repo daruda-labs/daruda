@@ -5,8 +5,8 @@
 
 use super::{FIX_SESSION_ID, Run, RunOutcome};
 use crate::NodeId;
-use crate::event::FlowEvent;
-use crate::record::{AttemptOutcome, Invalidation};
+use crate::record::AttemptOutcome;
+use crate::run_log::machine::FlowRunEvent;
 use crate::runner::{NodeFailure, RunContext};
 use crate::template::{Surface, TemplateContext, render};
 use std::path::PathBuf;
@@ -30,11 +30,15 @@ impl Run<'_> {
         let members = self.rerun_members(rerun, gate);
         // The computed set, not the declared roots: a host cannot infer the
         // closure, the `∩ executed` filter or the recursion guard. An empty
-        // one still says work resumed.
-        self.emit(FlowEvent::Rerunning {
+        // one still says work resumed. Each member starts a new generation.
+        let scheduled = FlowRunEvent::RerunScheduled {
             gate: gate.clone(),
             members: members.clone(),
-        });
+        };
+        self.log
+            .commit(scheduled)
+            .await
+            .map_err(|e| self.log.failure(super::site(gate, ctx.attempt), e))?;
         for member in members {
             self.drive(&member).await?;
         }
@@ -72,6 +76,22 @@ impl Run<'_> {
         let text = render(fix, &tctx, Surface::Prompt);
 
         let fix_id = NodeId::from(FIX_SESSION_ID);
+        let gate = ctx.node_id;
+        // O2: the session and its evidence number are durable before it is
+        // paid for. Narrated as `FixStarted`: a fix can take minutes.
+        let started = self
+            .log
+            .commit(FlowRunEvent::fix_started(gate.clone()))
+            .await
+            .map_err(|e| self.log.failure(super::site(gate, ctx.attempt), e))?;
+        let FlowRunEvent::FixStarted { evidence, .. } = started.event else {
+            return Err(self.log.failure(
+                super::site(gate, ctx.attempt),
+                daruda_runlog::CommitError::Io(std::io::Error::other(
+                    "the log answered a fix with another event",
+                )),
+            ));
+        };
         let reserve = || self.reserve_extra_turn();
         let fix_ctx = RunContext {
             // A fix session writes no file, so there is no contract to go round
@@ -90,7 +110,7 @@ impl Run<'_> {
             // nodes are what produce evidence of that.
             output: None,
             contract: None,
-            evidence_seq: self.take_seq(),
+            evidence_seq: evidence,
             // The gate's own timeout: a fix is a prompt inside a policy
             // rather than a node, so nothing else would
             // bound it and a hung fix session's only defence would be the
@@ -100,16 +120,11 @@ impl Run<'_> {
             // because it only runs `grep` gives its fix session 30s too.
             // An author wanting a longer repair raises the gate's.
             timeout: ctx.timeout,
-            permission: self.permission_for_fix(agent),
+            permission: self.permission_for_fix(agent, gate),
             cancel: self.cancel,
             // The run's real door, though a fix owing no file never asks.
             reserve_extra_turn: &reserve,
         };
-        // A fix is a real agent session and can take minutes. With no event
-        // for it a host sits on `NodeFailed` and looks hung.
-        self.emit(FlowEvent::FixStarted {
-            gate: ctx.node_id.clone(),
-        });
         let result = self
             .accounted_call(|| self.runner.run_agent(&fix_ctx, agent, &text))
             .await;
@@ -126,25 +141,16 @@ impl Run<'_> {
                 Err(failure) => AttemptOutcome::Failed(failure.clone()),
             }
         };
-        self.record(
-            &fix_ctx,
-            recorded,
-            Invalidation::default(),
-            super::Reported::from(&result),
-        );
+        self.settle_fix(&fix_ctx, gate, recorded, super::Reported::from(&result))
+            .await?;
         // Like any node: a cancel that interrupted the session is not a
         // failure of it, and reporting one would be wrong about why the run
         // stopped. The fix owes no output, so there is nothing to archive.
+        // An interrupted fix is narrated with no `FixEnded`: a stop is not an
+        // ending the fix reached. `RunEnded` follows and says why.
         if interrupted {
-            // No `FixEnded`: a stop is not an ending the fix reached, and
-            // `failure: None` would say it succeeded. `RunEnded` follows and
-            // says why — the same rule an interrupted node follows.
             return Err(RunOutcome::Canceled { node: Some(fix_id) });
         }
-        self.emit(FlowEvent::FixEnded {
-            gate: ctx.node_id.clone(),
-            failure: result.outcome.as_ref().err().cloned(),
-        });
         // Re-deriving the gate would bill again, which is what the stop is for.
         if stopped_here {
             return Err(RunOutcome::Canceled { node: None });

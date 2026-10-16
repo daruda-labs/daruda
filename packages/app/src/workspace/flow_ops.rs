@@ -21,7 +21,7 @@
 use crate::agent::launch_resolve::ConnectCommandError;
 use std::path::{Path, PathBuf};
 
-use daruda_flow::event::{FlowEvent, RunEnd};
+use daruda_flow::event::RunEnd;
 use daruda_flow::runner::{AcpRunner, CancelToken, OverageStop, ProcessRunner, Runners};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{Context, Window};
@@ -588,7 +588,7 @@ impl Workspace {
 /// `end` is filled in once `execute` returns normally; a panic leaves it
 /// `None`, and `Drop` then reports the failure rather than nothing at all.
 struct LastWord {
-    events: Option<smol::channel::Sender<FlowEvent>>,
+    events: Option<smol::channel::Sender<daruda_flow::event::RunNotice>>,
     end: Option<RunEnd>,
 }
 
@@ -599,11 +599,11 @@ impl Drop for LastWord {
         };
         let end = self.end.take().unwrap_or_else(|| RunEnd::Io {
             site: daruda_flow::error::IoSite::Run,
-            doing: "running the flow",
+            doing: "running the flow".to_string(),
             path: std::path::PathBuf::new(),
             message: s::flow::run_panicked(),
         });
-        let _ = events.try_send(FlowEvent::RunEnded { end });
+        let _ = events.try_send(daruda_flow::event::RunNotice::Unrecorded(end));
     }
 }
 

@@ -232,3 +232,21 @@ fn execute_takes_the_lock_under_the_given_root_and_the_copy_inside_the_tree() {
         "nothing is written inside the tree any more: {seen:?}"
     );
 }
+
+/// **M10.** A run refused before it starts leaves no log either: refusals
+/// travel back as the report, never as a record.
+#[test]
+fn a_refused_run_opens_no_log() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let request = request_for(CHAIN, dir.path());
+    let lock_dir = super::lock_dir_of(&request);
+    std::fs::create_dir_all(&lock_dir).expect("mkdir");
+    let held = RunLock::acquire(&lock_dir, "other", &|_| true).expect("free");
+
+    let report = execute(&request, &FakeRunner::new(), &CancelToken::default());
+
+    assert!(matches!(report.outcome, RunOutcome::LockHeld { .. }));
+    assert!(!crate::run_log::log_dir(&report.run_dir).exists());
+    assert!(!crate::run_log::reader::started(&report.run_dir));
+    held.release().expect("the original holder still owns it");
+}

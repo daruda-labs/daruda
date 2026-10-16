@@ -106,7 +106,7 @@ fn main() {
         is_alive: Box::new(process_is_alive),
         // Asked about the directory the attempt ran in, which is the
         // node's own when it names one.
-        git_status: Some(Box::new(git_status)),
+        git_status: Some(std::sync::Arc::new(git_status)),
         events: Some(tx),
         // No answering surface: this runner prints events, it does not
         // offer buttons. A flow that could reach `permission: ask` is
@@ -119,7 +119,7 @@ fn main() {
     // the engine, so a slow reader here cannot slow the run.
     let watcher = std::thread::spawn(move || {
         while let Ok(event) = smol::block_on(rx.recv()) {
-            println!("{}", describe(&event));
+            println!("{}", describe(&event.into_event()));
         }
     });
 

@@ -114,7 +114,7 @@ fn the_working_tree_note_is_taken_where_the_node_ran() {
     let dir = tempfile::tempdir().expect("tempdir");
     std::fs::create_dir_all(dir.path().join("sub")).expect("mkdir");
     let mut request = request_for(TWO_TREES, dir.path());
-    request.git_status = Some(Box::new(|at: &std::path::Path| {
+    request.git_status = Some(std::sync::Arc::new(|at: &std::path::Path| {
         Some(format!(
             " M {}",
             at.file_name().unwrap_or_default().to_string_lossy()
