@@ -196,6 +196,7 @@ actions!(
         ActivateTab8,
         ActivateTab9,
         ToggleLeftDock,
+        ResetLeftDockWidth,
         ToggleGitChangesFocus,
         ToggleFilesFocus,
         ToggleBottomDock,

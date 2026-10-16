@@ -11,8 +11,7 @@ use crate::ui::{Icon, IconName, Sizable as _};
 use crate::workspace::layout::{Dock, LeftDockSnapshot};
 use crate::workspace::root_menu::RootContextMenuExt as _;
 
-use super::agent_badges::{agent_badges_row, agent_status_cell};
-use super::context_menu::build_context_menu_items;
+use super::agent_badges::agent_status_cell;
 use super::drag::{DragGhost, DragPayload};
 
 use super::{GitBadgeData, availability_badge, availability_chip};
@@ -30,19 +29,20 @@ use super::{GitBadgeData, availability_badge, availability_chip};
 /// touching `cx` again here.
 fn git_badge_view(
     badge: GitBadgeData,
+    metrics: theme::UiMetrics,
     arrow_color: gpui::Hsla,
     pill_bg: gpui::Hsla,
     pill_text: gpui::Hsla,
 ) -> impl IntoElement {
-    let arrow_size = px(theme::GIT_BADGE_ARROW_SIZE);
+    let arrow_size = px(metrics.icon(theme::GIT_BADGE_ARROW_SIZE));
     let arrow_group = move |icon: IconName, count: u32| {
         div()
             .flex_none()
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(theme::GIT_BADGE_ARROW_NUM_GAP))
-            .text_size(px(theme::GIT_BADGE_FONT_SIZE))
+            .gap(px(metrics.space(theme::GIT_BADGE_ARROW_NUM_GAP)))
+            .text_size(px(metrics.text(theme::GIT_BADGE_FONT_SIZE)))
             .text_color(arrow_color)
             .child(
                 Icon::new(icon)
@@ -57,7 +57,7 @@ fn git_badge_view(
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(theme::GIT_BADGE_GAP))
+        .gap(px(metrics.space(theme::GIT_BADGE_GAP)))
         .when(badge.ahead > 0, |d| {
             d.child(arrow_group(IconName::ArrowUp, badge.ahead))
         })
@@ -69,11 +69,11 @@ fn git_badge_view(
                 div()
                     .flex_none()
                     .min_w(px(theme::GIT_BADGE_PILL_MIN_W))
-                    .px(px(theme::GIT_BADGE_PILL_PAD_X))
-                    .py(px(theme::GIT_BADGE_PILL_PAD_Y))
+                    .px(px(metrics.space(theme::GIT_BADGE_PILL_PAD_X)))
+                    .py(px(metrics.space(theme::GIT_BADGE_PILL_PAD_Y)))
                     .rounded(px(theme::GIT_BADGE_PILL_RADIUS))
                     .bg(pill_bg)
-                    .text_size(px(theme::GIT_BADGE_FONT_SIZE))
+                    .text_size(px(metrics.text(theme::GIT_BADGE_FONT_SIZE)))
                     .text_color(pill_text)
                     .text_center()
                     .child(format!("{}", badge.total)),
@@ -91,6 +91,7 @@ pub(in crate::workspace::left_dock::projects) fn worktree_row(
 ) -> impl IntoElement {
     // Snapshot every row colour from the live theme so the closures
     // below (hover, drag_over) capture stable values.
+    let row_metrics = super::tree::RowMetrics::new(snap.metrics);
     let t = theme::current(cx);
     let label_active = t.text_primary;
     let label_inactive = t.text_muted;
@@ -123,17 +124,19 @@ pub(in crate::workspace::left_dock::projects) fn worktree_row(
     let status_cell = agent_status_cell(
         snap.agent_status_per_lane.get(&lane_ref).copied(),
         snap.agent_outcome_per_lane.get(&lane_ref).copied(),
+        snap.metrics,
+        row_metrics.leading_width,
         cx,
     );
 
     // The status cell shares the label's line so it stays pinned to the
     // first line when sub-rows (sublabel, multi-session badges) grow the row.
     let label_line = div()
-        .min_h(px(theme::DOCK_TREE_ROW_LINE_MIN_H))
+        .min_h(px(snap.metrics.row(theme::DOCK_TREE_ROW_LINE_MIN_H)))
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(theme::LANE_ROW_GAP))
+        .gap(px(row_metrics.leading_gap))
         .child(status_cell)
         .child(
             div()
@@ -142,8 +145,8 @@ pub(in crate::workspace::left_dock::projects) fn worktree_row(
                 .flex()
                 .flex_row()
                 .items_center()
-                .gap(px(theme::LANE_LABEL_GAP))
-                .text_size(px(theme::LANE_LABEL_FONT_SIZE))
+                .gap(px(snap.metrics.space(theme::LANE_LABEL_GAP)))
+                .text_size(px(snap.metrics.text(theme::LANE_LABEL_FONT_SIZE)))
                 .text_color(if is_active && !is_unavailable {
                     label_active
                 } else {
@@ -153,6 +156,7 @@ pub(in crate::workspace::left_dock::projects) fn worktree_row(
                 .when_some(git_badge.filter(|_| !is_unavailable), |d, badge| {
                     d.child(git_badge_view(
                         badge,
+                        snap.metrics,
                         badge_arrow_text,
                         badge_pill_bg,
                         badge_pill_text,
@@ -164,9 +168,14 @@ pub(in crate::workspace::left_dock::projects) fn worktree_row(
     let sub_rows = div()
         .flex()
         .flex_col()
-        .pl(px(theme::STATUS_INDICATOR_CELL_WIDTH + theme::LANE_ROW_GAP))
+        .pl(px(row_metrics.subrow_indent))
         .when_some(avail_badge, |d, (icon, state_label)| {
-            d.child(availability_chip(icon, state_label, sublabel_color))
+            d.child(availability_chip(
+                icon,
+                state_label,
+                sublabel_color,
+                snap.metrics,
+            ))
         })
         .when_some(sublabel.filter(|_| !is_unavailable), |d, sublabel| {
             d.child(
@@ -174,8 +183,8 @@ pub(in crate::workspace::left_dock::projects) fn worktree_row(
                     .flex()
                     .flex_row()
                     .items_center()
-                    .gap(px(theme::LANE_SUBLABEL_GAP))
-                    .text_size(px(theme::LANE_SUB_FONT_SIZE))
+                    .gap(px(snap.metrics.space(theme::LANE_SUBLABEL_GAP)))
+                    .text_size(px(snap.metrics.text(theme::LANE_SUB_FONT_SIZE)))
                     .text_color(sublabel_color)
                     .text_ellipsis()
                     .child(sublabel.to_owned()),
@@ -187,10 +196,13 @@ pub(in crate::workspace::left_dock::projects) fn worktree_row(
                     project: project_id,
                     lane: wt.id,
                 }),
-            |d, sessions| {
-                d.child(agent_badges_row(
-                    sessions,
-                    snap.agent_active_session_id.as_deref(),
+            |d, _sessions| {
+                d.child(crate::workspace::left_dock::sessions::named_rows(
+                    daruda_store::project::LaneRef {
+                        project: project_id,
+                        lane: wt.id,
+                    },
+                    snap,
                     cx,
                 ))
             },
@@ -205,38 +217,9 @@ pub(in crate::workspace::left_dock::projects) fn worktree_row(
         .child(sub_rows);
 
     let wt_id: LaneId = wt.id;
-    let wt_path: std::path::PathBuf = wt.path.clone();
     let wt_label_shared = SharedString::from(label.clone());
-    let wt_description_current: Option<String> = wt.description.clone();
-    let wt_name_current: Option<String> = wt.name.clone();
     let removable = crate::workspace::Workspace::lane_removable(wt);
-    let wt_availability = wt.availability;
-
-    // Merge context menu state — captured before closures so all
-    // values are 'static (no borrow of `wt` or `snap` inside closures).
-    let wt_is_git = matches!(&wt.kind, daruda_store::project::LaneKind::Git { .. });
-    let wt_is_detached = matches!(
-        &wt.kind,
-        daruda_store::project::LaneKind::Git { branch: None, .. }
-    );
-    let wt_source_branch: Option<String> = match &wt.kind {
-        daruda_store::project::LaneKind::Git {
-            branch: Some(b), ..
-        } => Some(b.clone()),
-        _ => None,
-    };
-    let wt_base_ref: Option<String> = wt.base_ref.clone();
-    let wt_is_dirty = snap
-        .git_worktree_cache
-        .get(&daruda_store::project::LaneRef {
-            project: project_id,
-            lane: wt.id,
-        })
-        .is_some_and(|s| !s.staged.is_empty() || !s.unstaged.is_empty());
-    let wt_source_repo_root: Option<std::path::PathBuf> = match &wt.kind {
-        daruda_store::project::LaneKind::Git { repo_root, .. } => Some(repo_root.clone()),
-        _ => None,
-    };
+    let lane_menu = super::context_menu::lane_menu(wt, project_id, snap);
     let workspace = snap.workspace.clone();
 
     // Drag payload — captured once so on_drag + on_drop share the same Arc.
@@ -256,16 +239,16 @@ pub(in crate::workspace::left_dock::projects) fn worktree_row(
     // across projects and GPUI routes every first-lane click to a single row.
     // Encode both project + lane id so each row is uniquely addressable.
     let row_group = SharedString::from(format!("lane-row-{project_id}-{wt_id}"));
-    let mut row = super::tree::row()
+    let mut row = super::tree::row(snap.metrics)
         .id(SharedString::from(format!("lane-row-{project_id}-{wt_id}")))
         // Expose to test debug_bounds so gpui::test can find this row.
         .debug_selector(|| format!("lane-row-{project_id}-{wt_id}"))
-        .pl(px(theme::LANE_ROW_INSET_L))
+        .pl(px(row_metrics.lane_inset))
         .group(row_group.clone())
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(theme::LANE_ROW_GAP))
+        .gap(px(row_metrics.leading_gap))
         .cursor_pointer()
         .tooltip(crate::ui::tooltip::text(path_tooltip))
         // Reserve a same-width transparent left border on inactive rows so
@@ -319,35 +302,16 @@ pub(in crate::workspace::left_dock::projects) fn worktree_row(
                 }
             }),
         )
-        .root_context_menu(ws_for_rclick.clone(), move |menu, _window, _cx| {
-            let path_str = wt_path.to_str().map(|s| s.to_string()).unwrap_or_default();
-            let items = build_context_menu_items(super::context_menu::CtxMenuArgs {
-                project_id,
-                wt_id,
-                path_str,
-                current_description: wt_description_current.clone(),
-                current_name: wt_name_current.clone(),
-                workspace: ws_for_rclick.clone(),
-                is_git: wt_is_git,
-                is_detached: wt_is_detached,
-                is_dirty: wt_is_dirty,
-                source_branch: wt_source_branch.clone(),
-                base_ref: wt_base_ref.clone(),
-                source_path: wt_path.clone(),
-                source_repo_root: wt_source_repo_root.clone(),
-                availability: wt_availability,
-                removable,
-            });
-            items.into_iter().fold(menu, |m, item| m.item(item))
-        })
+        .root_context_menu(ws_for_rclick, lane_menu)
         .child(body);
 
     if removable {
         let ws_for_close = workspace.clone();
         let row_group_for_close = row_group.clone();
-        let close = crate::ui::button_icon_danger(
+        let close = crate::ui::button_icon_danger_sized(
             SharedString::from(format!("wt-remove-{project_id}-{wt_id}")),
             crate::ui::icons::DELETE,
+            snap.metrics,
             cx,
         )
         .invisible()

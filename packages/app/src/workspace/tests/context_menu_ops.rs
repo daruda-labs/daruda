@@ -95,6 +95,10 @@ async fn a_dock_row_right_click_deploys_at_the_workspace_root(cx: &mut TestAppCo
 
     let project_id = workspace.read_with(vcx, |ws, _| ws.active_ref().project);
     let selector: &'static str = Box::leak(format!("lane-row-{project_id}-1").into_boxed_str());
+    // WORKAROUND: GPUI cached paint omits debug_bounds replay; force a fresh
+    // test frame rather than changing vendored instrumentation here.
+    vcx.update(|window, _| window.refresh());
+    vcx.run_until_parked();
     let row = vcx
         .debug_bounds(selector)
         .expect("the lane row renders in the left dock");

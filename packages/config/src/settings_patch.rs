@@ -56,6 +56,7 @@ pub enum SettingsFieldId {
     LeftCollapsedByDefault,
     PreviewTab,
     LeftDefaultWidth,
+    LeftDockSize,
     FileIconColorMode,
     ShellNaturalTextEditing,
     ShellProgram,
@@ -141,6 +142,7 @@ impl SettingsFieldId {
             Self::LeftCollapsedByDefault => "left_dock.left_collapsed_by_default",
             Self::PreviewTab => "file_viewer.preview_tab",
             Self::LeftDefaultWidth => "left_dock.left_default_width",
+            Self::LeftDockSize => "left_dock.size",
             Self::FileIconColorMode => "left_dock.file_icon_color_mode",
             Self::ShellNaturalTextEditing => "shell.natural_text_editing",
             Self::ShellProgram => "shell.program",
@@ -232,6 +234,7 @@ pub enum SettingsPatch {
     LeftCollapsedByDefault(bool),
     PreviewTab(bool),
     LeftDefaultWidth(f32),
+    LeftDockSize(crate::UiSize),
     FileIconColorMode(crate::IconColorMode),
     /// The whole hidden list, for Settings' switches. The status bar's own
     /// menu keeps [`Self::ToggleStatusBarItem`]; both write one field.
@@ -323,6 +326,7 @@ impl SettingsPatch {
             Self::LeftCollapsedByDefault(_) => SettingsFieldId::LeftCollapsedByDefault,
             Self::PreviewTab(_) => SettingsFieldId::PreviewTab,
             Self::LeftDefaultWidth(_) => SettingsFieldId::LeftDefaultWidth,
+            Self::LeftDockSize(_) => SettingsFieldId::LeftDockSize,
             Self::FileIconColorMode(_) => SettingsFieldId::FileIconColorMode,
             Self::StatusBarHiddenItems(_) => SettingsFieldId::StatusBarHiddenItems,
             Self::ShellNaturalTextEditing(_) => SettingsFieldId::ShellNaturalTextEditing,
@@ -427,6 +431,7 @@ impl SettingsPatch {
             }
             Self::PreviewTab(value) => config.file_viewer.preview_tab = *value,
             Self::LeftDefaultWidth(value) => config.left_dock.left_default_width = *value,
+            Self::LeftDockSize(value) => config.left_dock.size = *value,
             Self::FileIconColorMode(value) => config.left_dock.file_icon_color_mode = value.clone(),
             Self::StatusBarHiddenItems(value) => config.status_bar.hidden_items = value.clone(),
             Self::ShellNaturalTextEditing(value) => config.shell.natural_text_editing = *value,
@@ -570,6 +575,7 @@ impl SettingsPatch {
             Self::LeftDefaultWidth(_) => {
                 left.left_dock.left_default_width != right.left_dock.left_default_width
             }
+            Self::LeftDockSize(_) => left.left_dock.size != right.left_dock.size,
             Self::FileIconColorMode(_) => {
                 left.left_dock.file_icon_color_mode != right.left_dock.file_icon_color_mode
             }

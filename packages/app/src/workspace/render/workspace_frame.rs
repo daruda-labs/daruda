@@ -151,15 +151,13 @@ impl Workspace {
             // advance badge animation (its frames aren't in the snapshot).
             // Embedded `git_commit_input` and focus/scroll handles self-notify
             // and dirty the dock as an ancestor (Pitfall #10).
-            .when(left_dock_open, |el| {
-                el.child(
-                    gpui::AnyView::from(self.docks.left.clone()).cached(
-                        gpui::StyleRefinement::default()
-                            .h_full()
-                            .w(gpui::px(left_dock_size)),
-                    ),
-                )
-            })
+            .child(
+                gpui::AnyView::from(self.docks.left.clone()).cached(
+                    gpui::StyleRefinement::default()
+                        .h_full()
+                        .w(gpui::px(left_dock_size)),
+                ),
+            )
             .child(main_area)
             // `.cached()`: staging diffs `RightDockSnapshot`
             // (`content_differs`) and repaints only on real change, so a
@@ -175,14 +173,12 @@ impl Workspace {
                     ),
                 )
             })
-            .when(left_dock_open, |el| {
-                el.child(dock_resize_handle(
-                    DockPosition::Left,
-                    left_dock_size,
-                    dragged_dock,
-                    cx,
-                ))
-            })
+            .child(dock_resize_handle(
+                DockPosition::Left,
+                left_dock_size,
+                dragged_dock,
+                cx,
+            ))
             .when(right_dock_open, |el| {
                 el.child(dock_resize_handle(
                     DockPosition::Right,
@@ -377,6 +373,7 @@ impl Workspace {
         let workspace_root = crate::lane_slot_table!(@register_listeners cx, workspace_root);
         workspace_root
             .on_action(cx.listener(Self::on_toggle_left_dock))
+            .on_action(cx.listener(Self::on_reset_left_dock_width))
             .on_action(cx.listener(Self::on_toggle_git_changes_focus))
             .on_action(cx.listener(Self::on_toggle_files_focus))
             .on_action(cx.listener(Self::on_toggle_bottom_dock))

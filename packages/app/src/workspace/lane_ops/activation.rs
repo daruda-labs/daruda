@@ -6,6 +6,7 @@ use gpui::{Context, Window};
 
 use crate::lane::availability::LaneAvailability;
 use crate::workspace::Workspace;
+use crate::workspace::main_area::tab_ops::PaneEntry;
 
 impl Workspace {
     /// Switch to the nth lane (0-indexed) of the active project, sorted
@@ -49,9 +50,21 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.activate_lane_as(target, PaneEntry::Enter, window, cx);
+    }
+
+    pub(in crate::workspace) fn activate_lane_as(
+        &mut self,
+        target: LaneRef,
+        entry: PaneEntry,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.active == target {
             self.close_page(cx);
-            self.reactivate_active_lane(window, cx);
+            if entry == PaneEntry::Enter {
+                self.reactivate_active_lane(window, cx);
+            }
             return;
         }
         if self.lane_for(target).is_none() {
@@ -148,7 +161,9 @@ impl Workspace {
             // Cannot be the orchestrator's: its tab was taken down above, and
             // `remove_orchestrator_tab` repairs `focused_pane_id` in every
             // runtime it touches.
-            self.focus_pane(focused, window, cx);
+            if entry == PaneEntry::Enter {
+                self.focus_pane(focused, window, cx);
+            }
         }
         // The incoming lane's runtime carries its own panes/split state;
         // recompute inactive-pane dim against the now-live focused pane.

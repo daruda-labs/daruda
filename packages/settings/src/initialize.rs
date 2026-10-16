@@ -223,6 +223,21 @@ impl SettingsView {
             );
             select::state_with_options(opts, Some(&preferred_editor), window, cx)
         });
+        let left_dock_size_select = cx.new(|cx| {
+            let opts = daruda_config::UiSize::ALL
+                .into_iter()
+                .map(|size| {
+                    let label = match size {
+                        daruda_config::UiSize::Small => s::settings::ui_size_small(),
+                        daruda_config::UiSize::Normal => s::settings::ui_size_normal(),
+                        daruda_config::UiSize::Large => s::settings::ui_size_large(),
+                    };
+                    SelectOption::new(size.as_str(), label)
+                })
+                .collect();
+            let current = SharedString::new_static(config.left_dock.size.as_str());
+            select::state_with_options(opts, Some(&current), window, cx)
+        });
         let file_icon_color_select = cx.new(|cx| {
             let opts = vec![
                 select::SelectOption::new(ICON_COLOR, s::settings::icon_color_color()),
@@ -496,6 +511,7 @@ impl SettingsView {
 
         for (state, setting) in [
             (&language_select, SelectSetting::Language),
+            (&left_dock_size_select, SelectSetting::LeftDockSize),
             (&file_icon_color_select, SelectSetting::FileIconColorMode),
             (&terminal_preset_select, SelectSetting::TerminalPreset),
             (&ui_preset_select, SelectSetting::UiPreset),
@@ -678,6 +694,7 @@ impl SettingsView {
             syntax_theme_select,
             clipboard_streaming_input,
             editor_select,
+            left_dock_size_select,
             file_icon_color_select,
             panels_grid_columns_input,
             claude_status_enable: config.claude_status.enable,

@@ -23,6 +23,7 @@ const NAME_LANDING: &str = "landing";
 /// `settings:<slug>` opens a specific section (e.g. `settings:font`).
 const NAME_SETTINGS: &str = "settings";
 /// CLI token for the Settings window showing a failed action's banner.
+const NAME_LEFT_DOCK_GIT: &str = "left-dock-git";
 const NAME_SETTINGS_ERROR: &str = "settings-error";
 /// CLI token for Settings with a search query typed: the results page.
 const NAME_SETTINGS_SEARCH: &str = "settings-search";
@@ -64,6 +65,12 @@ const NAME_AGENT_CHAT_COMPACTION: &str = "agent-chat-compaction";
 const NAME_AGENT_CHAT_ATTACHMENTS: &str = "agent-chat-attachments";
 const NAME_ORCHESTRATOR_CHIP: &str = "orchestrator-chip";
 const NAME_ORCHESTRATOR_TAB: &str = "orchestrator-tab";
+const NAME_LEFT_DOCK_SESSIONS_SIX: &str = "left-dock-sessions-six";
+const NAME_LEFT_DOCK_SESSIONS: &str = "left-dock-sessions";
+const NAME_LEFT_DOCK_GROUPS: &str = "left-dock-groups";
+const NAME_LEFT_DOCK_WORKTREES: &str = "left-dock-worktrees";
+const NAME_LEFT_DOCK_RAIL: &str = "left-dock-rail";
+const NAME_LEFT_DOCK_EXPANDED: &str = "left-dock-expanded";
 const NAME_TAB_INDICATORS: &str = "tab-indicators";
 /// CLI token for the mid-turn transcript, before the agent writes its answer.
 const NAME_AGENT_CHAT_WORKING: &str = "agent-chat-working";
@@ -186,6 +193,13 @@ impl ScreenshotScenario {
             "task-editor-disk-copy" => Some(Self::TaskEditor(TaskEditorShot::DiskCopy)),
             NAME_ORCHESTRATOR_CHIP => Some(Self::OrchestratorChip),
             NAME_ORCHESTRATOR_TAB => Some(Self::OrchestratorTab),
+            NAME_LEFT_DOCK_SESSIONS_SIX => Some(Self::LeftDockSessionsSix),
+            NAME_LEFT_DOCK_SESSIONS => Some(Self::LeftDockSessions),
+            NAME_LEFT_DOCK_GROUPS => Some(Self::LeftDockGroups),
+            NAME_LEFT_DOCK_GIT => Some(Self::LeftDockGit),
+            NAME_LEFT_DOCK_WORKTREES => Some(Self::LeftDockWorktrees),
+            NAME_LEFT_DOCK_RAIL => Some(Self::LeftDockRail),
+            NAME_LEFT_DOCK_EXPANDED => Some(Self::LeftDockExpanded),
             NAME_TAB_INDICATORS => Some(Self::TabIndicators),
             NAME_COMMAND_PALETTE => Some(Self::CommandPalette),
             NAME_LANE_SWITCHER => Some(Self::LaneSwitcher),

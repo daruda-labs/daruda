@@ -14,6 +14,10 @@ fn fixture(window: &mut Window, cx: &mut gpui::App) -> LeftDockSnapshot {
         crate::ui::InputPanel::new(crate::ui::InputPanelLayout::ActionsBelow, window, cx)
     });
     LeftDockSnapshot {
+        metrics: Default::default(),
+        expanded: true,
+        open_tabs: Default::default(),
+        named_sessions: Default::default(),
         left_dock_view: daruda_store::project::LeftDockView::default(),
         workspace_page: None,
         lanes: Vec::new(),
@@ -294,6 +298,19 @@ fn distinct_cache_arc_differs(cx: &mut TestAppContext) {
             a.content_differs(&b),
             "distinct cached_visible Arc must trip content_differs (ptr_eq)"
         );
+        gpui::Empty
+    });
+}
+
+#[gpui::test]
+fn presentation_size_invalidates_the_cached_dock(cx: &mut TestAppContext) {
+    crate::test_support::init_gpui_component(cx);
+    cx.add_window(|window, cx| {
+        let a = fixture(window, cx);
+        let mut b = fixture(window, cx);
+        b.cached_visible = ByPointer(a.cached_visible.clone());
+        b.metrics = crate::ui::theme::UiMetrics(daruda_config::UiSize::Large);
+        assert!(a.content_differs(&b));
         gpui::Empty
     });
 }

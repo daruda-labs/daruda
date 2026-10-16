@@ -103,6 +103,9 @@ impl Workspace {
                 "split_down" => self.on_split_down(&SplitDown, window, cx),
                 "next_tab" => self.on_next_tab(&NextTab, window, cx),
                 "prev_tab" => self.on_prev_tab(&PrevTab, window, cx),
+                "reset_left_dock_width" => {
+                    self.on_reset_left_dock_width(&super::ResetLeftDockWidth, window, cx)
+                }
                 "toggle_left_dock" => self.on_toggle_left_dock(&ToggleLeftDock, window, cx),
                 "toggle_git_changes_focus" => {
                     self.on_toggle_git_changes_focus(&ToggleGitChangesFocus, window, cx);

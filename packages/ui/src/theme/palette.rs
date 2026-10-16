@@ -225,6 +225,16 @@ pub const PANEL_BODY_GAP: f32 = GAP_STANDARD;
 // Dock sizes. The right default fits all five tab labels in the widest
 // locale. Bottom presets are `TAB_BAR_HEIGHT + 2*PANEL_BODY_PAD_Y +
 // N*BUTTON_WIDGET_HEIGHT + (N-1)*PANEL_BODY_GAP`, one per macro row count.
+pub const DOCK_LEFT_RAIL_W: f32 = 48.0;
+pub const DOCK_RAIL_ROW_H: f32 = 36.0;
+pub const DOCK_RAIL_INITIAL_SIZE: f32 = 28.0;
+/// Opaque project marks need more separation than hover surfaces in a compact rail.
+pub const RAIL_PROJECT_BG: Hsla = hsla(215.45455, 11.0 / 59.0, 59.0 / 255.0, 1.0);
+pub const DOCK_SESSION_ROW_H: f32 = 44.0;
+pub const DOCK_SESSION_PANEL_W: f32 = 330.0;
+pub const DOCK_SESSION_PANEL_H: f32 = 360.0;
+pub const DOCK_LEFT_COLLAPSE_W: f32 = (DOCK_LEFT_RAIL_W + DOCK_LEFT_MIN_W) / 2.0;
+pub const DOCK_LEFT_EXPAND_W: f32 = DOCK_LEFT_COLLAPSE_W + CONTROL_ICON_SIZE;
 pub const DOCK_LEFT_DEFAULT_W: f32 = 250.0;
 pub const DOCK_LEFT_MIN_W: f32 = 220.0;
 pub const DOCK_LEFT_MAX_W: f32 = 400.0;
@@ -272,9 +282,9 @@ pub const LANE_DRAG_GHOST_PAD_Y: f32 = PAD_XS;
 pub const DRAG_PILL_CURSOR_OFFSET: f32 = 4.0;
 
 // ── Lanes and project tree (left dock) ──────────────────────────────────────
-// A lane's inset lands its label on the project name and centres its status
-// cell under the folder glyph. Group presets are stored as hex on
-// `SerializedGroup::color`, so the header decodes them without a lookup.
+// Coupled project/lane columns are resolved beside the tree component.
+// Group presets are stored as hex on `SerializedGroup::color`, so the
+// header decodes them without a lookup.
 
 pub const LANE_ROW_PAD_X: f32 = PAD_LG;
 pub const LANE_ROW_GAP: f32 = GAP_SM;
@@ -295,10 +305,6 @@ pub const LANE_PLACEHOLDER_LINE_GAP: f32 = GAP_STANDARD;
 pub const LANE_UNREAD_DOT_SIZE: f32 = 6.0;
 pub const LANE_UNREAD_DOT_RADIUS: f32 = RADIUS_XS;
 pub const LANE_BRANCH_CHIP_PAD_X: f32 = PAD_XS;
-pub const LANE_PROJECT_ICON_SIZE: f32 = 14.0;
-pub const LANE_PROJECT_NAME_INSET: f32 = LANE_ROW_PAD_X + LANE_PROJECT_ICON_SIZE + LANE_LABEL_GAP;
-pub const LANE_ROW_INSET_L: f32 =
-    LANE_PROJECT_NAME_INSET - LANE_ACTIVE_BORDER_W - STATUS_INDICATOR_CELL_WIDTH - LANE_ROW_GAP;
 pub const LANE_GROUP_LABEL_FONT_SIZE: f32 = FONT_SIZE_SM;
 pub const LANE_GROUP_COLOR_DOT_SIZE: f32 = 8.0;
 pub const LANE_GROUP_COLOR_DOT_RADIUS: f32 = RADIUS_SM;

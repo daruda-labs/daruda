@@ -18,9 +18,8 @@ use gpui::{
     AnyElement, App, ClickEvent, Context, EventEmitter, FocusHandle, Focusable, Render,
     SharedString, Subscription, Window, div, prelude::*, px,
 };
-use gpui_component::Sizable as _;
 
-use super::{ButtonVariants as _, DropdownButton, PopupMenuItem};
+use super::{ButtonVariants as _, DropdownMenu as _, PopupMenuItem};
 use super::{InputEvent, InputState};
 
 /// Visual treatment for an action button rendered inside an
@@ -43,7 +42,7 @@ pub enum InputPanelLayout {
     ActionsRight,
     /// Text area on top, button row below.
     ActionsBelow,
-    /// Buttons float as an absolute 32px bar at the bottom of the text area.
+    /// Buttons float at the bottom; the default bar is 32px high.
     /// The text area gets bottom padding equal to the bar height so text is
     /// never hidden under the bar. All buttons are right-aligned in the bar.
     ActionsFloating,
@@ -131,6 +130,7 @@ pub struct InputPanel {
     /// surrounding pane already paints its own border.
     appearance: bool,
     actions: Vec<PanelAction>,
+    metrics: theme::UiMetrics,
     _area_sub: Subscription,
 }
 
@@ -152,7 +152,22 @@ impl InputPanel {
             layout,
             appearance: true,
             actions: Vec::new(),
+            metrics: theme::UiMetrics::default(),
             _area_sub: sub,
+        }
+    }
+
+    /// Use the host surface's size at construction.
+    pub fn with_metrics(mut self, metrics: theme::UiMetrics) -> Self {
+        self.metrics = metrics;
+        self
+    }
+
+    /// Reflow the existing input and actions without replacing the buffer.
+    pub fn set_metrics(&mut self, metrics: theme::UiMetrics, cx: &mut Context<Self>) {
+        if self.metrics != metrics {
+            self.metrics = metrics;
+            cx.notify();
         }
     }
 
@@ -275,80 +290,82 @@ impl EventEmitter<InputPanelEvent> for InputPanel {}
 impl Render for InputPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let bar_border = theme::current(cx).border;
-        let area = crate::input::composer_input(&self.area, cx)
+        let metrics = self.metrics;
+        let area = crate::input::composer_input_sized(&self.area, cx, metrics)
             .appearance(self.appearance)
-            .px(px(theme::INPUT_TEXTAREA_PAD_X))
-            .py(px(theme::INPUT_TEXTAREA_PAD_Y));
+            .px(px(metrics.space(theme::INPUT_TEXTAREA_PAD_X)))
+            .py(px(metrics.space(theme::INPUT_TEXTAREA_PAD_Y)));
 
-        let buttons: Vec<AnyElement> = self
-            .actions
-            .iter()
-            .map(|action| {
-                use crate::Disableable as _;
-                let handler = Arc::clone(&action.on_click);
-                let btn = match action.variant {
-                    PanelActionVariant::Primary => {
-                        crate::button_primary(action.id.clone(), action.label.clone())
-                    }
-                    PanelActionVariant::Secondary => {
-                        crate::button(action.id.clone(), action.label.clone())
-                    }
-                    PanelActionVariant::Danger => {
-                        crate::button_danger(action.id.clone(), action.label.clone())
-                    }
-                };
-                let btn = btn
-                    .disabled(action.disabled)
-                    .on_click(move |ev, win, cx| handler(ev, win, cx));
-
-                if action.dropdown_items.is_empty() {
-                    btn.into_any_element()
-                } else {
-                    let items = std::rc::Rc::clone(&action.dropdown_items);
-                    let dropdown =
-                        DropdownButton::new(SharedString::from(format!("{}-split", action.id)))
-                            .small()
-                            .button(btn)
-                            .disabled(action.disabled);
-                    let dropdown = match action.variant {
-                        PanelActionVariant::Primary => dropdown.primary(),
-                        PanelActionVariant::Secondary => dropdown,
-                        PanelActionVariant::Danger => dropdown.danger(),
+        let buttons: Vec<AnyElement> =
+            self.actions
+                .iter()
+                .map(|action| {
+                    use crate::Disableable as _;
+                    let handler = Arc::clone(&action.on_click);
+                    let btn = crate::button_sized(action.id.clone(), action.label.clone(), metrics);
+                    let btn = match action.variant {
+                        PanelActionVariant::Primary => btn.primary(),
+                        PanelActionVariant::Secondary => btn,
+                        PanelActionVariant::Danger => btn.danger(),
                     };
-                    dropdown
-                        .dropdown_menu(move |menu, _window, _cx| {
-                            let mut m = menu;
-                            for it in items.iter() {
-                                let on_select = Arc::clone(&it.on_select);
-                                m = m.item(
-                                    PopupMenuItem::new(it.label.clone())
-                                        .on_click(move |_, win, app_cx| on_select(win, app_cx)),
-                                );
-                            }
-                            m
-                        })
-                        .into_any_element()
-                }
-            })
-            .collect();
+                    let btn = btn
+                        .disabled(action.disabled)
+                        .on_click(move |ev, win, cx| handler(ev, win, cx));
+
+                    if action.dropdown_items.is_empty() {
+                        btn.into_any_element()
+                    } else {
+                        let items = std::rc::Rc::clone(&action.dropdown_items);
+                        let caret = crate::button_split_caret_sized(
+                            SharedString::from(format!("{}-menu", action.id)),
+                            metrics,
+                        )
+                        .disabled(action.disabled);
+                        let caret = match action.variant {
+                            PanelActionVariant::Primary => caret.primary(),
+                            PanelActionVariant::Secondary => caret,
+                            PanelActionVariant::Danger => caret.danger(),
+                        };
+                        div()
+                            .id(SharedString::from(format!("{}-split", action.id)))
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .child(btn.rounded_r_none().border_r_0())
+                            .child(caret.dropdown_menu(crate::menu_builder(
+                                move |menu, _window, _cx| {
+                                    let mut m = menu;
+                                    for it in items.iter() {
+                                        let on_select = Arc::clone(&it.on_select);
+                                        m = m.item(PopupMenuItem::new(it.label.clone()).on_click(
+                                            move |_, win, app_cx| on_select(win, app_cx),
+                                        ));
+                                    }
+                                    m
+                                },
+                            )))
+                            .into_any_element()
+                    }
+                })
+                .collect();
 
         match self.layout {
             InputPanelLayout::ActionsBelow => div()
                 .flex()
                 .flex_col()
                 .w_full()
-                .gap(px(theme::INPUT_PANEL_SECTION_GAP))
+                .gap(px(metrics.space(theme::INPUT_PANEL_SECTION_GAP)))
                 .child(
                     div()
                         .flex_1()
-                        .min_h(px(theme::INPUT_PANEL_MIN_H))
+                        .min_h(px(metrics.row(theme::INPUT_PANEL_MIN_H)))
                         .child(area),
                 )
                 .child(
                     div()
                         .flex()
                         .flex_row()
-                        .gap(px(theme::INPUT_PANEL_BUTTON_GAP))
+                        .gap(px(metrics.space(theme::INPUT_PANEL_BUTTON_GAP)))
                         .children(buttons),
                 )
                 .into_any_element(),
@@ -357,7 +374,7 @@ impl Render for InputPanel {
                 .flex_row()
                 .w_full()
                 .h_full()
-                .gap(px(theme::INPUT_PANEL_SECTION_GAP))
+                .gap(px(metrics.space(theme::INPUT_PANEL_SECTION_GAP)))
                 .child(div().flex_1().h_full().child(area))
                 .child(
                     div()
@@ -365,7 +382,7 @@ impl Render for InputPanel {
                         .flex()
                         .flex_col()
                         .items_start()
-                        .gap(px(theme::INPUT_PANEL_BUTTON_GAP))
+                        .gap(px(metrics.space(theme::INPUT_PANEL_BUTTON_GAP)))
                         .children(buttons),
                 )
                 .into_any_element(),
@@ -379,10 +396,9 @@ impl Render for InputPanel {
                     div()
                         .w_full()
                         .flex_1()
-                        .min_h(px(
-                            theme::INPUT_PANEL_MIN_H + theme::INPUT_PANEL_FLOATING_BAR_H
-                        ))
-                        .pb(px(theme::INPUT_PANEL_FLOATING_BAR_H))
+                        .min_h(px(metrics.row(theme::INPUT_PANEL_MIN_H)
+                            + metrics.row(theme::INPUT_PANEL_FLOATING_BAR_H)))
+                        .pb(px(metrics.row(theme::INPUT_PANEL_FLOATING_BAR_H)))
                         .child(area),
                 )
                 .child(
@@ -391,15 +407,15 @@ impl Render for InputPanel {
                         .bottom(px(0.))
                         .left(px(0.))
                         .w_full()
-                        .h(px(theme::INPUT_PANEL_FLOATING_BAR_H))
+                        .h(px(metrics.row(theme::INPUT_PANEL_FLOATING_BAR_H)))
                         .border_t_1()
                         .border_color(bar_border)
                         .flex()
                         .flex_row()
                         .items_center()
                         .justify_end()
-                        .px(px(theme::GIT_COMMIT_PAD))
-                        .gap(px(theme::GIT_COMMIT_BUTTON_GAP))
+                        .px(px(metrics.space(theme::GIT_COMMIT_PAD)))
+                        .gap(px(metrics.space(theme::GIT_COMMIT_BUTTON_GAP)))
                         .children(buttons),
                 )
                 .into_any_element(),
@@ -416,5 +432,23 @@ mod tests {
         let a = PanelAction::new("id", "Label", PanelActionVariant::Primary, |_, _, _| {})
             .disabled(true);
         assert!(a.disabled);
+    }
+    #[gpui::test]
+    fn size_reload_keeps_the_live_input_and_draft(cx: &mut gpui::TestAppContext) {
+        use gpui::AppContext as _;
+        crate::test_support::init_gpui_component(cx);
+        cx.add_window(|window, cx| {
+            let panel = cx.new(|cx| InputPanel::new(InputPanelLayout::ActionsFloating, window, cx));
+            panel.update(cx, |p, cx| p.set_text("Keep this commit draft", window, cx));
+            let original = panel.read(cx).area.entity_id();
+            for size in daruda_config::UiSize::ALL {
+                panel.update(cx, |p, cx| p.set_metrics(theme::UiMetrics(size), cx));
+                let p = panel.read(cx);
+                assert_eq!(p.metrics, theme::UiMetrics(size));
+                assert_eq!(p.area.entity_id(), original);
+                assert_eq!(p.text(cx), "Keep this commit draft");
+            }
+            gpui::Empty
+        });
     }
 }

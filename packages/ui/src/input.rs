@@ -228,13 +228,21 @@ pub enum InputGrowMode {
 }
 
 pub(crate) fn composer_input(state: &Entity<InputState>, cx: &App) -> Input {
+    composer_input_sized(state, cx, d::UiMetrics::default())
+}
+
+pub(crate) fn composer_input_sized(
+    state: &Entity<InputState>,
+    cx: &App,
+    metrics: d::UiMetrics,
+) -> Input {
     Input::new(state)
         .small()
         .appearance(false)
         .input_padding(false)
         .disabled(state.read(cx).is_disabled())
-        .text_size(px(d::FONT_SIZE_MD))
-        .line_height(px(d::INPUT_LINE_HEIGHT))
+        .text_size(px(metrics.text(d::FONT_SIZE_MD)))
+        .line_height(px(metrics.row(d::INPUT_LINE_HEIGHT)))
 }
 
 pub fn input_with_action<T: InputTabSpec>(

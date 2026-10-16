@@ -82,3 +82,37 @@ fn a_pending_edit_does_not_leave_the_switch_behind_the_bar_menu(cx: &mut TestApp
     now.sort_by_key(|i| format!("{i:?}"));
     assert_eq!(now, vec![StatusBarItem::Flow, StatusBarItem::Ports]);
 }
+
+#[gpui::test]
+fn dock_size_select_persists_and_reset_restores_normal(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    cx.update_window(wh.into(), |_, window, cx| {
+        win.update(cx, |w, cx| {
+            let select = w.left_dock_size_select.clone();
+            SettingsView::set_select_value(&select, "large", window, cx);
+            w.persist_select_setting(&select, SelectSetting::LeftDockSize, cx);
+            assert_eq!(
+                crate::store::SettingsStore::global(cx)
+                    .user()
+                    .left_dock
+                    .size,
+                daruda_config::UiSize::Large
+            );
+            let target = crate::layout::Target::Select(SelectSetting::LeftDockSize);
+            assert!(w.differs_from_default(target));
+            w.reset_to_default(target, window, cx);
+            assert_eq!(
+                crate::store::SettingsStore::global(cx)
+                    .user()
+                    .left_dock
+                    .size,
+                daruda_config::UiSize::Normal
+            );
+            assert_eq!(
+                select.read(cx).selected_value().map(|s| s.as_ref()),
+                Some("normal")
+            );
+        });
+    })
+    .unwrap();
+}

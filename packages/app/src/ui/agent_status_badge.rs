@@ -72,6 +72,7 @@ pub struct AgentStatusBadge {
     /// When true, the indicator is wrapped in a 1 px outline
     /// ring marking it as the session attached to the focused tab.
     active: bool,
+    metrics: theme::UiMetrics,
 }
 
 impl AgentStatusBadge {
@@ -81,6 +82,7 @@ impl AgentStatusBadge {
             size,
             color,
             active: false,
+            metrics: theme::UiMetrics::default(),
         }
     }
 
@@ -91,8 +93,13 @@ impl AgentStatusBadge {
         Self::new(status, size, color_for_status(status, cx))
     }
 
-    /// Wrap the indicator with an outline ring (sub-row "active in
-    /// the focused tab" affordance).
+    /// Use the host surface's artwork size without changing its status shape.
+    pub fn with_metrics(mut self, metrics: theme::UiMetrics) -> Self {
+        self.metrics = metrics;
+        self
+    }
+
+    /// Wrap the indicator with an outline ring for the focused session.
     pub fn active(mut self) -> Self {
         self.active = true;
         self
@@ -101,7 +108,7 @@ impl AgentStatusBadge {
 
 impl RenderOnce for AgentStatusBadge {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let dim = self.size.dim();
+        let dim = px(self.metrics.icon(self.size.dim().into()));
         let tick = cx
             .try_global::<StatusPulseClock>()
             .map(|c| c.tick)

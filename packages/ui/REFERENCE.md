@@ -384,3 +384,21 @@ tree under `vendor/zed/` with `patches/gpui-*.patch` applied by
 `tools/vendor_gpui`, which CI reruns with `--check`. On a
 `gpui_component` rev bump, re-apply each patch by re-doing the diff
 against the upstream source.
+
+## Surface presentation sizes
+
+`theme::UiMetrics` resolves a `daruda_config::UiSize` into text, icon, spacing,
+row, and minimum target dimensions. Hosts pass it as plain snapshot data. The
+`button_icon_sized`, `button_icon_danger_sized`, `button_with_icon_sized`,
+`dock_tab_sized`, and `dock_tab_bar_sized` factories and
+`SectionHeader::with_metrics` opt into it; existing factories retain Normal.
+Text never falls below the shared readable minimum, and targets stay at least
+24px. This is independent of terminal/chat font preferences and window zoom.
+
+`button_sized` and `button_compact_sized` own text-action geometry. An
+`InputPanel` opts in with `with_metrics` and adopts live changes with
+`set_metrics`; its input buffer and focus identity survive a size change.
+
+`button_split_caret_sized` uses the same height as a sized text action and
+keeps icon artwork independent of the vendor size tier. `InputPanel` composes
+the two halves through the shared dropdown-menu path.

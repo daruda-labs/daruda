@@ -4,7 +4,7 @@ use gpui::{AnyElement, App, IntoElement, div, prelude::*, px};
 
 use super::{Page, PageState};
 use crate::surface::strings;
-use crate::ui::{ButtonVariants as _, button_icon, button_with_icon, icons, theme};
+use crate::ui::{ButtonVariants as _, button_icon, button_with_icon_sized, icons, theme};
 use crate::workspace::layout::{LeftDockSnapshot, RightDockSnapshot};
 use crate::workspace::right_dock;
 
@@ -21,12 +21,12 @@ pub(in crate::workspace) fn navigation(snap: &LeftDockSnapshot, cx: &App) -> Any
         .border_color(t.border)
         .children([Page::Tasks, Page::Flows].into_iter().map(|page| {
             let workspace = snap.workspace.clone();
-            button_with_icon(page.icon(), page.label(), page.icon())
+            button_with_icon_sized(page.icon(), page.label(), page.icon(), snap.metrics)
                 .ghost()
                 .w_full()
                 .justify_start()
-                .h(px(theme::DOCK_NAV_ROW_HEIGHT))
-                .text_size(px(theme::LANE_LABEL_FONT_SIZE))
+                .h(px(snap.metrics.target(theme::DOCK_NAV_ROW_HEIGHT)))
+                .text_size(px(snap.metrics.text(theme::LANE_LABEL_FONT_SIZE)))
                 .when(snap.workspace_page == Some(page), |button| {
                     button.bg(t.lane_card_active_bg).text_color(t.text_primary)
                 })

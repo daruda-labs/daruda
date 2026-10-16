@@ -35,6 +35,7 @@ pub(in crate::workspace) struct GitContext {
 impl GitContext {
     pub(in crate::workspace) fn new(
         workspace: &WeakEntity<Workspace>,
+        metrics: crate::ui::theme::UiMetrics,
         window: &mut Window,
         cx: &mut Context<Workspace>,
     ) -> Self {
@@ -42,6 +43,7 @@ impl GitContext {
         let ws_amend = workspace.clone();
         let commit_input = cx.new(|cx| {
             crate::ui::InputPanel::new(crate::ui::InputPanelLayout::ActionsFloating, window, cx)
+                .with_metrics(metrics)
                 .with_placeholder(
                     crate::surface::strings::git::commit_placeholder(),
                     window,

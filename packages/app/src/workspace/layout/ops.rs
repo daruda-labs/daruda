@@ -45,6 +45,7 @@ pub(in crate::workspace) struct DockDrag {
     pub(in crate::workspace) position: DockPosition,
     pub(super) anchor_px: f32,
     pub(super) start_size: f32,
+    pub(super) expanded_size: f32,
 }
 
 /// Pure height formula for the bottom dock auto-grow path.
@@ -75,6 +76,42 @@ pub(in crate::workspace) fn bottom_dock_height_for_rows(rows: usize) -> f32 {
 }
 
 impl Workspace {
+    pub(in crate::workspace) fn on_reset_left_dock_width(
+        &mut self,
+        _: &crate::workspace::ResetLeftDockWidth,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_session_chooser(true, window, cx);
+        self.mutate_durable(cx, |ws, cx| {
+            ws.docks.drag = None;
+            ws.docks.left.update(cx, |dock, _| {
+                dock.open();
+                dock.resize(crate::ui::theme::DOCK_LEFT_DEFAULT_W);
+            });
+            ws.main_area.pending_resize = true;
+        });
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn on_dock_resize_press(
+        &mut self,
+        position: DockPosition,
+        event: &gpui::MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if position == DockPosition::Left && event.click_count == 2 {
+            self.on_reset_left_dock_width(&crate::workspace::ResetLeftDockWidth, window, cx);
+        } else {
+            let anchor = match position {
+                DockPosition::Left | DockPosition::Right => event.position.x,
+                DockPosition::Bottom => event.position.y,
+            };
+            self.begin_dock_drag(position, anchor.into(), cx);
+        }
+    }
+
     /// Draft attachments occupy one scrollable row without changing the saved dock size.
     pub(in crate::workspace) fn bottom_dock_display_size(&self, cx: &gpui::App) -> f32 {
         let size = self.docks.bottom.read(cx).size;
@@ -95,9 +132,19 @@ impl Workspace {
     pub(in crate::workspace) fn on_toggle_left_dock(
         &mut self,
         _: &ToggleLeftDock,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.close_session_chooser(true, window, cx);
+        if self.docks.left.read(cx).is_open
+            && (self.git.panel_focus.contains_focused(window, cx)
+                || self
+                    .file_tree
+                    .files_panel_focus
+                    .contains_focused(window, cx))
+        {
+            self.focus_pane(self.active_runtime().focused_pane_id, window, cx);
+        }
         self.mutate_durable(cx, |ws, cx| {
             ws.docks.left.update(cx, |d, _| d.toggle());
             ws.main_area.pending_resize = true;
@@ -277,7 +324,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let start_size = match position {
-            DockPosition::Left => self.docks.left.read(cx).size,
+            DockPosition::Left => self.docks.left.read(cx).display_size(),
             DockPosition::Right => self.docks.right.read(cx).size,
             DockPosition::Bottom => self.docks.bottom.read(cx).size,
         };
@@ -285,6 +332,7 @@ impl Workspace {
             position,
             anchor_px,
             start_size,
+            expanded_size: self.docks.left.read(cx).size,
         });
         cx.notify();
     }
@@ -309,7 +357,18 @@ impl Workspace {
             DockPosition::Bottom => drag.start_size - delta,
         };
         match drag.position {
-            DockPosition::Left => self.docks.left.update(cx, |d, _| d.resize(new_size)),
+            DockPosition::Left => {
+                self.close_session_chooser(false, window, cx);
+                self.docks.left.update(cx, |d, _| {
+                    if new_size < crate::ui::theme::DOCK_LEFT_COLLAPSE_W {
+                        d.is_open = false;
+                        d.size = drag.expanded_size;
+                    } else if d.is_open || new_size >= crate::ui::theme::DOCK_LEFT_EXPAND_W {
+                        d.is_open = true;
+                        d.resize(new_size);
+                    }
+                });
+            }
             DockPosition::Right => self.docks.right.update(cx, |d, _| d.resize(new_size)),
             // Bottom dock renders through `.cached()`, so notify its
             // entity directly (Pitfall #10) — a Workspace-only notify

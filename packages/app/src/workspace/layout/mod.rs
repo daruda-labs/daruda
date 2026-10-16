@@ -114,6 +114,20 @@ impl Dock {
         changed
     }
 
+    /// Snapshot changes discovered during parent paint must schedule a later
+    /// frame: GPUI queues dirty views during paint without marking the window
+    /// dirty. Deferring the notify invalidates this cached child after paint.
+    pub(in crate::workspace) fn stage_for_render(
+        &mut self,
+        next: DockSnapshot,
+        cx: &mut Context<Self>,
+    ) {
+        if self.stage(next) {
+            let id = cx.entity_id();
+            cx.defer(move |cx| cx.notify(id));
+        }
+    }
+
     pub fn new(position: DockPosition, workspace: WeakEntity<Workspace>) -> Self {
         let (size, min_size, max_size) = match position {
             DockPosition::Left => (
@@ -153,6 +167,14 @@ impl Dock {
         self.panels.push(Box::new(panel));
     }
 
+    pub(in crate::workspace) fn display_size(&self) -> f32 {
+        if self.position == DockPosition::Left && !self.is_open {
+            theme::DOCK_LEFT_RAIL_W
+        } else {
+            self.size
+        }
+    }
+
     pub fn toggle(&mut self) {
         self.is_open = !self.is_open;
     }
@@ -184,13 +206,18 @@ impl Dock {
 impl Render for Dock {
     fn render(
         &mut self,
-        _window: &mut gpui::Window,
+        window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
         #[cfg(test)]
         self.render_count.set(self.render_count.get() + 1);
         if !self.is_open {
-            return div().into_any_element();
+            return match &self.snap {
+                DockSnapshot::Left(snap) => {
+                    crate::workspace::left_dock::rail::render(snap, window, cx)
+                }
+                _ => div().into_any_element(),
+            };
         }
 
         let t = theme::current(cx);
@@ -220,7 +247,10 @@ impl Render for Dock {
                     .size_full()
                     .overflow_hidden()
                     .child(div().flex_1().overflow_hidden().child(body))
-                    .child(crate::workspace::left_dock::footer::render(cx))
+                    .child(crate::workspace::left_dock::footer::render(
+                        snap.metrics,
+                        cx,
+                    ))
                     .into_any_element();
                 (header, content)
             }

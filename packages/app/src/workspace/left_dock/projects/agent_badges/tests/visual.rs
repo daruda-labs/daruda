@@ -26,7 +26,13 @@ impl Render for Indicators {
                 div()
                     .w(px(theme::STATUS_INDICATOR_CELL_WIDTH))
                     .h(px(theme::STATUS_INDICATOR_SIZE))
-                    .child(agent_status_cell(Some(SessionStatus::Idle), outcome, cx))
+                    .child(agent_status_cell(
+                        Some(SessionStatus::Idle),
+                        outcome,
+                        Default::default(),
+                        theme::STATUS_INDICATOR_CELL_WIDTH,
+                        cx,
+                    ))
             }))
     }
 }

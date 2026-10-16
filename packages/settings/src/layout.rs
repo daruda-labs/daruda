@@ -150,7 +150,11 @@ const TERMINAL: &[Card] = &[
 const WORKSPACE: &[Card] = &[
     Card::Rows {
         title: s::settings::section_sidebar,
-        rows: &[t(T::LeftDefaultWidth), b(B::LeftCollapsedByDefault)],
+        rows: &[
+            sel(S::LeftDockSize),
+            t(T::LeftDefaultWidth),
+            b(B::LeftCollapsedByDefault),
+        ],
     },
     Card::Rows {
         title: s::settings::card_files,

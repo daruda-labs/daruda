@@ -16,6 +16,7 @@ use crate::workspace::render::ws_popup_menu_item;
 /// the lane-row call site stays readable as per-lane flags accumulate
 /// (mirrors `rows::ProjectHeaderArgs`). Every field is owned so the
 /// resulting `PopupMenuItem` closures are `'static`.
+#[derive(Clone)]
 pub(super) struct CtxMenuArgs {
     pub project_id: ProjectId,
     pub wt_id: LaneId,
@@ -39,6 +40,54 @@ pub(super) struct CtxMenuArgs {
     /// (main / default) lanes route Remove through the project-delete
     /// flow instead.
     pub removable: bool,
+}
+
+/// Both layouts use the same lane metadata and command menu.
+pub(in crate::workspace::left_dock) fn lane_menu(
+    lane: &crate::lane::Lane,
+    project_id: ProjectId,
+    snap: &crate::workspace::layout::LeftDockSnapshot,
+) -> impl Fn(
+    crate::ui::PopupMenu,
+    &mut gpui::Window,
+    &mut gpui::Context<crate::ui::PopupMenu>,
+) -> crate::ui::PopupMenu
++ use<> {
+    let target = LaneRef {
+        project: project_id,
+        lane: lane.id,
+    };
+    let (source_branch, source_repo_root, is_detached) = match &lane.kind {
+        daruda_store::project::LaneKind::Git {
+            branch, repo_root, ..
+        } => (branch.clone(), Some(repo_root.clone()), branch.is_none()),
+        _ => (None, None, false),
+    };
+    let args = CtxMenuArgs {
+        project_id,
+        wt_id: lane.id,
+        path_str: lane.path.to_str().unwrap_or_default().to_owned(),
+        current_description: lane.description.clone(),
+        current_name: lane.name.clone(),
+        workspace: snap.workspace.clone(),
+        is_git: lane.is_git(),
+        is_detached,
+        is_dirty: snap
+            .git_worktree_cache
+            .get(&target)
+            .is_some_and(|s| !s.staged.is_empty() || !s.unstaged.is_empty()),
+        source_branch,
+        base_ref: lane.base_ref.clone(),
+        source_path: lane.path.clone(),
+        source_repo_root,
+        availability: lane.availability,
+        removable: crate::workspace::Workspace::lane_removable(lane),
+    };
+    move |menu, _, _| {
+        build_context_menu_items(args.clone())
+            .into_iter()
+            .fold(menu, |menu, item| menu.item(item))
+    }
 }
 
 /// Build the context menu item list for a lane row right-click.

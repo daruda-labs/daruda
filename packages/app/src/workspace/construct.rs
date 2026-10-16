@@ -221,7 +221,12 @@ impl Workspace {
             project_layer,
             last_agent_id: None,
             agent_pulse_prev: Vec::new(),
-            git: left_dock::git_ops::context::GitContext::new(&ws_weak, window, cx),
+            git: left_dock::git_ops::context::GitContext::new(
+                &ws_weak,
+                crate::ui::theme::UiMetrics(config.left_dock.size),
+                window,
+                cx,
+            ),
             left_dock_preview: None,
             panels: main_area::bottom_dock::macro_ops::load_or_seed_panels(&data_dir),
             agent_vocabulary,

@@ -72,7 +72,7 @@ async fn status_pulse_repaints_the_left_dock_only_where_a_badge_lives(cx: &mut T
         );
     }
 
-    // A closed dock paints nothing at all, badge view or not.
+    // The collapsed rail still paints lane status indicators.
     let closed = cx
         .update_window(wh.into(), |_, _window, cx| {
             ws.update(cx, |ws, cx| {
@@ -85,7 +85,10 @@ async fn status_pulse_repaints_the_left_dock_only_where_a_badge_lives(cx: &mut T
             })
         })
         .unwrap();
-    assert!(!closed, "a closed dock has nothing to advance");
+    assert!(
+        closed,
+        "the collapsed rail must advance its status indicators"
+    );
 
     // The other half of the contract: where the gate says yes, a notify really
     // does repaint — otherwise the gate would silently freeze the badge.

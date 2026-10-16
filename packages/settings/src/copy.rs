@@ -195,6 +195,10 @@ pub(super) fn select(setting: SelectSetting) -> RowCopy {
             label: s::settings::label_preferred_editor,
             hint: String::new,
         },
+        SelectSetting::LeftDockSize => RowCopy {
+            label: s::settings::label_left_dock_size,
+            hint: s::settings::hint_left_dock_size,
+        },
         SelectSetting::FileIconColorMode => RowCopy {
             label: s::settings::label_file_icon_colors,
             hint: String::new,

@@ -429,6 +429,9 @@ pub(super) fn patch_settings_document(
                 t.remove("visible_items");
             })
         }
+        SettingsPatch::LeftDockSize(_) => patch_section(doc, "left_dock", |t| {
+            t.insert("size", toml_edit::value(config.left_dock.size.as_str()));
+        }),
         SettingsPatch::FileIconColorMode(_) => patch_section(doc, "left_dock", |t| {
             let mode = match config.left_dock.file_icon_color_mode {
                 crate::IconColorMode::Color => "color",

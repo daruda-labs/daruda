@@ -31,16 +31,36 @@ pub fn tab(label: impl Into<SharedString>) -> Tab {
 
 /// Compact dock navigation; artwork stays independent of the vendor tab tier.
 pub fn dock_tab(icon: impl Into<super::Icon>, label: impl Into<SharedString>) -> Tab {
+    dock_tab_sized(icon, label, super::theme::UiMetrics::default())
+}
+
+/// Dock tab that opts into a surface presentation size.
+pub fn dock_tab_sized(
+    icon: impl Into<super::Icon>,
+    label: impl Into<SharedString>,
+    metrics: super::theme::UiMetrics,
+) -> Tab {
     Tab::new()
         .w(px(super::theme::DOCK_TAB_WIDTH))
-        .min_h(px(super::theme::TAB_BAR_HEIGHT))
-        .child(icon.into().with_size(px(super::theme::CONTROL_ICON_SIZE)))
+        .min_h(px(metrics.target(super::theme::TAB_BAR_HEIGHT)))
+        .child(
+            icon.into()
+                .with_size(px(metrics.icon(super::theme::CONTROL_ICON_SIZE))),
+        )
         .tooltip(super::tooltip::text(label))
 }
 
 /// Shared strip metrics for both docks, without changing content-area tabs.
 pub fn dock_tab_bar(id: impl Into<ElementId>) -> TabBar {
-    tab_bar(id).w_full().gap(px(0.))
+    dock_tab_bar_sized(id, super::theme::UiMetrics::default())
+}
+
+/// Sized strip paired with `dock_tab_sized`.
+pub fn dock_tab_bar_sized(id: impl Into<ElementId>, metrics: super::theme::UiMetrics) -> TabBar {
+    tab_bar(id)
+        .h(px(metrics.target(super::theme::TAB_BAR_HEIGHT)))
+        .w_full()
+        .gap(px(0.))
 }
 
 #[cfg(test)]

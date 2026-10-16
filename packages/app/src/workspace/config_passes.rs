@@ -89,6 +89,13 @@ impl Workspace {
         self.mirrors = mirrors;
     }
 
+    pub(super) fn apply_config_to_left_dock(&mut self, cx: &mut Context<Self>) {
+        let metrics = crate::ui::theme::UiMetrics(self.mirrors.left_dock_size);
+        self.git
+            .commit_input
+            .update(cx, |panel, cx| panel.set_metrics(metrics, cx));
+    }
+
     /// Each chat pane's name and the transcript defaults it follows until the
     /// user overrides them — applied here as well as at pane creation, so an
     /// open, untouched pane tracks a config edit live. Resolved per pane: the

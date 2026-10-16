@@ -108,6 +108,11 @@
       "$ref": "#/$defs/Rgba",
       "default": "#0f1011ff"
     },
+    "rail_project_bg": {
+      "description": "Maps to `palette::RAIL_PROJECT_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#303946ff"
+    },
     "button_widget_bg": {
       "description": "Maps to `palette::BG_HOVER`.",
       "$ref": "#/$defs/Rgba",

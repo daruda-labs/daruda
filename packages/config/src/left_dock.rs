@@ -19,6 +19,8 @@ pub enum IconColorMode {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct LeftDockConfig {
+    /// Presentation size for dock text, artwork, and row geometry.
+    pub size: crate::UiSize,
     /// Left dock width in pixels on fresh launch. Clamped to
     /// `[LEFT_MIN_W, LEFT_MAX_W]` at load time.
     pub left_default_width: f32,
@@ -46,6 +48,7 @@ const LEFT_DEFAULT_W: f32 = 220.0;
 impl Default for LeftDockConfig {
     fn default() -> Self {
         Self {
+            size: crate::UiSize::Normal,
             left_default_width: LEFT_DEFAULT_W,
             left_collapsed_by_default: false,
             files_show_hidden: true,

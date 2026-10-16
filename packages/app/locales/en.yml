@@ -79,6 +79,7 @@ timestamp:
 
 # Command palette and quick switchers
 command:
+  reset_left_dock_width: "Reset Left Dock Width"
   open_project_config: "Open Project Config…"
   edit_window_title: "Edit Window Title…"
   zoom_window: "Zoom Window"
@@ -265,6 +266,14 @@ titlebar:
 
 # Dock / sidebar tabs (display labels only — DOCK_PANEL_* identity consts stay &'static str)
 dock:
+  worktree_count: "%{count} worktrees"
+  open_tab_count: "%{count} open tabs"
+  no_open_tabs: "No open tabs"
+  session_title: "Session %{session} · %{title}"
+  session_count: "%{count} sessions"
+  session_idle: "Idle"
+  session_connecting: "Connecting"
+  session_executing: "Running a tool"
   right_tab_usage: "Usage"
   right_tab_skills: "Skills"
   right_tab_tools: "Tools"
@@ -887,13 +896,6 @@ claude:
   consent_title: "Enable Claude Code integration?"
   consent_body: "daruda will register hook entries in ~/.claude/settings.json so Claude Code can report session status (Working / Needs attention / Idle) for each worktree.\n\nOther tools' hooks are preserved. You can disable this anytime via the command palette (\"Claude: Uninstall Hook Integration\")."
   consent_confirm: "Enable"
-  # Suffix appended to the active session's badge tooltip to identify
-  # the one that's bound to the focused tab. Empty for inactive
-  # siblings.
-  badge_active_suffix: " (active in this tab)"
-  # Sub-row label preceding the session badges (e.g. `"3 sessions:"`).
-  # Rendered as `format!("{count}{SUFFIX}")`.
-  sessions_label_suffix: " sessions:"
 
 # Main-area tab strip: the status dot's tooltip. The dot is told apart by
 # colour alone, so the tooltip names what it means.

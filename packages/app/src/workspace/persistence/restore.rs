@@ -49,8 +49,8 @@ impl Workspace {
         let left_size = workspace.docks.left_size;
         self.docks.left.update(cx, |d, _| {
             d.is_open = left_open;
-            if left_size > 0.0 {
-                d.size = left_size;
+            if left_size.is_finite() && left_size > 0.0 {
+                d.resize(left_size);
             }
         });
         self.docks.left_view = workspace.active_dock_view;

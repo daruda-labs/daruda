@@ -72,8 +72,8 @@ pub(in crate::workspace::left_dock::projects) fn group_header_row(
         .flex_row()
         .items_center()
         .w_full()
-        .gap(px(theme::LANE_LABEL_GAP))
-        .text_size(px(theme::LANE_GROUP_LABEL_FONT_SIZE))
+        .gap(px(snap.metrics.space(theme::LANE_LABEL_GAP)))
+        .text_size(px(snap.metrics.text(theme::LANE_GROUP_LABEL_FONT_SIZE)))
         .font_weight(gpui::FontWeight::MEDIUM)
         .text_color(label_color)
         .when_some(color_dot, |d, dot| d.child(dot))
@@ -85,17 +85,21 @@ pub(in crate::workspace::left_dock::projects) fn group_header_row(
         )
         .child(
             // Same hit target as the add action; collapse state lives in the SVG.
-            crate::ui::button_icon(("group-chevron", group_id as usize), caret_icon, cx).on_click(
-                cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
-                    cx.stop_propagation();
-                    if let Some(ws) = ws_for_chevron.upgrade() {
-                        ws.update(cx, |ws, cx| ws.toggle_group_collapse(group_id, cx));
-                    }
-                }),
-            ),
+            crate::ui::button_icon_sized(
+                ("group-chevron", group_id as usize),
+                caret_icon,
+                snap.metrics,
+                cx,
+            )
+            .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+                cx.stop_propagation();
+                if let Some(ws) = ws_for_chevron.upgrade() {
+                    ws.update(cx, |ws, cx| ws.toggle_group_collapse(group_id, cx));
+                }
+            })),
         );
 
-    super::tree::row()
+    super::tree::row(snap.metrics)
         .id(("group-header", group_id as usize))
         .group(row_group_key.clone())
         .flex()
@@ -195,9 +199,7 @@ pub(in crate::workspace::left_dock::projects) struct ProjectHeaderArgs {
 /// per-project "create lane" affordance, so the row carries every
 /// project-scoped action.
 ///
-/// `is_collapsed` flips the leading glyph between an open folder
-/// (expanded) and a closed one (collapsed). The glyph carries its own click
-/// handler that toggles the flag; the rest of the row stays bound to
+/// The project initial toggles its fold state; the rest of the row stays bound to
 /// `activate_lane(last_active)` so a header click still snaps the focus.
 pub(in crate::workspace::left_dock::projects) fn project_header_row(
     args: ProjectHeaderArgs,
@@ -239,16 +241,17 @@ pub(in crate::workspace::left_dock::projects) fn project_header_row(
         label: name.clone(),
     };
 
+    let row_metrics = super::tree::RowMetrics::new(snap.metrics);
     let row_group = SharedString::from(format!("project-row-{project_id}"));
-    super::tree::row()
+    super::tree::row(snap.metrics)
         .id(("project-header", project_id as usize))
         .group(row_group.clone())
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(theme::LANE_LABEL_GAP))
+        .gap(px(row_metrics.leading_gap))
         .w_full()
-        .text_size(px(theme::LANE_LABEL_FONT_SIZE))
+        .text_size(px(snap.metrics.text(theme::LANE_LABEL_FONT_SIZE)))
         .text_color(label_color)
         .cursor_pointer()
         .hover(move |d| d.bg(row_hover_bg))
@@ -311,31 +314,32 @@ pub(in crate::workspace::left_dock::projects) fn project_header_row(
         // whatever weight the name carries.
         .child({
             let ws_for_toggle = snap.workspace.clone();
-            let folder_icon = if is_collapsed {
-                crate::ui::icons::FOLDER
-            } else {
-                crate::ui::icons::FOLDER_OPEN
-            };
-            crate::ui::button_icon_glyph(
-                ("project-fold", project_id as usize),
-                folder_icon,
-                theme::LANE_PROJECT_ICON_SIZE,
-                cx,
-            )
-            .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
-                cx.stop_propagation();
-                if let Some(ws) = ws_for_toggle.upgrade() {
-                    ws.update(cx, |ws, cx| ws.toggle_project_collapse(project_id, cx));
-                }
-            }))
+            crate::ui::button_bare_compact(("project-fold", project_id as usize))
+                .label(crate::workspace::left_dock::rail::project_initial(&name))
+                .text_size(px(snap.metrics.text(theme::FONT_SIZE_MD)))
+                .w(px(row_metrics.leading_width))
+                .h(px(row_metrics.leading_width))
+                .when(is_collapsed, |button| button.bg(t.overlay_prominent))
+                .tooltip(name.clone())
+                .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+                    cx.stop_propagation();
+                    if let Some(ws) = ws_for_toggle.upgrade() {
+                        ws.update(cx, |ws, cx| ws.toggle_project_collapse(project_id, cx));
+                    }
+                }))
         })
         .child(div().flex_1().text_ellipsis().child(name))
         // Keep branch metadata quiet beside the project name.
         .when_some(default_branch.filter(|_| !is_unavailable), |row, branch| {
-            row.child(branch_chip(branch, chip_color))
+            row.child(branch_chip(branch, chip_color, snap.metrics))
         })
         .when_some(avail_badge, |row, (icon, state_label)| {
-            row.child(availability_chip(icon, state_label, chip_color))
+            row.child(availability_chip(
+                icon,
+                state_label,
+                chip_color,
+                snap.metrics,
+            ))
         })
         // The create-lane `[+]` is meaningless for an inaccessible
         // project root, so hide it alongside the state chip.
@@ -343,9 +347,10 @@ pub(in crate::workspace::left_dock::projects) fn project_header_row(
             let ws_for_add = snap.workspace.clone();
             let row_group_for_btn = row_group.clone();
             row.child(
-                crate::ui::button_icon(
+                crate::ui::button_icon_sized(
                     ("project-add-lane", project_id as usize),
                     crate::ui::icons::ADD,
+                    snap.metrics,
                     cx,
                 )
                 .invisible()
@@ -413,36 +418,41 @@ pub(in crate::workspace::left_dock::projects) fn section_header(
     // "New Group…". Per-project lane creation lives on each
     // project's `[+ new lane]` row.
     let ws_for_group = snap.workspace.clone();
-    let add_button = crate::ui::button_icon("section-add-toggle", crate::ui::icons::ADD, cx)
-        .dropdown_menu(menu_builder(move |menu, _window, _cx| {
-            let ws_for_group = ws_for_group.clone();
-            menu.item(
-                PopupMenuItem::new(surface_strings::projects::add_menu_project()).on_click(
-                    move |_, _window, app_cx| {
-                        // No workspace handle needed — the global open-folder
-                        // flow reads its config from `SettingsStore` and the
-                        // resulting picker runs async without a captured
-                        // entity.
-                        let config =
-                            crate::settings_store::SettingsStore::global(app_cx).user_arc();
-                        crate::windows::prompt_and_open_folder_with_policy(config, app_cx);
-                    },
-                ),
-            )
-            .item(
-                PopupMenuItem::new(surface_strings::projects::add_menu_group()).on_click(
-                    move |_, window, app_cx| {
-                        if let Some(ws) = ws_for_group.upgrade() {
-                            ws.update(app_cx, |ws, cx| {
-                                ws.on_new_group(&NewGroup, window, cx);
-                            });
-                        }
-                    },
-                ),
-            )
-        }));
+    let add_button = crate::ui::button_icon_sized(
+        "section-add-toggle",
+        crate::ui::icons::ADD,
+        snap.metrics,
+        cx,
+    )
+    .dropdown_menu(menu_builder(move |menu, _window, _cx| {
+        let ws_for_group = ws_for_group.clone();
+        menu.item(
+            PopupMenuItem::new(surface_strings::projects::add_menu_project()).on_click(
+                move |_, _window, app_cx| {
+                    // No workspace handle needed — the global open-folder
+                    // flow reads its config from `SettingsStore` and the
+                    // resulting picker runs async without a captured
+                    // entity.
+                    let config = crate::settings_store::SettingsStore::global(app_cx).user_arc();
+                    crate::windows::prompt_and_open_folder_with_policy(config, app_cx);
+                },
+            ),
+        )
+        .item(
+            PopupMenuItem::new(surface_strings::projects::add_menu_group()).on_click(
+                move |_, window, app_cx| {
+                    if let Some(ws) = ws_for_group.upgrade() {
+                        ws.update(app_cx, |ws, cx| {
+                            ws.on_new_group(&NewGroup, window, cx);
+                        });
+                    }
+                },
+            ),
+        )
+    }));
 
     SectionHeader::new(surface_strings::projects::section_header())
+        .with_metrics(snap.metrics)
         .padding(theme::LANE_ROW_PAD_X, theme::LANE_SECTION_PAD_Y)
         .actions(add_button)
 }

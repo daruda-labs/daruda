@@ -24,7 +24,19 @@ mod geometry_tests;
 
 /// Default secondary button — `small()` + label, excluded from Tab.
 pub fn button(id: impl Into<ElementId>, label: impl Into<SharedString>) -> Button {
+    button_sized(id, label, theme::UiMetrics::default())
+}
+
+/// Standard text action using its host surface size.
+pub fn button_sized(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    metrics: theme::UiMetrics,
+) -> Button {
     standard_button(Button::new(id).small().label(label).tab_stop(false))
+        .h(px(metrics.target(theme::BUTTON_HEIGHT)))
+        .text_size(px(metrics.text(theme::FONT_SIZE_MD)))
+        .line_height(px(metrics.row(theme::INPUT_LINE_HEIGHT)))
 }
 
 fn standard_button(button: Button) -> Button {
@@ -48,7 +60,19 @@ pub fn compact_button(button: Button) -> Button {
 }
 
 pub fn button_compact(id: impl Into<ElementId>, label: impl Into<SharedString>) -> Button {
+    button_compact_sized(id, label, theme::UiMetrics::default())
+}
+
+/// Compact text action using its host surface size.
+pub fn button_compact_sized(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    metrics: theme::UiMetrics,
+) -> Button {
     compact_button(button(id, label))
+        .h(px(metrics.row(theme::BUTTON_COMPACT_HEIGHT)))
+        .text_size(px(metrics.text(theme::FONT_SIZE_MD)))
+        .line_height(px(metrics.row(theme::BUTTON_COMPACT_LINE_HEIGHT)))
 }
 
 /// Primary variant.
@@ -90,15 +114,37 @@ pub fn button_with_icon(
     label: impl Into<SharedString>,
     path: &'static str,
 ) -> Button {
+    button_with_icon_sized(id, label, path, theme::UiMetrics::default())
+}
+
+/// Labelled control using a surface's presentation size.
+pub fn button_with_icon_sized(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    path: &'static str,
+    metrics: theme::UiMetrics,
+) -> Button {
     standard_button(button_bare(id))
-        .child(super::icons::icon(path))
+        .h(px(metrics.target(theme::BUTTON_HEIGHT)))
+        .text_size(px(metrics.text(theme::FONT_SIZE_MD)))
+        .child(super::icons::icon(path).with_size(px(metrics.icon(theme::CONTROL_ICON_SIZE))))
         .child(label.into())
 }
 
 /// Ghost chrome with a fixed 24px hit target and independent 16px SVG.
 pub fn button_icon(id: impl Into<ElementId>, path: &'static str, cx: &App) -> Button {
+    button_icon_sized(id, path, theme::UiMetrics::default(), cx)
+}
+
+/// Icon control using a surface size while preserving its minimum hit target.
+pub fn button_icon_sized(
+    id: impl Into<ElementId>,
+    path: &'static str,
+    metrics: theme::UiMetrics,
+    cx: &App,
+) -> Button {
     let t = theme::current(cx);
-    icon_button_shell(id, path).custom(
+    icon_button_shell_sized(id, path, metrics).custom(
         ButtonCustomVariant::new(cx)
             .foreground(t.text_muted)
             .hover(t.dock_icon_active_bg)
@@ -106,10 +152,27 @@ pub fn button_icon(id: impl Into<ElementId>, path: &'static str, cx: &App) -> Bu
     )
 }
 
+/// Menu half of a split text action; shares the label half's height.
+pub fn button_split_caret_sized(id: impl Into<ElementId>, metrics: theme::UiMetrics) -> Button {
+    icon_button_shell_sized(id, crate::icons::EXPAND_MORE, metrics)
+        .h(px(metrics.target(theme::BUTTON_HEIGHT)))
+        .rounded_l_none()
+}
+
 /// Destructive action: neutral at rest, a translucent red fill on hover.
 pub fn button_icon_danger(id: impl Into<ElementId>, path: &'static str, cx: &App) -> Button {
+    button_icon_danger_sized(id, path, theme::UiMetrics::default(), cx)
+}
+
+/// Destructive icon control using the host surface's presentation size.
+pub fn button_icon_danger_sized(
+    id: impl Into<ElementId>,
+    path: &'static str,
+    metrics: theme::UiMetrics,
+    cx: &App,
+) -> Button {
     let hover = theme::with_alpha(theme::ERROR, theme::CONTROL_DANGER_HOVER_ALPHA);
-    icon_button_shell(id, path).custom(
+    icon_button_shell_sized(id, path, metrics).custom(
         ButtonCustomVariant::new(cx)
             .foreground(theme::current(cx).text_muted)
             .hover(hover)
@@ -153,7 +216,18 @@ pub fn button_icon_on_surface(
 fn icon_button_shell(id: impl Into<ElementId>, path: &'static str) -> Button {
     // The vendor's icon slot inherits Small (14px). A child decouples artwork
     // from the button tier while the shell still owns focus and disabled state.
-    icon_target(id).child(super::icons::icon(path))
+    icon_button_shell_sized(id, path, theme::UiMetrics::default())
+}
+
+fn icon_button_shell_sized(
+    id: impl Into<ElementId>,
+    path: &'static str,
+    metrics: theme::UiMetrics,
+) -> Button {
+    icon_target(id)
+        .w(px(metrics.target(theme::CONTROL_TARGET_SIZE)))
+        .h(px(metrics.target(theme::CONTROL_TARGET_SIZE)))
+        .child(super::icons::icon(path).with_size(px(metrics.icon(theme::CONTROL_ICON_SIZE))))
 }
 
 fn icon_target(id: impl Into<ElementId>) -> Button {

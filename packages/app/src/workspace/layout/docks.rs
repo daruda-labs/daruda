@@ -14,9 +14,10 @@ pub(in crate::workspace) struct Docks {
     pub(in crate::workspace) left_view: daruda_store::project::LeftDockView,
     /// Active utility tab (Usage / Skills / Tools), independent of pages.
     pub(in crate::workspace) right_view: daruda_store::project::RightDockView,
-    /// Dock resize drag — active while the user is pulling on the right edge
-    /// of the left dock, the left edge of the right dock, or the top edge of
-    /// the bottom dock.
+    /// One root-deployed worktree or session chooser, independent of dock width.
+    pub(in crate::workspace) session_chooser:
+        Option<crate::workspace::left_dock::sessions::Chooser>,
+    /// Live resize of a dock edge, cleared when the pointer is released.
     pub(in crate::workspace) drag: Option<super::ops::DockDrag>,
 }
 
@@ -62,6 +63,7 @@ impl Docks {
             bottom,
             left_view: daruda_store::project::LeftDockView::default(),
             right_view: daruda_store::project::RightDockView::default(),
+            session_chooser: None,
             drag: None,
         }
     }
