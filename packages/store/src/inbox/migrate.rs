@@ -72,6 +72,9 @@ impl Machine for SourceMachine {
     type State = Attribution;
     type Event = SourceEvent;
     type Rejected = SourceRejected;
+    // Bump with any change to how `SourceEvent` or `Attribution` serializes, so an older
+    // build refuses the log as too new.
+    const SCHEMA: u32 = 1;
 
     fn check(state: &Attribution, event: &SourceEvent) -> Result<(), SourceRejected> {
         if state.captured.is_some() {

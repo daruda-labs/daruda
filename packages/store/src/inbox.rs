@@ -91,6 +91,9 @@ impl Machine for InboxMachine {
     type State = InboxState;
     type Event = InboxEvent;
     type Rejected = InboxRejected;
+    // Bump with any change to how `InboxEvent` or `InboxState` serializes, so an older
+    // build refuses the log as too new.
+    const SCHEMA: u32 = 1;
 
     fn check(state: &InboxState, event: &InboxEvent) -> Result<(), InboxRejected> {
         match event {
