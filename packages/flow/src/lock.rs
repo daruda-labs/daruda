@@ -385,6 +385,15 @@ pub fn read_holder(dir: &Path) -> Option<LockHolder> {
     read_at(&dir.join(LOCK_FILE))
 }
 
+/// Whether no lock file exists in `dir` at all. An unreadable one is not
+/// absent: the winner of a reclaim race may not have written it yet.
+pub(crate) fn is_absent(dir: &Path) -> bool {
+    matches!(
+        std::fs::symlink_metadata(dir.join(LOCK_FILE)),
+        Err(e) if e.kind() == ErrorKind::NotFound
+    )
+}
+
 /// The same read against a full path, for the takeover file.
 fn read_at(path: &Path) -> Option<LockHolder> {
     let text = std::fs::read_to_string(path).ok()?;

@@ -2,8 +2,8 @@
 //!
 //! A marker is a cache of the run log's `RunEnded`, written after it; when
 //! the two disagree the log wins. A crash cannot write a record of itself,
-//! so `Crashed` is derived from an open log or no marker plus a dead lock
-//! holder rather than from a marker of its own.
+//! so `Crashed` is derived from an open log whose lock is gone or names a
+//! dead holder, rather than from a marker of its own.
 
 use crate::error::{FlowIoError, IoSite};
 use crate::lock::IsAlive;
@@ -115,12 +115,19 @@ fn marker_name(outcome: &RunOutcome) -> Option<&'static str> {
 /// `None` says the caller does not know where it is. `crate::resume` has
 /// the test that walks the whole path.
 pub fn run_status(run_dir: &Path, lock_dir: Option<&Path>, is_alive: IsAlive<'_>) -> RunStatus {
-    match crate::run_log::reader::ending(run_dir) {
+    let open = match crate::run_log::reader::ending(run_dir) {
         crate::run_log::reader::Ending::Ended(kind) => return status_of_end(kind),
-        crate::run_log::reader::Ending::Open | crate::run_log::reader::Ending::NoLog => {}
-    }
+        crate::run_log::reader::Ending::Open => true,
+        crate::run_log::reader::Ending::NoLog => false,
+    };
     if let Some(status) = marked(run_dir) {
         return status;
+    }
+    // A log is only ever written under the lock, so an open log with no
+    // lock file left means its writer is gone: a refused resume or a
+    // panicking run thread gives the lock back without ending the log.
+    if open && lock_dir.is_some_and(crate::lock::is_absent) {
+        return RunStatus::Crashed;
     }
     lock_status(run_dir, lock_dir, is_alive)
 }
@@ -159,8 +166,9 @@ fn lock_status(run_dir: &Path, lock_dir: Option<&Path>, is_alive: IsAlive<'_>) -
     // path with no lock in it, which would read the same as "free".
     let holder = lock_dir.and_then(crate::lock::read_holder);
     // A lock naming a different run is evidence about that run, not this
-    // one; an unreadable or absent one is no evidence at all. Either way
-    // there is nothing here to call a crash without guessing.
+    // one, and while it is held no resume could take the tree anyway; an
+    // unreadable or absent one is no evidence at all. Either way there is
+    // nothing here to call a crash without guessing.
     match holder {
         Some(holder) if !holds_this_run(&holder.run_id, run_dir) => RunStatus::Unknown,
         Some(holder) if is_alive(holder.pid) => RunStatus::Running,
@@ -531,6 +539,45 @@ mod tests {
         assert_eq!(gone, vec!["01B00".to_string(), "01B01".to_string()]);
         assert_eq!(surviving(dir.path()).len(), 20);
         assert!(dir.path().join("01B21").is_dir(), "the newest must stay");
+    }
+
+    /// A log that holds `RunStarted` and never ended, as a crash leaves one.
+    fn open_log_in(run_dir: &Path) {
+        let mut log = crate::run_log::store::open_file_log(run_dir)
+            .unwrap_or_else(|e| panic!("the log opens: {e:?}"));
+        log.commit(crate::run_log::machine::FlowRunEvent::RunStarted {
+            nodes: Vec::new(),
+            until: None,
+            pinned: Vec::new(),
+            profile: None,
+        })
+        .expect("commit");
+    }
+
+    /// A log that never ended with no lock left: whatever stopped writing
+    /// it gave the lock back, and no live writer runs without one.
+    #[test]
+    fn an_open_log_with_no_lock_reads_as_crashed() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let run_dir = run_dir_in(dir.path(), "01J");
+        open_log_in(&run_dir);
+        assert_eq!(status_beside(&run_dir, &|_| true), RunStatus::Crashed);
+    }
+
+    /// Where the lock is, or whose it is, still decides: an unknown lock
+    /// directory and a lock another run holds say nothing about this run.
+    #[test]
+    fn an_open_log_still_needs_this_runs_lock_to_be_read_as_gone() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let run_dir = run_dir_in(dir.path(), "01J");
+        open_log_in(&run_dir);
+        assert_eq!(run_status(&run_dir, None, &|_| false), RunStatus::Unknown);
+        write_lock(dir.path(), 4242, "01K");
+        assert_eq!(status_beside(&run_dir, &|_| false), RunStatus::Unknown);
+        write_lock(dir.path(), 4242, "01J");
+        assert_eq!(status_beside(&run_dir, &|_| true), RunStatus::Running);
+        std::fs::write(dir.path().join(".lock"), "{ truncated").expect("write");
+        assert_eq!(status_beside(&run_dir, &|_| true), RunStatus::Unknown);
     }
 
     /// A truncated or garbage lock is not evidence of a live run — the same

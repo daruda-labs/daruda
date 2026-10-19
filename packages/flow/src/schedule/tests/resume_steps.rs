@@ -10,7 +10,7 @@ use daruda_runlog::testing::{Fault, FaultBackend};
 
 /// Leave the run in `run_dir` the way a killed process would: no end in its
 /// log, no marker, and a lock naming a pid that is gone.
-fn as_if_killed(request: &crate::request::RunRequest, run_dir: &Path) {
+pub(super) fn as_if_killed(request: &crate::request::RunRequest, run_dir: &Path) {
     crate::run_log::testing::forget_stop(run_dir);
     for marker in ["DONE", "FAILED", "CANCELED"] {
         let _ = std::fs::remove_file(run_dir.join(marker));
@@ -28,7 +28,7 @@ fn as_if_killed(request: &crate::request::RunRequest, run_dir: &Path) {
 }
 
 /// The request that continues `run_dir`, as a host builds it.
-fn resume_request(
+pub(super) fn resume_request(
     text: &str,
     cwd: &Path,
     run_dir: &Path,

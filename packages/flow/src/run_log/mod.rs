@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 /// from `progress.jsonl` so an older build never reads it as its journal.
 const RUN_LOG_DIR: &str = "progress";
 /// Flow run logs never compact, so generation 0 is the whole run.
-const FIRST_LOG_FILE: &str = "log.0.jsonl";
+pub(crate) const FIRST_LOG_FILE: &str = "log.0.jsonl";
 
 /// Where the run in `run_dir` keeps its log.
 pub fn log_dir(run_dir: &Path) -> PathBuf {

@@ -182,9 +182,7 @@ pub(crate) enum Settled {
 /// Only for a run that stopped without ending; a stop cuts the wait short.
 ///
 /// Before the lock, and reading only when the log was last written: a
-/// stop during the wait must leave no trace. Under the lock it would have
-/// to give the lock back, and a crashed run whose lock is gone reads as
-/// `Unknown`, which nobody can resume.
+/// stop during the wait must leave no trace, not even a reclaimed lock.
 pub(crate) fn settle_after_crash(
     run_dir: &Path,
     settle: Duration,
