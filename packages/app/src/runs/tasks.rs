@@ -343,7 +343,7 @@ impl RunsHost {
         cx.on_app_quit(|cx| {
             if !Self::shut_down_flows(QUIT_FLUSH_DEADLINE, cx) {
                 LogWriter::log(
-                    ErrorReport::new("A flow run was still ending its processes at quit")
+                    ErrorReport::new(crate::surface::strings::error::flows_quit_shutdown())
                         .severity(ErrorSeverity::Warning)
                         .at(file!(), line!())
                         .dedup("flows.quit_shutdown")
@@ -354,7 +354,7 @@ impl RunsHost {
                 && let Err(error) = store.flush(QUIT_FLUSH_DEADLINE)
             {
                 LogWriter::log(
-                    ErrorReport::new("Task commits were still queued at quit")
+                    ErrorReport::new(crate::surface::strings::error::tasks_quit_flush())
                         .severity(ErrorSeverity::Warning)
                         .from_error(&error)
                         .at(file!(), line!())

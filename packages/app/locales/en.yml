@@ -1496,6 +1496,10 @@ error:
   # Settling the runs the last session left failed this time, without a
   # crash; the next start tries again.
   tasks_settle_failed: "Tasks are read-only until daruda restarts: the runs left by the last session could not be settled"
+  # Quitting stopped waiting for task changes to become durable.
+  tasks_quit_flush: "Task changes were still being saved at quit"
+  # Quitting stopped waiting for a flow run to end the processes it started.
+  flows_quit_shutdown: "A flow run was still ending its processes at quit"
   # A task change the task log refused, e.g. stopping a task that already ended.
   task_command_refused: "That task change is no longer possible"
   task_escalation_orphan: "Tool-use-failure escalation has no matching task"
