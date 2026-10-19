@@ -229,6 +229,7 @@ pub(super) fn end_kind(end: &EndLine) -> EndKind {
         EndLine::Failed { .. }
         | EndLine::BudgetExhausted { .. }
         | EndLine::Io { .. }
+        | EndLine::Log { .. }
         | EndLine::Unprovisioned { .. } => EndKind::Failed,
     }
 }

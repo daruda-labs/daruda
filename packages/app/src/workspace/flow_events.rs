@@ -366,6 +366,8 @@ fn flow_outcome_notice(
         // here — named anyway so the compiler, not a reader, checks that.
         RunEnd::BudgetExhausted { .. }
         | RunEnd::Io { .. }
+        | RunEnd::Log { .. }
+        | RunEnd::NotResumed { .. }
         | RunEnd::LockHeld { .. }
         | RunEnd::Invalid { .. }
         | RunEnd::Unprovisioned { .. }
@@ -406,6 +408,8 @@ fn end_refusal(end: &RunEnd) -> Option<String> {
         RunEnd::Done | RunEnd::Failed { .. } | RunEnd::Canceled { .. } => None,
         RunEnd::BudgetExhausted { limit } => Some(s::flow::budget_exhausted(*limit)),
         RunEnd::Io { message, .. } => Some(message.clone()),
+        RunEnd::Log { message, .. } => Some(message.clone()),
+        RunEnd::NotResumed { message } => Some(message.clone()),
         RunEnd::LockHeld { holder } => Some(s::flow::lock_held(holder.pid)),
         RunEnd::Invalid { issues } => Some(issue_report(issues)),
         RunEnd::Unprovisioned { agent, message } => Some(s::flow::unprovisioned(agent, message)),

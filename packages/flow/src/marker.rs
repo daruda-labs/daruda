@@ -76,6 +76,7 @@ pub fn status_of(outcome: &RunOutcome) -> Option<RunStatus> {
         RunOutcome::Failed { .. }
         | RunOutcome::BudgetExhausted { .. }
         | RunOutcome::Io(_)
+        | RunOutcome::Log(_)
         | RunOutcome::Unprovisioned { .. } => Some(RunStatus::Failed),
         // Not folded into `Failed`: that would make it unresumable, and a
         // run that stopped because a directory would not resolve has lost
@@ -87,6 +88,9 @@ pub fn status_of(outcome: &RunOutcome) -> Option<RunStatus> {
         // Neither took the directory, so neither has anything to say
         // about it.
         RunOutcome::LockHeld { .. } | RunOutcome::Invalid { .. } => None,
+        // Refused under the lock before anything changed: how the run last
+        // ended still stands.
+        RunOutcome::NotResumed(_) => None,
         // No marker, like a crash: the evidence a resume reads is the log
         // and a lock whose holder is gone.
         RunOutcome::ShutDown => None,

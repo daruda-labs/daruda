@@ -160,6 +160,14 @@ pub enum EndLine {
     Stalled {
         nodes: Vec<NodeId>,
     },
+    /// The log refused a record for a reason other than the disk, and could
+    /// still take this one.
+    Log {
+        site: SiteLine,
+        doing: String,
+        path: PathBuf,
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -467,7 +475,16 @@ impl EndLine {
             RunOutcome::Stalled { nodes } => Self::Stalled {
                 nodes: nodes.clone(),
             },
-            RunOutcome::LockHeld { .. } | RunOutcome::Invalid { .. } | RunOutcome::ShutDown => {
+            RunOutcome::Log(e) => Self::Log {
+                site: (&e.site).into(),
+                doing: e.doing.to_string(),
+                path: e.path.clone(),
+                message: e.refusal.to_string(),
+            },
+            RunOutcome::LockHeld { .. }
+            | RunOutcome::Invalid { .. }
+            | RunOutcome::ShutDown
+            | RunOutcome::NotResumed(_) => {
                 return None;
             }
         })
@@ -501,6 +518,17 @@ impl EndLine {
             },
             Self::Stalled { nodes } => RunEnd::Stalled {
                 nodes: nodes.clone(),
+            },
+            Self::Log {
+                site,
+                doing,
+                path,
+                message,
+            } => RunEnd::Log {
+                site: site.into(),
+                doing: doing.clone(),
+                path: path.clone(),
+                message: message.clone(),
             },
         }
     }

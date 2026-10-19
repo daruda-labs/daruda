@@ -214,6 +214,63 @@ impl std::error::Error for FlowIoError {
     }
 }
 
+/// The run log would not open, take a record or be read for a reason other
+/// than the disk failing. Apart from [`FlowIoError`] so a host can tell an
+/// engine fault, or a log another build wrote, from a failing disk.
+#[derive(Debug)]
+pub struct FlowLogError {
+    pub site: IoSite,
+    pub doing: &'static str,
+    /// The log's directory.
+    pub path: std::path::PathBuf,
+    pub refusal: LogRefusal,
+}
+
+/// Why the run log refused, when the disk did not.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum LogRefusal {
+    /// The run's state machine refused the record: an engine fault.
+    #[error("the run log refused the record: {0}")]
+    Rejected(crate::run_log::machine::FlowRunRejected),
+    /// The log answered a proposal with another record: an engine fault.
+    #[error("the run log answered with a different record than the one proposed")]
+    Mismatched,
+    /// An earlier write failed, so the log takes nothing more.
+    #[error("the run log is closed after an earlier write failure")]
+    Closed,
+    /// The log's writer thread stopped after a panic.
+    #[error("the run log's writer stopped after a panic")]
+    Stopped,
+    /// The log was read from its own writer thread, which would wait on
+    /// itself: an engine fault.
+    #[error("the run log was read from its own writer thread")]
+    Reentered,
+    #[error("the run log is corrupt at line {line}")]
+    Corrupt { line: u64 },
+    #[error("the run log was written in format {found}, newer than this build reads ({supported})")]
+    TooNew { found: u32, supported: u32 },
+    #[error("the run log's generation {generation} has no whole snapshot to restore from")]
+    NoWholeGeneration { generation: u64 },
+}
+
+impl std::fmt::Display for FlowLogError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.site {
+            IoSite::Run => write!(f, "{} ", self.doing)?,
+            IoSite::Node { node, attempt } => {
+                write!(f, "{} for `{node}` attempt {attempt} ", self.doing)?
+            }
+        }
+        write!(f, "failed at {}: {}", self.path.display(), self.refusal)
+    }
+}
+
+impl std::error::Error for FlowLogError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.refusal)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

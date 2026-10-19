@@ -96,9 +96,7 @@ impl Run<'_> {
         let FlowRunEvent::FixStarted { evidence, .. } = started.event else {
             return Err(self.log.failure(
                 super::site(gate, ctx.attempt),
-                daruda_runlog::CommitError::Io(std::io::Error::other(
-                    "the log answered a fix with another event",
-                )),
+                crate::error::LogRefusal::Mismatched,
             ));
         };
         let reserve = || self.reserve_extra_turn();

@@ -75,12 +75,9 @@ impl Run<'_> {
                 attempt,
                 evidence,
             }),
-            _ => Err(self.log.failure(
-                site(id, next),
-                daruda_runlog::CommitError::Io(std::io::Error::other(
-                    "the log answered an attempt with another event",
-                )),
-            )),
+            _ => Err(self
+                .log
+                .failure(site(id, next), crate::error::LogRefusal::Mismatched)),
         }
     }
 

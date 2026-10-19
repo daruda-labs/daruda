@@ -20,7 +20,7 @@ use std::time::Duration;
 use daruda_runlog::{LogBackend, RunLog};
 
 use crate::NodeId;
-use crate::error::{FlowError, FlowIoError, IoSite};
+use crate::error::{FlowError, IoSite};
 use crate::load::LoadedFlow;
 use crate::marker::RunStatus;
 use crate::run_log::line::AttemptLine;
@@ -41,7 +41,6 @@ use crate::schedule::RunOutcome;
 /// silently change what the run is, halfway through.
 pub const RUN_SPEC_FILE: &str = "run.yaml";
 
-const RESUME: &str = "continuing the run";
 const IMPORT: &str = "taking over the run's progress journal";
 
 /// Whether a run may be picked up.
@@ -227,17 +226,6 @@ fn wait_out(
     }
 }
 
-/// A refusal found once the lock is held: nothing was recorded, so the run
-/// directory is left as it was.
-fn refused(run_dir: &Path, error: ResumeError) -> RunOutcome {
-    RunOutcome::Io(FlowIoError {
-        site: IoSite::Run,
-        doing: RESUME,
-        path: run_dir.to_path_buf(),
-        source: std::io::Error::other(error.to_string()),
-    })
-}
-
 /// Open the run's log under the lock (§5.5 steps 1–2), taking over the
 /// journal of a run an older build started.
 pub(crate) fn open_under_lock(
@@ -245,7 +233,9 @@ pub(crate) fn open_under_lock(
     loaded: &LoadedFlow,
 ) -> Result<RunLog<FlowRunMachine, daruda_runlog::FileBackend>, RunOutcome> {
     if !reader::started(run_dir) {
-        return Err(refused(run_dir, ResumeError::NothingStarted));
+        // Found once the lock is held: nothing was recorded, so the run
+        // directory is left as it was.
+        return Err(RunOutcome::NotResumed(ResumeError::NothingStarted));
     }
     let mut log = crate::run_log::store::open_file_log(run_dir)?;
     // Decided on what the opened log holds, not on whether it exists: a
@@ -257,12 +247,11 @@ pub(crate) fn open_under_lock(
         return Ok(log);
     }
     log.commit(import_journal(run_dir, loaded)).map_err(|e| {
-        RunOutcome::Io(FlowIoError {
-            site: IoSite::Run,
-            doing: IMPORT,
-            path: crate::run_log::log_dir(run_dir),
-            source: std::io::Error::other(e.to_string()),
-        })
+        crate::run_log::store::LogFault::from(e).outcome(
+            IoSite::Run,
+            IMPORT,
+            crate::run_log::log_dir(run_dir),
+        )
     })?;
     Ok(log)
 }
@@ -365,7 +354,7 @@ pub(crate) fn pick_up<B: LogBackend + Send + 'static>(
             crate::run_log::machine::RunPhase::Fresh => ResumeError::NothingStarted,
             _ => ResumeError::NotResumable(crate::marker::run_status(run_dir, None, &|_| false)),
         };
-        return Err(refused(run_dir, why));
+        return Err(RunOutcome::NotResumed(why));
     }
     // Step 3. A marker left in place would keep saying how the run last
     // ended while it runs again (F8).

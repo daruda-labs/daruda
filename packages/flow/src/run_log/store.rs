@@ -10,11 +10,11 @@ use std::time::{Duration, Instant};
 
 use daruda_runlog::{
     AfterCommit, Body, CatchUp, CommitError, Committed, Committer, FileBackend, LogBackend,
-    OpenError, Record, RunLog,
+    OpenError, Record, RunLog, SubscribeError,
 };
 
 use super::machine::{FlowRunEvent, FlowRunMachine, FlowRunRejected, FlowRunState};
-use crate::error::{FlowIoError, IoSite};
+use crate::error::{FlowIoError, FlowLogError, IoSite, LogRefusal};
 use crate::event::{RunNotice, Sequenced};
 use crate::schedule::RunOutcome;
 
@@ -31,8 +31,8 @@ pub(crate) fn open_file_log(
     run_dir: &Path,
 ) -> Result<RunLog<FlowRunMachine, FileBackend>, RunOutcome> {
     let dir = super::log_dir(run_dir);
-    std::fs::create_dir_all(&dir).map_err(|source| open_failed(&dir, source))?;
-    RunLog::open(FileBackend::new(dir.clone()), BUILD).map_err(|e| open_failed(&dir, open_io(e)))
+    std::fs::create_dir_all(&dir).map_err(|source| open_failed(&dir, source.into()))?;
+    RunLog::open(FileBackend::new(dir.clone()), BUILD).map_err(|e| open_failed(&dir, e.into()))
 }
 
 /// The same over any backend, for the tests that crash one.
@@ -41,23 +41,87 @@ pub(crate) fn open_log<B: LogBackend>(
     backend: B,
     dir: &Path,
 ) -> Result<RunLog<FlowRunMachine, B>, RunOutcome> {
-    RunLog::open(backend, BUILD).map_err(|e| open_failed(dir, open_io(e)))
+    RunLog::open(backend, BUILD).map_err(|e| open_failed(dir, e.into()))
 }
 
-fn open_io(error: OpenError) -> std::io::Error {
-    match error {
-        OpenError::Io(e) => e,
-        other => std::io::Error::other(other.to_string()),
+fn open_failed(dir: &Path, fault: LogFault) -> RunOutcome {
+    fault.outcome(IoSite::Run, OPEN, dir.to_path_buf())
+}
+
+/// What went wrong between a run and its log: the disk, or a refusal the
+/// disk had no part in. Kept apart until it becomes the run's outcome, so a
+/// host can tell them apart.
+#[derive(Debug)]
+pub(crate) enum LogFault {
+    Disk(std::io::Error),
+    Refused(LogRefusal),
+}
+
+impl LogFault {
+    pub(crate) fn outcome(self, site: IoSite, doing: &'static str, path: PathBuf) -> RunOutcome {
+        match self {
+            LogFault::Disk(source) => RunOutcome::Io(FlowIoError {
+                site,
+                doing,
+                path,
+                source,
+            }),
+            LogFault::Refused(refusal) => RunOutcome::Log(FlowLogError {
+                site,
+                doing,
+                path,
+                refusal,
+            }),
+        }
     }
 }
 
-fn open_failed(dir: &Path, source: std::io::Error) -> RunOutcome {
-    RunOutcome::Io(FlowIoError {
-        site: IoSite::Run,
-        doing: OPEN,
-        path: dir.to_path_buf(),
-        source,
-    })
+impl From<std::io::Error> for LogFault {
+    fn from(error: std::io::Error) -> Self {
+        LogFault::Disk(error)
+    }
+}
+
+impl From<LogRefusal> for LogFault {
+    fn from(refusal: LogRefusal) -> Self {
+        LogFault::Refused(refusal)
+    }
+}
+
+impl From<FlowCommitError> for LogFault {
+    fn from(error: FlowCommitError) -> Self {
+        match error {
+            CommitError::Io(e) => LogFault::Disk(e),
+            CommitError::Rejected(rejected) => LogRefusal::Rejected(rejected).into(),
+            CommitError::Closed => LogRefusal::Closed.into(),
+            CommitError::Poisoned => LogRefusal::Stopped.into(),
+        }
+    }
+}
+
+impl From<OpenError> for LogFault {
+    fn from(error: OpenError) -> Self {
+        match error {
+            OpenError::Io(e) => LogFault::Disk(e),
+            OpenError::Corrupt { line } => LogRefusal::Corrupt { line }.into(),
+            OpenError::TooNew { found, supported } => {
+                LogRefusal::TooNew { found, supported }.into()
+            }
+            OpenError::NoWholeGeneration { generation } => {
+                LogRefusal::NoWholeGeneration { generation }.into()
+            }
+        }
+    }
+}
+
+impl From<SubscribeError> for LogFault {
+    fn from(error: SubscribeError) -> Self {
+        match error {
+            SubscribeError::Io(e) => LogFault::Disk(e),
+            SubscribeError::Stopped => LogRefusal::Stopped.into(),
+            SubscribeError::OnCommitterThread => LogRefusal::Reentered.into(),
+        }
+    }
 }
 
 /// Time the run spent with a question open, read off the committed state.
@@ -184,7 +248,7 @@ impl FlowRunStore {
             narrate_live(&narrated_dir, events.as_ref(), record, state);
         });
         let committer = Committer::spawn(log, "flow-run-log", hook)
-            .map_err(|source| open_failed(&dir, source))?;
+            .map_err(|source| open_failed(&dir, source.into()))?;
         Ok(Self {
             inner: Rc::new(Inner {
                 committer,
@@ -249,12 +313,8 @@ impl FlowRunStore {
     }
 
     /// Every event committed so far, read on the committer thread.
-    pub(crate) fn events(&self) -> Result<Vec<FlowRunEvent>, FlowCommitError> {
-        let (catch_up, _live) = self
-            .inner
-            .committer
-            .subscribe(0)
-            .map_err(|e| CommitError::Io(std::io::Error::other(e.to_string())))?;
+    pub(crate) fn events(&self) -> Result<Vec<FlowRunEvent>, LogFault> {
+        let (catch_up, _live) = self.inner.committer.subscribe(0)?;
         Ok(match catch_up {
             CatchUp::Records(records) => records
                 .into_iter()
@@ -269,17 +329,8 @@ impl FlowRunStore {
 
     /// A commit that failed, as the outcome the run ends with: past this
     /// point nothing the run does can be recorded, so it cannot go on.
-    pub(crate) fn failure(&self, site: IoSite, error: FlowCommitError) -> RunOutcome {
-        let source = match error {
-            CommitError::Io(e) => e,
-            other => std::io::Error::other(other.to_string()),
-        };
-        RunOutcome::Io(FlowIoError {
-            site,
-            doing: RECORD,
-            path: self.inner.dir.clone(),
-            source,
-        })
+    pub(crate) fn failure(&self, site: IoSite, error: impl Into<LogFault>) -> RunOutcome {
+        error.into().outcome(site, RECORD, self.inner.dir.clone())
     }
 }
 
@@ -369,6 +420,28 @@ mod tests {
             clock.parked(now),
             clock.parked(now + Duration::from_secs(60)),
             "the closed question still counts as open"
+        );
+    }
+
+    /// A record the machine refuses is an engine fault, not a disk failure,
+    /// and the outcome it ends the run with says which.
+    #[test]
+    fn a_refused_commit_is_not_a_disk_failure() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let node = crate::NodeId::from("design");
+        let store = super::super::testing::attempt_in_flight(dir.path(), &node);
+        let again = smol::block_on(store.commit(FlowRunEvent::attempt_started(node, 0)))
+            .expect_err("a second start beside the first is refused");
+        let outcome = store.failure(IoSite::Run, again);
+        assert!(
+            matches!(
+                &outcome,
+                RunOutcome::Log(FlowLogError {
+                    refusal: LogRefusal::Rejected(FlowRunRejected::InFlight(_)),
+                    ..
+                })
+            ),
+            "{outcome:?}"
         );
     }
 

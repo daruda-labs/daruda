@@ -273,6 +273,8 @@ fn result_of(outcome: &RunOutcome) -> String {
             format!("never ran: `{agent}`'s runtime could not be prepared: {message}.")
         }
         RunOutcome::ShutDown => "stopped when the app quit; it can be resumed.".to_string(),
+        RunOutcome::Log(e) => format!("stopped because its log refused: {e}."),
+        RunOutcome::NotResumed(e) => format!("not resumed: {e}."),
     }
 }
 

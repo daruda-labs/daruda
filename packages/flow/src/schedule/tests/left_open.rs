@@ -43,7 +43,10 @@ fn a_resume_refused_under_the_lock_leaves_the_run_resumable() {
     let refused = execute(&resumed, &FakeRunner::new(), &CancelToken::default());
 
     assert!(
-        matches!(refused.outcome, RunOutcome::Io(_)),
+        matches!(
+            &refused.outcome,
+            RunOutcome::Log(e) if matches!(e.refusal, crate::error::LogRefusal::TooNew { .. })
+        ),
         "{:?}",
         refused.outcome
     );
@@ -156,4 +159,29 @@ fn a_run_that_panicked_is_resumable() {
         report.outcome
     );
     assert_eq!(runner.calls()[0].attempt, 2, "the cut attempt was reused");
+}
+
+/// A run that ended between `prepare` and the lock is refused under the
+/// lock as not resumable, which a host must be able to tell from a disk
+/// failure, and nothing in its directory changes.
+#[test]
+fn a_resume_of_a_run_that_ended_meanwhile_is_refused_as_such() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let request = request_for(CHAIN, dir.path());
+    let first = execute(&request, &FakeRunner::new(), &CancelToken::default());
+    assert!(matches!(first.outcome, RunOutcome::Done));
+    let mut resumed = request_for(CHAIN, dir.path());
+    resumed.resume = Some(crate::resume::Continuation::default());
+
+    let refused = execute(&resumed, &FakeRunner::new(), &CancelToken::default());
+
+    assert!(
+        matches!(
+            refused.outcome,
+            RunOutcome::NotResumed(crate::resume::ResumeError::NotResumable(RunStatus::Done))
+        ),
+        "{:?}",
+        refused.outcome
+    );
+    assert!(first.run_dir.join("DONE").is_file());
 }

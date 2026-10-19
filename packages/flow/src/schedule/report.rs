@@ -61,6 +61,13 @@ pub enum RunOutcome {
     /// The app quit while the run was going. Its processes were ended and
     /// no ending was recorded, so the run reads as crashed and resumes.
     ShutDown,
+    /// The run log refused for a reason other than the disk: an engine
+    /// fault, a log another build wrote, or a writer stopped by an earlier
+    /// failure. The run could not record what it did, so it stopped.
+    Log(crate::error::FlowLogError),
+    /// A resume found under the lock that the run cannot be continued after
+    /// all. Nothing was recorded, and the run directory is as it was.
+    NotResumed(crate::resume::ResumeError),
 }
 
 impl RunOutcome {

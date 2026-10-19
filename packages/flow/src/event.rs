@@ -112,6 +112,18 @@ pub enum RunEnd {
     },
     /// The app quit mid-run; nothing about an ending was recorded.
     ShutDown,
+    /// The run log refused for a reason other than the disk.
+    Log {
+        site: IoSite,
+        doing: String,
+        path: PathBuf,
+        message: String,
+    },
+    /// A resume found under the lock that the run cannot be continued.
+    /// Nothing was recorded.
+    NotResumed {
+        message: String,
+    },
 }
 
 /// A value and its place in the run log that recorded it.
@@ -186,6 +198,15 @@ impl From<&RunOutcome> for RunEnd {
                 nodes: nodes.clone(),
             },
             RunOutcome::ShutDown => RunEnd::ShutDown,
+            RunOutcome::Log(e) => RunEnd::Log {
+                site: e.site.clone(),
+                doing: e.doing.to_string(),
+                path: e.path.clone(),
+                message: e.refusal.to_string(),
+            },
+            RunOutcome::NotResumed(e) => RunEnd::NotResumed {
+                message: e.to_string(),
+            },
         }
     }
 }
@@ -211,6 +232,8 @@ mod tests {
             RunEnd::Unprovisioned { .. } => "Unprovisioned",
             RunEnd::Stalled { .. } => "Stalled",
             RunEnd::ShutDown => "ShutDown",
+            RunEnd::Log { .. } => "Log",
+            RunEnd::NotResumed { .. } => "NotResumed",
         }
     }
 
@@ -231,6 +254,9 @@ mod tests {
             RunOutcome::Stalled { .. } => ("Stalled", Some(RunStatus::Stalled)),
             // No marker and no `RunEnded`: the run reads as crashed.
             RunOutcome::ShutDown => ("ShutDown", None),
+            RunOutcome::Log(_) => ("Log", Some(RunStatus::Failed)),
+            // No marker and no `RunEnded`: the directory is as it was.
+            RunOutcome::NotResumed(_) => ("NotResumed", None),
         }
     }
 
@@ -278,6 +304,13 @@ mod tests {
                 nodes: vec!["review".into()],
             },
             RunOutcome::ShutDown,
+            RunOutcome::Log(crate::error::FlowLogError {
+                site: IoSite::Run,
+                doing: "recording the run's progress",
+                path: PathBuf::from("logs/progress"),
+                refusal: crate::error::LogRefusal::Closed,
+            }),
+            RunOutcome::NotResumed(crate::resume::ResumeError::NothingStarted),
         ]
     }
 
@@ -296,7 +329,7 @@ mod tests {
         }
         assert_eq!(
             names.len(),
-            10,
+            12,
             "a variant added to `expected` needs a sample here too"
         );
     }
