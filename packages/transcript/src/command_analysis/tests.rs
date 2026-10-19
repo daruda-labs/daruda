@@ -2,6 +2,65 @@ use super::*;
 use daruda_acp::ToolStatusView;
 
 #[test]
+fn display_order_prioritizes_main_work_and_preserves_analysis() {
+    let cases: &[(&str, &[&str])] = &[
+        (
+            "cd packages/terminal && cargo test | head -40",
+            &["cargo", "cd", "head"],
+        ),
+        (
+            "echo ready; rg pattern src | head -20; git diff",
+            &["rg", "git", "echo", "head"],
+        ),
+        (
+            "printf x | cut -c1 | rg x | tr a b | sort | uniq | wc -l",
+            &["rg", "printf", "cut", "tr", "sort", "uniq", "wc"],
+        ),
+        (
+            "dirname file; basename file; realpath file; readlink file; nl file; od file; cat file",
+            &[
+                "cat", "dirname", "basename", "realpath", "readlink", "nl", "od",
+            ],
+        ),
+        (
+            "pwd; ls; stat file; du .; grep x file; diff a b; find . -print",
+            &["ls", "stat", "du", "grep", "diff", "find", "pwd"],
+        ),
+        (
+            "echo ready; cp a b; mv b c; rm c; mkdir d; touch e; tee out",
+            &["cp", "mv", "rm", "mkdir", "touch", "tee", "echo"],
+        ),
+        (
+            "echo ready; ./custom-tool; python3 task.py; npm test; cargo check; git status",
+            &["custom-tool", "python3", "npm", "cargo", "git", "echo"],
+        ),
+        ("echo $(rm file)", &["rm", "echo"]),
+        ("sort -o out input; git status", &["git", "sort"]),
+        ("git status && git diff | head", &["git", "head"]),
+        ("head file; echo ready; cd repo", &["head", "echo", "cd"]),
+        ("git status", &["git"]),
+        ("", &[]),
+    ];
+    for (source, expected) in cases {
+        let analysis = analyze(source);
+        let original = analysis.clone();
+        assert_eq!(analysis.programs_in_display_order(), *expected, "{source}");
+        assert_eq!(
+            analysis, original,
+            "display ordering mutated analysis: {source}"
+        );
+    }
+}
+
+#[test]
+fn supporting_display_priority_does_not_override_edit_effects() {
+    let analysis = analyze("sort -o out input; git status");
+    assert_eq!(analysis.effect, Some(CommandEffect::Edit));
+    assert_eq!(analysis.programs, ["sort", "git"]);
+    assert_eq!(analysis.programs_in_display_order(), ["git", "sort"]);
+}
+
+#[test]
 fn links_the_current_grammar_abi() {
     // Native grammar symbols must not resolve to an older transitive dependency.
     for language in [

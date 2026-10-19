@@ -30,6 +30,14 @@ pub struct CommandAnalysis {
     pub effect: Option<CommandEffect>,
 }
 
+impl CommandAnalysis {
+    /// Main programs first, then supporting programs; ties keep source order.
+    /// The analyzed source order and command effects are left unchanged.
+    pub fn programs_in_display_order(&self) -> Vec<&String> {
+        rules::programs_in_display_order(&self.programs)
+    }
+}
+
 struct CachedAnalysis {
     source: String,
     analysis: CommandAnalysis,

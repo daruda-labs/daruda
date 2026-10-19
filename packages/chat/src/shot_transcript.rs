@@ -219,7 +219,7 @@ fn cycles() -> Vec<Cycle> {
                 ),
                 Call::new("Edit packages/terminal/CLAUDE.md", ToolKindView::Edit, Some("Edit")),
                 Call::new("Read scripts/lint-file-size.sh", ToolKindView::Read, Some("Read")),
-                Call::new("cargo test -p daruda_terminal", ToolKindView::Execute, Some("Bash")),
+                Call::new("cd packages/terminal && cargo test | cut -c1-160 | head -40", ToolKindView::Execute, Some("Bash")),
             ],
         },
     ]

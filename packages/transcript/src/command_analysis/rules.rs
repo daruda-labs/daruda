@@ -1,6 +1,21 @@
-//! Conservative effect rules for literal shell arguments.
+//! Shell command display priorities and conservative effect rules.
 
 use super::CommandEffect;
+
+// Display priority is independent of read/edit effects. Unlisted programs
+// lead so new tools and user scripts remain visible without a registry entry.
+const SUPPORTING_PROGRAMS: &[&str] = &[
+    "[", "basename", "cd", "cut", "dirname", "echo", "false", "groups", "head", "id", "nl", "od",
+    "printenv", "printf", "pwd", "readlink", "realpath", "sleep", "sort", "tail", "test", "tr",
+    "true", "type", "uname", "uniq", "wc", "which", "whoami",
+];
+
+pub(super) fn programs_in_display_order(programs: &[String]) -> Vec<&String> {
+    let mut ordered: Vec<_> = programs.iter().collect();
+    // Stable sorting preserves source order within each priority.
+    ordered.sort_by_key(|program| SUPPORTING_PROGRAMS.contains(&program.as_str()));
+    ordered
+}
 
 // Only commands whose normal options do not write user files belong here.
 const READ_PROGRAMS: &[&str] = &[

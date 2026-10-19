@@ -160,7 +160,6 @@ agent_chat:
   tool_status_cancelled: "Cancelled"
   # Chip marking a shell command launched detached (`run_in_background: true`).
   tool_background: "Background"
-  command_more: "+%{count}"
   # Badge naming a shell tool call's nonzero exit code, e.g. "Exit 1".
   tool_exit_code: "Exit %{code}"
   # Badge naming the signal that terminated a shell tool call, e.g. "Signal SIGKILL".

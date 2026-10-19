@@ -27,9 +27,9 @@ pub(super) fn command_tags(
     let Some(analysis) = analysis else {
         return Vec::new();
     };
-    let Some(program) = analysis.programs.first() else {
+    if analysis.programs.is_empty() {
         return Vec::new();
-    };
+    }
     let bg = theme::dim_toward_gray(theme::agent_chat_tint(cx), dim);
     let border = theme::dim_toward_gray(theme::agent_chat_border_tint(cx), dim);
     let fg = theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim);
@@ -40,24 +40,18 @@ pub(super) fn command_tags(
             .border_color(border)
             .text_color(fg)
     };
-    let mut tags = vec![
-        div()
-            .id(SharedString::from(format!("command-program-{tool_id}")))
-            .flex()
-            .min_w_0()
-            .max_w(px(theme::AGENT_CHAT_COMMAND_TAG_MAX_W))
-            .child(badge(program.clone()).truncate())
-            .tooltip(daruda_ui::tooltip::text(program.clone()))
-            .into_any_element(),
-    ];
-    if analysis.programs.len() > 1 {
+    let mut tags = Vec::with_capacity(analysis.programs.len() + 1);
+    for (index, program) in analysis.programs_in_display_order().into_iter().enumerate() {
         tags.push(
             div()
-                .id(SharedString::from(format!("command-programs-{tool_id}")))
-                .child(badge(s::agent_chat::command_more(
-                    analysis.programs.len() - 1,
+                .id(SharedString::from(format!(
+                    "command-program-{tool_id}-{index}"
                 )))
-                .tooltip(daruda_ui::tooltip::text(analysis.programs.join(", ")))
+                .flex()
+                .min_w_0()
+                .max_w(px(theme::AGENT_CHAT_COMMAND_TAG_MAX_W))
+                .child(badge(program.clone()).truncate())
+                .tooltip(daruda_ui::tooltip::text(program.clone()))
                 .into_any_element(),
         );
     }
