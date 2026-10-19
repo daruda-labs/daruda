@@ -8,10 +8,9 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::tasks::ExecutionRef;
 use futures::FutureExt as _;
-use gpui::{App, Context, WeakEntity};
+use gpui::{Context, WeakEntity};
 
-use crate::runs::{ReadOnlyCause, RunsEffects, RunsHost, TaskCommitError, TaskIntent};
-use crate::window_registry::WindowRegistry;
+use crate::runs::{ReadOnlyCause, RunsHost, TaskCommitError, TaskIntent};
 use crate::workspace::Workspace;
 
 /// What the desktop shows for a command the task log did not take.
@@ -85,10 +84,6 @@ impl Workspace {
         self.propose_task_command(TaskIntent::Cancel { exec }, cx)
     }
 
-    pub(crate) fn install_task_effects(cx: &mut App) {
-        RunsHost::install_effects(std::rc::Rc::new(WorkspaceEffects), cx);
-    }
-
     /// Stop the turn and drop the queue of the chat pane running `exec`;
     /// `false` when this window holds no such pane.
     pub(in crate::workspace) fn stop_task_execution(
@@ -132,48 +127,6 @@ fn report_commit_error(ws: &WeakEntity<Workspace>, e: &TaskCommitError, cx: &mut
     let shown = ws.update(cx, |ws, cx| ws.report_error(report.clone(), cx));
     if shown.is_err() {
         LogWriter::log(report);
-    }
-}
-
-/// The run can be in any window: the one that asked first, then the rest.
-struct WorkspaceEffects;
-
-impl RunsEffects for WorkspaceEffects {
-    fn flow_changed(&self, change: &crate::runs::FlowChange, cx: &mut App) {
-        crate::workspace::flow_events::deliver_flow_change(change, cx);
-    }
-
-    fn cli_event(
-        &self,
-        pane: Option<crate::runs::RunPane>,
-        event: daruda_agent::pty_tracker::PtyTrackerEvent,
-        cx: &mut App,
-    ) {
-        WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
-            use daruda_agent::pty_tracker::PtyTrackerEvent;
-            let event = match &event {
-                PtyTrackerEvent::BindingChanged { binding, .. } => {
-                    let Some(pane) = pane.filter(|pane| pane.workspace == ws.uuid()) else {
-                        return;
-                    };
-                    PtyTrackerEvent::BindingChanged {
-                        pane_id: pane.pane,
-                        binding: binding.clone(),
-                    }
-                }
-                event @ PtyTrackerEvent::SessionProcessExited { .. } => event.clone(),
-            };
-            ws.apply_pty_tracker_event(event, cx);
-        });
-    }
-
-    fn stop_execution(&self, exec: &ExecutionRef, cx: &mut App) {
-        let mut stopped = false;
-        WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
-            if !stopped {
-                stopped = ws.stop_task_execution(exec, cx);
-            }
-        });
     }
 }
 
