@@ -127,7 +127,7 @@ fn execute_with(
     let mut setup_warnings = prepare_runs_dir(request.run_dir.parent());
 
     // Only past the lock is the log opened: a continuation reads what the
-    // run had finished here, never before the lock (F14).
+    // run had finished here, never before the lock.
     let begun = match &request.resume {
         None => begin(request, &mut setup_warnings),
         Some(_) => continue_run(request, &mut setup_warnings),
@@ -193,7 +193,7 @@ fn execute_with(
         );
         return report;
     }
-    // The log first: the marker below is only its cache (F8).
+    // The log first: the marker below is only its cache.
     let ended = match smol::block_on(record_end(&store, &report.outcome)) {
         Ok(seq) => seq,
         Err(e) => {
@@ -288,7 +288,7 @@ fn begin(request: &RunRequest, warnings: &mut Vec<String>) -> Result<Begun, RunO
     })
 }
 
-/// A continuation: the log replayed and tidied under the lock (§5.5).
+/// A continuation: the log replayed and tidied under the lock.
 fn continue_run(request: &RunRequest, warnings: &mut Vec<String>) -> Result<Begun, RunOutcome> {
     let log = crate::resume::open_under_lock(&request.run_dir, &request.loaded)?;
     let (store, replay) = crate::resume::pick_up(
@@ -320,7 +320,7 @@ pub(super) async fn record_end(
         format!("how this run ended could not be recorded, so it may read as unfinished: {e}")
     };
     // A question whose wait was cut short can still be open; a run cannot
-    // end with one (B5).
+    // end with one.
     let open = store.state().open_ask_ids();
     for id in open {
         let reason = crate::run_log::machine::AbandonReason::RunEnded;
@@ -340,7 +340,7 @@ pub(super) async fn record_end(
 }
 
 /// The run's lock, given back however the run thread ends. A panic used to
-/// leave it naming this live process until the app restarted (F5).
+/// leave it naming this live process until the app restarted.
 struct HeldLock(Option<RunLock>);
 
 impl HeldLock {

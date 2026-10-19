@@ -1,4 +1,4 @@
-//! What a resume does before it hands the run back to the scheduler (§5.5):
+//! What a resume does before it hands the run back to the scheduler:
 //! under the lock, close what the dead process left open, clear its marker,
 //! and check its passes still hold.
 
@@ -43,7 +43,7 @@ pub(super) fn resume_request(
     Ok(request)
 }
 
-/// **F8.** A stalled run picked up again stops reading as stalled: its
+/// A stalled run picked up again stops reading as stalled: its
 /// marker goes, and how it ends this time is what it says.
 #[test]
 fn a_resume_clears_the_stalled_marker() {
@@ -121,7 +121,7 @@ impl NodeRunner for Asks {
     }
 }
 
-/// **B4, B5.** A question open when the process died is closed as
+/// A question open when the process died is closed as
 /// abandoned on resume; the next question takes the next id, and the run
 /// can still end.
 #[test]
@@ -196,7 +196,7 @@ nodes:
     );
 }
 
-/// **M9.** A pinned node and a command node are not re-run on resume, and
+/// A pinned node and a command node are not re-run on resume, and
 /// neither is an output a resume checks for.
 #[test]
 fn a_pin_and_a_command_survive_a_resume_untouched() {
@@ -248,7 +248,7 @@ nodes:
     assert!(!log.contains("\"type\":\"output_lost\""), "{log}");
 }
 
-/// **F14.** A resume reads the run only once it holds the lock: refused as
+/// A resume reads the run only once it holds the lock: refused as
 /// held, it leaves the log and the markers exactly as they were.
 #[test]
 fn a_resume_refused_by_the_lock_reads_and_writes_nothing() {
@@ -281,7 +281,7 @@ fn a_resume_refused_by_the_lock_reads_and_writes_nothing() {
     );
 }
 
-/// **M7.** A run an older build started, and that build's process died,
+/// A run an older build started, and that build's process died,
 /// is taken over from its journal and finished — not started over.
 #[test]
 fn a_run_an_older_build_started_is_resumed_from_its_journal() {
@@ -380,8 +380,8 @@ fn journal_of_failures(
     (request, run_dir)
 }
 
-/// **F10 for imported runs.** A failure the older build journaled still
-/// counts: with one of two attempts spent, the resume has one left.
+/// A failure the older build journaled counts like one the log recorded:
+/// with one of two attempts spent, the resume has one left.
 #[test]
 fn an_imported_run_keeps_the_attempts_its_journal_spent() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -435,7 +435,7 @@ fn an_imported_node_with_no_attempts_left_fails_as_journaled() {
 
 /// **Quit is not a stop.** The app quitting mid-node records no ending, no
 /// marker and no settle, and keeps the lock: the run reads as crashed, and
-/// a resume re-runs the cut attempt without spending a try on it (D4-2).
+/// a resume re-runs the cut attempt without spending a try on it.
 #[test]
 fn a_quit_mid_node_leaves_the_run_to_resume_like_a_crash() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -544,7 +544,7 @@ fn a_resume_right_after_a_crash_waits_for_what_it_left() {
     assert!(took >= wait, "it said {wait:?} and took {took:?}");
 }
 
-/// **O3.** A resume that died after opening the log but before importing
+/// A resume that died after opening the log but before importing
 /// the older build's journal leaves a log holding nothing of the run. The
 /// journal is still the record, so the next resume imports it rather than
 /// refusing the run as never started.
@@ -720,7 +720,7 @@ nodes:
     }
 }
 
-/// **F7, S10.** A command's process group outlives a host killed while it
+/// A command's process group outlives a host killed while it
 /// ran. A resume ends it before the node runs again, and only when the
 /// recorded identity says the pid is still that command.
 #[cfg(unix)]
@@ -810,7 +810,7 @@ nodes:
         let Process::Drove(report) = process(backend, loaded, dir, &FakeRunner::new()) else {
             panic!("the run could not be picked up");
         };
-        // The crashed attempt spent no try, so the node runs again (D4-2).
+        // The crashed attempt spent no try, so the node runs again.
         assert!(
             matches!(report.outcome, RunOutcome::Done),
             "{:?}",

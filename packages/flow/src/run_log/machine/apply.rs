@@ -167,7 +167,7 @@ fn start(
 }
 
 /// The old journal knew which nodes passed and, per node, the settled
-/// attempts of its current generation; those keep counting (F10).
+/// attempts of its current generation; those keep counting.
 fn import(state: &mut FlowRunState, imported: &Imported) {
     start(
         state,

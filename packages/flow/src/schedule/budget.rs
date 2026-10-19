@@ -80,7 +80,7 @@ impl Accounting {
         }
     }
 
-    /// Read the run's open-question clock from `clock` (F15).
+    /// Read the run's open-question clock from `clock`.
     pub(super) fn with_clock(
         mut self,
         clock: std::sync::Arc<crate::run_log::store::ParkClock>,
@@ -185,7 +185,7 @@ impl Accounting {
     /// person. A budget bounds work, and waiting is the absence of it.
     ///
     /// The larger of the settled calls' waits and the time a question has
-    /// been open: the second sees a wait a sibling has not finished yet (F15).
+    /// been open: the second sees a wait a sibling has not finished yet.
     pub(super) fn deadline(&self, budget: &Budget) -> Option<std::time::Instant> {
         let open = self.clock.parked(std::time::Instant::now());
         budget

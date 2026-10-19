@@ -320,7 +320,7 @@ impl<'a> Run<'a> {
         Box::pin(async move {
             let policy = self.policy_of(node);
             // A resume can find this node's attempts in this generation
-            // already spent; one a crash interrupted is not (D4-2).
+            // already spent; one a crash interrupted is not.
             if let Some(spent) = self.attempts_spent_before(id, &policy) {
                 return Err(spent);
             }
@@ -401,8 +401,8 @@ impl<'a> Run<'a> {
                         Err((doing, path, e)) => return Err(io_at(id, next, doing, path, e)),
                     };
 
-                // O2: the attempt and its evidence number are durable before
-                // the session is paid for, so a crash cannot reuse them (F2).
+                // The attempt and its evidence number are durable before
+                // the session is paid for, so a crash cannot reuse them.
                 let started = self.start_attempt(id, next).await?;
                 // A local because `ctx` borrows it, like `contract` above.
                 let reserve = || self.reserve_extra_turn();
@@ -455,7 +455,7 @@ impl<'a> Run<'a> {
                 // run: it is judged and kept, and the run ends after it.
                 let stopped_here = result.stopped_the_run && result.outcome.is_ok();
                 // A quit records nothing and moves nothing: the attempt stays
-                // started, so a resume finds it crash-interrupted (D4-2).
+                // started, so a resume finds it crash-interrupted.
                 if self.cancel.is_shutting_down() {
                     return Err(RunOutcome::ShutDown);
                 }
@@ -471,7 +471,7 @@ impl<'a> Run<'a> {
 
                 let failure = match judge(&ctx, result) {
                     Ok(()) => {
-                        // O1: the output is on disk before its pass is.
+                        // The output is on disk before its pass is.
                         if let Some(path) = output.clone() {
                             durable::sync_file(path).await;
                         }
@@ -525,9 +525,9 @@ impl<'a> Run<'a> {
                 // runs — a fix that starts first would read a live output
                 // instead of the evidence it is supposed to answer.
                 let set = self.invalidation_set(node, &policy);
-                // O2: which outputs stop being current is durable before any
+                // Which outputs stop being current is durable before any
                 // of them is moved, so a crash in between is a resume's to
-                // finish rather than a pass with no output (F3).
+                // finish rather than a pass with no output.
                 let members: Vec<NodeId> = set
                     .iter()
                     .map(|(member, _)| member.clone())

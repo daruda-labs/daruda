@@ -227,7 +227,7 @@ fn every_crash_point_reopens_to_a_committed_prefix() {
     assert!(enumerate_crashes::<FlowRunMachine>(scenario).cases > 0);
 }
 
-/// **B2.** Two starts proposed together get distinct evidence numbers, and
+/// Two starts proposed together get distinct evidence numbers, and
 /// the numbers come from the log, not the proposer.
 #[test]
 fn concurrent_starts_are_numbered_by_the_log() {
@@ -249,7 +249,7 @@ fn concurrent_starts_are_numbered_by_the_log() {
     assert_eq!(state.next_evidence, 3);
 }
 
-/// **B1.** A rerun starts a new generation: its attempt counts from 1, and
+/// A rerun starts a new generation: its attempt counts from 1, and
 /// a start proposed for the old generation is refused.
 #[test]
 fn a_rerun_starts_a_generation_at_attempt_one() {
@@ -296,7 +296,7 @@ fn a_rerun_starts_a_generation_at_attempt_one() {
     ));
 }
 
-/// **F10, D4-2.** A resume turns the attempt in flight into an interrupted
+/// A resume turns the attempt in flight into an interrupted
 /// one that keeps its number but spends no try, closes every question, and
 /// lets the next start continue the numbers.
 #[test]
@@ -344,11 +344,11 @@ fn a_resume_interrupts_closes_questions_and_continues_numbers() {
     ));
     assert!(
         matches!(assigned.last(), Some(FlowRunEvent::AskRaised { id: 2, .. })),
-        "a question after a resume takes the next id (B4)"
+        "a question after a resume takes the next id"
     );
 }
 
-/// **B5.** A run cannot record its end with a question still open.
+/// A run cannot record its end with a question still open.
 #[test]
 fn a_run_ends_only_with_no_open_question() {
     let (state, _) = run(vec![
@@ -362,7 +362,7 @@ fn a_run_ends_only_with_no_open_question() {
     ));
 }
 
-/// **B3.** A repair's fix asks as its gate, and only while it is running.
+/// A repair's fix asks as its gate, and only while it is running.
 #[test]
 fn a_fix_asks_as_its_gate_only_while_it_runs() {
     let fix_ask = FlowRunEvent::ask_raised(
@@ -381,7 +381,7 @@ fn a_fix_asks_as_its_gate_only_while_it_runs() {
     assert!(FlowRunMachine::check(&fixing, &fix_ask).is_ok());
 }
 
-/// **M9.** A pin starts out passed, with no attempt, and is not an output a
+/// A pin starts out passed, with no attempt, and is not an output a
 /// resume can declare lost.
 #[test]
 fn a_pin_counts_as_passed_and_cannot_be_lost() {
@@ -429,7 +429,7 @@ fn an_imported_pass_has_no_attempt() {
     );
 }
 
-/// **§5.5 step 6.** Only an agent node leaves an output a resume can find
+/// Only an agent node leaves an output a resume can find
 /// gone; a passed command has none to lose.
 #[test]
 fn a_command_cannot_lose_an_output() {
@@ -447,7 +447,7 @@ fn a_command_cannot_lose_an_output() {
     ));
 }
 
-/// **D4-2.** A rerun's generation spends its own tries: an attempt a crash
+/// A rerun's generation spends its own tries: an attempt a crash
 /// interrupted in an earlier generation does not discount the new one.
 #[test]
 fn a_rerun_resets_what_a_crash_did_not_spend() {
@@ -588,7 +588,7 @@ fn only_a_crashed_or_stalled_run_resumes() {
     assert!(FlowRunMachine::check(&stalled, &FlowRunEvent::Resumed { carried: 0 }).is_ok());
 }
 
-/// **F7.** A command's group is kept with its attempt until it settles, once
+/// A command's group is kept with its attempt until it settles, once
 /// per attempt, and only for the attempt that started it.
 #[test]
 fn a_spawned_group_belongs_to_its_attempt_until_it_settles() {

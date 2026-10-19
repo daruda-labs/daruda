@@ -13,7 +13,7 @@ pub struct FlowRunState {
     pub(crate) phase: RunPhase,
     pub(crate) start: StartFacts,
     pub(crate) nodes: BTreeMap<NodeId, NodeState>,
-    /// The next evidence number; never reused, across resumes too (F2).
+    /// The next evidence number; never reused, across resumes too.
     pub(crate) next_evidence: u32,
     pub(crate) next_ask: u64,
     pub(crate) spent: SpentLine,
@@ -68,7 +68,7 @@ pub struct NodeState {
     /// next attempt's number is one past this.
     pub(crate) attempts: u32,
     /// Of those, the ones a crash interrupted. They do not count against
-    /// `max_attempts` (D4-2); a stop or a failure does.
+    /// `max_attempts`; a stop or a failure does.
     #[serde(default)]
     pub(crate) crashed: u32,
     pub(crate) last: AttemptState,

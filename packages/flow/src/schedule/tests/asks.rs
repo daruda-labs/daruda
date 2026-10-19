@@ -95,7 +95,7 @@ fn answer_after_retry(
     })
 }
 
-/// **F15.** The run's deadline stops while a question is open, not only once
+/// The run's deadline stops while a question is open, not only once
 /// the asking call returns: otherwise the sibling's retry is refused as over
 /// time while the run is in fact parked on a person.
 #[test]
@@ -153,7 +153,7 @@ fn position(lines: &[String], needles: &[&str]) -> usize {
         .unwrap_or_else(|| panic!("no record with {needles:?}: {lines:#?}"))
 }
 
-/// **F1, S5.** A sibling's retry does not close a question: it stays open
+/// A sibling's retry does not close a question: it stays open
 /// through the sibling's failure and next start, and once answered the node
 /// that asked goes on.
 #[test]
@@ -242,7 +242,7 @@ impl NodeRunner for AsksUntilStopped {
     }
 }
 
-/// **F13.** An answer to a question the run has abandoned is reported as
+/// An answer to a question the run has abandoned is reported as
 /// failed, and the log says the question was abandoned.
 #[test]
 fn answering_an_abandoned_question_fails() {

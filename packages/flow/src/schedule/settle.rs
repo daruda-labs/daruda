@@ -1,5 +1,5 @@
 //! An attempt's life on the run log: its start is committed before the
-//! session is paid for (O2), and its settle is the record of it. Separate
+//! session is paid for, and its settle is the record of it. Separate
 //! from the drive loop, which decides what happens next; this only records
 //! what did.
 
@@ -23,7 +23,7 @@ impl Run<'_> {
     }
 
     /// Attempts in this node's generation that count against its cap: a
-    /// crash-interrupted one does not, a stop or a failure does (D4-2).
+    /// crash-interrupted one does not, a stop or a failure does.
     pub(super) fn spent_attempts(&self, id: &NodeId) -> u32 {
         self.log.state().node(id).map_or(0, |node| node.spent())
     }
@@ -181,7 +181,7 @@ impl Run<'_> {
     }
 
     /// The host's `git status` for `cwd`, asked off this thread: it is a
-    /// blocking subprocess, and the wave's other nodes must keep going (F11).
+    /// blocking subprocess, and the wave's other nodes must keep going.
     async fn tree_note(&self, cwd: &Path) -> Option<String> {
         let ask = self.git_status.clone()?;
         let cwd = cwd.to_path_buf();
@@ -206,7 +206,7 @@ impl Run<'_> {
             let stamp = crate::archive::CancelStamp::Evidence(ctx.evidence_seq);
             match crate::archive::archive_canceled(&self.log_dir, id, output, stamp) {
                 Ok(moved) => {
-                    // O1: the move is on disk before the record naming it.
+                    // The move is on disk before the record naming it.
                     let set = [(id.clone(), Some(output.to_path_buf()))];
                     super::durable::sync_dirs(&set, &self.log_dir).await;
                     archived.extend(moved);

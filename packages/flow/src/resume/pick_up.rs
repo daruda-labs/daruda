@@ -16,8 +16,9 @@ use crate::run_log::store::FlowRunStore;
 use crate::runner::OutputContract;
 use crate::schedule::RunOutcome;
 
-/// The rest of §5.5 once the log is open: steps 3–7. Returns the store and
-/// what the scheduler starts from (step 8).
+/// The rest of a resume once the log is open: steps 3–7 of the resume order
+/// in the crate's AGENTS.md. Returns the store and what the scheduler starts
+/// from (step 8).
 pub(crate) fn pick_up<B: LogBackend + Send + 'static>(
     log: RunLog<FlowRunMachine, B>,
     loaded: &LoadedFlow,
@@ -33,7 +34,7 @@ pub(crate) fn pick_up<B: LogBackend + Send + 'static>(
         return Err(RunOutcome::NotResumed(why));
     }
     // Step 3. A marker left in place would keep saying how the run last
-    // ended while it runs again (F8).
+    // ended while it runs again.
     if let Err(e) = crate::marker::clear_markers(run_dir) {
         warnings.push(e.to_string());
     }
@@ -54,7 +55,7 @@ async fn resume_steps(
 ) -> Result<(), RunOutcome> {
     let record = |e| store.failure(IoSite::Run, e);
     // Step 5. The reply channels died with the process, so nothing can
-    // answer these; left open they would keep the run from ever ending (B5).
+    // answer these; left open they would keep the run from ever ending.
     let open = store.state().open_ask_ids();
     for id in open {
         let reason = AbandonReason::AppRestart;
@@ -70,7 +71,7 @@ async fn resume_steps(
         .map_err(record)?;
 
     // Step 6. A pass is only as good as the file it left; directory entries
-    // may not survive a power cut, so check (F4). Commands and pins leave
+    // may not survive a power cut, so check. Commands and pins leave
     // nothing to check.
     let outputs = crate::schedule::node_outputs(loaded.flow(), run_dir);
     for node in &loaded.flow().nodes {
@@ -86,7 +87,7 @@ async fn resume_steps(
     }
 
     // Step 7. Whatever an unfinished or invalidated node left live is
-    // evidence, not a result (F3).
+    // evidence, not a result.
     let passed: Vec<NodeId> = store.state().finished().into_iter().collect();
     let resumes = store.state().resumes;
     let log_dir = run_dir.join(crate::schedule::LOG_DIR_NAME);
@@ -96,7 +97,7 @@ async fn resume_steps(
     Ok(())
 }
 
-/// End the command groups a dead process left running (F7). A command
+/// End the command groups a dead process left running. A command
 /// survives its host in a group of its own, and the retry would otherwise
 /// run beside it. A pid whose identity no longer matches is someone else's.
 fn end_orphaned_commands(state: &FlowRunState) -> Vec<String> {

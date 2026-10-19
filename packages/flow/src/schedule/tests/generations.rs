@@ -46,7 +46,7 @@ nodes:
         wait: 0s
 ";
 
-/// **B1.** Each repair rerun is a generation of its own, and each counts
+/// Each repair rerun is a generation of its own, and each counts
 /// its attempts from 1 — the log accepts all three, as the scheduler has
 /// always numbered them.
 #[test]
@@ -94,7 +94,7 @@ fn each_rerun_is_a_generation_counting_from_one() {
     assert_eq!(gate, vec![1, 2, 3], "the gate's own count runs on");
 }
 
-/// **B2.** Two nodes of one wave propose their starts together; the log
+/// Two nodes of one wave propose their starts together; the log
 /// numbers them apart.
 #[test]
 fn a_wave_s_starts_get_distinct_evidence() {
@@ -173,7 +173,7 @@ impl NodeRunner for FixAsks {
     }
 }
 
-/// **B3.** A repair's fix asks as its gate, the log takes the question, and
+/// A repair's fix asks as its gate, the log takes the question, and
 /// once it is answered the repair goes on.
 #[test]
 fn a_fix_session_s_question_is_taken_and_answered() {

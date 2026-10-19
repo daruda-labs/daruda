@@ -233,7 +233,7 @@ fn execute_takes_the_lock_under_the_given_root_and_the_copy_inside_the_tree() {
     );
 }
 
-/// **M10.** A run refused before it starts leaves no log either: refusals
+/// A run refused before it starts leaves no log either: refusals
 /// travel back as the report, never as a record.
 #[test]
 fn a_refused_run_opens_no_log() {

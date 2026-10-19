@@ -414,7 +414,7 @@ mod tests {
     }
 
     /// The selection comes from the run's first event, so the progress
-    /// after it — even a torn tail — is not read before the lock (F14).
+    /// after it — even a torn tail — is not read before the lock.
     #[test]
     fn the_selection_is_read_from_the_first_event_alone() {
         let dir = tempfile::tempdir().expect("tempdir");

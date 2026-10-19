@@ -81,7 +81,7 @@ pub enum NodeFailure {
     },
     /// The process running the attempt died with its attempts spent. Kept
     /// to read logs of builds that counted such an attempt; a crash spends
-    /// no attempt now (D4-2), so the engine no longer ends a node this way.
+    /// no attempt now, so the engine no longer ends a node this way.
     Interrupted,
     /// A failure an older build journaled: only its rendered text survived,
     /// so it is reported as written rather than guessed back into a kind.
@@ -396,7 +396,7 @@ pub struct PendingAsk {
     pub reply: smol::channel::Sender<daruda_acp::PermissionDecision>,
 }
 
-/// The engine closed the question before this answer arrived (F13).
+/// The engine closed the question before this answer arrived.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("the run is no longer waiting for this answer")]
 pub struct AskClosed;

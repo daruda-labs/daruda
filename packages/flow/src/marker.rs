@@ -185,7 +185,7 @@ fn lock_status(run_dir: &Path, lock_dir: Option<&Path>, is_alive: IsAlive<'_>) -
 }
 
 /// Remove every marker, so a resumed run no longer reads as how it last
-/// ended (F8). A marker already gone is not an error.
+/// ended. A marker already gone is not an error.
 pub(crate) fn clear_markers(run_dir: &Path) -> Result<(), FlowIoError> {
     for name in [DONE, FAILED, CANCELED, STALLED] {
         let path = run_dir.join(name);

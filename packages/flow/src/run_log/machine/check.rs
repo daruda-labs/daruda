@@ -53,7 +53,7 @@ pub(super) fn check(state: &FlowRunState, event: &E) -> Result<(), R> {
         | E::AttemptCanceled { node, record } => in_flight(state, node, record),
         E::OutputLost { node } => {
             let current = running_node(state, node)?;
-            // Only an agent node's output file can go missing (§5.5 step 6).
+            // Only an agent node's output file can go missing.
             if current.produces != Produces::File {
                 return Err(R::NoOutput(node.clone()));
             }

@@ -1,4 +1,4 @@
-//! Flushing a node's files before the log says they exist (O1). Best effort,
+//! Flushing a node's files before the log says they exist. Best effort,
 //! and off the run thread: a resume re-checks every passed output and reruns
 //! a node whose file is gone, so a flush that fails costs a rerun, never a
 //! wrong result.

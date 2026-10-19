@@ -19,8 +19,8 @@ use crate::schedule::RunOutcome;
 
 const IMPORT: &str = "taking over the run's progress journal";
 
-/// Open the run's log under the lock (§5.5 steps 1–2), taking over the
-/// journal of a run an older build started.
+/// Open the run's log under the lock, taking over the journal of a run an
+/// older build started.
 pub(crate) fn open_under_lock(
     run_dir: &Path,
     loaded: &LoadedFlow,
@@ -33,7 +33,7 @@ pub(crate) fn open_under_lock(
     let mut log = crate::run_log::store::open_file_log(run_dir)?;
     // Decided on what the opened log holds, not on whether it exists: a
     // crash between opening it and committing the import leaves a log with
-    // nothing in it, and the journal is still the run's record (O3).
+    // nothing in it, and the journal is still the run's record.
     if log.state().phase() != crate::run_log::machine::RunPhase::Fresh
         || !crate::journal::exists(run_dir)
     {

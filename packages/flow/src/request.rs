@@ -76,7 +76,7 @@ pub struct RunRequest {
     ///
     /// Comes from [`crate::resume::prepare`] with the `loaded` above. It
     /// carries only what was fixed when the run started; what the run had
-    /// finished is read after the lock is taken (F14).
+    /// finished is read after the lock is taken.
     pub resume: Option<crate::resume::Continuation>,
 }
 
@@ -187,7 +187,7 @@ fn check_node_cwd(
 
 /// How a host reports a working tree's state, asked about the directory an
 /// attempt ran in. Shared and `Sync` because the run asks it off its own
-/// thread, so a slow `git status` never stalls the rest of a wave (F11).
+/// thread, so a slow `git status` never stalls the rest of a wave.
 pub type AskGitStatus = std::sync::Arc<dyn Fn(&std::path::Path) -> Option<String> + Send + Sync>;
 
 pub fn validate_request(request: &RunRequest) -> Vec<ValidationIssue> {

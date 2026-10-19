@@ -86,7 +86,7 @@ impl Run<'_> {
 
         let fix_id = NodeId::from(FIX_SESSION_ID);
         let gate = ctx.node_id;
-        // O2: the session and its evidence number are durable before it is
+        // The session and its evidence number are durable before it is
         // paid for. Narrated as `FixStarted`: a fix can take minutes.
         let started = self
             .log

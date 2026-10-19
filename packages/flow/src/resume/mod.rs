@@ -7,7 +7,7 @@
 //!
 //! [`prepare`] reads only what was fixed at the start, and reads it before
 //! any lock. Everything that changes as a run goes is read inside `execute`,
-//! after the lock is taken (F14).
+//! after the lock is taken.
 //!
 //! **Node-level, and only node-level.** Whatever was in flight is gone — an
 //! ACP session cannot outlive the process that opened it. So the interrupted
@@ -34,9 +34,9 @@ pub(crate) use settle::{SETTLE_AFTER_CRASH, Settled, settle_after_crash};
 /// The spec a run was executing, as the run itself recorded it.
 ///
 /// Named here rather than inlined at the call site because *which* file a
-/// resume reads is the whole of decision ③: never the flow file on disk
-/// today. Editing it between the crash and the resume would otherwise
-/// silently change what the run is, halfway through.
+/// resume reads matters: never the flow file on disk today. Editing it
+/// between the crash and the resume would otherwise silently change what
+/// the run is, halfway through.
 pub const RUN_SPEC_FILE: &str = "run.yaml";
 
 /// Whether a run may be picked up.
@@ -56,7 +56,7 @@ pub struct Resumed {
     /// `run.yaml`.
     pub loaded: LoadedFlow,
     /// The node the run was started up to. Only facts fixed at the start
-    /// are read before the lock (F14); the progress is read under it.
+    /// are read before the lock; the progress is read under it.
     pub until: Option<NodeId>,
 }
 

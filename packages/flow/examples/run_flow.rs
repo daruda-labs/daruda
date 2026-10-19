@@ -1,7 +1,7 @@
 //! Run a flow file against a real agent, from a terminal.
 //!
 //! Everything the engine refuses to decide for itself is decided here, which
-//! makes this the smallest possible sketch of what the app owes it in P3: the
+//! makes this the smallest possible sketch of what the app owes it: the
 //! run id and directory, whether a pid is alive, what `git status` says, and
 //! where to send the event stream.
 //!

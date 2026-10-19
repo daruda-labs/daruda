@@ -52,7 +52,7 @@ fn legacy_run(run_dir: &Path) {
     .expect("line");
 }
 
-/// **M7.** A run an older build recorded still reads back: what passed, the
+/// A run an older build recorded still reads back: what passed, the
 /// profile, the spend and every attempt.
 #[test]
 fn the_reader_reads_a_run_an_older_build_recorded() {
@@ -93,7 +93,7 @@ fn the_reader_reads_a_run_log() {
     ));
 }
 
-/// **F8.** The log wins over a marker that disagrees with it.
+/// The log wins over a marker that disagrees with it.
 #[test]
 fn a_marker_that_disagrees_with_the_log_loses() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -154,7 +154,10 @@ fn a_corrupt_middle_record_is_not_read_as_a_prefix() {
     std::fs::remove_file(report.run_dir.join("DONE")).expect("the marker");
 
     assert!(reader::state(&report.run_dir).is_none());
-    assert!(matches!(reader::ending(&report.run_dir), Ending::Unreadable));
+    assert!(matches!(
+        reader::ending(&report.run_dir),
+        Ending::Unreadable
+    ));
     assert!(reader::read(&report.run_dir).passed.is_empty());
     let no_lock = dir.path().join("locks");
     assert_eq!(

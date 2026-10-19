@@ -82,7 +82,7 @@ pub fn archive_attempt(
 }
 
 /// What tells one stopped output's archive name from another's when the
-/// plain `<id>.canceled` name is already taken (F9).
+/// plain `<id>.canceled` name is already taken.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CancelStamp {
     /// A live cancel: the interrupted attempt's evidence number.
@@ -332,7 +332,7 @@ mod tests {
         assert_eq!(archived, None);
     }
 
-    /// **F9.** A second stop of the same node keeps the first one's evidence:
+    /// A second stop of the same node keeps the first one's evidence:
     /// the fixed name used to be written over.
     #[test]
     fn a_second_cancel_of_one_node_does_not_overwrite_the_first() {

@@ -53,7 +53,7 @@ fn spawn(run_dir: &Path) -> FlowRunStore {
 /// Make a run stopped mid-attempt look killed mid-attempt instead: drop the
 /// stop's settle, the run's end and every record after them, the way a
 /// `kill -9` before those commits would have left the log. A stop that was
-/// recorded spends a try (D4-2); a kill does not.
+/// recorded spends a try; a kill does not.
 pub(crate) fn forget_stop(run_dir: &Path) {
     let backend = daruda_runlog::FileBackend::new(super::log_dir(run_dir));
     let history =

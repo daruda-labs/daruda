@@ -1,5 +1,5 @@
-//! A run crashed at a write of its log, then picked up by a new process
-//! (§6.5). The log lives in a `FaultBackend`, so "what survived" is exactly
+//! A run crashed at a write of its log, then picked up by a new process.
+//! The log lives in a `FaultBackend`, so "what survived" is exactly
 //! what the backend kept; outputs live in a real run directory.
 
 use super::*;
@@ -164,7 +164,7 @@ fn every_fault(clean: &FaultBackend) -> Vec<Fault> {
     faults
 }
 
-/// **S1, S8.** Crash a run at every write, pick it up, and it finishes with
+/// Crash a run at every write, pick it up, and it finishes with
 /// no evidence number reused, attempt numbers continued, and every passed
 /// output on disk.
 #[test]
@@ -286,7 +286,7 @@ fn design_starts(events: &[FlowRunEvent]) -> Vec<(u32, u32)> {
         .collect()
 }
 
-/// **D4-2, S8.** An attempt a crash interrupted does not count: with two
+/// An attempt a crash interrupted does not count: with two
 /// allowed, two crashes mid-attempt still leave the next pick-up a try,
 /// numbered past both.
 #[test]
@@ -320,7 +320,7 @@ fn crash_interrupted_attempts_do_not_count_toward_the_cap() {
     assert_eq!(design_starts(&records(&last)), [(1, 1), (2, 2), (3, 3)]);
 }
 
-/// **D4-2.** A node with no retry policy that a crash caught mid-attempt
+/// A node with no retry policy that a crash caught mid-attempt
 /// runs again on resume, under fresh attempt and evidence numbers, rather
 /// than failing as interrupted.
 #[test]
@@ -355,7 +355,7 @@ nodes:
     assert_eq!(design_starts(&records(&second)), [(1, 1), (2, 2)]);
 }
 
-/// **D4-2, F10.** A failure that reached a verdict still counts across a
+/// A failure that reached a verdict still counts across a
 /// resume; only the crashed attempt after it does not. With two allowed,
 /// one failure and one crash leave exactly one more try.
 #[test]
@@ -405,7 +405,7 @@ fn a_verdict_failure_still_counts_after_a_crash() {
     assert_eq!(attempts, [3], "the failed attempt was forgotten");
 }
 
-/// **D4-1, D4-2.** A stopped attempt counts like a failed one: picked up
+/// A stopped attempt counts like a failed one: picked up
 /// after a crash that kept the stop but lost the run's end, a node allowed
 /// two tries gets one more, not two.
 #[test]
@@ -444,7 +444,7 @@ fn a_stopped_attempt_still_counts() {
     assert_eq!(attempts, [2], "the stop did not count");
 }
 
-/// **D4-2.** A stop that used up the node's only try still blocks it: picked
+/// A stop that used up the node's only try still blocks it: picked
 /// up after a crash that kept the stop but lost the run's end, the node does
 /// not run past its cap, and the run ends the way that stop would have.
 #[test]
@@ -487,7 +487,7 @@ nodes:
     assert!(runner.calls().is_empty(), "the node ran past its cap");
 }
 
-/// **F4.** A pass whose output is gone when the run is picked up is undone,
+/// A pass whose output is gone when the run is picked up is undone,
 /// and only that node runs again.
 #[test]
 fn a_lost_output_reruns_only_its_node() {
@@ -527,7 +527,7 @@ fn a_lost_output_reruns_only_its_node() {
     assert_eq!(lost, vec![NodeId::from("design")]);
 }
 
-/// **F3.** A crash between invalidating a repair's members and settling the
+/// A crash between invalidating a repair's members and settling the
 /// gate: whether or not the members' outputs were moved, the resume moves
 /// what is left live and re-derives them, so nothing reads as passed with
 /// its output gone.
@@ -688,7 +688,7 @@ impl NodeRunner for StopDuringSlowWrite {
     }
 }
 
-/// **F11, S12.** A slow fsync holds up only the committer thread: a sibling
+/// A slow fsync holds up only the committer thread: a sibling
 /// in the same wave sees a stop at its own polling pace, not after the write.
 #[test]
 fn a_slow_log_write_does_not_stall_the_rest_of_the_wave() {
@@ -763,7 +763,7 @@ impl NodeRunner for Panics {
     }
 }
 
-/// **F5, S7.** A run thread that panics gives its lock back, so the next run
+/// A run thread that panics gives its lock back, so the next run
 /// in the same working tree starts instead of being refused as held.
 #[test]
 fn a_panicking_run_gives_its_lock_back() {
@@ -784,7 +784,7 @@ fn a_panicking_run_gives_its_lock_back() {
     );
 }
 
-/// **S6.** What a watcher was sent is what the log replays to: the stream
+/// What a watcher was sent is what the log replays to: the stream
 /// is the log's narration, number for number.
 #[test]
 fn the_stream_is_the_log_replayed() {

@@ -1,5 +1,5 @@
 //! The run thread's handle on a run's log. Commits go to a `Committer` on its
-//! own thread, so an fsync never stalls the other nodes of a wave (F11); the
+//! own thread, so an fsync never stalls the other nodes of a wave; the
 //! committer narrates each record to the host only once it is durable.
 
 use std::cell::{Cell, RefCell};
@@ -133,7 +133,7 @@ impl From<SubscribeError> for LogFault {
 
 /// Time the run spent with a question open, read off the committed state.
 /// Feeds the run deadline, so a sibling's boundary check does not count a
-/// wait that has not settled yet as work (F15).
+/// wait that has not settled yet as work.
 ///
 /// Observed by the committer's hook, so a detached commit (a drop guard
 /// closing its question) moves it as soon as it is durable.
