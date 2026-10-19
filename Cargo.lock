@@ -1737,6 +1737,7 @@ dependencies = [
  "daruda_flow",
  "daruda_flow_edit",
  "daruda_project",
+ "daruda_runlog",
  "daruda_settings",
  "daruda_store",
  "daruda_terminal",

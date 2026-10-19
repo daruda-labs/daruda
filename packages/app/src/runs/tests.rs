@@ -205,7 +205,7 @@ fn an_unfinished_reconciliation_reopens_read_only_and_preserves_files(cx: &mut T
     let _claim = store.begin_reconcile().unwrap();
     let expected = store.current().unwrap();
     drop(store);
-    let log_path = dir.path().join("log.0.jsonl");
+    let log_path = daruda_runlog::FileBackend::new(dir.path()).log_path(0);
     let mut log = std::fs::OpenOptions::new()
         .append(true)
         .open(&log_path)

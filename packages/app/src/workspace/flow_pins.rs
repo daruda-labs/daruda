@@ -260,7 +260,7 @@ nodes:
             "{\"type\":\"attempt_passed\",\"node\":\"design\",\"record\":{\"attempt\":1,\
              \"evidence\":1,\"turns\":1,\"spent\":{\"node_runs\":1}}}",
         ));
-        std::fs::write(log_dir.join("log.0.jsonl"), log).expect("log");
+        std::fs::write(daruda_flow::run_log::log_file(dir.path()), log).expect("log");
         std::fs::write(dir.path().join("design.md"), "done\n").expect("output");
 
         let resolved = resolve_in(&["design".into()], TWO, None, Some(dir.path()));

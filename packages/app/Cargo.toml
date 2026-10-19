@@ -165,6 +165,8 @@ daruda_chat = { workspace = true, features = ["test-support"] }
 # hooks on an open Settings.
 daruda_settings = { workspace = true, features = ["test-support"] }
 daruda_ui = { workspace = true, features = ["test-support"] }
+# Where a task log's bytes live, for a test that tears its last line.
+daruda_runlog = { workspace = true }
 gpui = { workspace = true, features = ["test-support"] }
 serde_json = { workspace = true }
 
