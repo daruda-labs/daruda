@@ -6,8 +6,6 @@ use std::path::PathBuf;
 
 #[cfg(any(test, feature = "screenshot"))]
 use gpui::Context;
-#[cfg(feature = "screenshot")]
-use gpui::Window;
 
 #[cfg(any(test, feature = "screenshot"))]
 use crate::runs::{RunView, RunsHost};
@@ -82,7 +80,6 @@ impl Workspace {
     pub(in crate::workspace) fn seed_flow_run_for_shot(
         &mut self,
         asking: bool,
-        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.ensure_project_for_shot();
