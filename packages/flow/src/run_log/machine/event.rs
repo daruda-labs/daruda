@@ -60,16 +60,18 @@ pub enum FlowRunEvent {
         node: NodeId,
         record: Box<AttemptLine>,
     },
-    /// A passed agent node whose output was gone when the run resumed.
+    /// A passed agent node whose output was gone when the run resumed. It
+    /// starts a new generation.
     OutputLost {
         node: NodeId,
     },
-    /// Committed before a repair moves the members' outputs aside.
+    /// Committed before a repair moves the members' outputs aside. Each
+    /// member starts a new generation.
     Invalidated {
         gate: NodeId,
         members: Vec<NodeId>,
     },
-    /// A repair re-derives these: each starts a new generation.
+    /// A repair re-derives these, in the generations `Invalidated` began.
     RerunScheduled {
         gate: NodeId,
         members: Vec<NodeId>,

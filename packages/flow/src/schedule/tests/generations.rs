@@ -227,3 +227,129 @@ fn a_fix_session_s_question_is_taken_and_answered() {
             .any(|event| matches!(event, FlowRunEvent::AskAnswered { .. }))
     );
 }
+
+/// Each start of `node` in the log, as `(generation, attempt)`.
+fn starts_of(events: &[FlowRunEvent], wanted: &str) -> Vec<(u32, u32)> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            FlowRunEvent::AttemptStarted {
+                node,
+                generation,
+                attempt,
+                ..
+            } if node == wanted => Some((*generation, *attempt)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A pass whose output is gone on resume is taken away, and the node runs
+/// again in a generation of its own: with two tries allowed it gets two
+/// more, however many the lost pass had used.
+#[test]
+fn a_node_whose_output_was_lost_gets_a_fresh_count() {
+    use super::crash::{Process, append_index, process, records};
+    use daruda_runlog::testing::{Fault, FaultBackend};
+    let flow = super::crash::TWO_RETRYING.replace("max_attempts: 5", "max_attempts: 2");
+    let loaded = load(&flow, None).expect("valid flow");
+    let fail = || Step::fail(NodeFailure::Exit { code: Some(1) });
+    let passes_second = || {
+        FakeRunner::new().script(
+            "design",
+            vec![
+                fail(),
+                Step::Ok {
+                    writes: Some("design ran\n".to_string()),
+                },
+            ],
+        )
+    };
+    let probe = FaultBackend::new();
+    let _ = process(
+        probe.clone(),
+        &loaded,
+        tempfile::tempdir().expect("t").path(),
+        &passes_second(),
+    );
+    let review = append_index(
+        &probe,
+        |e| matches!(e, FlowRunEvent::AttemptStarted { node, .. } if node == "review"),
+    );
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let first = FaultBackend::new().with_fault(Fault::TornAppend { k: review, keep: 0 });
+    let _ = process(first.clone(), &loaded, dir.path(), &passes_second());
+    std::fs::remove_file(dir.path().join("run").join("design.md")).expect("lose the output");
+
+    // A third attempt in the old count would fail and be the last.
+    let runner = FakeRunner::new().script(
+        "design",
+        vec![
+            fail(),
+            Step::Ok {
+                writes: Some("design ran again\n".to_string()),
+            },
+            fail(),
+        ],
+    );
+    let second = first.crash();
+    let Process::Drove(report) = process(second.clone(), &loaded, dir.path(), &runner) else {
+        panic!("the run could not be picked up");
+    };
+    assert!(
+        matches!(report.outcome, RunOutcome::Done),
+        "{:?}",
+        report.outcome
+    );
+    assert_eq!(
+        starts_of(&records(&second), "design"),
+        [(0, 1), (0, 2), (1, 1), (1, 2)]
+    );
+}
+
+/// A crash after a repair invalidated its members but before it scheduled
+/// their rerun: the members still start the new generation the repair
+/// gave them, counting from 1.
+#[test]
+fn members_invalidated_before_a_crash_rerun_in_a_new_generation() {
+    use super::crash::{Process, append_index, process, records};
+    use daruda_runlog::testing::{Fault, FaultBackend};
+    let loaded = load(GATED, None).expect("valid flow");
+    let gate_fails_once = || {
+        FakeRunner::new().script(
+            "gate",
+            vec![
+                Step::fail(NodeFailure::Exit { code: Some(1) }),
+                Step::Ok { writes: None },
+            ],
+        )
+    };
+    let probe = FaultBackend::new();
+    let _ = process(
+        probe.clone(),
+        &loaded,
+        tempfile::tempdir().expect("t").path(),
+        &gate_fails_once(),
+    );
+    let scheduled = append_index(&probe, |e| matches!(e, FlowRunEvent::RerunScheduled { .. }));
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let first = FaultBackend::new().with_fault(Fault::TornAppend {
+        k: scheduled,
+        keep: 0,
+    });
+    let _ = process(first.clone(), &loaded, dir.path(), &gate_fails_once());
+    let runner = gate_fails_once();
+    let second = first.crash();
+    let Process::Drove(report) = process(second.clone(), &loaded, dir.path(), &runner) else {
+        panic!("the run could not be picked up");
+    };
+
+    assert!(
+        matches!(report.outcome, RunOutcome::Done),
+        "{:?}",
+        report.outcome
+    );
+    assert_eq!(starts_of(&records(&second), "review"), [(0, 1), (1, 1)]);
+}

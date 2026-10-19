@@ -535,6 +535,7 @@ impl<'a> Run<'a> {
                     .collect();
                 if !members.is_empty() {
                     let gate = id.clone();
+                    let members = members.clone();
                     self.log
                         .commit(FlowRunEvent::Invalidated { gate, members })
                         .await
@@ -596,8 +597,8 @@ impl<'a> Run<'a> {
                     return Err(outcome);
                 }
 
-                if let PolicyKind::Repair { fix, rerun } = &policy.kind {
-                    self.repair(fix, rerun, &ctx, id, &evidence, &failure)
+                if let PolicyKind::Repair { fix, .. } = &policy.kind {
+                    self.repair(fix, &members, &ctx, id, &evidence, &failure)
                         .await?;
                 }
 

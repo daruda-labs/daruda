@@ -55,8 +55,10 @@ again:
 
 ## Attempt Budget
 
-`max_attempts` counts attempts in the current repair generation; a rerun
-starts a generation at attempt 1. A verdict failure and a user or overage
+`max_attempts` counts attempts in the current generation. A node whose pass
+is taken away (a repair's `Invalidated`, or `OutputLost` on resume) starts a
+new generation at attempt 1, so a crash before `RerunScheduled` still reruns
+the members with a fresh count. A verdict failure and a user or overage
 stop spend an attempt, and the count survives resume. An attempt cut short
 by a crash or a quit spends none (`NodeState::crashed`).
 

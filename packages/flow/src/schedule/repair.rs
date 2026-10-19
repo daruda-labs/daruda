@@ -18,19 +18,28 @@ impl Run<'_> {
     pub(super) async fn repair(
         &self,
         fix: &str,
-        rerun: &[NodeId],
+        invalidated: &[NodeId],
         ctx: &RunContext<'_>,
         gate: &NodeId,
         evidence: &[PathBuf],
         failure: &NodeFailure,
     ) -> Result<(), RunOutcome> {
         self.run_fix(fix, ctx, evidence, failure).await?;
-        // Each member starts a fresh generation of its own — that is the
-        // rule that gives a nested gate its cap back.
-        let members = self.rerun_members(rerun, gate);
+        // The set invalidated before the fix, whose members began their
+        // fresh generations then, not a second derivation that could take in
+        // a sibling that finished meanwhile. A member another gate started
+        // driving during the fix is left to that drive.
+        let members: Vec<NodeId> = {
+            let driving = self.driving.borrow();
+            invalidated
+                .iter()
+                .filter(|member| !driving.contains(*member))
+                .cloned()
+                .collect()
+        };
         // The computed set, not the declared roots: a host cannot infer the
         // closure, the `∩ executed` filter or the recursion guard. An empty
-        // one still says work resumed. Each member starts a new generation.
+        // one still says work resumed.
         let scheduled = FlowRunEvent::RerunScheduled {
             gate: gate.clone(),
             members: members.clone(),

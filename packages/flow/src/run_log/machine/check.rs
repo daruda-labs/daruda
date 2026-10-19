@@ -79,12 +79,13 @@ pub(super) fn check(state: &FlowRunState, event: &E) -> Result<(), R> {
             running(state)?;
             for member in members {
                 let current = known(state, member)?;
-                let reusable = matches!(
-                    current.last,
-                    AttemptState::Passed { .. } | AttemptState::Pinned
-                );
-                if !reusable && !current.invalidated {
-                    return Err(R::NotPassed(member.clone()));
+                // A member in flight is still being derived; scheduling it
+                // again would start a second attempt beside it.
+                idle(member, current)?;
+                // Its new generation began at `Invalidated`; a member never
+                // invalidated would rerun inside the count of its old one.
+                if !current.invalidated {
+                    return Err(R::NotInvalidated(member.clone()));
                 }
             }
             Ok(())

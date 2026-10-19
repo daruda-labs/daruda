@@ -61,7 +61,8 @@ pub struct StartFacts {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NodeState {
     pub(crate) produces: Produces,
-    /// Raised by each repair rerun; attempts count from 1 within one.
+    /// Raised each time the node's pass is taken away (a repair invalidates
+    /// it, or its output is lost); attempts count from 1 within one.
     pub(crate) generation: u32,
     /// Attempts started in this generation, interrupted ones included: the
     /// next attempt's number is one past this.

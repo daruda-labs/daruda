@@ -101,23 +101,23 @@ pub(super) fn apply(state: &mut FlowRunState, event: &E) {
             );
             state.spent = record.spent.clone();
         }
-        E::OutputLost { node } => settle(state, node, AttemptState::NotRun),
+        E::OutputLost { node } => {
+            if let Some(current) = state.nodes.get_mut(node) {
+                current.last = AttemptState::NotRun;
+                next_generation(current);
+            }
+        }
         E::Invalidated { members, .. } => {
             for member in members {
                 if let Some(current) = state.nodes.get_mut(member) {
                     current.invalidated = true;
+                    next_generation(current);
                 }
             }
         }
-        E::RerunScheduled { members, .. } => {
-            for member in members {
-                if let Some(current) = state.nodes.get_mut(member) {
-                    current.generation += 1;
-                    current.attempts = 0;
-                    current.crashed = 0;
-                }
-            }
-        }
+        // The members' generations began when their passes were taken away,
+        // so a crash before this record still reruns them counting from 1.
+        E::RerunScheduled { .. } => {}
         E::FixStarted { gate, evidence } => {
             state.fixing.insert(gate.clone(), *evidence);
             state.next_evidence = evidence + 1;
@@ -196,6 +196,14 @@ fn import(state: &mut FlowRunState, imported: &Imported) {
     }
     state.next_evidence = imported.next_evidence;
     state.spent = imported.spent.clone();
+}
+
+/// A node whose pass was taken away is re-derived from scratch: its next
+/// attempt is the first of a new generation, with the whole cap to spend.
+fn next_generation(node: &mut NodeState) {
+    node.generation += 1;
+    node.attempts = 0;
+    node.crashed = 0;
 }
 
 /// Settle `node` as passed or pinned, numbering the pass.

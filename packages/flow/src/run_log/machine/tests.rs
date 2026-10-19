@@ -260,6 +260,10 @@ fn a_rerun_starts_a_generation_at_attempt_one() {
             node: id("design"),
             record: line(1, 1),
         },
+        FlowRunEvent::Invalidated {
+            gate: id("gate"),
+            members: vec![id("design")],
+        },
         FlowRunEvent::RerunScheduled {
             gate: id("gate"),
             members: vec![id("design")],
@@ -430,6 +434,10 @@ fn a_rerun_resets_what_a_crash_did_not_spend() {
             node: id("design"),
             record: line(2, 2),
         },
+        FlowRunEvent::Invalidated {
+            gate: id("gate"),
+            members: vec![id("design")],
+        },
         FlowRunEvent::RerunScheduled {
             gate: id("gate"),
             members: vec![id("design")],
@@ -451,6 +459,10 @@ fn a_rerun_resets_what_a_crash_did_not_spend() {
             node: id("design"),
             record: line(2, 2),
         },
+        FlowRunEvent::Invalidated {
+            gate: id("gate"),
+            members: vec![id("design")],
+        },
         FlowRunEvent::RerunScheduled {
             gate: id("gate"),
             members: vec![id("design")],
@@ -468,6 +480,64 @@ fn a_rerun_resets_what_a_crash_did_not_spend() {
         (0, 1),
         "the earlier generation's crash was carried into the rerun"
     );
+}
+
+/// A member whose rerun is already in flight cannot be scheduled again: a
+/// second start beside the live attempt is not a rerun.
+#[test]
+fn a_rerun_of_a_member_in_flight_is_refused() {
+    let (state, _) = run(vec![
+        started(),
+        FlowRunEvent::attempt_started(id("design"), 0),
+        FlowRunEvent::AttemptPassed {
+            node: id("design"),
+            record: line(1, 1),
+        },
+        FlowRunEvent::Invalidated {
+            gate: id("gate"),
+            members: vec![id("design")],
+        },
+        FlowRunEvent::RerunScheduled {
+            gate: id("gate"),
+            members: vec![id("design")],
+        },
+        FlowRunEvent::attempt_started(id("design"), 1),
+    ]);
+    let again = FlowRunEvent::RerunScheduled {
+        gate: id("gate"),
+        members: vec![id("design")],
+    };
+    assert_eq!(
+        FlowRunMachine::check(&state, &again),
+        Err(FlowRunRejected::InFlight(id("design")))
+    );
+}
+
+/// A lost output takes the pass away and starts the node's next generation
+/// with nothing spent, however many attempts the lost pass took.
+#[test]
+fn a_lost_output_starts_a_new_generation() {
+    let (state, _) = run(vec![
+        started(),
+        FlowRunEvent::attempt_started(id("design"), 0),
+        FlowRunEvent::AttemptFailed {
+            node: id("design"),
+            failure: FailureLine::Exit { code: Some(1) },
+            record: line(1, 1),
+        },
+        FlowRunEvent::attempt_started(id("design"), 0),
+        FlowRunEvent::AttemptPassed {
+            node: id("design"),
+            record: line(2, 2),
+        },
+        FlowRunEvent::OutputLost { node: id("design") },
+    ]);
+    let design = state.node(&id("design")).expect("design");
+    assert_eq!(
+        (design.generation, design.attempts, design.spent()),
+        (1, 0, 0)
+    );
+    assert!(FlowRunMachine::check(&state, &FlowRunEvent::attempt_started(id("design"), 1)).is_ok());
 }
 
 /// Only a run that stopped without ending, or ended stalled, resumes.
