@@ -136,7 +136,7 @@ fn an_unfinished_reconciliation_reopens_without_changing_recovery_files() {
     let task_id = spec.id.clone();
     let mut log = RunLog::<TaskMachine, _>::open(FileBackend::new(logs.path()), BUILD).unwrap();
     log.commit(TaskEvent::Created { spec }).unwrap();
-    let old_path = logs.path().join("log.0.jsonl");
+    let old_path = FileBackend::new(logs.path()).log_path(0);
     let old_log = std::fs::read(&old_path).unwrap();
     log.compact().unwrap();
     log.commit(TaskEvent::SubtaskAdded {
@@ -215,7 +215,7 @@ fn read_only_recovery_refuses_a_newer_task_log_without_changing_files() {
     drop(log);
     let mut tail = std::fs::OpenOptions::new()
         .append(true)
-        .open(logs.path().join("log.0.jsonl"))
+        .open(FileBackend::new(logs.path()).log_path(0))
         .unwrap();
     tail.write_all(b"{\"v\":99}").unwrap();
     tail.sync_all().unwrap();
