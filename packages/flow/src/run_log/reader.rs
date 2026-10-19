@@ -166,11 +166,14 @@ pub fn narration(run_dir: &Path) -> Vec<Sequenced<FlowEvent>> {
     said
 }
 
-/// Fold a run's events into what a resumed run starts from.
+/// Fold a run's events into what a resumed run starts from. Which nodes
+/// passed is the machine's answer, the same one resume's own steps read.
 pub(crate) fn replay_events<'e>(events: impl IntoIterator<Item = &'e E>) -> Replay {
     let mut replay = Replay::default();
+    let mut state = FlowRunState::default();
     let fix = NodeId::from(FIX_SESSION_ID);
     for event in events {
+        FlowRunMachine::apply(&mut state, event);
         match event {
             E::RunStarted {
                 until,
@@ -180,15 +183,12 @@ pub(crate) fn replay_events<'e>(events: impl IntoIterator<Item = &'e E>) -> Repl
             } => {
                 replay.profile = profile.clone();
                 replay.until = until.clone();
-                replay.passed.extend(pinned.iter().cloned());
                 replay.pinned = pinned.clone();
             }
             E::Imported(imported) => {
                 replay.profile = imported.profile.clone();
                 replay.until = imported.until.clone();
                 replay.pinned = imported.pinned.clone();
-                replay.passed.extend(imported.pinned.iter().cloned());
-                replay.passed.extend(imported.passed.iter().cloned());
                 replay.next_seq = imported.next_evidence;
                 replay.spent = (&imported.spent).into();
                 for attempt in &imported.records {
@@ -210,9 +210,6 @@ pub(crate) fn replay_events<'e>(events: impl IntoIterator<Item = &'e E>) -> Repl
                 replay.next_seq = replay.next_seq.max(evidence + 1);
             }
             E::AttemptPassed { node, record } => {
-                if !replay.passed.contains(node) {
-                    replay.passed.push(node.clone());
-                }
                 settled(&mut replay, node, record, AttemptOutcome::Passed);
             }
             E::AttemptFailed {
@@ -239,11 +236,9 @@ pub(crate) fn replay_events<'e>(events: impl IntoIterator<Item = &'e E>) -> Repl
                 };
                 settled(&mut replay, &fix, record, outcome);
             }
-            E::Invalidated { members, .. } => {
-                replay.passed.retain(|passed| !members.contains(passed));
-            }
-            E::OutputLost { node } => replay.passed.retain(|passed| passed != node),
-            E::Resumed { .. }
+            E::Invalidated { .. }
+            | E::OutputLost { .. }
+            | E::Resumed { .. }
             | E::NodeRefused { .. }
             | E::ProcessSpawned { .. }
             | E::RerunScheduled { .. }
@@ -253,6 +248,7 @@ pub(crate) fn replay_events<'e>(events: impl IntoIterator<Item = &'e E>) -> Repl
             | E::RunEnded { .. } => {}
         }
     }
+    replay.passed = state.passed_in_order();
     replay
 }
 
@@ -262,9 +258,6 @@ fn settled(
     record: &super::line::AttemptLine,
     outcome: AttemptOutcome,
 ) {
-    for invalidated in &record.invalidated {
-        replay.passed.retain(|passed| passed != invalidated);
-    }
     replay.spent = (&record.spent).into();
     crate::record::push_attempt(&mut replay.records, node, record.to_record(outcome));
 }
@@ -339,6 +332,88 @@ mod tests {
         assert!(replay.passed.is_empty(), "{:?}", replay.passed);
         assert_eq!(replay.pinned, vec![NodeId::from("pinned")]);
         assert_eq!(replay.profile.as_deref(), Some("cheap"));
+    }
+
+    /// The passes a resume schedules from are the state machine's, in the
+    /// order they happened: a node started again after its pass is not
+    /// passed, whatever the event that took the pass away.
+    #[test]
+    fn the_passes_are_the_machines_in_pass_order() {
+        let line = |attempt, evidence| {
+            Box::new(crate::run_log::line::AttemptLine::new(
+                &crate::record::AttemptRecord {
+                    attempt,
+                    evidence_seq: evidence,
+                    outcome: AttemptOutcome::Passed,
+                    invalidated: crate::record::Invalidation::default(),
+                    git_status: None,
+                    at: std::time::UNIX_EPOCH,
+                    took: Duration::ZERO,
+                    waited: crate::runner::Waiting::default(),
+                    tools: Vec::new(),
+                    turns: 1,
+                    usage: None,
+                },
+                &Default::default(),
+            ))
+        };
+        let node = |id: &str| NodeStart {
+            id: id.into(),
+            produces: Produces::Nothing,
+        };
+        let events = [
+            E::RunStarted {
+                nodes: vec![node("a"), node("b"), node("c")],
+                until: None,
+                pinned: Vec::new(),
+                profile: None,
+            },
+            E::attempt_started("b".into(), 0),
+            E::AttemptPassed {
+                node: "b".into(),
+                record: line(1, 1),
+            },
+            E::attempt_started("a".into(), 0),
+            E::AttemptPassed {
+                node: "a".into(),
+                record: line(1, 2),
+            },
+            E::attempt_started("c".into(), 0),
+            E::AttemptPassed {
+                node: "c".into(),
+                record: line(1, 3),
+            },
+            E::attempt_started("c".into(), 0),
+        ];
+        let numbered = numbered(&events);
+        let replay = replay_events(&numbered);
+        let state = state_of(&numbered);
+        assert_eq!(replay.passed, vec![NodeId::from("b"), NodeId::from("a")]);
+        let passed: std::collections::BTreeSet<NodeId> = replay.passed.iter().cloned().collect();
+        assert_eq!(passed, state.finished());
+    }
+
+    /// Each event as `assign` would have numbered it, applied in turn.
+    fn numbered(events: &[E]) -> Vec<E> {
+        let mut state = FlowRunState::default();
+        events
+            .iter()
+            .map(|event| {
+                let mut event = event.clone();
+                FlowRunMachine::assign(&state, &mut event);
+                FlowRunMachine::check(&state, &event).expect("a valid event");
+                FlowRunMachine::apply(&mut state, &event);
+                event
+            })
+            .collect()
+    }
+
+    fn state_of(events: &[E]) -> FlowRunState {
+        let mut state = FlowRunState::default();
+        for event in events {
+            FlowRunMachine::apply(&mut state, event);
+        }
+        state
     }
 
     /// The selection comes from the run's first event, so the progress

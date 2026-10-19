@@ -22,6 +22,10 @@ pub struct FlowRunState {
     /// Gates whose fix session is running, with that session's evidence.
     pub(crate) fixing: BTreeMap<NodeId, u32>,
     pub(crate) resumes: u32,
+    /// How many passes and pins the run has recorded; each node keeps the
+    /// ordinal of its latest, so the order nodes passed in is replayed too.
+    #[serde(default)]
+    pub(crate) passes: u32,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,6 +73,9 @@ pub struct NodeState {
     pub(crate) last: AttemptState,
     /// A repair took this node's output away; it is no longer current.
     pub(crate) invalidated: bool,
+    /// The run's pass ordinal when this node last passed or was pinned.
+    #[serde(default)]
+    pub(crate) passed_as: u32,
 }
 
 /// Whether a passed node leaves a file the run can check is still there.
@@ -140,6 +147,18 @@ impl FlowRunState {
             .collect()
     }
 
+    /// The same nodes in the order they passed: what a resumed run starts
+    /// from, and the one fold of which passes stand.
+    pub(crate) fn passed_in_order(&self) -> Vec<NodeId> {
+        let mut passed: Vec<(&NodeId, &NodeState)> = self
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.counts_as_passed())
+            .collect();
+        passed.sort_by_key(|(_, node)| node.passed_as);
+        passed.into_iter().map(|(id, _)| id.clone()).collect()
+    }
+
     /// Every node the run started with, in the order a host draws them,
     /// with what the log says of it.
     pub fn node_states(&self) -> impl Iterator<Item = (&NodeId, &NodeState)> {
@@ -195,6 +214,7 @@ impl NodeState {
             crashed: 0,
             last: AttemptState::NotRun,
             invalidated: false,
+            passed_as: 0,
         }
     }
 

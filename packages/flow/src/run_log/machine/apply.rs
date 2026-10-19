@@ -64,7 +64,7 @@ pub(super) fn apply(state: &mut FlowRunState, event: &E) {
             }
         }
         E::AttemptPassed { node, record } => {
-            settle(
+            passed(
                 state,
                 node,
                 AttemptState::Passed {
@@ -155,9 +155,7 @@ fn start(
         .map(|node| (node.id.clone(), NodeState::new(node.produces)))
         .collect();
     for pin in &pinned {
-        if let Some(node) = state.nodes.get_mut(pin) {
-            node.last = AttemptState::Pinned;
-        }
+        passed(state, pin, AttemptState::Pinned);
     }
     state.start = StartFacts {
         order: nodes.iter().map(|node| node.id.clone()).collect(),
@@ -179,9 +177,7 @@ fn import(state: &mut FlowRunState, imported: &Imported) {
         imported.profile.clone(),
     );
     for id in &imported.passed {
-        if let Some(node) = state.nodes.get_mut(id) {
-            node.last = AttemptState::Passed { attempt: 0 };
-        }
+        passed(state, id, AttemptState::Passed { attempt: 0 });
     }
     for carried in &imported.carried {
         if let Some(node) = state.nodes.get_mut(&carried.node) {
@@ -200,6 +196,15 @@ fn import(state: &mut FlowRunState, imported: &Imported) {
     }
     state.next_evidence = imported.next_evidence;
     state.spent = imported.spent.clone();
+}
+
+/// Settle `node` as passed or pinned, numbering the pass.
+fn passed(state: &mut FlowRunState, node: &NodeId, last: AttemptState) {
+    if let Some(current) = state.nodes.get_mut(node) {
+        state.passes += 1;
+        current.passed_as = state.passes;
+        current.last = last;
+    }
 }
 
 fn settle(state: &mut FlowRunState, node: &NodeId, last: AttemptState) {

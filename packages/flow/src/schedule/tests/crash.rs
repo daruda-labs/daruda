@@ -189,6 +189,7 @@ fn a_crash_at_any_write_resumes_with_numbers_and_outputs_intact() {
         let first = FaultBackend::new().with_fault(fault);
         let _ = process(first.clone(), &loaded, dir.path(), &FakeRunner::new());
         let second = first.crash();
+        assert_one_fold_of_passes(&records(&second), &fault);
         match process(second.clone(), &loaded, dir.path(), &FakeRunner::new()) {
             Process::Drove(report) => assert!(
                 matches!(report.outcome, RunOutcome::Done),
@@ -227,6 +228,7 @@ fn a_crash_at_any_write_resumes_with_numbers_and_outputs_intact() {
             assert_eq!(numbers, &expected, "{fault:?}: {key:?}");
             continued += usize::from(numbers.len() > 1);
         }
+        assert_one_fold_of_passes(&events, &fault);
         let state = state_of(&events);
         assert!(
             matches!(state.phase(), RunPhase::Ended(_)),
@@ -244,6 +246,16 @@ fn a_crash_at_any_write_resumes_with_numbers_and_outputs_intact() {
         }
     }
     assert!(continued > 0, "no crash interrupted an attempt");
+}
+
+/// The passes the scheduler resumes from and the ones resume's own steps
+/// keep are the same set.
+fn assert_one_fold_of_passes(events: &[FlowRunEvent], fault: &Fault) {
+    let scheduled: BTreeSet<NodeId> = crate::run_log::reader::replay_events(events)
+        .passed
+        .into_iter()
+        .collect();
+    assert_eq!(scheduled, state_of(events).finished(), "{fault:?}");
 }
 
 /// One agent node allowed `max_attempts` tries.
