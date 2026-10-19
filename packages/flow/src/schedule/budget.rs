@@ -330,8 +330,8 @@ impl Run<'_> {
     /// Cancel comes first: an explicit stop is a more accurate reason than a
     /// limit that expired in the same moment.
     pub(super) fn stop_before_more_work(&self) -> Option<RunOutcome> {
-        if self.cancel.is_canceled() {
-            return Some(RunOutcome::Canceled { node: None });
+        if let Some(kind) = self.cancel.kind() {
+            return Some(RunOutcome::stopped_by(kind));
         }
         self.budget_exhausted()
             .map(|limit| RunOutcome::BudgetExhausted { limit })

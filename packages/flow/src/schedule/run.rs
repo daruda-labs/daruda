@@ -105,13 +105,10 @@ fn execute_with(
             events,
             cancel,
         );
-        if settled == crate::resume::Settled::Stopped {
-            let outcome = if cancel.is_shutting_down() {
-                RunOutcome::ShutDown
-            } else {
-                RunOutcome::Canceled { node: None }
-            };
-            return not_started(request, outcome);
+        if settled == crate::resume::Settled::Stopped
+            && let Some(kind) = cancel.kind()
+        {
+            return not_started(request, RunOutcome::stopped_by(kind));
         }
     }
     let lock = match RunLock::acquire(&lock_dir, &run_id_of(&request.run_dir), &*request.is_alive) {
@@ -183,7 +180,9 @@ fn execute_with(
     // A quit that cut the run short is not how it ended. Leaving it as a
     // crash leaves it resumable: no `RunEnded`, no `run.md` or marker, and
     // the lock kept, so its dead holder is what reads the run as crashed.
-    if cancel.is_shutting_down() && !matches!(report.outcome, RunOutcome::Done) {
+    // Only an outcome the quit produced: a failure, a spent budget or a stall
+    // a sibling reached before it is the run's real ending.
+    if matches!(report.outcome, RunOutcome::ShutDown) {
         report.outcome = RunOutcome::ShutDown;
         // The committer drains here, so what the run did commit is on disk.
         drop(store);
@@ -391,8 +390,8 @@ fn provision_agents(
 ) -> Result<(), RunOutcome> {
     let mut prepared = HashSet::new();
     for id in request.selected_agents() {
-        if cancel.is_canceled() {
-            return Err(RunOutcome::Canceled { node: None });
+        if let Some(kind) = cancel.kind() {
+            return Err(RunOutcome::stopped_by(kind));
         }
         if !prepared.insert(id) {
             continue;
@@ -402,8 +401,10 @@ fn provision_agents(
         };
         match provision(id, launch) {
             Ok(warnings) => notices.extend(warnings),
-            Err(_) if cancel.is_canceled() => return Err(RunOutcome::Canceled { node: None }),
             Err(message) => {
+                if let Some(kind) = cancel.kind() {
+                    return Err(RunOutcome::stopped_by(kind));
+                }
                 return Err(RunOutcome::Unprovisioned {
                     agent: id.to_string(),
                     message,

@@ -357,6 +357,7 @@ mod lifecycle;
 mod ordering;
 mod parallel;
 mod prompts;
+mod quit;
 mod records;
 mod repair;
 mod resume_steps;

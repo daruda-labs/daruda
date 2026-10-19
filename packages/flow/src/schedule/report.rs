@@ -63,6 +63,17 @@ pub enum RunOutcome {
     ShutDown,
 }
 
+impl RunOutcome {
+    /// How a stop between units of work ends the run: a quit leaves it to
+    /// resume, anything else cancels it.
+    pub(crate) fn stopped_by(kind: crate::runner::StopKind) -> Self {
+        match kind {
+            crate::runner::StopKind::ShutDown => RunOutcome::ShutDown,
+            crate::runner::StopKind::Stop => RunOutcome::Canceled { node: None },
+        }
+    }
+}
+
 /// Which of the three defences stopped the run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BudgetLimit {

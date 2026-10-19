@@ -265,6 +265,9 @@ pub(crate) async fn run_flow(inputs: RunInputs<'_>, runner: &dyn NodeRunner) -> 
                 // failures ends the run does not depend on which agent was
                 // slower.
                 Err(stopped) if matches!(outcome, RunOutcome::Done) => outcome = stopped,
+                // A quit only cut its node short; an ending a sibling reached
+                // on its own is the run's, whatever the declaration order.
+                Err(stopped) if matches!(outcome, RunOutcome::ShutDown) => outcome = stopped,
                 // A node kept by its own stop is `node: None`; the sibling
                 // it interrupted names where the run was actually cut.
                 Err(stopped @ RunOutcome::Canceled { node: Some(_) })
