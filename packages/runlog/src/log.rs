@@ -8,7 +8,7 @@ use crate::backend::LogBackend;
 use crate::error::{CommitError, OpenError};
 use crate::machine::Machine;
 use crate::record::{Body, FORMAT_VERSION, Record, now_ms};
-use crate::replay::replay;
+use crate::replay::{admit, replay};
 use crate::snapshot::{self, Base, Decoded};
 
 /// Past either budget the current generation's log is worth compacting.
@@ -93,11 +93,13 @@ fn closed_error() -> io::Error {
 }
 
 /// The newest generation whose snapshot is whole, with that snapshot.
-/// Every snapshot's version is read first: a newer one refuses the open.
-fn choose_generation<S: Default + serde::de::DeserializeOwned>(
+/// Every snapshot's versions are read first, and so is every newer
+/// generation's log: anything a newer build wrote refuses the open, so the
+/// fallback past a broken snapshot never drops what this build cannot read.
+fn choose_generation<M: Machine>(
     backend: &impl LogBackend,
     generations: &[u64],
-) -> Result<(u64, Base<S>), OpenError> {
+) -> Result<(u64, Base<M::State>), OpenError> {
     let mut whole = Vec::new();
     for &generation in generations {
         if generation == 0 {
@@ -106,34 +108,62 @@ fn choose_generation<S: Default + serde::de::DeserializeOwned>(
         let Some(bytes) = backend.read(generation)?.snapshot else {
             continue;
         };
-        match snapshot::decode(&bytes) {
+        match snapshot::decode::<M::State>(&bytes, M::SCHEMA)? {
             Decoded::Whole(base) => whole.push((generation, base)),
-            Decoded::TooNew(found) => {
-                return Err(OpenError::TooNew {
-                    found,
-                    supported: FORMAT_VERSION,
-                });
-            }
             Decoded::Broken => {}
         }
     }
-    if let Some(chosen) = whole.pop() {
-        return Ok(chosen);
+    let chosen = match whole.pop() {
+        Some(chosen) => chosen,
+        None => match (generations.first(), generations.last()) {
+            (None, _) | (Some(0), _) => (
+                0,
+                Base {
+                    state: M::State::default(),
+                    seq: 0,
+                    epoch: 0,
+                },
+            ),
+            // Generation 0 is gone, so falling back to it would silently
+            // discard everything the broken snapshot held.
+            (Some(_), Some(&newest)) | (Some(&newest), None) => {
+                return Err(OpenError::NoWholeGeneration { generation: newest });
+            }
+        },
+    };
+    for &newer in generations.iter().filter(|&&newer| newer > chosen.0) {
+        admit::<M>(&backend.read(newer)?.log)?;
     }
-    match (generations.first(), generations.last()) {
-        (None, _) | (Some(0), _) => Ok((
-            0,
-            Base {
-                state: S::default(),
-                seq: 0,
-                epoch: 0,
-            },
-        )),
-        // Generation 0 is gone, so falling back to it would silently
-        // discard everything the broken snapshot held.
-        (Some(_), Some(&newest)) | (Some(&newest), None) => {
-            Err(OpenError::NoWholeGeneration { generation: newest })
-        }
+    Ok(chosen)
+}
+
+/// What a log holds, read without taking it over: for a reader that does
+/// not hold the writer's lock, such as a history list or a status check.
+pub struct History<M: Machine> {
+    /// The seq the records continue from: 0, or the seq of the snapshot
+    /// a compaction left in their place.
+    pub base_seq: u64,
+    /// Every whole record after `base_seq`, `opened` records included.
+    pub records: Vec<Record<M::Event>>,
+    /// The state after the last of them.
+    pub state: M::State,
+    /// The last line was not whole and is not among `records`: a crash cut
+    /// it, or the live writer has not finished it yet.
+    pub torn: bool,
+}
+
+impl<M: Machine> fmt::Debug for History<M>
+where
+    M::Event: fmt::Debug,
+    M::State: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("History")
+            .field("base_seq", &self.base_seq)
+            .field("records", &self.records)
+            .field("state", &self.state)
+            .field("torn", &self.torn)
+            .finish()
     }
 }
 
@@ -142,20 +172,38 @@ impl<M: Machine, B: LogBackend> RunLog<M, B> {
     /// a torn tail, removing generations, or recording a new epoch.
     pub fn read_only(backend: &B) -> Result<(u64, M::State), OpenError> {
         let generations = backend.generations()?;
-        let (generation, base) = choose_generation::<M::State>(backend, &generations)?;
+        let (generation, base) = choose_generation::<M>(backend, &generations)?;
         let log = backend.read(generation)?.log;
-        let replayed = replay::<M>(&log, base)?;
+        let replayed = replay::<M>(&log, base, drop)?;
         Ok((replayed.last_seq, replayed.state))
+    }
+
+    /// [`Self::read_only`] with the records themselves, under the same
+    /// rules as open: only a torn last line is passed over, and a gap, an
+    /// unreadable line, or a newer version is refused.
+    pub fn read_history(backend: &B) -> Result<History<M>, OpenError> {
+        let generations = backend.generations()?;
+        let (generation, base) = choose_generation::<M>(backend, &generations)?;
+        let base_seq = base.seq;
+        let log = backend.read(generation)?.log;
+        let mut records = Vec::new();
+        let replayed = replay::<M>(&log, base, |record| records.push(record))?;
+        Ok(History {
+            base_seq,
+            records,
+            state: replayed.state,
+            torn: replayed.torn,
+        })
     }
 
     /// Restore from `backend` and append an `opened` record. Nothing is
     /// written until the whole chosen generation has been read and accepted.
     pub fn open(mut backend: B, build: &str) -> Result<Self, OpenError> {
         let generations = backend.generations()?;
-        let (generation, base) = choose_generation::<M::State>(&backend, &generations)?;
+        let (generation, base) = choose_generation::<M>(&backend, &generations)?;
         let base_seq = base.seq;
         let log = backend.read(generation)?.log;
-        let replayed = replay::<M>(&log, base)?;
+        let replayed = replay::<M>(&log, base, drop)?;
 
         backend.select(generation)?;
         if replayed.torn {
@@ -179,6 +227,7 @@ impl<M: Machine, B: LogBackend> RunLog<M, B> {
         let line = opened.encode(Body::<&M::Event>::Opened {
             epoch: opened.epoch,
             build: build.to_owned(),
+            schema: M::SCHEMA,
         })?;
         opened.write(&line)?;
         Ok(opened)
@@ -244,7 +293,7 @@ impl<M: Machine, B: LogBackend> RunLog<M, B> {
             return Err(closed_error());
         }
         let next = self.generation + 1;
-        let bytes = snapshot::encode(&self.state, self.last_seq, self.epoch)?;
+        let bytes = snapshot::encode(&self.state, M::SCHEMA, self.last_seq, self.epoch)?;
         let switched = (|| {
             // A leftover from an earlier lost switch must not prefix the new log.
             if self.backend.generations()?.contains(&next) {

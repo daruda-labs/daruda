@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use daruda_runlog::{Body, CatchUp, FORMAT_VERSION, FileBackend, OpenError, RunLog};
+use daruda_runlog::{Body, CatchUp, FORMAT_VERSION, FileBackend, OpenError, RunLog, Versioned};
 
 use crate::toy::{BUILD, Toy, add, ticket};
 
@@ -43,7 +43,7 @@ fn a_newer_record_version_is_refused_and_left_untouched() {
         .unwrap();
     assert!(matches!(
         err,
-        OpenError::TooNew { found, supported }
+        OpenError::TooNew { what: Versioned::Format, found, supported }
             if found == FORMAT_VERSION + 1 && supported == FORMAT_VERSION
     ));
     assert_eq!(std::fs::read(log_path(dir.path())).unwrap(), bytes);
@@ -63,7 +63,7 @@ fn a_complete_newer_record_without_its_newline_is_left_untouched() {
     let opened = RunLog::<Toy, _>::open(FileBackend::new(dir.path()), BUILD);
     assert!(matches!(
         opened,
-        Err(OpenError::TooNew { found, supported })
+        Err(OpenError::TooNew { what: Versioned::Format, found, supported })
             if found == FORMAT_VERSION + 1 && supported == FORMAT_VERSION
     ));
     assert_eq!(std::fs::read(log_path(dir.path())).unwrap(), bytes);
@@ -143,7 +143,7 @@ fn every_open_appends_an_opened_record_with_a_higher_epoch() {
         let [record] = records.as_slice() else {
             panic!("expected only the opened record, got {}", records.len());
         };
-        let Body::Opened { epoch, build } = &record.body else {
+        let Body::Opened { epoch, build, .. } = &record.body else {
             panic!("the last record after open is `opened`");
         };
         assert_eq!(build, BUILD);
@@ -154,4 +154,41 @@ fn every_open_appends_an_opened_record_with_a_higher_epoch() {
         }
     }
     assert_eq!(epochs, vec![1, 2, 3]);
+}
+
+#[test]
+fn history_reads_past_a_torn_last_line_without_cutting_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut bytes = seeded(dir.path());
+    bytes.extend_from_slice(b"{\"v\":1,\"seq\":4,\"at");
+    std::fs::write(log_path(dir.path()), &bytes).unwrap();
+
+    let history = RunLog::<Toy, _>::read_history(&FileBackend::new(dir.path())).unwrap();
+    assert!(history.torn);
+    assert_eq!(history.base_seq, 0);
+    let seqs: Vec<u64> = history.records.iter().map(|record| record.seq).collect();
+    assert_eq!(seqs, vec![1, 2, 3]);
+    assert!(matches!(history.records[0].body, Body::Opened { .. }));
+    assert_eq!(history.state.total, 2);
+    assert_eq!(std::fs::read(log_path(dir.path())).unwrap(), bytes);
+}
+
+#[test]
+fn history_refuses_a_corrupt_middle_line_and_a_seq_gap() {
+    let dir = tempfile::tempdir().unwrap();
+    let rows = lines(&seeded(dir.path()));
+    let mut broken = rows.clone();
+    broken[1] = "{not json".into();
+    std::fs::write(log_path(dir.path()), broken.join("\n") + "\n").unwrap();
+    assert!(matches!(
+        RunLog::<Toy, _>::read_history(&FileBackend::new(dir.path())),
+        Err(OpenError::Corrupt { line: 2 })
+    ));
+
+    let gapped = [rows[0].clone(), rows[2].clone()];
+    std::fs::write(log_path(dir.path()), gapped.join("\n") + "\n").unwrap();
+    assert!(matches!(
+        RunLog::<Toy, _>::read_history(&FileBackend::new(dir.path())),
+        Err(OpenError::Corrupt { line: 2 })
+    ));
 }

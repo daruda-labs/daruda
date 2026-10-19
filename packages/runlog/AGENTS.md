@@ -43,11 +43,25 @@ and no subscriber sees a record the disk lacks. A rejection emits nothing.
 
 ## Fresh State Comes Only From Replay
 
-Construct state only through `RunLog::open` or `RunLog::read_only`. The latter
-replays without writing an `opened` record, repairing a torn tail, or pruning
-generations, so recovery can preserve every file while exposing its state.
+Construct state only through `RunLog::open`, `RunLog::read_only`, or
+`RunLog::read_history`. The last two replay without writing an `opened` record,
+repairing a torn tail, or pruning generations, so recovery can preserve every
+file while exposing its state; `read_history` also returns the records.
 Do not seed a machine's state from another file, a cache, or a default after
 a failed open: the log is the single source, and a second source drifts from it.
+
+File names (`log.<g>.jsonl`, `snapshot.<g>.json`) belong to `FileBackend`.
+Other crates never parse a log's lines or build its paths: they read through
+`read_history`, ask `FileBackend::holds_log` whether one exists, and take
+`FileBackend::log_path` only to show or edit the bytes in a test.
+
+## Readers Without the Lock
+
+`read_only` and `read_history` may run while another process writes. They
+apply the same rules as open, so the one tolerance a reader gets is the same
+torn last line: a live writer may be mid-append, and that line is simply not
+returned (`History::torn`). Anything else open would refuse, a reader gets as
+an error too; it must not fall back to a prefix of the log.
 
 ## Strict Replay
 
@@ -58,7 +72,20 @@ a failed open: the log is the single source, and a second source drifts from it.
 - A record or snapshot with a newer `v` is `OpenError::TooNew`, and the log
   is left byte-for-byte untouched. Never overwrite a newer version.
 - A broken newest snapshot falls back to an older generation; with no older
-  generation left, open fails instead of starting empty.
+  generation left, open fails instead of starting empty. A generation is only
+  dropped after its snapshot and log were checked for newer versions: what a
+  newer build wrote is refused, never treated as broken and dropped.
+
+## Schema Versions
+
+`v` covers only the envelope. A machine's events and state carry
+`Machine::SCHEMA`, recorded in every `opened` record and snapshot and checked
+before any event or state is parsed, so an older build refuses a newer log as
+`OpenError::TooNew { what: Versioned::Schema, .. }` instead of `Corrupt`.
+
+- Bump the machine's `SCHEMA` in the same change that adds, renames, or
+  reshapes an event or state variant or field, even an optional one.
+- Never lower it or reuse a number. Reading an older schema must keep working.
 
 ## Single Writer
 

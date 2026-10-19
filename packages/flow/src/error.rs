@@ -247,8 +247,12 @@ pub enum LogRefusal {
     Reentered,
     #[error("the run log is corrupt at line {line}")]
     Corrupt { line: u64 },
-    #[error("the run log was written in format {found}, newer than this build reads ({supported})")]
-    TooNew { found: u32, supported: u32 },
+    #[error("the run log was written in {what} {found}, newer than this build reads ({supported})")]
+    TooNew {
+        what: daruda_runlog::Versioned,
+        found: u32,
+        supported: u32,
+    },
     #[error("the run log's generation {generation} has no whole snapshot to restore from")]
     NoWholeGeneration { generation: u64 },
 }

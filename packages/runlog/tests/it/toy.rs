@@ -87,6 +87,28 @@ impl Machine for Toy {
     }
 }
 
+/// `Toy` as a later build declares it once its events have changed.
+pub struct NewerToy;
+
+impl Machine for NewerToy {
+    type State = ToyState;
+    type Event = ToyEvent;
+    type Rejected = ToyRejected;
+    const SCHEMA: u32 = Toy::SCHEMA + 1;
+
+    fn check(state: &ToyState, event: &ToyEvent) -> Result<(), ToyRejected> {
+        Toy::check(state, event)
+    }
+
+    fn assign(state: &ToyState, event: &mut ToyEvent) {
+        Toy::assign(state, event);
+    }
+
+    fn apply(state: &mut ToyState, event: &ToyEvent) {
+        Toy::apply(state, event);
+    }
+}
+
 pub fn add(n: i64) -> ToyEvent {
     ToyEvent::Add { n }
 }

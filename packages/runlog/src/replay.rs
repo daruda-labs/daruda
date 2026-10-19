@@ -3,7 +3,7 @@
 
 use crate::error::OpenError;
 use crate::machine::Machine;
-use crate::record::{Body, FORMAT_VERSION, Record, VersionProbe};
+use crate::record::{Body, Record, VersionProbe};
 use crate::snapshot::Base;
 
 /// The log replayed onto its generation's base.
@@ -34,24 +34,28 @@ fn split_lines(log: &[u8]) -> (Vec<(usize, &[u8])>, Option<usize>) {
     (lines, None)
 }
 
+/// Refuse a log any of whose lines a newer build wrote: its envelope, or
+/// an `opened` record naming a newer machine schema. Read before any line
+/// is trusted or anything is cut, so a newer log is never called corrupt.
+pub(crate) fn admit<M: Machine>(log: &[u8]) -> Result<(), OpenError> {
+    let (lines, fragment) = split_lines(log);
+    let fragment_line = fragment.map(|start| &log[start..]);
+    for line in lines.iter().map(|(_, line)| *line).chain(fragment_line) {
+        if let Ok(probe) = serde_json::from_slice::<VersionProbe>(line) {
+            probe.admit(M::SCHEMA)?;
+        }
+    }
+    Ok(())
+}
+
+/// Replay `log` onto `base`, handing each whole record to `seen` in order.
 pub(crate) fn replay<M: Machine>(
     log: &[u8],
     base: Base<M::State>,
+    mut seen: impl FnMut(Record<M::Event>),
 ) -> Result<Replayed<M::State>, OpenError> {
+    admit::<M>(log)?;
     let (lines, fragment) = split_lines(log);
-    // A newer writer's records may not even share this envelope, so the
-    // version is read before any line is trusted or anything is cut.
-    let fragment_line = fragment.map(|start| &log[start..]);
-    for line in lines.iter().map(|(_, line)| *line).chain(fragment_line) {
-        if let Ok(probe) = serde_json::from_slice::<VersionProbe>(line)
-            && probe.v > FORMAT_VERSION
-        {
-            return Err(OpenError::TooNew {
-                found: probe.v,
-                supported: FORMAT_VERSION,
-            });
-        }
-    }
 
     let mut replayed = Replayed {
         state: base.state,
@@ -81,17 +85,35 @@ pub(crate) fn replay<M: Machine>(
         if record.seq != replayed.last_seq + 1 {
             return Err(OpenError::Corrupt { line: number });
         }
-        match record.body {
-            Body::Opened { epoch, .. } => replayed.epoch = replayed.epoch.max(epoch),
+        let body = match record.body {
+            Body::Opened {
+                epoch,
+                build,
+                schema,
+            } => {
+                replayed.epoch = replayed.epoch.max(epoch);
+                Body::Opened {
+                    epoch,
+                    build,
+                    schema,
+                }
+            }
             Body::Event { event } => {
                 let event: M::Event = serde_json::from_value(event)
                     .map_err(|_| OpenError::Corrupt { line: number })?;
                 check_replayed::<M>(&replayed.state, &event, number);
                 M::apply(&mut replayed.state, &event);
+                Body::Event { event }
             }
-        }
+        };
         replayed.last_seq = record.seq;
         replayed.records += 1;
+        seen(Record {
+            v: record.v,
+            seq: record.seq,
+            at_ms: record.at_ms,
+            body,
+        });
     }
     Ok(replayed)
 }
@@ -155,7 +177,7 @@ mod tests {
     #[test]
     fn whole_records_replay_in_order() {
         let log = line(1, 2) + &line(2, 3);
-        let replayed = replay::<Sum>(log.as_bytes(), base()).unwrap();
+        let replayed = replay::<Sum>(log.as_bytes(), base(), drop).unwrap();
         assert_eq!(
             (replayed.state, replayed.last_seq, replayed.torn),
             (5, 2, false)
@@ -167,7 +189,7 @@ mod tests {
     fn a_seq_gap_is_corrupt() {
         let log = line(1, 2) + &line(3, 3);
         assert!(matches!(
-            replay::<Sum>(log.as_bytes(), base()),
+            replay::<Sum>(log.as_bytes(), base(), drop),
             Err(OpenError::Corrupt { line: 2 })
         ));
     }
@@ -175,14 +197,41 @@ mod tests {
     #[test]
     fn an_unparseable_last_line_is_torn() {
         let log = line(1, 2) + "garbage\n";
-        let replayed = replay::<Sum>(log.as_bytes(), base()).unwrap();
+        let replayed = replay::<Sum>(log.as_bytes(), base(), drop).unwrap();
         assert!(replayed.torn);
         assert_eq!(replayed.whole_len, line(1, 2).len() as u64);
+    }
+
+    /// An event this build cannot parse, after an `opened` naming a newer
+    /// schema, is a newer log, not a corrupt one.
+    #[test]
+    fn a_newer_schema_is_too_new_not_corrupt() {
+        let opened = "{\"v\":1,\"seq\":1,\"at_ms\":0,\"kind\":\"opened\",\"epoch\":1,\"build\":\"b\",\"schema\":2}\n";
+        let log = opened.to_owned()
+            + "{\"v\":1,\"seq\":2,\"at_ms\":0,\"kind\":\"event\",\"event\":\"new\"}\n";
+        assert!(matches!(
+            replay::<Sum>(log.as_bytes(), base(), drop),
+            Err(OpenError::TooNew {
+                what: crate::error::Versioned::Schema,
+                found: 2,
+                supported: 1
+            })
+        ));
+    }
+
+    #[test]
+    fn whole_records_are_handed_over_in_order() {
+        let log = line(1, 2) + &line(2, 3) + "{\"v\":1,\"seq\":3";
+        let mut seqs = Vec::new();
+        let replayed =
+            replay::<Sum>(log.as_bytes(), base(), |record| seqs.push(record.seq)).unwrap();
+        assert_eq!(seqs, vec![1, 2]);
+        assert!(replayed.torn);
     }
 
     #[test]
     #[should_panic(expected = "fails its own precondition")]
     fn a_replayed_record_that_fails_check_panics_in_tests() {
-        let _ = replay::<Sum>(line(1, 0).as_bytes(), base());
+        let _ = replay::<Sum>(line(1, 0).as_bytes(), base(), drop);
     }
 }

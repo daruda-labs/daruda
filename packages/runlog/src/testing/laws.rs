@@ -12,7 +12,7 @@ use crate::snapshot;
 /// any sample state can be committed against.
 fn seeded<M: Machine>(state: &M::State) -> RunLog<M, FaultBackend> {
     let mut backend = FaultBackend::new();
-    let bytes = snapshot::encode(state, 0, 0).expect("sample state serializes");
+    let bytes = snapshot::encode(state, M::SCHEMA, 0, 0).expect("sample state serializes");
     backend
         .replace_snapshot(1, &bytes)
         .expect("the in-memory backend accepts a snapshot");

@@ -55,8 +55,22 @@ impl FileBackend {
         &self.dir
     }
 
-    fn log_path(&self, generation: u64) -> PathBuf {
+    /// The file holding `generation`'s log, for a person or a test that
+    /// looks at the bytes. Reading records goes through
+    /// [`RunLog::read_history`](crate::RunLog::read_history), which applies
+    /// replay's rules.
+    pub fn log_path(&self, generation: u64) -> PathBuf {
         self.dir.join(format!("log.{generation}.jsonl"))
+    }
+
+    /// Whether a log was ever opened here: any generation's file is present.
+    /// A missing directory holds none.
+    pub fn holds_log(&self) -> io::Result<bool> {
+        match self.generations() {
+            Ok(generations) => Ok(!generations.is_empty()),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(err) => Err(err),
+        }
     }
 
     fn snapshot_path(&self, generation: u64) -> PathBuf {
@@ -247,6 +261,22 @@ mod tests {
             "the dropped log is no target"
         );
         backend.drop_generation(5).unwrap();
+    }
+
+    #[test]
+    fn a_log_is_held_once_any_generation_is_present() {
+        let temp = tempfile::tempdir().unwrap();
+        assert!(
+            !FileBackend::new(temp.path().join("absent"))
+                .holds_log()
+                .unwrap()
+        );
+        let mut backend = FileBackend::new(temp.path());
+        std::fs::write(temp.path().join("notes.txt"), b"x").unwrap();
+        assert!(!backend.holds_log().unwrap());
+        backend.select(0).unwrap();
+        assert!(backend.holds_log().unwrap());
+        assert_eq!(backend.log_path(0), temp.path().join("log.0.jsonl"));
     }
 
     #[test]

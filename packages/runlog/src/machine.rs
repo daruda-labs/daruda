@@ -16,6 +16,14 @@ pub trait Machine {
     type Event: Serialize + DeserializeOwned + Send;
     type Rejected: std::error::Error + Send + 'static;
 
+    /// The version of `Event` and `State` as serialized. Bump it whenever a
+    /// variant or field is added or changed: the log records it, and an older
+    /// build refuses a newer one as [`OpenError::TooNew`] instead of failing
+    /// to parse it and calling the log corrupt.
+    ///
+    /// [`OpenError::TooNew`]: crate::OpenError::TooNew
+    const SCHEMA: u32 = 1;
+
     /// Pure precondition. Never mutates. It must also accept the event as
     /// `assign` filled it in: test builds re-check every replayed record.
     fn check(state: &Self::State, event: &Self::Event) -> Result<(), Self::Rejected>;

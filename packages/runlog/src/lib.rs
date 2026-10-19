@@ -18,7 +18,7 @@ pub mod testing;
 
 pub use backend::{FileBackend, Generation, LogBackend};
 pub use committer::{AfterCommit, Committer};
-pub use error::{CommitError, FlushTimedOut, OpenError, SubscribeError};
-pub use log::{CatchUp, Committed, RunLog};
+pub use error::{CommitError, FlushTimedOut, OpenError, SubscribeError, Versioned};
+pub use log::{CatchUp, Committed, History, RunLog};
 pub use machine::Machine;
 pub use record::{Body, FORMAT_VERSION, Record};

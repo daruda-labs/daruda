@@ -104,9 +104,16 @@ impl From<OpenError> for LogFault {
         match error {
             OpenError::Io(e) => LogFault::Disk(e),
             OpenError::Corrupt { line } => LogRefusal::Corrupt { line }.into(),
-            OpenError::TooNew { found, supported } => {
-                LogRefusal::TooNew { found, supported }.into()
+            OpenError::TooNew {
+                what,
+                found,
+                supported,
+            } => LogRefusal::TooNew {
+                what,
+                found,
+                supported,
             }
+            .into(),
             OpenError::NoWholeGeneration { generation } => {
                 LogRefusal::NoWholeGeneration { generation }.into()
             }

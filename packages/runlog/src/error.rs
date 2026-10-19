@@ -39,14 +39,37 @@ pub struct FlushTimedOut {
     pub deadline: std::time::Duration,
 }
 
+/// Which version a log was written in that this build does not read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Versioned {
+    /// The record and snapshot envelope, [`FORMAT_VERSION`](crate::FORMAT_VERSION).
+    Format,
+    /// The machine's events and state, [`Machine::SCHEMA`](crate::Machine::SCHEMA).
+    Schema,
+}
+
+impl std::fmt::Display for Versioned {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Format => "format",
+            Self::Schema => "schema",
+        })
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum OpenError {
     /// A line other than a torn last one is unreadable, its event does not
     /// fit the machine, or its seq breaks the sequence. `line` is 1-based.
     #[error("run log is corrupt at line {line}")]
     Corrupt { line: u64 },
-    #[error("run log format {found} is newer than this build supports ({supported})")]
-    TooNew { found: u32, supported: u32 },
+    /// A newer build wrote it. The log is left byte-for-byte untouched.
+    #[error("run log {what} {found} is newer than this build supports ({supported})")]
+    TooNew {
+        what: Versioned,
+        found: u32,
+        supported: u32,
+    },
     /// The newest generation's snapshot is unreadable and no older
     /// generation remains to fall back to. Opening empty would lose it all.
     #[error("run log generation {generation} has no whole snapshot to restore from")]
@@ -64,6 +87,15 @@ mod tests {
         assert_eq!(
             OpenError::Corrupt { line: 4 }.to_string(),
             "run log is corrupt at line 4"
+        );
+        assert_eq!(
+            OpenError::TooNew {
+                what: Versioned::Schema,
+                found: 3,
+                supported: 2
+            }
+            .to_string(),
+            "run log schema 3 is newer than this build supports (2)"
         );
         let err: CommitError<std::fmt::Error> = CommitError::Closed;
         assert!(err.to_string().contains("closed"));
