@@ -347,7 +347,7 @@ impl RunsHost {
         cx.on_app_quit(|cx| {
             if !Self::shut_down_flows(QUIT_FLUSH_DEADLINE, cx) {
                 LogWriter::log(
-                    ErrorReport::new(crate::surface::strings::error::flows_quit_shutdown())
+                    ErrorReport::new("A flow run was still ending its processes at quit")
                         .severity(ErrorSeverity::Warning)
                         .at(file!(), line!())
                         .dedup("flows.quit_shutdown")
@@ -358,7 +358,7 @@ impl RunsHost {
                 && let Err(error) = store.flush(QUIT_FLUSH_DEADLINE)
             {
                 LogWriter::log(
-                    ErrorReport::new(crate::surface::strings::error::tasks_quit_flush())
+                    ErrorReport::new("Task commits were still queued at quit")
                         .severity(ErrorSeverity::Warning)
                         .from_error(&error)
                         .at(file!(), line!())
@@ -537,7 +537,7 @@ fn reconcile(store: &TaskStore) -> Result<(), ReadOnlyCause> {
         Ok(()) => {
             if let Err(e) = claim.finish() {
                 report_reconcile(
-                    error::tasks_reconcile_marker_left(),
+                    "Tasks will open read-only on the next start: the settling marker could not be removed".to_string(),
                     Some(&e),
                     "tasks.reconcile.finish",
                 );
@@ -616,7 +616,7 @@ fn settle(store: &TaskStore, lost: Vec<ExecutionRef>) -> Result<(), ReconcileBlo
         match smol::block_on(store.propose(event)) {
             Ok(_) => {}
             Err(CommitError::Rejected(rejected)) => LogWriter::log(
-                ErrorReport::new(crate::surface::strings::error::tasks_reconcile_skipped())
+                ErrorReport::new("A task the last session left running could not be settled and was left as recorded")
                     .severity(ErrorSeverity::Warning)
                     .from_error(&rejected)
                     .with_context("task", exec.task_id.to_string())
