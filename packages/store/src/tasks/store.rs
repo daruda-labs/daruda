@@ -133,8 +133,20 @@ impl TaskStore {
     }
 
     /// The last committed seq and the state it left, replayed from the log.
+    /// After a write failure stops the committer, the state is read from the
+    /// files: nothing writes them any more, and a failed commit must not hide
+    /// every task the log already holds.
     pub fn current(&self) -> Result<(u64, TasksBook), SubscribeError> {
-        let (catch_up, _live) = self.subscribe(0)?;
+        let (catch_up, _live) = match self.subscribe(0) {
+            Ok(subscribed) => subscribed,
+            Err(SubscribeError::Stopped) => {
+                return RunLog::<TaskMachine, _>::read_only(&FileBackend::new(
+                    self.log_dir.as_path(),
+                ))
+                .map_err(|e| SubscribeError::Io(io::Error::other(e)));
+            }
+            Err(e) => return Err(e),
+        };
         Ok(match catch_up {
             CatchUp::Snapshot { state, seq } => (seq, state),
             CatchUp::Records(records) => {
@@ -294,6 +306,35 @@ mod tests {
         let (seq, book) = store.current().unwrap();
         assert_eq!(seq, committed.seq);
         assert_eq!(book, committed.state_after);
+    }
+
+    #[test]
+    fn a_stopped_committer_still_reads_the_durable_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = TaskStore::in_directory(
+            temp.path(),
+            None,
+            "b",
+            Box::new(|_, _| panic!("the committer stops after this commit")),
+        )
+        .unwrap();
+        let spec = super::super::machine::TaskSpec {
+            id: "t".into(),
+            project: crate::project::ProjectUuid::new(),
+            title: "t".into(),
+            prompt: String::new(),
+            notes: String::new(),
+            base_worktree_path: None,
+            branch_name: "b".into(),
+            run_in: Default::default(),
+            agent_type: Default::default(),
+            agent_surface: Default::default(),
+            auto_execute: true,
+            created_at: chrono::Utc::now(),
+        };
+        assert!(smol::block_on(store.propose(TaskEvent::Created { spec })).is_err());
+        let (_, book) = store.current().unwrap();
+        assert!(book.get("t").is_some(), "the durable record vanished");
     }
 
     #[test]
