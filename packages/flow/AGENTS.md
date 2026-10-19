@@ -12,7 +12,7 @@ A run lives in `<cwd>/.daruda/flow-runs/<run-id>/`:
 | Path | What it is |
 |---|---|
 | `run.yaml` | The flow as resolved at start. A resume reads it, never the source file. |
-| `logs/progress/log.0.jsonl` | The run log (`run_log/`). The record of the run; never compacted. |
+| `logs/progress/` | The run log (`run_log/`). The record of the run; never compacted. File names belong to `daruda_runlog`; read it through `run_log::reader`. |
 | `progress.jsonl` | An older build's journal. Read-only: imported once, into an empty log, on resume. |
 | `logs/` (other files) | Evidence: transcripts, command logs, archived outputs. |
 | `DONE`, `FAILED`, `CANCELED`, `STALLED` | Markers, a cache of the log's ending. Written after `RunEnded`; the log wins. |
@@ -40,9 +40,14 @@ The run's lock lives outside the tree, under the host's lock root
 Each step must give the same result if a crash interrupts it and it runs
 again:
 
-1. Before the lock, read only facts fixed at start (`reader::selection`), then
-   wait out the settle window after a crashed run's last record. A Stop
-   during the wait leaves the run untouched.
+1. Before the lock, read two things and decide nothing about progress from
+   either: the selection fixed at start (`reader::selection`), and when a log
+   that has not ended was last written (`reader::last_written_while_running`),
+   which only times the wait out of the settle window. Both replay the whole
+   log, but a value that disagrees with what the lock holder later finds can
+   cost no more than a wrong wait length. The wait must come before the lock,
+   so a Stop during it leaves the run untouched, lock included. A run only an
+   older build's journal records has no record times, so it gets no wait.
 2. Take the lock; open the log, importing the old journal if the log holds
    nothing of the run yet.
 3. Clear markers.
