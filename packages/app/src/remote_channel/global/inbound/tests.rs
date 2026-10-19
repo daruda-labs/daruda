@@ -26,6 +26,27 @@ fn open_bot(
     ))
 }
 
+/// Claim through the production inbox path, as `Some(bot)` when it may act.
+async fn claim_incoming(
+    id: &str,
+    generation: uuid::Uuid,
+    event_id: &str,
+    cx: &mut gpui::AsyncApp,
+) -> Option<Arc<BotSession>> {
+    match super::claim_incoming(
+        id,
+        generation,
+        event_id,
+        &crate::runs::RunsHost::claim_inbound,
+        cx,
+    )
+    .await
+    {
+        Claimed::Ready(bot) => Some(bot),
+        Claimed::Skip | Claimed::Retry => None,
+    }
+}
+
 fn wait_release(root: &std::path::Path) {
     let lease = crate::test_support::once_released(
         || InboxLease::try_acquire(root, &lock::digest_of("shared-bot")),
@@ -36,14 +57,27 @@ fn wait_release(root: &std::path::Path) {
     drop(lease);
 }
 
+fn reopen_requested(id: &str, cx: &mut TestAppContext) -> bool {
+    cx.update(
+        |cx| match &cx.global::<RemoteChannels>().connections[id].worker {
+            super::super::WorkerState::Running { worker } => worker.reopen_requested(),
+            _ => panic!("the connection's worker was replaced"),
+        },
+    )
+}
+
+/// The defect this guards: recovery used to start a second worker while the
+/// first still held the bot's lease, and the newcomer reported this process's
+/// own bot as held elsewhere. The same worker now reopens its own writer.
 #[gpui::test]
-async fn a_failed_claim_retires_its_worker_and_reopens_without_losing_history(
+async fn a_failed_claim_has_its_own_worker_reopen_the_inbox_without_losing_history(
     cx: &mut TestAppContext,
 ) {
     cx.executor().allow_parking();
     let root = tempfile::tempdir().unwrap();
     let bot = open_bot(root.path(), || Ok(InboxSeed::default()));
     let generation = cx.update(|cx| install_connection("work", bot.clone(), cx));
+    cx.update(|cx| run_worker("work", cx));
     let target = crate::remote_channel::bridge::PaneRef {
         workspace: Default::default(),
         pane: 7,
@@ -79,17 +113,25 @@ async fn a_failed_claim_retires_its_worker_and_reopens_without_losing_history(
         &mut app,
     )
     .await;
-    assert!(result.is_none());
+    assert!(matches!(result, Claimed::Retry));
     cx.update(|cx| {
         let connection = &cx.global::<RemoteChannels>().connections["work"];
         assert_eq!(
             connection.status,
             crate::remote_channel::runtime::Status::Failed
         );
-        assert_ne!(connection.generation, generation);
+        assert_eq!(connection.generation, generation);
         assert!(connection.bot.is_none());
         assert!(!connection.can_send());
     });
+    assert!(
+        !reopen_requested("work", cx),
+        "the reopen waits out the claim backoff"
+    );
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(1));
+    cx.run_until_parked();
+    assert!(reopen_requested("work", cx));
     cx.update(|cx| {
         assert_eq!(
             cx.global_mut::<RemoteChannels>()
@@ -172,6 +214,17 @@ fn an_old_inbox_failure_cannot_restart_a_replacement_or_finish_credential_update
         wait_release(first_root.path());
         wait_release(current_root.path());
     });
+}
+
+/// Stand in a running worker with no thread behind it.
+fn run_worker(id: &str, cx: &mut App) {
+    cx.global_mut::<RemoteChannels>()
+        .connections
+        .get_mut(id)
+        .unwrap()
+        .worker = super::super::WorkerState::Running {
+        worker: crate::remote_channel::runtime::Worker::detached(),
+    };
 }
 
 fn install_connection(id: &str, bot: Arc<BotSession>, cx: &mut App) -> uuid::Uuid {
@@ -330,7 +383,7 @@ async fn worker_revocation_while_a_claim_waits_prevents_effects_before_status_is
             .is_none()
     );
     release.send(()).await.unwrap();
-    assert!(waiting.await.is_none());
+    assert!(matches!(waiting.await, Claimed::Skip));
     assert!(matches!(
         smol::block_on(bot.inbox.claim(
             channel_key(ChannelKind::Slack),
@@ -418,4 +471,113 @@ fn a_plain_message_is_never_edited() {
         ),
         Feedback::Send(Message::plain("done".into(), None)),
     );
+}
+
+fn from(user: &str, event_id: &str, generation: uuid::Uuid) -> WorkerEvent {
+    WorkerEvent {
+        id: "work".into(),
+        generation,
+        payload: WorkerPayload::Incoming(transport::Incoming {
+            event_id: event_id.into(),
+            sender: RemoteRecipient {
+                user_id: user.into(),
+                conversation_id: "room".into(),
+                scope_id: "scope".into(),
+            },
+            kind: IncomingKind::Message {
+                text: "hello".into(),
+                reply_to: None,
+            },
+        }),
+    }
+}
+
+/// Slack and Discord acknowledge an event before it reaches the claim, so a
+/// command dropped on a failed claim is never sent again. It waits for the
+/// reopened inbox instead, with the commands after it queued behind it.
+/// The sender is a stranger so the claimed commands stop short of a reply.
+#[gpui::test]
+async fn a_command_whose_claim_failed_is_claimed_again_on_the_reopened_inbox(
+    cx: &mut TestAppContext,
+) {
+    use std::{cell::RefCell, rc::Rc};
+
+    cx.executor().allow_parking();
+    let root = tempfile::tempdir().unwrap();
+    let first = open_bot(root.path(), || Ok(InboxSeed::default()));
+    let generation = cx.update(|cx| install_connection("work", first.clone(), cx));
+    cx.update(|cx| run_worker("work", cx));
+    let attempts = Rc::new(RefCell::new(Vec::<String>::new()));
+    let recorded = attempts.clone();
+    let (events, receiver) = futures::channel::mpsc::unbounded();
+    cx.update(|cx| {
+        serve_events(
+            receiver,
+            move |inbox: &InboxStore, channel, id| {
+                let event = match &id {
+                    InboxId::Opaque(event) => event.clone(),
+                    InboxId::Monotonic(update) => update.to_string(),
+                };
+                let fail = recorded.borrow().is_empty();
+                recorded.borrow_mut().push(event);
+                if fail {
+                    futures::future::Either::Left(std::future::ready(Err(CommitError::Io(
+                        std::io::Error::other("temporary storage failure"),
+                    ))))
+                } else {
+                    futures::future::Either::Right(inbox.claim(channel, id))
+                }
+            },
+            cx,
+        )
+    });
+
+    events
+        .unbounded_send(from("stranger", "first", generation))
+        .unwrap();
+    events
+        .unbounded_send(from("stranger", "second", generation))
+        .unwrap();
+    cx.run_until_parked();
+    assert_eq!(
+        *attempts.borrow(),
+        ["first"],
+        "a later command must not be claimed ahead of a held one"
+    );
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(1));
+    cx.run_until_parked();
+    assert!(reopen_requested("work", cx));
+
+    drop(first);
+    let reopened = open_bot(root.path(), || panic!("recovery must not reimport"));
+    events
+        .unbounded_send(WorkerEvent {
+            id: "work".into(),
+            generation,
+            payload: WorkerPayload::Ready(reopened.clone()),
+        })
+        .unwrap();
+    // A real claim completes on the inbox's writer thread, outside the
+    // executor, so parking alone does not mean the backlog has drained.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while attempts.borrow().len() < 3 && std::time::Instant::now() < deadline {
+        cx.run_until_parked();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(*attempts.borrow(), ["first", "first", "second"]);
+    for event in ["first", "second"] {
+        assert!(matches!(
+            smol::block_on(reopened.inbox.claim(
+                channel_key(ChannelKind::Slack),
+                InboxId::Opaque(event.into())
+            )),
+            Err(CommitError::Rejected(InboxRejected::Duplicate { .. }))
+        ));
+    }
+    cx.update(|cx| cx.global_mut::<RemoteChannels>().connections.clear());
+    drop(events);
+    cx.run_until_parked();
+    drop(reopened);
+    wait_release(root.path());
 }

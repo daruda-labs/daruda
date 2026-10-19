@@ -12,6 +12,7 @@ use std::sync::{
 };
 use std::time::Duration;
 
+mod reclaim;
 mod session;
 use session::SessionOwner;
 pub(crate) use session::{BotSession, channel_key};
@@ -58,13 +59,36 @@ pub enum WorkerPayload {
     Incoming(Incoming),
 }
 
-pub struct Worker {
+/// What the foreground asks of a running worker. The blocking transport
+/// session and the retry waits watch `interrupt`; `stop` and `reopen` say why
+/// it was raised. Every request stores its reason before the interrupt, and the
+/// worker clears the interrupt before reading reasons, so no request is lost.
+#[derive(Default)]
+struct Signals {
+    /// Shared with each `BotSession` the worker publishes, as its liveness.
     stop: Arc<AtomicBool>,
+    reopen: AtomicBool,
+    interrupt: AtomicBool,
+}
+
+pub struct Worker {
+    signals: Arc<Signals>,
+}
+
+impl Worker {
+    /// Retire the inbox writer and open a fresh one under a newly taken
+    /// lease, publishing it as a new `Ready`. Done by the worker itself so the
+    /// old writer is let go before the lease is asked for again.
+    pub(crate) fn reopen_inbox(&self) {
+        self.signals.reopen.store(true, Ordering::SeqCst);
+        self.signals.interrupt.store(true, Ordering::SeqCst);
+    }
 }
 
 impl Drop for Worker {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
+        self.signals.stop.store(true, Ordering::SeqCst);
+        self.signals.interrupt.store(true, Ordering::SeqCst);
     }
 }
 
@@ -73,13 +97,15 @@ pub fn start(
     generation: uuid::Uuid,
     tx: UnboundedSender<WorkerEvent>,
 ) -> std::io::Result<Worker> {
-    let stop = Arc::new(AtomicBool::new(false));
-    let cancelled = stop.clone();
+    let signals = Arc::new(Signals::default());
+    let worker = signals.clone();
     std::thread::Builder::new()
         .name(format!("remote-{}", config.id))
         .spawn(move || {
+            let stop = &signals.stop;
+            let interrupt = &signals.interrupt;
             let emit = |payload| {
-                !cancelled.load(Ordering::Relaxed)
+                !stop.load(Ordering::Relaxed)
                     && tx
                         .unbounded_send(WorkerEvent {
                             id: config.id.clone(),
@@ -91,8 +117,16 @@ pub fn start(
             let lock_root = daruda_store::persistence::remote_lock_root();
             let data = daruda_store::persistence::default_data_dir();
             let mut serving: Option<SessionOwner> = None;
+            let mut retiring = None;
             let mut gateway = transport::discord::Gateway::default();
-            while !cancelled.load(Ordering::Relaxed) {
+            loop {
+                interrupt.store(false, Ordering::SeqCst);
+                if stop.load(Ordering::SeqCst) {
+                    return;
+                }
+                if signals.reopen.swap(false, Ordering::SeqCst) {
+                    reclaim::retire(&mut serving, &mut retiring);
+                }
                 let service = keychain::channel_service(&config.id);
                 let bot = keychain::read(&service, "bot_token");
                 let app = (config.kind == ChannelKind::Slack)
@@ -103,11 +137,11 @@ pub fn start(
                         Arc::new(Credentials { bot, app })
                     }
                     _ => {
-                        serving = None;
+                        reclaim::retire(&mut serving, &mut retiring);
                         if !emit(WorkerPayload::Status(Status::MissingCredentials)) {
                             return;
                         }
-                        wait(&cancelled);
+                        wait(interrupt);
                         continue;
                     }
                 };
@@ -121,56 +155,65 @@ pub fn start(
                         .as_ref()
                         .filter(|owner| owner.0.credentials.bot == credentials.bot)
                         .map(|owner| owner.0.inbox.clone());
-                    serving = None;
+                    // A reused writer's old session is revoked when the new one
+                    // replaces it below.
                     let inbox = match inbox {
                         Some(inbox) => inbox,
-                        None => match lock::claim(&lock_root, &credentials.bot) {
-                            lock::Claim::Ours { _lock: lease, .. } => {
-                                let seed = || {
-                                    daruda_store::inbox::migrate::remote(
-                                        &data,
-                                        &config.id,
-                                        channel_key(config.kind),
-                                    )
-                                };
-                                match daruda_store::inbox::InboxStore::open(
-                                    lease,
-                                    env!("CARGO_PKG_VERSION"),
-                                    seed,
-                                ) {
-                                    Ok(inbox) => Arc::new(inbox),
-                                    Err(error) => {
-                                        super::log_error(
-                                            "Remote inbox could not open",
-                                            &error,
-                                            "remote.inbox.open",
-                                        );
-                                        if !emit(WorkerPayload::Status(Status::Failed)) {
-                                            return;
+                        None => {
+                            reclaim::retire(&mut serving, &mut retiring);
+                            let Some(claim) =
+                                reclaim::claim(&lock_root, &credentials.bot, &mut retiring, stop)
+                            else {
+                                return;
+                            };
+                            match claim {
+                                lock::Claim::Ours { _lock: lease, .. } => {
+                                    let seed = || {
+                                        daruda_store::inbox::migrate::remote(
+                                            &data,
+                                            &config.id,
+                                            channel_key(config.kind),
+                                        )
+                                    };
+                                    match daruda_store::inbox::InboxStore::open(
+                                        lease,
+                                        env!("CARGO_PKG_VERSION"),
+                                        seed,
+                                    ) {
+                                        Ok(inbox) => Arc::new(inbox),
+                                        Err(error) => {
+                                            super::log_error(
+                                                "Remote inbox could not open",
+                                                &error,
+                                                "remote.inbox.open",
+                                            );
+                                            if !emit(WorkerPayload::Status(Status::Failed)) {
+                                                return;
+                                            }
+                                            wait(interrupt);
+                                            continue;
                                         }
-                                        wait(&cancelled);
-                                        continue;
                                     }
                                 }
-                            }
-                            claim => {
-                                let status = if matches!(claim, lock::Claim::Theirs) {
-                                    Status::HeldElsewhere
-                                } else {
-                                    Status::Failed
-                                };
-                                if !emit(WorkerPayload::Status(status)) {
-                                    return;
+                                claim => {
+                                    let status = if matches!(claim, lock::Claim::Theirs) {
+                                        Status::HeldElsewhere
+                                    } else {
+                                        Status::Failed
+                                    };
+                                    if !emit(WorkerPayload::Status(status)) {
+                                        return;
+                                    }
+                                    wait(interrupt);
+                                    continue;
                                 }
-                                wait(&cancelled);
-                                continue;
                             }
-                        },
+                        }
                     };
                     serving = Some(SessionOwner(Arc::new(BotSession::new(
                         credentials.clone(),
                         inbox,
-                        cancelled.clone(),
+                        stop.clone(),
                     ))));
                 }
                 let session = serving
@@ -195,14 +238,19 @@ pub fn start(
                 };
                 let result = match config.kind {
                     ChannelKind::Slack => {
-                        transport::slack::session(&credentials, &cancelled, publish, ready)
+                        transport::slack::session(&credentials, interrupt, publish, ready)
                     }
                     ChannelKind::Discord => {
-                        gateway.session(&credentials, &cancelled, publish, ready)
+                        gateway.session(&credentials, interrupt, publish, ready)
                     }
                 };
-                if cancelled.load(Ordering::Relaxed) {
+                if stop.load(Ordering::SeqCst) {
                     return;
+                }
+                // A requested reopen ended the session, not a connection fault;
+                // the gateway keeps its resume state and reconnects at once.
+                if signals.reopen.load(Ordering::SeqCst) {
+                    continue;
                 }
                 if let Err(error) = result {
                     if matches!(
@@ -227,25 +275,53 @@ pub fn start(
                 if !emit(WorkerPayload::Status(Status::Retrying)) {
                     return;
                 }
-                wait(&cancelled);
+                wait(interrupt);
             }
         })?;
-    Ok(Worker { stop })
+    Ok(Worker { signals: worker })
 }
 
-fn wait(cancelled: &AtomicBool) {
+fn wait(interrupted: &AtomicBool) {
     let until = std::time::Instant::now() + RETRY_DELAY;
-    while !cancelled.load(Ordering::Relaxed) && std::time::Instant::now() < until {
+    while !interrupted.load(Ordering::Relaxed) && std::time::Instant::now() < until {
         std::thread::sleep(CANCEL_CHECK);
     }
 }
 
 #[cfg(test)]
+impl Worker {
+    /// A handle with no thread behind it, for foreground tests that only
+    /// observe what was asked of the worker.
+    pub(crate) fn detached() -> Self {
+        Self {
+            signals: Arc::default(),
+        }
+    }
+
+    pub(crate) fn reopen_requested(&self) -> bool {
+        self.signals.reopen.load(Ordering::SeqCst)
+    }
+}
+
+#[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn dropping_worker_cancels_all_of_its_loops() {
-        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        drop(super::Worker { stop: stop.clone() });
-        assert!(stop.load(std::sync::atomic::Ordering::Relaxed));
+        let worker = Worker::detached();
+        let signals = worker.signals.clone();
+        drop(worker);
+        assert!(signals.stop.load(Ordering::SeqCst));
+        assert!(signals.interrupt.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn a_reopen_interrupts_the_session_without_stopping_the_worker() {
+        let worker = Worker::detached();
+        worker.reopen_inbox();
+        assert!(worker.signals.interrupt.load(Ordering::SeqCst));
+        assert!(!worker.signals.stop.load(Ordering::SeqCst));
+        assert!(worker.reopen_requested());
     }
 }

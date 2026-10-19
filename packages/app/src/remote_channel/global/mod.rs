@@ -1,5 +1,6 @@
 //! Foreground routing state, with one cancellable gateway worker per connection.
 
+use super::backoff::ErrorBackoff;
 use super::bridge::{ApprovalPrompt, BridgePing, MessageTail, Outbound, PaneRef, RoutingCore};
 use super::pairing::Pairing;
 use super::runtime::{self, BotSession, Status, Worker, WorkerEvent};
@@ -23,11 +24,14 @@ pub struct Connection {
     pub bot: Option<Arc<BotSession>>,
     pairing: Option<Pairing>,
     worker: WorkerState,
+    /// Paces inbox reopens while command claims keep failing; reset by the
+    /// next claim that commits.
+    claim_backoff: ErrorBackoff,
 }
 
 enum WorkerState {
     Idle,
-    Running { _worker: Worker },
+    Running { worker: Worker },
     UpdatingCredential { pending: usize },
 }
 
@@ -305,6 +309,13 @@ impl RemoteChannels {
         reconcile(cx);
     }
 
+    /// Take a bot whose inbox writer failed out of service, and after this
+    /// connection's claim backoff have its own worker open a fresh writer.
+    ///
+    /// The bot is revoked at once so nothing still holding it can act. The
+    /// generation stays: the same worker keeps serving, and the commands that
+    /// failed to claim wait in the inbound backlog for its next `Ready`. A
+    /// second worker would race the first for the lease the first still holds.
     fn recover_inbox(id: &str, generation: uuid::Uuid, bot: &Arc<BotSession>, cx: &mut App) {
         bot.revoke();
         let bridge = cx.global_mut::<Self>();
@@ -321,9 +332,33 @@ impl RemoteChannels {
         }
         connection.bot = None;
         connection.status = Status::Failed;
-        connection.generation = uuid::Uuid::new_v4();
-        connection.worker = WorkerState::Idle;
-        connection.worker = start_worker(&connection.config, connection.generation, &bridge.events);
+        let delay = connection.claim_backoff.delay();
+        let id = id.to_owned();
+        cx.spawn(async move |cx| {
+            cx.background_executor().timer(delay).await;
+            cx.update(|cx| Self::reopen_inbox(&id, generation, cx));
+        })
+        .detach();
+    }
+
+    /// Ask the worker serving `generation` to reopen its inbox. A replaced or
+    /// suspended connection has a newer generation and its own writer.
+    fn reopen_inbox(id: &str, generation: uuid::Uuid, cx: &mut App) {
+        let Some(connection) = cx
+            .try_global::<Self>()
+            .and_then(|bridge| bridge.connections.get(id))
+        else {
+            return;
+        };
+        if connection.generation != generation {
+            return;
+        }
+        match &connection.worker {
+            WorkerState::Running { worker } => worker.reopen_inbox(),
+            // Only a running worker publishes a bot, so an idle connection
+            // has no writer that could have failed.
+            WorkerState::Idle | WorkerState::UpdatingCredential { .. } => {}
+        }
     }
 
     pub(crate) fn suspend(config: ChannelConfig, cx: &mut App) {
@@ -342,6 +377,7 @@ impl RemoteChannels {
                 bot: None,
                 pairing: None,
                 worker: WorkerState::Idle,
+                claim_backoff: ErrorBackoff::new(),
             });
         connection.generation = uuid::Uuid::new_v4();
         connection.config = config;
@@ -440,6 +476,7 @@ pub(crate) fn reconcile(cx: &mut App) {
                 bot: None,
                 pairing: None,
                 worker,
+                claim_backoff: ErrorBackoff::new(),
             },
         );
     }
@@ -454,7 +491,7 @@ fn start_worker(
         return WorkerState::Idle;
     }
     match runtime::start(config.clone(), generation, events.clone()) {
-        Ok(worker) => WorkerState::Running { _worker: worker },
+        Ok(worker) => WorkerState::Running { worker },
         Err(error) => {
             super::log_error(
                 "Remote gateway worker could not start",
