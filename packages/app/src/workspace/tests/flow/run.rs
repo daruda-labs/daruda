@@ -1241,7 +1241,7 @@ async fn a_resumed_run_colours_carried_nodes_from_the_log(cx: &mut TestAppContex
     })
     .expect("window is live");
     assert!(
-        wait_for_run(cx, |cx| !run_is_held(cx, lane.path())),
+        wait_for_run(cx, |cx| !run_is_held(cx, lane.path())).await,
         "the first run did not finish"
     );
 
@@ -1300,7 +1300,8 @@ async fn a_resumed_run_colours_carried_nodes_from_the_log(cx: &mut TestAppContex
                 )
             })
         })
-    });
+    })
+    .await;
     let errors = ws.read_with(cx, |ws, _| {
         ws.error_history()
             .iter()
@@ -1322,7 +1323,7 @@ async fn a_resumed_run_colours_carried_nodes_from_the_log(cx: &mut TestAppContex
 
     ws.update(cx, |ws, cx| ws.stop_flow_run_in(here, cx));
     assert!(
-        wait_for_run(cx, |cx| !run_is_held(cx, lane.path())),
+        wait_for_run(cx, |cx| !run_is_held(cx, lane.path())).await,
         "the resumed run did not stop"
     );
 }

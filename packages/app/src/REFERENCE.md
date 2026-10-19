@@ -193,16 +193,25 @@ creation or session replacement rotates its gate epoch. No pane or a rejected
 prompt leaves episodes eligible for a later opportunity; failures use deduplicated
 `LogWriter` reporting. One pointer prompt contains at most twenty lines with
 handles, names, end/wait summaries and `call daruda_run_wait`, plus `+k more`.
-A process-global set records accepted `(RunKey, sequence)` identities for all
-eligible entries represented by the batch; waiter-covered and in-flight entries
-stay eligible later. Accepting a notice never marks a run result reported.
+Accepted `(RunKey, sequence)` identities are recorded for the current notice
+audience, `Audience { pane, session }` (`control/notices.rs`), for every eligible
+entry the batch represents. Each batch prunes the record to still-unreported
+episodes, and a different audience starts from an empty record, so a
+replacement pane or session is told again.
+Waiter-covered and in-flight entries stay eligible later. Accepting a notice
+never marks a run result reported.
 
 `AgentChatView::try_send_internal_prompt_text` uses `PromptOrigin::Internal`
 for these literal prompts. It never queues: it sends only to a connected session
 with no turn in flight, no open Stop/cancel-ack window and no queued or parked
-prompts, and otherwise refuses with `InternalDispatch::NotNow`, leaving composer,
-queued-edit and phone state untouched. A refused notice stays eligible; the host
-observes the pane until `accepts_internal_prompt_now` holds and flushes again.
+prompts. `NotNow` and `ReadOnly` refusals leave composer, queued-edit and phone
+state untouched; `Unavailable` is a failed handoff and reports the dead
+transport like any send (queued prompts dropped, handle detached, error shown).
+A refused notice stays eligible; the host observes the pane until
+`accepts_internal_prompt_now` holds and flushes again. Prompts parked by Stop
+count as waiting, so notices hold until the user resumes, removes or discards
+the parked queue; that is deliberate, since a notice never passes a user prompt.
+An explicit `daruda_run_wait` call is unaffected.
 The host reconciles any owed completion before dispatch and reconciles the new
 activity afterward, routing both edges through `fire_activity_completion`.
 It does not interpret slash commands or arm a phone first-response watch.

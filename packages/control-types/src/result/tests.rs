@@ -232,7 +232,13 @@ fn every_error_variant_round_trips_through_json() {
         },
         ControlError::FlowNotStarted {
             name: "ship.yaml".into(),
-            detail: "agent refused".into(),
+            reason: FlowNotStartedReason::NoLane,
+        },
+        ControlError::FlowNotStarted {
+            name: "ship.yaml".into(),
+            reason: FlowNotStartedReason::SessionHostUnusable {
+                agent: "claude".into(),
+            },
         },
         ControlError::FlowNeedsInteraction {
             name: "ship.yaml".into(),
@@ -266,6 +272,29 @@ fn every_error_variant_round_trips_through_json() {
         assert_eq!(back, case);
         assert!(!case.to_string().is_empty(), "every error has a diagnostic");
     }
+}
+
+/// A refused flow start answers with stable codes, never prose: the MCP
+/// caller branches on `reason.kind`, and the phone localizes from it.
+#[test]
+fn flow_not_started_carries_a_coded_reason() {
+    let error = ControlError::FlowNotStarted {
+        name: "ship.yaml".into(),
+        reason: FlowNotStartedReason::SessionHostUnusable {
+            agent: "claude".into(),
+        },
+    };
+    let json = serde_json::to_value(&error).expect("serialize");
+    assert_eq!(
+        json,
+        serde_json::json!({
+            "code": "flow_not_started",
+            "name": "ship.yaml",
+            "reason": { "kind": "session_host_unusable", "agent": "claude" },
+        })
+    );
+    let unit = serde_json::to_value(FlowNotStartedReason::NoLane).expect("serialize");
+    assert_eq!(unit, serde_json::json!({ "kind": "no_lane" }));
 }
 
 #[test]

@@ -5,15 +5,18 @@
 //!
 //! Strategy:
 //! - Empty file → `Ok(vec![])`.
-//! - Files under 10 KB → read normally (the linewise iterator is
-//!   already efficient at that size).
-//! - Larger files → seek to `file_size - chunk_size` and read forward.
+//! - Files under 10 KB → read whole.
+//! - Larger files → read only the last `chunk_size` bytes, where
 //!   `chunk_size` defaults to `n * 2 KB`; the caller asks for `n=20`
 //!   and the average JSONL line is well under 1 KB, so 40 KB lookback
-//!   is plenty.
+//!   is plenty. The window's first line is torn unless the byte before
+//!   it is a newline, so it is dropped up to the first `\n`.
+//!
+//! Each line is decoded on its own and a line that is not UTF-8 is
+//! skipped, so a torn or corrupt line costs only itself.
 
 use std::fs::File;
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 const SMALL_FILE_BYTES: u64 = 10_000;
@@ -23,40 +26,53 @@ const SEEK_BUFFER_FACTOR: usize = 2;
 /// Read the last `n` non-blank lines from `path`. Missing or
 /// unreadable files return an `io::Error`.
 pub fn read_last_n_lines<P: AsRef<Path>>(path: P, n: usize) -> Result<Vec<String>, std::io::Error> {
-    let file = File::open(path.as_ref())?;
-    let metadata = file.metadata()?;
-    let file_size = metadata.len();
+    let mut file = File::open(path.as_ref())?;
+    let file_size = file.metadata()?.len();
 
     if file_size == 0 {
         return Ok(Vec::new());
     }
 
+    let mut bytes = Vec::new();
     if file_size < SMALL_FILE_BYTES {
-        let reader = BufReader::new(file);
-        let lines: Vec<String> = reader
-            .lines()
-            .map_while(Result::ok)
-            .filter(|line| !line.trim().is_empty())
-            .collect();
-        let start = lines.len().saturating_sub(n);
-        return Ok(lines[start..].to_vec());
+        file.read_to_end(&mut bytes)?;
+        return Ok(last_lines(&bytes, n));
     }
 
     let chunk_size = (n
         .saturating_mul(BYTES_PER_LINE_ESTIMATE)
         .saturating_mul(SEEK_BUFFER_FACTOR)) as u64;
     let chunk_size = chunk_size.min(file_size);
-    let mut file = file;
-    file.seek(SeekFrom::End(-(chunk_size as i64)))?;
+    let window_start = file_size - chunk_size;
+    if window_start == 0 {
+        file.read_to_end(&mut bytes)?;
+        return Ok(last_lines(&bytes, n));
+    }
+    // One byte early, so a window that starts exactly on a line keeps it:
+    // that byte is then the newline the skip below consumes.
+    file.seek(SeekFrom::Start(window_start - 1))?;
+    file.take(chunk_size + 1).read_to_end(&mut bytes)?;
+    let whole = match bytes.iter().position(|&b| b == b'\n') {
+        Some(newline) => &bytes[newline + 1..],
+        None => &[],
+    };
+    Ok(last_lines(whole, n))
+}
 
-    let reader = BufReader::new(file);
-    let lines: Vec<String> = reader
-        .lines()
-        .map_while(Result::ok)
+/// The last `n` non-blank lines of `bytes`, as `BufRead::lines` splits them
+/// (`\n`, with a trailing `\r` removed), skipping lines that are not UTF-8.
+fn last_lines(bytes: &[u8], n: usize) -> Vec<String> {
+    let lines: Vec<String> = bytes
+        .split(|&b| b == b'\n')
+        .filter_map(|line| {
+            let line = line.strip_suffix(b"\r").unwrap_or(line);
+            std::str::from_utf8(line).ok()
+        })
         .filter(|line| !line.trim().is_empty())
+        .map(str::to_owned)
         .collect();
     let start = lines.len().saturating_sub(n);
-    Ok(lines[start..].to_vec())
+    lines[start..].to_vec()
 }
 
 #[cfg(test)]

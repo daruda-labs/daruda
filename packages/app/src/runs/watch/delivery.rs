@@ -139,6 +139,7 @@ impl RunWatch {
             }
         }
         self.prune();
+        self.forget_idle();
         for event in self.unreported() {
             self.announce(event);
         }

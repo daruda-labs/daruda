@@ -190,8 +190,10 @@ pub fn spawn(lane_dirs: Vec<(PathBuf, PathBuf)>) -> JsonlWatcherHandle {
 /// How `process_jsonl_file` reads a file's lines — memory vs completeness:
 /// - [`ReadStrategy::Tail`]: cheap byte-seek near the end via
 ///   `read_last_n_lines`, for FSEvent fires that append a few lines.
-///   The seek can land mid-UTF-8 and stop the iterator early — fine for
-///   the latest entries, brittle for deep history.
+///   It reads a bounded window (`n` × 2 KB), drops the window's torn first
+///   line and skips any line that is not UTF-8, so it returns only whole
+///   lines — but only as many as fit the window, which suits the latest
+///   entries and not deep history.
 /// - [`ReadStrategy::Full`]: `read_to_string` + split; one file-sized
 ///   allocation but every line is returned. Used at cold-restore so
 ///   non-ASCII history isn't silently dropped.

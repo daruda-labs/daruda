@@ -15,8 +15,18 @@ use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_chat::slash_dispatch::{LocalSlashCommand, SlashDispatch, classify_slash};
 use daruda_chat::view::{
-    EmptySubmitOutcome, EscapeOutcome, PhoneAckEffect, PromptDispatch, PromptId, PromptOrigin,
+    EmptySubmitOutcome, EscapeOutcome, PhoneAckEffect, PromptDispatch, PromptId,
 };
+
+/// Who typed a prompt sent through the slash-aware funnel below: the
+/// person-authored subset of `PromptOrigin`. A host notice is not a member,
+/// since classifying its text as a slash command could reset the session
+/// (`/clear`); notices go to `AgentChatView::try_send_internal_prompt_text`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UserPromptOrigin {
+    InApp,
+    Telegram,
+}
 
 impl Workspace {
     /// An untagged [`Self::send_agent_task_prompt_text`], the shorthand the
@@ -49,7 +59,7 @@ impl Workspace {
         let dispatch = self.send_agent_prompt_text_with_origin(
             pane_id,
             text,
-            PromptOrigin::InApp,
+            UserPromptOrigin::InApp,
             task.clone(),
             cx,
         );
@@ -112,14 +122,14 @@ impl Workspace {
         text: String,
         cx: &mut Context<Self>,
     ) -> Option<PromptDispatch> {
-        self.send_agent_prompt_text_with_origin(pane_id, text, PromptOrigin::Telegram, None, cx)
+        self.send_agent_prompt_text_with_origin(pane_id, text, UserPromptOrigin::Telegram, None, cx)
     }
 
     fn send_agent_prompt_text_with_origin(
         &mut self,
         pane_id: PaneId,
         text: String,
-        origin: PromptOrigin,
+        origin: UserPromptOrigin,
         task: Option<ExecutionRef>,
         cx: &mut Context<Self>,
     ) -> Option<PromptDispatch> {
@@ -147,16 +157,13 @@ impl Workspace {
             SlashDispatch::Forward => {
                 let view = self.agent_chat_view(pane_id).cloned()?;
                 let prompt_dispatch = match (origin, task) {
-                    // Host notices go to `try_send_internal_prompt_text`, which
-                    // never queues; no caller routes one through this funnel.
-                    (PromptOrigin::Internal, _) => PromptDispatch::Unavailable,
-                    (PromptOrigin::Telegram, _) => {
+                    (UserPromptOrigin::Telegram, _) => {
                         view.update(cx, |v, cx| v.send_prompt_text_for_telegram(text, cx))
                     }
-                    (PromptOrigin::InApp, Some(task)) => {
+                    (UserPromptOrigin::InApp, Some(task)) => {
                         view.update(cx, |v, cx| v.send_task_prompt_text(text, task, cx))
                     }
-                    (PromptOrigin::InApp, None) => {
+                    (UserPromptOrigin::InApp, None) => {
                         view.update(cx, |v, cx| v.send_prompt_text(text, cx))
                     }
                 };

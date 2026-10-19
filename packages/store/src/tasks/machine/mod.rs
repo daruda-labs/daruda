@@ -27,7 +27,8 @@ impl daruda_runlog::Machine for TaskMachine {
     type Event = TaskEvent;
     type Rejected = TaskRejected;
     // Bump with any change to how `TaskEvent` or `TasksBook` serializes, so an older
-    // build refuses the log as too new.
+    // build refuses the log as too new. 2 and 3 were used only by uncommitted
+    // builds whose logs may exist; never reuse them.
     const SCHEMA: u32 = 4;
 
     fn check(state: &TasksBook, event: &TaskEvent) -> Result<(), TaskRejected> {

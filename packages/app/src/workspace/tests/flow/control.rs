@@ -1019,7 +1019,7 @@ async fn closing_the_window_that_started_a_run_keeps_it_stoppable(cx: &mut TestA
     assert_eq!(rows.len(), 1, "the other window does not see the run");
     second.update(cx, |ws, cx| ws.stop_flow_run_in(here, cx));
     assert!(
-        wait_for_run(cx, |cx| !run_is_held(cx, lane.path())),
+        wait_for_run(cx, |cx| !run_is_held(cx, lane.path())).await,
         "the run did not stop from the window that is left"
     );
 }
@@ -1063,7 +1063,8 @@ nodes:
                 .ok()
                 .and_then(|text| text.trim().parse::<u32>().ok());
             pid.is_some()
-        }),
+        })
+        .await,
         "the command never started"
     );
     let run_dir = cx.update(|cx| {
@@ -1232,13 +1233,14 @@ async fn a_refused_start_tells_the_control_caller_why(cx: &mut TestAppContext) {
             cx,
         );
         match refused {
-            Err(ControlError::FlowNotStarted { name, detail }) => {
+            Err(ControlError::FlowNotStarted { name, reason }) => {
                 assert_eq!(name, "ship.yaml");
-                assert!(
-                    detail.contains(&crate::surface::strings::flow::session_host_unusable(
-                        "claude"
-                    )),
-                    "the reason is missing: {detail}"
+                assert_eq!(
+                    reason,
+                    crate::control::result::FlowNotStartedReason::SessionHostUnusable {
+                        agent: "claude".into()
+                    },
+                    "the reason is missing"
                 );
             }
             other => panic!("not refused with its reason: {other:?}"),
@@ -1276,7 +1278,7 @@ async fn a_desktop_resume_of_a_phone_started_run_stays_off_the_phone(cx: &mut Te
         "the phone's own start answers the phone"
     );
     assert!(
-        wait_for_run(cx, |cx| !run_is_held(cx, lane.path())),
+        wait_for_run(cx, |cx| !run_is_held(cx, lane.path())).await,
         "the first run did not finish"
     );
 
@@ -1323,7 +1325,8 @@ async fn a_desktop_resume_of_a_phone_started_run_stays_off_the_phone(cx: &mut Te
     assert!(
         wait_for_run(cx, |cx| {
             run_dir.join("DONE").exists() && !run_is_held(cx, lane.path())
-        }),
+        })
+        .await,
         "the resumed run did not finish"
     );
     cx.run_until_parked();

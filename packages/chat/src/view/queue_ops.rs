@@ -104,8 +104,11 @@ impl AgentChatView {
     }
 
     /// Send a literal host notice only if it can reach the wire now. It never
-    /// queues, so it cannot pass parked or queued user prompts, and a refusal
-    /// leaves the composer edit, the queue and the phone watch untouched.
+    /// queues, so it cannot pass parked or queued user prompts. `NotNow` and
+    /// `ReadOnly` leave the composer edit, the queue and the phone watch
+    /// untouched; `Unavailable` means the handoff itself failed, which reports
+    /// the dead transport exactly like any send does (queued prompts dropped,
+    /// handle detached, error shown).
     pub fn try_send_internal_prompt_text(
         &mut self,
         text: String,
@@ -126,6 +129,11 @@ impl AgentChatView {
 
     /// Whether [`Self::try_send_internal_prompt_text`] would send now rather
     /// than refuse. A host waiting to retry observes the view against this.
+    ///
+    /// Prompts parked by Stop count as waiting: a notice never goes ahead of a
+    /// user prompt, so it holds until the user resumes, edits away or discards
+    /// the parked queue. Only the notice waits; an explicit tool call such as
+    /// `daruda_run_wait` does not go through here.
     pub fn accepts_internal_prompt_now(&self) -> bool {
         !self.is_read_only() && self.queued_prompt_count() == 0 && self.can_dispatch_now(&[])
     }

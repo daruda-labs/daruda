@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use super::*;
+use crate::runs::RunsHost;
 
 fn run_in(run_dir: &str) -> FlowRun {
     let run_dir = PathBuf::from(run_dir);

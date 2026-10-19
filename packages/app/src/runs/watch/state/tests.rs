@@ -74,3 +74,43 @@ fn a_held_end_is_released_by_a_later_retained_end_and_stale_tokens_do_nothing() 
         "the previous episode's token cannot release the new end"
     );
 }
+
+#[test]
+fn a_held_end_survives_an_immediate_resume_and_its_late_release_adds_its_text() {
+    let mut watch = RunWatch::default();
+    let key = RunKey::Flow("resumed".into());
+    watch.register(key.clone());
+    let mut bare = ended(key.clone());
+    if let RunState::Ended { text, .. } = &mut bare.state {
+        *text = None;
+    }
+    let token = watch.hold_end(bare);
+    // The desktop resumes the run while its report is still being read.
+    watch.begin(&key);
+    watch.observe_waiting(running(key.clone(), None));
+    watch.release_end(token.clone(), ended(key.clone()));
+    let (wait, _) = watch.open_wait(None).unwrap();
+    let answer = watch.poll_wait(wait, false).unwrap();
+    assert_eq!(answer.ended.len(), 1, "the previous episode's end is kept");
+    assert!(
+        matches!(&answer.ended[0].state, RunState::Ended { text: Some(text), .. } if text == "answer"),
+        "the late release still adds the report text"
+    );
+    watch.finish_wait(wait, true);
+    assert!(matches!(
+        watch.get(&key).unwrap().state,
+        RunState::Running { .. }
+    ));
+    assert_eq!(
+        watch.entries[&key].end,
+        EndState::Open,
+        "the new episode is unaffected"
+    );
+    watch.release_end(token, ended(key.clone()));
+    assert!(watch.unreported().is_empty(), "delivered once");
+    let (again, _) = watch.open_wait(None).unwrap();
+    assert!(
+        watch.poll_wait(again, false).is_none(),
+        "the new episode is still running"
+    );
+}

@@ -49,6 +49,8 @@ pub(super) struct RunEntry {
     pub(super) floor: u64,
     pub(super) disk_episode: Option<u64>,
     pub(super) local_sequence: Option<u64>,
+    /// When the key was first kept only to remember its end was reported.
+    pub(super) retired: Option<u64>,
 }
 
 impl RunEntry {
@@ -72,10 +74,12 @@ pub(crate) struct HeldEnd {
 pub(crate) struct RunWatch {
     pub(super) entries: HashMap<RunKey, RunEntry>,
     pub(in crate::runs) event_sender: Option<smol::channel::Sender<RunEvent>>,
-    locations: HashMap<String, FlowRunLocation>,
+    pub(super) locations: HashMap<String, FlowRunLocation>,
     pub(super) events: Vec<RunEvent>,
     pub(super) waiters: HashMap<WaitId, Waiter>,
     pub(super) next_waiter: u64,
+    /// Orders retirements so the oldest reported keys are forgotten first.
+    pub(super) retirements: u64,
 }
 /// A process-local episode with a stable per-key identity.
 /// The channel may announce it again when waiter coverage is withdrawn.
@@ -112,7 +116,16 @@ impl RunWatch {
     pub(crate) fn revision(&self, key: &RunKey) -> u64 {
         self.entries.get(key).map_or(0, |entry| entry.revision)
     }
+    /// Open a new episode. An end still held for enrichment is announced first,
+    /// as the closing episode's, so a resume during the report read cannot lose it.
     pub(crate) fn begin(&mut self, key: &RunKey) {
+        let entry = self.entry(key);
+        if entry.end == EndState::Held
+            && let Some(held) = entry.snapshot.clone()
+        {
+            entry.end = EndState::Ended;
+            self.push_event(held);
+        }
         let entry = self.entry(key);
         entry.disk_episode = None;
         entry.local_sequence = None;
@@ -214,6 +227,7 @@ impl RunWatch {
             None => self.clear_waiting(&key),
         }
         self.entry(&key).snapshot = Some(snapshot);
+        self.bound();
         self.wake();
     }
     pub(crate) fn locate(&mut self, location: FlowRunLocation) {
@@ -354,6 +368,7 @@ impl RunWatch {
         }
         let key = snapshot.key.clone();
         self.entry(&key).snapshot = Some(snapshot);
+        self.bound();
         self.wake();
     }
     pub(super) fn wake(&self) {
@@ -394,10 +409,20 @@ impl RunWatch {
         };
         Some((entry.snapshot.clone()?, held))
     }
-    /// Announce a held end with its enriched content; stale tokens do nothing.
+    /// Announce a held end with its enriched content. A token whose episode
+    /// [`Self::begin`] already closed only adds the text to that episode's
+    /// unreported end; it never announces anything.
     pub(crate) fn release_end(&mut self, held: HeldEnd, enriched: RunSnapshot) {
+        if enriched.key != held.key {
+            return;
+        }
         let entry = self.entry(&held.key);
-        if entry.floor != held.floor || entry.end != EndState::Held || enriched.key != held.key {
+        if entry.floor != held.floor {
+            let closed = held.floor..entry.floor;
+            self.enrich_closed(closed, enriched);
+            return;
+        }
+        if entry.end != EndState::Held {
             return;
         }
         entry.end = EndState::Ended;
@@ -405,6 +430,28 @@ impl RunWatch {
         entry.snapshot = Some(enriched.clone());
         self.push_event(enriched);
         self.wake();
+    }
+
+    /// Give an earlier episode's still-unreported end the text read for it.
+    fn enrich_closed(&mut self, episodes: std::ops::Range<u64>, enriched: RunSnapshot) {
+        let RunState::Ended {
+            text: Some(text), ..
+        } = enriched.state
+        else {
+            return;
+        };
+        for event in &mut self.events {
+            if event.snapshot.key == enriched.key
+                && event.delivery == Delivery::Unreported
+                && episodes.contains(&event.sequence)
+                && let RunState::Ended {
+                    text: current @ None,
+                    ..
+                } = &mut event.snapshot.state
+            {
+                *current = Some(text.clone());
+            }
+        }
     }
 }
 #[cfg(test)]

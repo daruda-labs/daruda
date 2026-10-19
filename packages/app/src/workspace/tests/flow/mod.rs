@@ -514,23 +514,43 @@ fn add_lane_with_a_flow(
     (dir, target)
 }
 
-/// Let a real run's thread get on with it until `done` holds, for at most a
-/// few seconds. The engine wakes the app from its own thread from its first
+/// How long a real run is given to reach what a test waits for.
+const RUN_PATIENCE: std::time::Duration = std::time::Duration::from_secs(10);
+/// How often a fact no run change announces, such as a file the run's
+/// command writes, is checked again.
+const RUN_RECHECK: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// Let a real run's thread get on with it until `done` holds, for at most
+/// [`RUN_PATIENCE`]. Between checks the app runs while the test waits for
+/// the run's next change, so a state the run reaches is seen when it
+/// happens. The engine wakes the app from its own thread from its first
 /// record on, so a test allows parking before it starts the run: allowing it
 /// only here is too late, and the scheduler fails the test at its end.
-fn wait_for_run(
+async fn wait_for_run(
     cx: &mut TestAppContext,
     mut done: impl FnMut(&mut TestAppContext) -> bool,
 ) -> bool {
     cx.executor().allow_parking();
-    for _ in 0..200 {
+    let changed = cx.update(crate::runs::RunsHost::flow_changes_for_test);
+    let deadline = std::time::Instant::now() + RUN_PATIENCE;
+    loop {
         cx.run_until_parked();
         if done(cx) {
             return true;
         }
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        let recheck = cx.executor().timer(RUN_RECHECK);
+        smol::future::or(
+            async {
+                // SILENT-OK: the host outlives the test, so the channel stays open.
+                let _ = changed.recv().await;
+            },
+            recheck,
+        )
+        .await;
     }
-    false
 }
 
 /// Whether this process holds a run in `worktree`.

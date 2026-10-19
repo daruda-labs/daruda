@@ -450,6 +450,46 @@ pub enum ControlResult {
     },
 }
 
+/// Why a valid flow did not start, for [`ControlError::FlowNotStarted`].
+///
+/// Carries only values that read the same in every locale: the agent is the
+/// name the flow file and the settings use. Paths and OS error text stay in
+/// the desktop's log, since this answer also reaches an MCP caller.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum FlowNotStartedReason {
+    /// The window has no active worktree to run in.
+    NoLane,
+    /// The worktree's path would not resolve.
+    LaneUnresolvable,
+    /// The worktree runs its agents on another machine.
+    RemoteLane { agent: String },
+    /// An agent's launch configuration cannot produce a command.
+    AgentLaunchRefused { agent: String },
+    /// An agent's session host holds a value the launch cannot quote.
+    SessionHostUnusable { agent: String },
+    /// The flow file could not be read.
+    ReadFailed,
+    /// The run cannot be resumed from what it left behind.
+    ResumeRefused,
+}
+
+impl std::fmt::Display for FlowNotStartedReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoLane => write!(f, "no active worktree"),
+            Self::LaneUnresolvable => write!(f, "worktree path does not resolve"),
+            Self::RemoteLane { agent } => write!(f, "worktree is remote for agent {agent}"),
+            Self::AgentLaunchRefused { agent } => write!(f, "agent {agent} cannot launch"),
+            Self::SessionHostUnusable { agent } => {
+                write!(f, "session host of agent {agent} is unusable")
+            }
+            Self::ReadFailed => write!(f, "flow file could not be read"),
+            Self::ResumeRefused => write!(f, "run cannot be resumed"),
+        }
+    }
+}
+
 /// A command that cannot run. A branch the caller must take in the normal
 /// course — a queued prompt, an already-idle pane — is an `Ok` variant with a
 /// disposition, not an error.
@@ -478,11 +518,12 @@ pub enum ControlError {
         name: String,
     },
     /// The flow is valid, but its start was refused for a reason outside
-    /// the file — the worktree, an agent's launch, its host. `detail` is the
-    /// reason the desktop would show, for a caller that sees no toast.
+    /// the file — the worktree, an agent's launch, its host. A typed reason
+    /// rather than the desktop's toast text: that text is localized and names
+    /// local paths, and a tool result's values are fixed English.
     FlowNotStarted {
         name: String,
-        detail: String,
+        reason: FlowNotStartedReason,
     },
     /// The flow would open a desktop dialog the phone cannot answer — an
     /// agent node whose permission policy is `ask`, or a file declaring
@@ -583,8 +624,8 @@ impl std::fmt::Display for ControlError {
             Self::FlowNotFound { name } => write!(f, "no flow named {name}"),
             Self::FlowLocked { name } => write!(f, "flow already running: {name}"),
             Self::FlowRefused { name } => write!(f, "flow will not run as written: {name}"),
-            Self::FlowNotStarted { name, detail } => {
-                write!(f, "flow did not start: {name}: {detail}")
+            Self::FlowNotStarted { name, reason } => {
+                write!(f, "flow did not start: {name}: {reason}")
             }
             Self::FlowNeedsInteraction { name } => write!(f, "flow needs desktop input: {name}"),
             Self::RunMismatch => write!(f, "the requested run no longer owns this worktree"),

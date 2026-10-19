@@ -21,28 +21,54 @@ struct WorkspaceEffects {
     unlocated: std::cell::RefCell<Unlocated>,
 }
 
-/// How long a run id no open lane holds is trusted to stay absent. A wait
-/// refreshes every few seconds; probing every lane's disk each time is waste.
-const UNLOCATED_RETRY: std::time::Duration = std::time::Duration::from_secs(30);
+/// A run id no open lane holds is probed again after a growing pause: a wait
+/// refreshes every few seconds, and probing every lane's disk each time is
+/// waste, yet a run another process creates must show up within seconds.
+const UNLOCATED_RETRY_FIRST: std::time::Duration = std::time::Duration::from_secs(2);
+const UNLOCATED_RETRY_MAX: std::time::Duration = std::time::Duration::from_secs(5);
+/// A miss nobody asked about for this long is dropped, bounding the map.
+const UNLOCATED_FORGET: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// Run ids recently probed and not found, with the open lanes they were probed in.
+/// Run ids recently probed and not found, by id.
 #[derive(Default)]
-struct Unlocated(std::collections::HashMap<String, (u64, std::time::Instant)>);
+struct Unlocated(std::collections::HashMap<String, Miss>);
+
+struct Miss {
+    /// The open lanes it was probed in.
+    lanes: u64,
+    /// When it was last probed.
+    at: std::time::Instant,
+    /// How long that probe is trusted.
+    pause: std::time::Duration,
+}
 
 impl Unlocated {
-    /// Probe again once the open lanes change or the miss has aged out.
+    /// Probe again once the open lanes change or the pause has passed.
     fn should_probe(&mut self, id: &str, lanes: u64, now: std::time::Instant) -> bool {
         self.0
-            .retain(|_, (_, at)| now.saturating_duration_since(*at) < UNLOCATED_RETRY);
-        self.0.get(id).is_none_or(|(seen, _)| *seen != lanes)
+            .retain(|_, miss| now.saturating_duration_since(miss.at) < UNLOCATED_FORGET);
+        self.0.get(id).is_none_or(|miss| {
+            miss.lanes != lanes || now.saturating_duration_since(miss.at) >= miss.pause
+        })
     }
 
     fn record(&mut self, id: &str, lanes: u64, now: std::time::Instant, found: bool) {
         if found {
             self.0.remove(id);
-        } else {
-            self.0.insert(id.to_owned(), (lanes, now));
+            return;
         }
+        let pause = match self.0.get(id) {
+            Some(miss) if miss.lanes == lanes => (miss.pause * 2).min(UNLOCATED_RETRY_MAX),
+            _ => UNLOCATED_RETRY_FIRST,
+        };
+        self.0.insert(
+            id.to_owned(),
+            Miss {
+                lanes,
+                at: now,
+                pause,
+            },
+        );
     }
 }
 
@@ -138,22 +164,41 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_unlocated_run_is_probed_again_only_after_lanes_change_or_time_passes() {
+    fn an_unlocated_run_is_probed_again_after_a_short_growing_backoff() {
+        use std::time::Duration;
         let mut unlocated = Unlocated::default();
         let start = std::time::Instant::now();
         assert!(unlocated.should_probe("run", 1, start));
         unlocated.record("run", 1, start, false);
-        assert!(!unlocated.should_probe("run", 1, start + std::time::Duration::from_secs(2)));
+        assert!(!unlocated.should_probe("run", 1, start + Duration::from_millis(500)));
         assert!(
             unlocated.should_probe("run", 2, start),
             "a lane opened or closed"
         );
         assert!(unlocated.should_probe("other", 1, start));
-        assert!(unlocated.should_probe("run", 1, start + UNLOCATED_RETRY));
-        assert!(unlocated.0.is_empty(), "aged misses are forgotten");
-        unlocated.record("run", 1, start, false);
-        unlocated.record("run", 1, start, true);
-        assert!(unlocated.should_probe("run", 1, start));
+        let first = start + UNLOCATED_RETRY_FIRST;
+        assert!(
+            unlocated.should_probe("run", 1, first),
+            "a run another process creates shows up within seconds"
+        );
+        unlocated.record("run", 1, first, false);
+        assert!(!unlocated.should_probe("run", 1, first + UNLOCATED_RETRY_FIRST));
+        let second = first + UNLOCATED_RETRY_FIRST * 2;
+        assert!(unlocated.should_probe("run", 1, second), "the wait doubled");
+        let mut at = second;
+        for _ in 0..10 {
+            unlocated.record("run", 1, at, false);
+            at += UNLOCATED_RETRY_MAX;
+            assert!(unlocated.should_probe("run", 1, at), "never past the cap");
+        }
+        unlocated.record("run", 1, at, true);
+        assert!(unlocated.should_probe("run", 1, at));
+        unlocated.record("gone", 1, at, false);
+        assert!(unlocated.should_probe("x", 1, at + UNLOCATED_FORGET));
+        assert!(
+            !unlocated.0.contains_key("gone"),
+            "misses nobody asks about again are forgotten"
+        );
     }
 
     /// A flow change reaches the effects with no window open, which is

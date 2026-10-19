@@ -116,7 +116,8 @@ async fn windows_spelling_one_worktree_two_ways_share_its_run(cx: &mut TestAppCo
     );
     assert!(
         wait_for_run(cx, |cx| seen(&first, cx).is_none()
-            && seen(&second, cx).is_none()),
+            && seen(&second, cx).is_none())
+        .await,
         "the run did not end"
     );
 }

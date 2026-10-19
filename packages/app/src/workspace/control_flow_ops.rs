@@ -13,10 +13,10 @@ use std::path::Path;
 use gpui::Context;
 
 use crate::control::result::{
-    ControlError, FlowEntry, FlowOriginKind, LaneHandle, StopDisposition,
+    ControlError, FlowEntry, FlowNotStartedReason, FlowOriginKind, LaneHandle, StopDisposition,
 };
 use crate::workspace::Workspace;
-use crate::workspace::flow_ops::{FlowStartRefused, flow_refusal_text};
+use crate::workspace::flow_ops::FlowStartRefused;
 use crate::workspace::flow_paths::{FlowOrigin, FoundFlow, flow_label};
 use crate::workspace::flow_request::{FlowSelection, FlowSubmitError};
 use daruda_store::project::LaneRef;
@@ -170,28 +170,32 @@ impl Workspace {
 }
 
 /// A start's refusal as the control caller's answer. A problem in the file
-/// is `FlowRefused`, a held worktree `FlowLocked`; anything else carries the
-/// reason the desktop would have shown, since this caller sees no toast.
+/// is `FlowRefused`, a held worktree `FlowLocked`; anything else names its
+/// reason as a code, since this caller sees no toast and the toast's wording
+/// is localized desktop text that an MCP result must not carry.
 fn refusal_answer(name: String, refused: FlowStartRefused) -> ControlError {
     let error = match refused {
         FlowStartRefused::AlreadyRunning => return ControlError::FlowLocked { name },
         FlowStartRefused::Submit(error) => error,
     };
-    match error {
+    let reason = match error {
         FlowSubmitError::Load(_) | FlowSubmitError::Invalid(_) => {
-            ControlError::FlowRefused { name }
+            return ControlError::FlowRefused { name };
         }
-        FlowSubmitError::LockHeld { .. } => ControlError::FlowLocked { name },
-        other => {
-            let (message, detail) = flow_refusal_text(other);
-            let detail = if detail.is_empty() {
-                message
-            } else {
-                format!("{message}\n{detail}")
-            };
-            ControlError::FlowNotStarted { name, detail }
+        FlowSubmitError::LockHeld { .. } => return ControlError::FlowLocked { name },
+        FlowSubmitError::NoLane => FlowNotStartedReason::NoLane,
+        FlowSubmitError::LaneUnresolvable { .. } => FlowNotStartedReason::LaneUnresolvable,
+        FlowSubmitError::RemoteLane { agent } => FlowNotStartedReason::RemoteLane { agent },
+        FlowSubmitError::AgentLaunchRefused { agent, .. } => {
+            FlowNotStartedReason::AgentLaunchRefused { agent }
         }
-    }
+        FlowSubmitError::UnusableSessionHost { agent, .. } => {
+            FlowNotStartedReason::SessionHostUnusable { agent }
+        }
+        FlowSubmitError::Read { .. } => FlowNotStartedReason::ReadFailed,
+        FlowSubmitError::Resume(_) => FlowNotStartedReason::ResumeRefused,
+    };
+    ControlError::FlowNotStarted { name, reason }
 }
 
 /// The single conversion between the workspace-private flow origin and the
