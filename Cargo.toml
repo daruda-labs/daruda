@@ -21,7 +21,7 @@ gpui = { path = "vendor/zed/crates/gpui" }
 [workspace.package]
 version = "0.2.18"
 edition = "2024"
-rust-version = "1.95"
+rust-version = "1.97"
 license = "AGPL-3.0-only"
 description = "Run multiple AI agents in parallel, each in its own git worktree, from a single macOS terminal window."
 repository = "https://github.com/daruda-labs/daruda"

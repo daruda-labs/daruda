@@ -59,6 +59,10 @@ jobs:
 
       - name: Verify dependency maintenance scripts and Rust floor
         id: rust
+        # Cargo metadata runs on the runner's toolchain: the floor read here
+        # names the rust-toolchain.toml channel, which is not installed yet.
+        env:
+          RUSTUP_TOOLCHAIN: stable
         run: |
           bash scripts/rust-version.sh --self-test
           bash scripts/check-packaging-changes.sh --self-test
@@ -69,7 +73,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ steps.rust.outputs.version }}
-          components: rustfmt
+          components: clippy, rustfmt
 
       - name: Format
         run: cargo fmt --all -- --check

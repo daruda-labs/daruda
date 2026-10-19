@@ -1,0 +1,6 @@
+# Local checks and CI run one toolchain: Clippy lints differ between
+# releases, so a newer local toolchain passes code that CI rejects.
+# scripts/rust-version.sh rejects a channel that differs from the Rust floor.
+[toolchain]
+channel = "1.97"
+components = ["clippy", "rustfmt"]

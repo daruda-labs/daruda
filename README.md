@@ -55,7 +55,7 @@ Use `Cmd+Ctrl+1-9` to jump between worktrees.
 ### macOS Requirements
 
 - macOS 12 Monterey or later
-- Rust 1.95+
+- Rust 1.97 via rustup, pinned by `rust-toolchain.toml`
 - Xcode Command Line Tools
 - Zig 0.14.1, installed by the bootstrap script below on macOS
 
@@ -74,7 +74,7 @@ cargo run -p daruda
 
 - Windows x86_64 or ARM64
 - Git for Windows
-- Rust 1.95+ (MSVC toolchain)
+- Rust 1.97 via rustup (MSVC toolchain), pinned by `rust-toolchain.toml`
 - Visual Studio 2022 Build Tools with the C++ workload and Windows SDK
 - Zig 0.14.1, installed by the bootstrap script below
 

@@ -848,13 +848,13 @@ upstream's in four ways, none of which touch source:
    `priority = -1`, matching the "vendored upstream, do not lint" stance
    used for `gpui_component`. The `priority` is load-bearing: without it
    the one lint deliberately left armed (below) is buried by the groups.
-4. `rust-version = "1.95"` plus `incompatible_msrv = "deny"` — unlike
+4. `rust-version = "1.97"` plus `incompatible_msrv = "deny"` — unlike
    `gpui_component`, this crate declares the floor. The manifest is
    daruda's own file, so declaring it costs nothing when re-vendoring,
    and it lets `cargo clippy -p ferrum_flow` catch a std API newer than
    CI's pinned toolchain without installing that toolchain locally.
    Note the check only sees std API stabilization, not language
-   features; CI's 1.95 pin remains the final gate.
+   features; the pinned toolchain remains the final gate.
 
 ### Re-vendor procedure
 

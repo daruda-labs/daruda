@@ -29,6 +29,10 @@ jobs:
         uses: actions/checkout@v7
       - name: Read and verify the Rust floor
         id: rust
+        # Cargo metadata runs on the runner's toolchain: the floor read here
+        # names the rust-toolchain.toml channel, which is not installed yet.
+        env:
+          RUSTUP_TOOLCHAIN: stable
         run: |
           version=$(bash scripts/rust-version.sh)
           echo "version=$version" >> "$GITHUB_OUTPUT"

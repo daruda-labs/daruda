@@ -32,13 +32,15 @@ daruda locally. For a short product overview and first run instructions, see
 | macOS | 12.0 Monterey or later; Apple Silicon and Intel supported |
 | Linux | x86_64 `.deb` and portable tar.gz; CI builds, tests, and smoke-tests the window under Xvfb and sway; a real desktop is still unverified; requires system `libfontconfig`, `libxcb`, `libxkbcommon`, `libwayland`, and a Vulkan driver |
 | Windows | Experimental native MSVC build; GUI runtime still needs desktop verification |
-| Rust | 1.95+; CI pins the floor to 1.95 |
+| Rust | 1.97 through rustup; `rust-toolchain.toml` pins local checks and CI |
 | Zig | 0.14.1; `./scripts/bootstrap-zig.sh` installs the pinned version on macOS |
 | Xcode Command Line Tools | Required on macOS |
 
 Rust uses edition 2024. The minimum version is declared once in
 `[workspace.package]`; first-party crates inherit `rust-version.workspace = true`.
-CI pins the floor exactly, while local development can use newer toolchains.
+`rust-toolchain.toml` pins the same version for local work and CI, because
+Clippy lints differ between releases; a toolchain that ignores this file, such
+as a Homebrew `rust`, can pass code that CI rejects.
 The vendored `gpui_component*` manifests retain upstream's Rust version policy;
 `ferrum_flow` declares the floor to enable `clippy::incompatible_msrv`.
 
@@ -445,9 +447,10 @@ Linux checks both X11 and Wayland startup/paint; Windows checks native
 builds, startup, platform adapters, and packaging.
 
 CI reads the Rust floor through [rust-version.sh](scripts/rust-version.sh),
-using Cargo metadata rather than a second toolchain version literal. The reader
-rejects differing first-party and `ferrum_flow` declarations; upstream widget
-MSRVs retain their independent policy. Its self-test runs in the Lint job.
+using Cargo metadata. The reader rejects differing first-party and
+`ferrum_flow` declarations and a `rust-toolchain.toml` channel that differs
+from the floor; upstream widget MSRVs retain their independent policy. Its
+self-test runs in the Lint job.
 
 For dependency and native-packaging changes, macOS CI also verifies a signed
 debug `.app` and starts its bundled binary. Linux CI builds the debug tarball
@@ -472,7 +475,7 @@ Shared registry requirements live in `[workspace.dependencies]`. Members inherit
 them with `workspace = true`, keeping their own features, optional flags, and
 target conditions. Different incompatible requirements, such as the app's
 `toml 0.8` and the GPUI vendor tool's `toml 0.9`, stay separate. Resolver 3
-prefers dependencies compatible with the declared Rust floor; the Rust 1.95
+prefers dependencies compatible with the declared Rust floor; the pinned Rust
 CI jobs and `--locked` Cargo gates remain the compatibility check.
 
 When an upstream fix is required for correctness, raise the dependency's

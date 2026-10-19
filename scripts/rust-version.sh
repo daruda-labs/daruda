@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
-# Print the shared Rust floor and reject first-party/vendor MSRV drift.
+# Print the shared Rust floor and reject first-party/vendor MSRV drift and a
+# rust-toolchain.toml channel that differs from the floor.
 set -euo pipefail
+
+# The pinned channel from a rust-toolchain.toml on stdin.
+toolchain_channel() {
+    sed -n 's/^channel = "\(.*\)"$/\1/p' | grep -E '^[0-9]+\.[0-9]+(\.[0-9]+)?$'
+}
 
 select_version() {
     jq -er '
@@ -41,10 +47,28 @@ if [ "${1:-}" = "--self-test" ]; then
             exit 1
         fi
     done
+    for channel in 1.95 1.95.0; do
+        [ "$(printf '[toolchain]\nchannel = "%s"\n' "$channel" | toolchain_channel)" = "$channel" ]
+    done
+    for fixture in '[toolchain]' 'channel = "stable"' 'channel = "1.95-x86_64-apple-darwin"'; do
+        if printf '%s\n' "$fixture" | toolchain_channel >/dev/null 2>&1; then
+            echo "Toolchain check accepted invalid channel: $fixture" >&2
+            exit 1
+        fi
+    done
     echo "Rust floor self-test passed."
     exit 0
 fi
 
 [ $# -eq 0 ] || { echo "usage: $0 [--self-test]" >&2; exit 2; }
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
-cargo metadata --locked --no-deps --format-version 1 | select_version
+version=$(cargo metadata --locked --no-deps --format-version 1 | select_version)
+channel=$(toolchain_channel < rust-toolchain.toml) || {
+    echo "rust-toolchain.toml has no numeric channel" >&2
+    exit 1
+}
+if [ "$channel" != "$version" ]; then
+    echo "rust-toolchain.toml channel $channel differs from the Rust floor $version" >&2
+    exit 1
+fi
+echo "$version"

@@ -1,6 +1,6 @@
 name: Set up the build toolchain
 description: >-
-  The declared Rust floor with clippy, the pinned Zig, locked dependencies,
+  The declared Rust floor with clippy and rustfmt, the pinned Zig, locked dependencies,
   and the vendored GPUI check. Checkout stays in the job.
 inputs:
   cache-key:
@@ -13,6 +13,10 @@ runs:
     - name: Read and verify the Rust floor
       id: rust
       shell: bash
+      # Cargo metadata runs on the runner's toolchain: the floor read here
+      # names the rust-toolchain.toml channel, which is not installed yet.
+      env:
+        RUSTUP_TOOLCHAIN: stable
       run: |
         version=$(bash scripts/rust-version.sh)
         echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -27,7 +31,7 @@ runs:
       uses: dtolnay/rust-toolchain@stable
       with:
         toolchain: ${{ steps.rust.outputs.version }}
-        components: clippy
+        components: clippy, rustfmt
 
     - name: Cache Rust build
       uses: Swatinem/rust-cache@v2.9.1

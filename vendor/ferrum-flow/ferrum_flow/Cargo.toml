@@ -8,7 +8,7 @@ edition = "2024"
 # Declared, unlike gpui_component — the manifest is our own file (the only
 # delta), so a floor costs nothing in re-vendoring terms, and it is what
 # arms the MSRV check below.
-rust-version = "1.95"
+rust-version = "1.97"
 
 [lib]
 doctest = false
