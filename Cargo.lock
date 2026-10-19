@@ -1902,7 +1902,6 @@ dependencies = [
 name = "daruda_control_types"
 version = "0.2.18"
 dependencies = [
- "daruda_core",
  "daruda_store",
  "serde",
  "serde_json",

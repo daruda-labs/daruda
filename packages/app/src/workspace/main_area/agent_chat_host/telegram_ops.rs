@@ -36,10 +36,10 @@ pub(in crate::workspace) const FIRST_RESPONSE_FALLBACK_SECS: u64 = 60;
 /// characters around `marker` (the caller's localized "…(truncated)…" string).
 ///
 /// This file owns the *budget* and the localized marker; the elision itself is
-/// `crate::control::agent_text`'s, shared with the orchestrator's own reader —
+/// `daruda_control_types::agent_text`'s, shared with the orchestrator's own reader —
 /// which keeps a different amount and a fixed English marker.
 fn preview_for(text: &str, marker: &str) -> String {
-    crate::control::agent_text::elide_middle(
+    daruda_control_types::agent_text::elide_middle(
         text,
         TELEGRAM_PREVIEW_HEAD_CHARS,
         TELEGRAM_PREVIEW_TAIL_CHARS,

@@ -76,7 +76,8 @@ main.rs → menus.rs, windows.rs → workspace/
   → title_bar/ → ui/, surface/
   → runs/, agent/, project/, lane/, surface/, config_watcher.rs
 
-runs/ → daruda_store, daruda_flow, daruda_agent, daruda_terminal::pty
+runs/ → daruda_store, daruda_flow, daruda_agent, daruda_terminal::pty,
+        daruda_control_types::agent_text
 
 project/ → lane/
 agent/ → lane/
@@ -89,8 +90,10 @@ agent/ → lane/
 - `runs/` owns the process-wide task log, execution bindings, CLI tracker,
   flow runs in flight, and `RunWatch` result snapshots, delivery ledger and waiters.
   Its GPUI-free domain state uses its own `RunKey`, `RunSnapshot` and `RunEvent`
-  types. `runs/` never imports `daruda_control_types`, `control/`, chat views,
-  or this crate's `workspace/`, `project/` or `lane/`. Workspace installs
+  types. `runs/` never imports `control/`, chat views, or this crate's
+  `workspace/`, `project/` or `lane/`, and imports `daruda_control_types` only
+  for `agent_text`: answer bounds are control-contract policy that run results
+  must share with live chat replies. Workspace installs
   `RunsEffects` callbacks for window operations, flow location and run events;
   control converts run-owned types at the MCP boundary and owns orchestrator
   notices. Workspace reads the task projection; only RunsHost writes it.

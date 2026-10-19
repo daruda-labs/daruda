@@ -11,7 +11,6 @@ description = "The external control contract for daruda — command vocabulary, 
 workspace = true
 
 [dependencies]
-daruda_core = { workspace = true }
 daruda_store = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 

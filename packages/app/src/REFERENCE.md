@@ -90,7 +90,9 @@ them speaks for the run's end. Closing a window leaves its runs going.
 `runs/result.rs` defines the run-owned `RunKey`, `RunSnapshot`, progress,
 waiting state, end reason and artifact pointers. `control/mcp/runs.rs` resolves
 external handles and converts these types to `daruda_control_types`; `runs/`
-does not import the control protocol or chat views. Workspace installs
+does not import `control/`, the control protocol or chat views, except
+`daruda_control_types::agent_text`: answer bounds are control-contract policy
+that run results share with live chat replies. Workspace installs
 `RunsEffects::locate_flow_run`, returning `FlowRunLocation { run_dir, lock_dir }`,
 and `RunsEffects::run_event`, receiving the run-owned `RunEvent`.
 
@@ -195,9 +197,12 @@ A process-global set records accepted `(RunKey, sequence)` identities for all
 eligible entries represented by the batch; waiter-covered and in-flight entries
 stay eligible later. Accepting a notice never marks a run result reported.
 
-`AgentChatView::send_internal_prompt_text` uses `PromptOrigin::Internal` for
-these literal prompts. It preserves composer and queued-edit state, appends
-behind existing prompts, and respects FIFO and the Stop/cancel-ack window.
+`AgentChatView::try_send_internal_prompt_text` uses `PromptOrigin::Internal`
+for these literal prompts. It never queues: it sends only to a connected session
+with no turn in flight, no open Stop/cancel-ack window and no queued or parked
+prompts, and otherwise refuses with `InternalDispatch::NotNow`, leaving composer,
+queued-edit and phone state untouched. A refused notice stays eligible; the host
+observes the pane until `accepts_internal_prompt_now` holds and flushes again.
 The host reconciles any owed completion before dispatch and reconciles the new
 activity afterward, routing both edges through `fire_activity_completion`.
 It does not interpret slash commands or arm a phone first-response watch.
@@ -345,7 +350,7 @@ daruda (app)  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
              →  daruda_flow_edit  →  daruda_flow   # YAML edits that keep comments and order
              →  daruda_project    →  daruda_config, daruda_store, daruda_core  # GPUI-free Project/Lane
              →  daruda_content    →  merman, resvg, image   # GPUI-free image + mermaid pipeline
-             →  daruda_control_types  →  daruda_store, daruda_core   # GPUI-free control contract, PaneRef
+             →  daruda_control_types  →  daruda_store   # GPUI-free control contract, PaneRef
              →  daruda_ui         →  daruda_terminal, daruda_config, gpui_component, ferrum_flow  # widgets
              →  daruda_transcript →  daruda_acp, daruda_config, daruda_ui   # transcript presentation, shared by chat + Settings
              →  daruda_chat       →  daruda_transcript, daruda_acp, daruda_content, daruda_ui, daruda_config, daruda_store, daruda_core  # the chat pane view

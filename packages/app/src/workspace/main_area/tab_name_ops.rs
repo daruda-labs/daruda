@@ -86,6 +86,6 @@ impl Workspace {
             .find(|tab| tab.layout.contains(pane_id))?
             .user_label
             .as_deref()
-            .and_then(crate::control::agent_text::sanitize_title)
+            .and_then(daruda_control_types::agent_text::sanitize_title)
     }
 }

@@ -10,7 +10,6 @@
 //! currently selected, are conversation context owned by the adapter — see
 //! `crate::telegram::command`.
 
-pub(crate) use daruda_control_types::agent_text;
 pub(crate) mod approval;
 pub(crate) mod ask;
 pub(crate) mod exec;
