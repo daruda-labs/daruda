@@ -87,23 +87,32 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.close_stale_flow_question(window, cx);
-        let lane = self.lane_at(&change.worktree, cx);
+        let lanes = self.lanes_at(&change.worktree, cx);
+        let lane = lanes.first().copied();
         match (&change.what, lane) {
             (FlowChanged::Ended(ended), lane) => {
+                for &held in &lanes {
+                    // The run just wrote its completion marker, so the list
+                    // that reads those markers is now wrong.
+                    self.invalidate_flow_history(held);
+                    self.colour_flow_graph(held, ended.colouring.clone(), cx);
+                }
                 self.on_flow_run_ended(lane, change.worktree.as_path(), ended, lead, cx);
             }
             (_, None) => {}
             (FlowChanged::Repainted, Some(_)) => cx.notify(),
-            (FlowChanged::Progressed { left_setup }, Some(lane)) => {
-                // Leaving setup is the first moment the run directory on
-                // disk is the swept one: retention runs after the run
-                // announces itself and before its first node.
-                if *left_setup {
-                    self.invalidate_flow_history(lane);
-                }
+            (FlowChanged::Progressed { left_setup }, Some(_)) => {
                 let colouring = RunsHost::flow_run(change.worktree.as_path(), cx)
                     .and_then(|run| run.view().colouring());
-                self.colour_flow_graph(lane, colouring, cx);
+                for &held in &lanes {
+                    // Leaving setup is the first moment the run directory on
+                    // disk is the swept one: retention runs after the run
+                    // announces itself and before its first node.
+                    if *left_setup {
+                        self.invalidate_flow_history(held);
+                    }
+                    self.colour_flow_graph(held, colouring.clone(), cx);
+                }
                 cx.notify();
             }
             (FlowChanged::Asked { ask_id, alone }, Some(lane)) => {
@@ -196,8 +205,9 @@ impl Workspace {
         }
     }
 
-    /// A run in `worktree` ended. Every window holding it refreshes and marks
-    /// it; the lead alone says so.
+    /// A run in `worktree` ended, in `lane` — this window's lane there, the
+    /// one in view first. Every window holding it marks it; the lead alone
+    /// says so.
     fn on_flow_run_ended(
         &mut self,
         lane: Option<LaneRef>,
@@ -206,11 +216,7 @@ impl Workspace {
         lead: bool,
         cx: &mut Context<Self>,
     ) {
-        if let Some(lane) = lane {
-            // The run just wrote its completion marker, so the list that
-            // reads those markers is now wrong.
-            self.invalidate_flow_history(lane);
-            self.colour_flow_graph(lane, ended.colouring.clone(), cx);
+        if lane.is_some() {
             cx.notify();
         }
         if lead {

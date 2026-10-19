@@ -15,16 +15,32 @@ use crate::surface::strings as s;
 
 impl Workspace {
     /// This window's lane at `worktree`, if it holds one — under whatever
-    /// spelling this window opened the folder by.
+    /// spelling this window opened the folder by. The lane in view when
+    /// several are there.
     pub(in crate::workspace) fn lane_at(
         &self,
         worktree: &CanonicalTree,
         cx: &App,
     ) -> Option<LaneRef> {
-        self.projects
+        self.lanes_at(worktree, cx).first().copied()
+    }
+
+    /// Every lane of this window at `worktree`, the one in view first. A
+    /// window can hold one folder twice: a worktree of one project can be
+    /// opened as another project's root.
+    pub(in crate::workspace) fn lanes_at(
+        &self,
+        worktree: &CanonicalTree,
+        cx: &App,
+    ) -> Vec<LaneRef> {
+        let mut lanes: Vec<LaneRef> = self
+            .projects
             .lanes()
-            .find(|(_, _, lane)| RunsHost::names_flow_tree(&lane.path, worktree, cx))
+            .filter(|(_, _, lane)| RunsHost::names_flow_tree(&lane.path, worktree, cx))
             .map(|(lane_ref, _, _)| lane_ref)
+            .collect();
+        lanes.sort_by_key(|lane| *lane != self.active);
+        lanes
     }
 
     /// The run going in `lane`, whoever started it.

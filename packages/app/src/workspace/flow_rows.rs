@@ -82,12 +82,23 @@ impl Workspace {
         keep: impl Fn(daruda_store::project::LaneRef) -> bool,
         cx: &App,
     ) -> Vec<FlowRunRow> {
-        let mut rows: Vec<FlowRunRow> = self
+        // One row per run: a window can hold a folder under two lanes, and
+        // a run listed twice would also count its questions twice. The lane
+        // in view wins, so a row names the lane the person is looking at.
+        let mut lanes: Vec<_> = self
             .projects
             .lanes()
             .filter(|(lane, _, _)| keep(*lane))
+            .collect();
+        lanes.sort_by_key(|(lane, _, _)| *lane != self.active);
+        let mut seen = std::collections::HashSet::new();
+        let mut rows: Vec<FlowRunRow> = lanes
+            .into_iter()
             .filter_map(|(lane, _, held)| {
                 let view = RunsHost::flow_run(&held.path, cx)?.view();
+                if !seen.insert(view.run_dir()) {
+                    return None;
+                }
                 Some(FlowRunRow {
                     lane,
                     run_dir: view.run_dir().to_path_buf(),

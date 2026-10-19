@@ -229,3 +229,45 @@ async fn a_run_no_window_holds_still_toasts_its_end(cx: &mut TestAppContext) {
     });
     assert!(toasted, "the end of a run no window holds went unsaid");
 }
+
+/// A window can hold one folder under two lanes — a worktree of one project
+/// opened as another project's root. Its run is still one row, its question
+/// counted once, and the lane in view is the one that answers for it.
+#[gpui::test]
+async fn a_folder_held_twice_in_one_window_lists_its_run_once(cx: &mut TestAppContext) {
+    let (lane, ws, _flow_path, _wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
+    let (here, twin) = ws.update(cx, |ws, _| {
+        let here = ws.active;
+        let lane_id = ws.alloc_id();
+        let mut twin = crate::lane::Lane::default_for_project(lane_id, lane.path().to_path_buf());
+        twin.tab_order = 1;
+        ws.project_for_mut(here.project)
+            .expect("the fixture's project")
+            .lanes
+            .push(twin);
+        let twin = daruda_store::project::LaneRef {
+            project: here.project,
+            lane: lane_id,
+        };
+        (here, twin)
+    });
+    let run_dir = lane.path().join("run");
+    ws.update(cx, |ws, cx| {
+        ws.seed_flow_run_for_test(here, run_dir.clone(), cx)
+    });
+    let (reply, _answered) = smol::channel::bounded(1);
+    let pending = question(1, "check", reply);
+    ws.update(cx, |ws, cx| {
+        ws.park_flow_ask_for_test(twin, &run_dir, pending, cx)
+    });
+    cx.run_until_parked();
+
+    let rows = ws.read_with(cx, |ws, cx| ws.flow_status_rows(cx));
+    assert_eq!(rows.len(), 1, "the run was listed once per lane: {rows:?}");
+    assert_eq!(rows[0].lane, here, "the row named a lane out of view");
+    assert_eq!(rows[0].asking.len(), 1);
+    let tree = daruda_flow::lock::CanonicalTree::resolve(lane.path()).expect("resolves");
+    ws.read_with(cx, |ws, cx| {
+        assert_eq!(ws.lanes_at(&tree, cx), vec![here, twin]);
+    });
+}
