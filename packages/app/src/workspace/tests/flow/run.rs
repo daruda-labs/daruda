@@ -1212,9 +1212,9 @@ async fn the_run_button_on_a_row_does_not_also_open_the_graph(cx: &mut TestAppCo
     );
 }
 
-/// F12: a resumed run never re-announces the nodes an earlier process
-/// passed, so a view built from its stream alone drew them pending. The
-/// run's view is checked against its log when it starts.
+/// A resumed run never re-announces the nodes an earlier process passed,
+/// so a view built from its stream alone would draw them pending. The run's
+/// view is checked against its log when it starts.
 #[gpui::test]
 async fn a_resumed_run_colours_carried_nodes_from_the_log(cx: &mut TestAppContext) {
     let gate = tempfile::tempdir().expect("tempdir");

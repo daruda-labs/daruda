@@ -246,7 +246,8 @@ impl NodeForm {
     ///
     /// Two things only, and both are things `daruda_flow::load` never gets to
     /// see: a node with no id cannot be written, and text that is not a duration
-    /// cannot become one. Every other rule stays the engine's (D6).
+    /// cannot become one. Every other rule stays the engine's, so the form
+    /// and a run never disagree about what is valid.
     pub(in crate::workspace) fn refusal(&self, cx: &App) -> Option<Refusal> {
         let fields = self.fields(cx);
         if fields.id.is_empty() {

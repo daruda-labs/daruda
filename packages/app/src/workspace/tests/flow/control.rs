@@ -914,9 +914,8 @@ fn stopping(
         .collect()
 }
 
-/// F6: closing the window that started a run used to leave the run going
-/// with no stop switch anywhere — the token lived in that window. The
-/// process holds the run now, so another window on the same worktree sees it
+/// Closing the window that started a run leaves it a stop switch: the
+/// process holds the run, so another window on the same worktree sees it
 /// and stops it.
 #[gpui::test]
 async fn closing_the_window_that_started_a_run_keeps_it_stoppable(cx: &mut TestAppContext) {

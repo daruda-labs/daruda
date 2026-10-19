@@ -225,8 +225,8 @@ async fn answering_one_question_leaves_the_others_up(cx: &mut TestAppContext) {
     );
 }
 
-/// F1: an event from a sibling node used to replace the stage that held the
-/// question, leaving the asking node parked on a reply nobody could send.
+/// An event from a sibling node leaves the question standing; taking it
+/// down would leave the asking node parked on a reply nobody could send.
 #[gpui::test]
 async fn a_sibling_event_never_drops_an_open_question(cx: &mut TestAppContext) {
     let (lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
@@ -260,7 +260,7 @@ async fn a_sibling_event_never_drops_an_open_question(cx: &mut TestAppContext) {
     );
 }
 
-/// F13: a question the engine already abandoned — its node was stopped or
+/// A question the engine already abandoned — its node was stopped or
 /// timed out — cannot take an answer, and the click says so rather than
 /// looking like it landed.
 #[gpui::test]

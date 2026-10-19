@@ -284,7 +284,8 @@ impl Workspace {
         let (ask_tx, ask_rx) = smol::channel::unbounded();
 
         // Only what the run fixed when it started. What it had finished is
-        // read by the engine once it holds the lane's lock (F14).
+        // read by the engine once it holds the lane's lock, since another
+        // process could still be writing it before then.
         let continuation = resumed.continuation();
         let request = RunRequest {
             until: None,
@@ -303,7 +304,7 @@ impl Workspace {
             agents,
             node_install_dir: node_install_dir.clone(),
             // A fresh ceiling, measured from now. What the earlier half
-            // spent is carried by the journal, not by this.
+            // spent is carried by the run log, not by this.
             budget: budget_from(&self.config_flow()),
             is_alive: Box::new(is_alive),
             git_status: Some(std::sync::Arc::new(git_status)),

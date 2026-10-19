@@ -39,9 +39,10 @@ impl Workspace {
             return Err(crate::surface::strings::modal::remove_lane_err_cannot_remove());
         }
         // A run is only retired when it ends on its own, so removing the lane
-        // would leave it working a checkout `git worktree remove` just deleted,
-        // with no lane left to show or stop it from. Refusing matches what the shell-out does anyway: `git worktree
-        // remove` fails on a dirty checkout, and a running flow makes one.
+        // would leave it working a checkout `git worktree remove` just
+        // deleted, with no lane left to show or stop it from. Refusing matches
+        // `git worktree remove`, which fails on the dirty checkout a running
+        // flow makes.
         if RunsHost::flow_run(&wt.path, cx).is_some() {
             return Err(crate::surface::strings::modal::remove_lane_err_flow_running());
         }
