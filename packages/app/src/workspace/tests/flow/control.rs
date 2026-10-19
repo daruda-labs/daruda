@@ -848,6 +848,55 @@ async fn a_cancelled_phone_started_run_still_reports_back(cx: &mut TestAppContex
     );
 }
 
+/// The app keeps running with every window closed (macOS quits only on an
+/// explicit Quit), so a phone-started run can end with no window to speak
+/// for it. The phone is still answered, once.
+#[gpui::test]
+async fn a_phone_started_run_answers_with_no_window_open(cx: &mut TestAppContext) {
+    let mut outbound =
+        cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
+    let lane = tempfile::tempdir().expect("tempdir");
+    let run_dir = lane.path().join("run");
+    cx.update(|cx| {
+        crate::runs::RunsHost::ensure_installed(cx);
+        Workspace::install_task_effects(cx);
+        let source = crate::runs::FlowSource::Resumed {
+            run_dir: run_dir.clone(),
+        };
+        crate::runs::RunsHost::seed_flow_run(
+            lane.path().to_path_buf(),
+            crate::runs::RunView::new(run_dir.clone(), source, Vec::new()),
+            cx,
+        );
+        assert!(crate::runs::RunsHost::owe_flow_outcome_remotely(
+            lane.path(),
+            cx
+        ));
+        crate::runs::RunsHost::apply_flow_event_for_test(
+            lane.path(),
+            &daruda_flow::event::FlowEvent::RunEnded {
+                end: daruda_flow::event::RunEnd::Done,
+            },
+            cx,
+        );
+    });
+    cx.run_until_parked();
+
+    match outbound.next().now_or_never().flatten() {
+        Some(crate::telegram::bridge::Outbound::Notice(text)) => {
+            assert_eq!(
+                text,
+                crate::surface::strings::control::flow_finished_notice()
+            );
+        }
+        other => panic!("the phone was not told how the run ended: {other:?}"),
+    }
+    assert!(
+        outbound.next().now_or_never().flatten().is_none(),
+        "the phone was answered more than once"
+    );
+}
+
 /// Whether each of `lanes`' runs has been told to stop.
 fn stopping(
     ws: &Workspace,

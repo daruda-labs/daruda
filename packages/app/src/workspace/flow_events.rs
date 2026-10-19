@@ -4,8 +4,10 @@
 //! its notices and questions into the view every window reads and then tells
 //! the windows through [`crate::runs::RunsEffects`]. A window that holds the
 //! run's worktree repaints, recolours its graph and raises a question; one
-//! window — the lead — also speaks for the run's end: the toast, the refusal,
-//! the phone. Windows that do not hold the worktree are not touched at all.
+//! window — the lead — also speaks for the run's end: the toast and the
+//! refusal. The phone that asked for a run is answered before any window,
+//! so it is answered with none open. Windows that do not hold the worktree
+//! are not touched at all.
 
 use std::path::{Path, PathBuf};
 
@@ -27,13 +29,30 @@ use crate::window_registry::WindowRegistry;
 /// whose window closed — any window, so the end is still said somewhere.
 pub(in crate::workspace) fn deliver_flow_change(change: &FlowChange, cx: &mut App) {
     let lead = match &change.what {
-        FlowChanged::Ended(_) => lead_window_for(&change.worktree, cx),
+        FlowChanged::Ended(ended) => {
+            if ended.owes_remote_answer {
+                answer_remote_caller(ended, cx);
+            }
+            lead_window_for(&change.worktree, cx)
+        }
         _ => None,
     };
     WindowRegistry::for_each_workspace(cx, |ws, window, cx| {
         let is_lead = lead == Some(cx.entity_id());
         ws.apply_flow_change(change, is_lead, window, cx);
     });
+}
+
+/// Tell the phone that asked for a run how it ended. Sent here, once per
+/// end, rather than by a window: the app keeps running with every window
+/// closed, and the caller is owed an answer either way.
+fn answer_remote_caller(ended: &FlowEnded, cx: &App) {
+    let refusal = end_refusal(&ended.end);
+    let notice = flow_outcome_notice(&ended.end, refusal, ended.overage.as_ref());
+    crate::remote_channel::global::RemoteChannels::send_notice(notice.clone(), cx);
+    if let Some(bridge) = cx.try_global::<crate::telegram::global::TelegramBridge>() {
+        bridge.send_notice(notice, cx);
+    }
 }
 
 fn lead_window_for(worktree: &CanonicalTree, cx: &mut App) -> Option<gpui::EntityId> {
@@ -167,16 +186,9 @@ impl Workspace {
             self.colour_flow_graph(lane, ended.colouring.clone(), cx);
             cx.notify();
         }
-        let refusal = end_refusal(&ended.end);
         if lead {
-            if let Some(message) = refusal.clone() {
+            if let Some(message) = end_refusal(&ended.end) {
                 self.report_flow_end_refusal(message, worktree, &ended.end, cx);
-            }
-            // A run asked for from a phone has to be *told* how it ended. The
-            // toast and the report both stay on a desktop the caller is not at.
-            if ended.owes_remote_answer {
-                let notice = flow_outcome_notice(&ended.end, refusal, ended.overage.as_ref());
-                self.relay_notice_to_telegram(notice, cx);
             }
             // Whichever lane is on screen: the Flows list shows only
             // "canceled", which reads like a Stop by hand.

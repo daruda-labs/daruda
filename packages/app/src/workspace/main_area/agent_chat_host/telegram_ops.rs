@@ -566,26 +566,6 @@ impl Workspace {
         cx.try_global::<crate::telegram::global::TelegramBridge>()
     }
 
-    /// Relay text that belongs to no pane.
-    ///
-    /// Lives beside [`Self::relay_to_telegram`] despite not being about a chat
-    /// pane, because both go through [`Self::telegram_bridge`] — keeping the
-    /// two callers of that gate together is what stops it being re-derived.
-    ///
-    /// Not presence-gated, unlike a ping. This answers a command the phone
-    /// sent, so dropping it because the user is at the desktop would be
-    /// backwards — the phone asked, the phone gets the answer.
-    pub(in crate::workspace) fn relay_notice_to_telegram(&self, text: String, cx: &Context<Self>) {
-        crate::remote_channel::global::RemoteChannels::send_notice(text.clone(), cx);
-        let Some(bridge) = self.telegram_bridge(cx) else {
-            trace::delivery("relay.gated", || {
-                format!("entry=notice reason=bridge text={}", trace::digest(&text))
-            });
-            return;
-        };
-        bridge.send_notice(text, cx);
-    }
-
     /// Relay an unsolicited, pane-less notice under each channel's presence
     /// rule. Hook notifications use this shape because a terminal permission
     /// cannot be answered through the hook protocol, so no button is valid.
