@@ -120,7 +120,7 @@ fn a_torn_last_record_is_read_past() {
         &crate::testing::FakeRunner::new(),
         &crate::runner::CancelToken::default(),
     );
-    let log = log_dir(&report.run_dir).join(FIRST_LOG_FILE);
+    let log = super::log_file(&report.run_dir);
     let mut bytes = std::fs::read(&log).expect("log");
     bytes.extend_from_slice(b"{\"v\":1,\"seq\":99,\"at");
     std::fs::write(&log, bytes).expect("tear");
@@ -128,4 +128,37 @@ fn a_torn_last_record_is_read_past() {
     let replay = reader::read(&report.run_dir);
     assert!(replay.torn);
     assert_eq!(replay.passed, vec![NodeId::from("design")]);
+}
+
+/// A damaged record before the last is refused the way an open refuses it:
+/// the reader never answers from the prefix in front of it, and with its
+/// writer gone the run is offered for a resume that can say why.
+#[test]
+fn a_corrupt_middle_record_is_not_read_as_a_prefix() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let report = crate::schedule::execute(
+        &crate::schedule::tests::request_for(ONE_AGENT, dir.path()),
+        &crate::testing::FakeRunner::new(),
+        &crate::runner::CancelToken::default(),
+    );
+    let log = super::log_file(&report.run_dir);
+    let text = std::fs::read_to_string(&log).expect("log");
+    let mut lines: Vec<&str> = text.lines().collect();
+    let passed = lines
+        .iter()
+        .position(|line| line.contains("\"attempt_passed\""))
+        .expect("the pass");
+    assert!(passed + 1 < lines.len(), "the pass is not the last record");
+    lines[passed] = "{not a record";
+    std::fs::write(&log, lines.join("\n") + "\n").expect("damage");
+    std::fs::remove_file(report.run_dir.join("DONE")).expect("the marker");
+
+    assert!(reader::state(&report.run_dir).is_none());
+    assert!(matches!(reader::ending(&report.run_dir), Ending::Unreadable));
+    assert!(reader::read(&report.run_dir).passed.is_empty());
+    let no_lock = dir.path().join("locks");
+    assert_eq!(
+        run_status(&report.run_dir, Some(&no_lock), &|_| false),
+        RunStatus::Crashed
+    );
 }

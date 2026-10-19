@@ -32,7 +32,7 @@ fn killed(dir: &Path) -> (crate::request::RunRequest, std::path::PathBuf) {
 fn a_resume_refused_under_the_lock_leaves_the_run_resumable() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (request, run_dir) = killed(dir.path());
-    let log = crate::run_log::log_dir(&run_dir).join(crate::run_log::FIRST_LOG_FILE);
+    let log = crate::run_log::log_file(&run_dir);
     let whole = std::fs::read(&log).expect("the log");
     // A record from a newer build: the open refuses it, after the lock.
     let mut newer = whole.clone();
@@ -90,10 +90,11 @@ fn a_commit_failure_during_a_resume_leaves_the_run_resumable() {
     // What the failed pick-up left, where a host reads it.
     let third = second.crash();
     let run_dir = dir.path().join("run");
-    let log_dir = crate::run_log::log_dir(&run_dir);
-    std::fs::create_dir_all(&log_dir).expect("mkdir");
-    let left = third.file("log.0.jsonl").expect("a log");
-    std::fs::write(log_dir.join(crate::run_log::FIRST_LOG_FILE), left).expect("write");
+    std::fs::create_dir_all(crate::run_log::log_dir(&run_dir)).expect("mkdir");
+    let left = daruda_runlog::LogBackend::read(&third, 0)
+        .expect("a log")
+        .log;
+    std::fs::write(crate::run_log::log_file(&run_dir), left).expect("write");
     let no_lock = dir.path().join("locks");
     assert_eq!(
         run_status(&run_dir, Some(&no_lock), &|_| false),

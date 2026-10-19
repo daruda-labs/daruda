@@ -14,14 +14,18 @@ use std::path::{Path, PathBuf};
 /// Under the engine's own `logs/`, which no node output may enter, and apart
 /// from `progress.jsonl` so an older build never reads it as its journal.
 const RUN_LOG_DIR: &str = "progress";
-/// Flow run logs never compact, so generation 0 is the whole run.
-pub(crate) const FIRST_LOG_FILE: &str = "log.0.jsonl";
-
 /// Where the run in `run_dir` keeps its log.
 pub fn log_dir(run_dir: &Path) -> PathBuf {
     run_dir
         .join(crate::schedule::LOG_DIR_NAME)
         .join(RUN_LOG_DIR)
+}
+
+/// The file holding the run's records, for a person or a test that looks at
+/// the bytes; reading them goes through [`reader`]. Flow run logs never
+/// compact, so the first generation is the whole run.
+pub fn log_file(run_dir: &Path) -> PathBuf {
+    daruda_runlog::FileBackend::new(log_dir(run_dir)).log_path(0)
 }
 
 /// Every node a run starts with, in the order a host draws them.

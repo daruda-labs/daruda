@@ -244,8 +244,7 @@ nodes:
         report.outcome
     );
     assert_eq!(runner.ids(), vec![NodeId::from("review")]);
-    let log = std::fs::read_to_string(crate::run_log::log_dir(&first.run_dir).join("log.0.jsonl"))
-        .expect("log");
+    let log = std::fs::read_to_string(crate::run_log::log_file(&first.run_dir)).expect("log");
     assert!(!log.contains("\"type\":\"output_lost\""), "{log}");
 }
 
@@ -263,7 +262,7 @@ fn a_resume_refused_by_the_lock_reads_and_writes_nothing() {
     as_if_killed(&request, &first.run_dir);
     let mut resumed =
         resume_request(CHAIN, dir.path(), &first.run_dir).expect("a killed run is resumable");
-    let log = crate::run_log::log_dir(&first.run_dir).join("log.0.jsonl");
+    let log = crate::run_log::log_file(&first.run_dir);
     let before = std::fs::read(&log).expect("log");
     // Someone else took the lane between the prompt and the click.
     resumed.is_alive = Box::new(|_| true);
@@ -623,7 +622,7 @@ fn a_stop_during_the_settle_wait_cuts_it_short_and_leaves_the_run_resumable() {
     let mut resumed = freshly_killed(dir.path(), settle);
     let (events, notices) = smol::channel::unbounded();
     resumed.events = Some(events);
-    let log = crate::run_log::log_dir(&resumed.run_dir).join("log.0.jsonl");
+    let log = crate::run_log::log_file(&resumed.run_dir);
     let before = std::fs::read(&log).expect("log");
     let cancel = CancelToken::default();
     let stopper = {

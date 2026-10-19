@@ -55,13 +55,14 @@ fn spawn(run_dir: &Path) -> FlowRunStore {
 /// `kill -9` before those commits would have left the log. A stop that was
 /// recorded spends a try (D4-2); a kill does not.
 pub(crate) fn forget_stop(run_dir: &Path) {
-    let path = super::log_dir(run_dir).join(super::FIRST_LOG_FILE);
-    let text = std::fs::read_to_string(&path).expect("the run's log");
-    let kept: Vec<&str> = text
-        .lines()
-        .take_while(|line| {
-            let record = serde_json::from_str::<daruda_runlog::Record<FlowRunEvent>>(line)
-                .expect("a whole record");
+    let backend = daruda_runlog::FileBackend::new(super::log_dir(run_dir));
+    let history =
+        daruda_runlog::RunLog::<super::machine::FlowRunMachine, _>::read_history(&backend)
+            .expect("the run's log");
+    let keep = history
+        .records
+        .iter()
+        .take_while(|record| {
             !matches!(
                 record.body,
                 daruda_runlog::Body::Event {
@@ -69,8 +70,13 @@ pub(crate) fn forget_stop(run_dir: &Path) {
                 }
             )
         })
+        .count();
+    let path = super::log_file(run_dir);
+    let text = std::fs::read_to_string(&path).expect("the run's log");
+    let body: String = text
+        .lines()
+        .take(keep)
+        .map(|line| format!("{line}\n"))
         .collect();
-    let mut body = kept.join("\n");
-    body.push('\n');
     std::fs::write(&path, body).expect("rewrite the log");
 }

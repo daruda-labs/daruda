@@ -1253,7 +1253,7 @@ async fn a_resumed_run_colours_carried_nodes_from_the_log(cx: &mut TestAppContex
         .map(|entry| entry.path())
         .find(|path| path.is_dir())
         .expect("the run's directory");
-    let log = daruda_flow::run_log::log_dir(&run_dir).join("log.0.jsonl");
+    let log = daruda_flow::run_log::log_file(&run_dir);
     let text = std::fs::read_to_string(&log).expect("the run log");
     let cut = text
         .lines()

@@ -139,7 +139,7 @@ fn an_open_question_stops_the_run_clock_for_its_siblings_too() {
 
 /// Every event the run in `run_dir` committed, by kind and node.
 fn log_lines(run_dir: &Path) -> Vec<String> {
-    std::fs::read_to_string(crate::run_log::log_dir(run_dir).join("log.0.jsonl"))
+    std::fs::read_to_string(crate::run_log::log_file(run_dir))
         .expect("the run's log")
         .lines()
         .map(str::to_string)

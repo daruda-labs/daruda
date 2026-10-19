@@ -122,6 +122,9 @@ pub fn run_status(run_dir: &Path, lock_dir: Option<&Path>, is_alive: IsAlive<'_>
     let open = match crate::run_log::reader::ending(run_dir) {
         crate::run_log::reader::Ending::Ended(kind) => return status_of_end(kind),
         crate::run_log::reader::Ending::Open => true,
+        // Not seen to end, so read like an open one: with its writer gone it
+        // is offered for resume, and the resume says why it cannot be read.
+        crate::run_log::reader::Ending::Unreadable => true,
         crate::run_log::reader::Ending::NoLog => false,
     };
     if let Some(status) = marked(run_dir) {

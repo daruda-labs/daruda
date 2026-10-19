@@ -7,7 +7,7 @@ use crate::load::LoadedFlow;
 use crate::run_log::machine::{FlowRunEvent, FlowRunMachine, FlowRunState, Produces, RunPhase};
 use crate::run_log::store::{FlowRunStore, open_log};
 use daruda_runlog::testing::{Fault, FaultBackend};
-use daruda_runlog::{Body, LogBackend, Machine as _, Record};
+use daruda_runlog::{Body, LogBackend, Machine as _, RunLog};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -117,11 +117,10 @@ pub(super) fn process_asking<B: LogBackend + Send + 'static>(
 
 /// Every whole record the backend holds, oldest first.
 pub(super) fn records(backend: &FaultBackend) -> Vec<FlowRunEvent> {
-    let bytes = backend.file("log.0.jsonl").unwrap_or_default();
-    bytes
-        .split(|&byte| byte == b'\n')
-        .filter(|line| !line.is_empty())
-        .filter_map(|line| serde_json::from_slice::<Record<FlowRunEvent>>(line).ok())
+    RunLog::<FlowRunMachine, _>::read_history(backend)
+        .expect("the log replays")
+        .records
+        .into_iter()
         .filter_map(|record| match record.body {
             Body::Event { event } => Some(event),
             Body::Opened { .. } => None,
@@ -143,16 +142,11 @@ pub(super) fn append_index(
     backend: &FaultBackend,
     wanted: impl Fn(&FlowRunEvent) -> bool,
 ) -> usize {
-    let bytes = backend.file("log.0.jsonl").expect("a log");
-    bytes
-        .split(|&byte| byte == b'\n')
-        .filter(|line| !line.is_empty())
-        .position(|line| {
-            matches!(
-                serde_json::from_slice::<Record<FlowRunEvent>>(line).map(|r| r.body),
-                Ok(Body::Event { event }) if wanted(&event)
-            )
-        })
+    RunLog::<FlowRunMachine, _>::read_history(backend)
+        .expect("the log replays")
+        .records
+        .into_iter()
+        .position(|record| matches!(record.body, Body::Event { event } if wanted(&event)))
         .expect("the record is in the log")
 }
 

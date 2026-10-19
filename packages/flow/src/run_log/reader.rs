@@ -1,11 +1,13 @@
 //! Reading a run directory back without taking it over: the run log when the
 //! run has one, the `progress.jsonl` journal an older build wrote when not.
-//! Lenient by design — a history list must not fail over one damaged run.
+//! The log is read by `daruda_runlog`'s replay rules; a log those rules
+//! refuse reads as nothing here, so a history list does not fail over one
+//! damaged run, and a resume opening it under the lock says why.
 
 use std::path::Path;
 use std::time::Duration;
 
-use daruda_runlog::{Body, Machine as _, Record};
+use daruda_runlog::{Body, FileBackend, History, Machine as _, Record, RunLog};
 
 use super::machine::{
     EndKind, FixOutcome, FlowRunEvent as E, FlowRunMachine, FlowRunState, ImportedOutcome, RunPhase,
@@ -49,9 +51,9 @@ pub struct Replay {
 
 /// Whether the run in `run_dir` keeps a run log.
 pub fn has_log(run_dir: &Path) -> bool {
-    super::log_dir(run_dir)
-        .join(super::FIRST_LOG_FILE)
-        .is_file()
+    // A directory that cannot be listed may hold one: claiming it does keeps
+    // a new run out of it, and reading it reports the failure.
+    backend(run_dir).holds_log().unwrap_or(true)
 }
 
 /// Whether the run got as far as recording that it started, in either format.
@@ -59,99 +61,116 @@ pub fn started(run_dir: &Path) -> bool {
     has_log(run_dir) || crate::journal::exists(run_dir)
 }
 
-/// The node the run was started up to, read from its first event alone: a
-/// fact fixed when the run started, so reading it before the lock cannot
-/// disagree with what the run finds under it. An older build's journal, or
-/// a log still waiting to import one, says it in the journal.
+/// The node the run was started up to, from its first event: a fact fixed
+/// when the run started, so reading it before the lock cannot disagree with
+/// what the run finds under it. An older build's journal, or a log still
+/// waiting to import one, says it in the journal.
 pub fn selection(run_dir: &Path) -> Option<NodeId> {
-    if !has_log(run_dir) || awaits_import(run_dir) {
-        return crate::journal::read(run_dir).until;
+    match source(run_dir) {
+        Source::Journal => crate::journal::read(run_dir).until,
+        Source::Unreadable => None,
+        Source::Log(history) => history
+            .records
+            .iter()
+            .filter_map(event_of)
+            .find_map(|event| match event {
+                E::RunStarted { until, .. } => Some(until.clone()),
+                E::Imported(imported) => Some(imported.until.clone()),
+                _ => None,
+            })
+            .flatten(),
     }
-    let path = super::log_dir(run_dir).join(super::FIRST_LOG_FILE);
-    let file = std::fs::File::open(path).ok()?;
-    std::io::BufRead::split(std::io::BufReader::new(file), b'\n')
-        .map_while(Result::ok)
-        .map_while(|line| serde_json::from_slice::<Record<E>>(&line).ok())
-        .find_map(|record| match record.body {
-            Body::Event {
-                event: E::RunStarted { until, .. },
-            } => Some(until),
-            Body::Event {
-                event: E::Imported(imported),
-            } => Some(imported.until),
-            _ => None,
-        })
-        .flatten()
 }
 
 /// What a run directory says it finished. A missing record is an empty
-/// replay: a crash before the first line is a run with nothing done.
+/// replay: a crash before the first line is a run with nothing done. So is
+/// a log replay refuses.
 pub fn read(run_dir: &Path) -> Replay {
-    if !has_log(run_dir) || awaits_import(run_dir) {
-        return crate::journal::read(run_dir);
+    match source(run_dir) {
+        Source::Journal => crate::journal::read(run_dir),
+        Source::Unreadable => Replay::default(),
+        Source::Log(history) => {
+            let mut replay = replay_events(history.records.iter().filter_map(event_of));
+            replay.torn = history.torn;
+            replay
+        }
     }
-    let lines = read_records(run_dir);
-    let mut replay = replay_events(lines.records.iter().filter_map(event_of));
-    replay.torn = lines.torn;
-    replay
+}
+
+/// Where a run's progress is read from.
+enum Source {
+    /// An older build's journal: there is no log, or it holds nothing of the
+    /// run yet.
+    Journal,
+    Log(Box<History<FlowRunMachine>>),
+    /// A log replay refuses: corrupt, or written by a newer build.
+    Unreadable,
+}
+
+fn source(run_dir: &Path) -> Source {
+    match history(run_dir) {
+        None => Source::Journal,
+        Some(Ok(history)) if awaits(&history.state, run_dir) => Source::Journal,
+        Some(Ok(history)) => Source::Log(Box::new(history)),
+        Some(Err(_)) => Source::Unreadable,
+    }
 }
 
 /// Whether an older build's journal still holds this run's progress: the
-/// journal is there and the log, if any, has recorded nothing of the run. A
-/// resume that crashed between opening the log and importing the journal
-/// leaves exactly that, and the journal is still the record.
-pub(crate) fn awaits_import(run_dir: &Path) -> bool {
-    crate::journal::exists(run_dir)
-        && state(run_dir).is_none_or(|state| state.phase() == RunPhase::Fresh)
+/// journal is there and the log has recorded nothing of the run. A resume
+/// that crashed between opening the log and importing the journal leaves
+/// exactly that, and the journal is still the record. A log replay refuses
+/// may hold the run, so it never hands over to the journal.
+fn awaits(state: &FlowRunState, run_dir: &Path) -> bool {
+    state.phase() == RunPhase::Fresh && crate::journal::exists(run_dir)
 }
 
-/// The state the log replays to, or `None` when the run keeps no log.
+/// The state the log replays to, or `None` when the run keeps no log or
+/// keeps one replay refuses.
 pub fn state(run_dir: &Path) -> Option<FlowRunState> {
-    if !has_log(run_dir) {
-        return None;
-    }
-    let mut state = FlowRunState::default();
-    for event in read_records(run_dir).records.iter().filter_map(event_of) {
-        FlowRunMachine::apply(&mut state, event);
-    }
-    Some(state)
+    history(run_dir)?.ok().map(|history| history.state)
 }
 
 /// When the log was last written, for a run it says is still going: the
-/// moment a dead holder stopped. `None` for a run that ended or keeps no log.
+/// moment a dead holder stopped. `None` for a run that ended, keeps no log,
+/// or keeps one replay refuses.
 pub(crate) fn last_written_while_running(run_dir: &Path) -> Option<u64> {
-    let records = read_records(run_dir).records;
-    let mut state = FlowRunState::default();
-    for event in records.iter().filter_map(event_of) {
-        FlowRunMachine::apply(&mut state, event);
-    }
-    if state.phase() != RunPhase::Running {
+    let history = history(run_dir)?.ok()?;
+    if history.state.phase() != RunPhase::Running {
         return None;
     }
-    records.last().map(|record| record.at_ms)
+    history.records.last().map(|record| record.at_ms)
 }
 
 /// How a run ended, as its log says. The log wins over a marker.
 pub(crate) enum Ending {
     NoLog,
+    /// The log is there but replay refuses it, so it says nothing either way.
+    Unreadable,
     Open,
     Ended(EndKind),
 }
 
 pub(crate) fn ending(run_dir: &Path) -> Ending {
-    match state(run_dir).map(|state| state.phase()) {
+    match history(run_dir) {
         None => Ending::NoLog,
-        Some(RunPhase::Ended(kind)) => Ending::Ended(kind),
-        Some(RunPhase::Fresh | RunPhase::Running) => Ending::Open,
+        Some(Err(_)) => Ending::Unreadable,
+        Some(Ok(history)) => match history.state.phase() {
+            RunPhase::Ended(kind) => Ending::Ended(kind),
+            RunPhase::Fresh | RunPhase::Running => Ending::Open,
+        },
     }
 }
 
 /// The narration the run's records produce, numbered by their seq: what a
 /// watcher of the live run was sent.
 pub fn narration(run_dir: &Path) -> Vec<Sequenced<FlowEvent>> {
+    let Some(Ok(history)) = history(run_dir) else {
+        return Vec::new();
+    };
     let mut state = FlowRunState::default();
     let mut said = Vec::new();
-    for record in read_records(run_dir).records {
+    for record in history.records {
         let Body::Event { event } = &record.body else {
             continue;
         };
@@ -269,36 +288,14 @@ fn event_of(record: &Record<E>) -> Option<&E> {
     }
 }
 
-struct Lines {
-    records: Vec<Record<E>>,
-    torn: bool,
+fn backend(run_dir: &Path) -> FileBackend {
+    FileBackend::new(super::log_dir(run_dir))
 }
 
-/// Every whole record, stopping at the first line that does not read. Flow
-/// run logs never compact, so generation 0 holds the whole run.
-fn read_records(run_dir: &Path) -> Lines {
-    let path = super::log_dir(run_dir).join(super::FIRST_LOG_FILE);
-    let Ok(bytes) = std::fs::read(path) else {
-        return Lines {
-            records: Vec::new(),
-            torn: false,
-        };
-    };
-    let mut records = Vec::new();
-    let mut torn = false;
-    for line in bytes.split(|&byte| byte == b'\n') {
-        if line.is_empty() {
-            continue;
-        }
-        match serde_json::from_slice::<Record<E>>(line) {
-            Ok(record) if record.v <= daruda_runlog::FORMAT_VERSION => records.push(record),
-            _ => {
-                torn = true;
-                break;
-            }
-        }
-    }
-    Lines { records, torn }
+/// The run's log as replay reads it, or `None` when the run keeps none.
+/// Flow run logs never compact, so its records are the whole run.
+fn history(run_dir: &Path) -> Option<Result<History<FlowRunMachine>, daruda_runlog::OpenError>> {
+    has_log(run_dir).then(|| RunLog::read_history(&backend(run_dir)))
 }
 
 #[cfg(test)]
@@ -434,7 +431,7 @@ mod tests {
         })
         .expect("commit");
         drop(log);
-        let path = crate::run_log::log_dir(dir.path()).join(crate::run_log::FIRST_LOG_FILE);
+        let path = crate::run_log::log_file(dir.path());
         let mut text = std::fs::read(&path).expect("log");
         text.extend_from_slice(b"{not a record");
         std::fs::write(&path, text).expect("tear");

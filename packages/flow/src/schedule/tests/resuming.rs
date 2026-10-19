@@ -338,8 +338,7 @@ fn a_continued_run_says_so_on_its_record() {
     );
     // And the run's log keeps the boundary, for whoever reads the directory
     // rather than the report.
-    let journal = std::fs::read_to_string(crate::run_log::log_dir(&run_dir).join("log.0.jsonl"))
-        .expect("journal");
+    let journal = std::fs::read_to_string(crate::run_log::log_file(&run_dir)).expect("journal");
     assert!(
         journal.contains("\"type\":\"resumed\""),
         "the journal does not show where it was taken over: {journal}"

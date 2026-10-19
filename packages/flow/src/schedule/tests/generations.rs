@@ -7,10 +7,11 @@ use crate::runner::{AskOwner, AskRequest, Permission};
 
 /// Every event the run in `run_dir` committed.
 fn logged(run_dir: &Path) -> Vec<FlowRunEvent> {
-    let text = std::fs::read_to_string(crate::run_log::log_dir(run_dir).join("log.0.jsonl"))
-        .expect("the run's log");
-    text.lines()
-        .filter_map(|line| serde_json::from_str::<daruda_runlog::Record<FlowRunEvent>>(line).ok())
+    let backend = daruda_runlog::FileBackend::new(crate::run_log::log_dir(run_dir));
+    daruda_runlog::RunLog::<crate::run_log::machine::FlowRunMachine, _>::read_history(&backend)
+        .expect("the run's log")
+        .records
+        .into_iter()
         .filter_map(|record| match record.body {
             daruda_runlog::Body::Event { event } => Some(event),
             daruda_runlog::Body::Opened { .. } => None,
