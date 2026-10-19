@@ -77,7 +77,7 @@ mod tests {
             assert_eq!(
                 compact,
                 NSRect::new(
-                    NSPoint::new([8.0, 28.0, 48.0][index], 12.0),
+                    NSPoint::new([16.0, 36.0, 56.0][index], 12.0),
                     NSSize::new(12.0, 12.0)
                 )
             );
@@ -100,6 +100,6 @@ mod tests {
                 8.0
             );
         }
-        assert_eq!(compact[2].origin.x + compact[2].size.width, 60.0);
+        assert_eq!(compact[2].origin.x + compact[2].size.width, 68.0);
     }
 }

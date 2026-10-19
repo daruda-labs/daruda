@@ -41,21 +41,22 @@ impl Workspace {
         // `title_bar::render` owns the row: the left inset (traffic lights on
         // macOS, plain margin elsewhere), the drag strip, and — where the
         // platform left no caption — the window controls.
-        let dock_toggles = div()
+        let left_dock_toggle = dock_toggle_icon(
+            "toggle-left-dock",
+            DockPosition::Left,
+            left_dock_open,
+            cx,
+            cx.listener(|this, _, window, cx| {
+                this.on_toggle_left_dock(&crate::workspace::ToggleLeftDock, window, cx);
+            }),
+        );
+        let trailing_dock_toggles = div()
             .flex()
             .flex_row()
+            .flex_none()
             .items_center()
             .gap(px(theme::DOCK_ICON_GROUP_GAP))
             .mr(px(theme::DOCK_ICON_GROUP_MR))
-            .child(dock_toggle_icon(
-                "toggle-left-dock",
-                DockPosition::Left,
-                left_dock_open,
-                cx,
-                cx.listener(|this, _, window, cx| {
-                    this.on_toggle_left_dock(&crate::workspace::ToggleLeftDock, window, cx);
-                }),
-            ))
             .child(dock_toggle_icon(
                 "toggle-bottom-dock",
                 DockPosition::Bottom,
@@ -77,8 +78,8 @@ impl Workspace {
         let title_bar = crate::title_bar::render(
             crate::title_bar::chrome_for_window(window),
             title_bar_bg,
-            None,
-            Some(dock_toggles.into_any_element()),
+            Some(left_dock_toggle.into_any_element()),
+            Some(trailing_dock_toggles.into_any_element()),
             window,
             cx,
         );

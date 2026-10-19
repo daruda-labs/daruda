@@ -364,12 +364,14 @@ padding:       0 lg (0 16px)
 
 In light mode the title bar uses `#dedfe3`; its 28px height stays unchanged.
 
-The bar has two modes, resolved per window in `title_bar::chrome_for_window`.
+The frame mode is resolved per window in `title_bar::chrome_for_window`.
 
 **Native** — macOS, and Linux under server-side decorations. Something else
 draws the frame, so the bar only reserves space for it.
 
-- macOS traffic-light buttons at standard macOS position (left).
+- macOS traffic-light buttons start 16px from the left edge.
+- Only macOS reserves the 80px traffic-light inset. Linux server-side
+  decorations use the regular 8px app-row inset below the compositor's frame.
 - The centre is an inert spacer; the OS owns the drag gesture.
 
 **Client** — Windows, and Linux under client-side decorations. The caption is
@@ -382,6 +384,12 @@ gone and the app owns everything the OS would have drawn.
 - Minimize / maximize-or-restore / close flush to the right edge, past the
   dock toggles.
 
+- The left dock toggle follows the traffic-light inset on macOS, the app-menu
+  button on client chrome (with a 2px gap), or the regular inset on Linux
+  server-side decorations. It stays in that slot when the dock resizes or
+  collapses to its 48px rail, including when the rail ends before the toggle.
+- The bottom and right dock toggles remain grouped at the right edge.
+  All controls stay outside the empty drag strip.
 - App title centered: `ui-md-strong`, `body` color.
 - No *content* controls in the TitleBar — window management and the entry
   point to the application menu only. The dock toggles are the standing

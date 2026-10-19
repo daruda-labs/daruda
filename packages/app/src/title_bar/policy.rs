@@ -21,9 +21,10 @@ pub(crate) struct FrameFacts {
 /// Who draws the window's frame.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum TitleBarChrome {
-    /// Something else draws the controls: macOS traffic lights, or a Linux
-    /// compositor under server-side decorations. We only reserve space.
+    /// macOS draws traffic lights inside the title bar. Reserve their space.
     Native,
+    /// The compositor draws its own frame above the application's title bar.
+    ServerDecorated,
     /// `appears_transparent` removed the caption and nothing replaced it, so
     /// the app owns drag, minimize, maximize and close.
     Client,
@@ -64,17 +65,19 @@ impl WindowChrome {
     /// a plain margin where the app draws its own chrome. One definition, so
     /// the workspace and the settings header cannot drift apart.
     pub(crate) fn leading_inset(self) -> f32 {
-        if self.is_client() {
-            crate::ui::theme::CLIENT_CHROME_INSET
-        } else {
+        if self.kind == TitleBarChrome::Native {
             crate::ui::theme::TRAFFIC_LIGHT_WIDTH
+        } else {
+            crate::ui::theme::CLIENT_CHROME_INSET
         }
     }
 }
 
 const fn chrome_for(facts: FrameFacts) -> TitleBarChrome {
-    if facts.os_draws_caption || facts.server_decorated {
+    if facts.os_draws_caption {
         TitleBarChrome::Native
+    } else if facts.server_decorated {
+        TitleBarChrome::ServerDecorated
     } else {
         TitleBarChrome::Client
     }
@@ -114,7 +117,7 @@ mod tests {
             (CSD, TitleBarChrome::Client, "no caption, no compositor"),
             (
                 SSD,
-                TitleBarChrome::Native,
+                TitleBarChrome::ServerDecorated,
                 "a server-decorated window already has controls",
             ),
         ];
@@ -136,5 +139,23 @@ mod tests {
         assert!(WindowChrome::new(CSD, false).is_client());
         assert!(!WindowChrome::new(MAC, false).is_client());
         assert!(!WindowChrome::new(SSD, false).is_client());
+    }
+
+    #[test]
+    fn only_macos_reserves_space_for_traffic_lights() {
+        use crate::ui::theme;
+
+        for (facts, is_windows, expected) in [
+            (MAC, false, theme::TRAFFIC_LIGHT_WIDTH),
+            (CSD, true, theme::CLIENT_CHROME_INSET),
+            (CSD, false, theme::CLIENT_CHROME_INSET),
+            (SSD, false, theme::CLIENT_CHROME_INSET),
+        ] {
+            assert_eq!(
+                WindowChrome::new(facts, is_windows).leading_inset(),
+                expected,
+                "{facts:?}, is_windows={is_windows}",
+            );
+        }
     }
 }

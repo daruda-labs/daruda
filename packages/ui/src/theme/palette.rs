@@ -121,11 +121,11 @@ pub const OVERLAY_BLACK: Hsla = hsla(0.0, 0.0, 0.0, 1.0);
 // because the title bar is only 28px tall.
 
 pub const TITLE_BAR_HEIGHT: f32 = 28.0;
-pub const TRAFFIC_LIGHT_X: f32 = 8.0;
+pub const TRAFFIC_LIGHT_X: f32 = 16.0;
 pub const TRAFFIC_LIGHT_Y: f32 = (TITLE_BAR_HEIGHT - TRAFFIC_LIGHT_SIZE) / 2.0;
 pub const TRAFFIC_LIGHT_SIZE: f32 = 12.0;
 pub const TRAFFIC_LIGHT_GAP: f32 = 8.0;
-pub const TRAFFIC_LIGHT_WIDTH: f32 = 70.0;
+pub const TRAFFIC_LIGHT_WIDTH: f32 = 80.0;
 pub const CLIENT_CHROME_INSET: f32 = 8.0;
 pub const WINDOW_CONTROL_W: f32 = 38.0;
 pub const WINDOW_CONTROL_GLYPH_SIZE: f32 = 11.0;

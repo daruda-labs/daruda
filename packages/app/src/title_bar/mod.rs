@@ -65,8 +65,7 @@ pub(crate) fn chrome_for_window(window: &Window) -> WindowChrome {
     )
 }
 
-/// Build the title bar. `trailing` is whatever the host puts to the right of
-/// the drag strip — the workspace's dock toggles, nothing for Settings.
+/// Build the title bar with host controls on either side of the drag strip.
 pub(crate) fn render(
     chrome: WindowChrome,
     bg: Hsla,
@@ -86,10 +85,18 @@ pub(crate) fn render(
         .bg(bg)
         .items_center()
         .child(div().flex_none().w(px(chrome.leading_inset())))
-        .when(chrome.is_client(), |d| {
-            d.children(app_menu::app_menu_button(cx).map(IntoElement::into_any_element))
-        })
-        .children(leading)
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .flex_none()
+                .items_center()
+                .gap(px(theme::DOCK_ICON_GROUP_GAP))
+                .when(chrome.is_client(), |d| {
+                    d.children(app_menu::app_menu_button(cx).map(IntoElement::into_any_element))
+                })
+                .children(leading),
+        )
         // Only the client arm gets a drag strip. Where the OS or the
         // compositor still owns the frame it already handles the gesture,
         // and ours would override the platform's own answer to a title-bar
