@@ -593,6 +593,7 @@ after settle and forces a repaint before capture.
 | Settings | `settings[:<section-slug>]`, `settings-error`, `settings-search` |
 | Agent catalog | `agent-catalog-expanded`, `agent-catalog-editor[:<fold\|filter\|range>]` |
 | Window chrome | `client-chrome` forces app-drawn controls; native macOS traffic lights still cover the left inset, so assess the right edge and spacing |
+| Compact dock | `left-dock-groups` shows aliases and individual panes; `left-dock-group-status` compares active and neutral collapsed-group lines; `left-dock-group-hover` adds header hover; `left-dock-project-alias` opens the initials editor |
 | Tab status | `tab-indicators` seeds each status dot; inspect its color |
 | Status bar | `status-ports`, `status-flows`, `status-usage`, `status-account`, `keep-awake`, `keep-awake-failed` — each chip's popup open over seeded data |
 | Agent chat | `agent-chat`, `agent-chat-working`, `agent-chat-empty`, `agent-chat-failure` |

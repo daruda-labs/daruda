@@ -4,18 +4,19 @@
 use gpui::KeyBinding;
 
 use crate::workspace::{
-    ClosePane, CloseTab, CommitAmend, CommitChanges, EditTask, EditWindowTitle, FilesActivate,
-    FilesCollapse, FilesExpand, FilesRefresh, FilesSelectNext, FilesSelectPrev, FilesToggleHidden,
-    FocusNextPane, FocusPaneDown, FocusPaneLeft, FocusPaneRight, FocusPaneUp, FocusPrevPane,
-    GitChangesActivate, GitChangesSelectNext, GitChangesSelectPrev, GitChangesToggleStage,
-    MoveActiveProjectToGroup, MoveTabLeft, MoveTabRight, NewGroup, NewSkill, NewTab, NewTask,
-    NextTab, OpenAgentChat, OpenCommandHistory, OpenProjectConfig, OpenSettings, PrevTab,
-    PushChanges, RefreshGitStatus, ReloadFlowGraph, RenameActiveProject, ResetLeftDockWidth,
-    RunFlow, ShowFlowGraph, ShowLeftDockFiles, ShowLeftDockGit, ShowLeftDockLanes, SplitDown,
-    SplitRight, SwitchRightPanelFlows, SwitchRightPanelSkills, SwitchRightPanelTasks,
-    SwitchRightPanelTools, SwitchRightPanelUsage, ToggleBottomDock, ToggleCommandPalette,
-    ToggleFilesFocus, ToggleGitChangesFocus, ToggleLaneSwitcher, ToggleLeftDock, ToggleRightDock,
-    ValidateFlow, ZoomWindow,
+    ClosePane, CloseTab, CommitAmend, CommitChanges, EditActiveProjectAlias, EditTask,
+    EditWindowTitle, FilesActivate, FilesCollapse, FilesExpand, FilesRefresh, FilesSelectNext,
+    FilesSelectPrev, FilesToggleHidden, FocusNextPane, FocusPaneDown, FocusPaneLeft,
+    FocusPaneRight, FocusPaneUp, FocusPrevPane, GitChangesActivate, GitChangesSelectNext,
+    GitChangesSelectPrev, GitChangesToggleStage, MoveActiveProjectToGroup, MoveTabLeft,
+    MoveTabRight, NewGroup, NewSkill, NewTab, NewTask, NextTab, OpenAgentChat, OpenCommandHistory,
+    OpenProjectConfig, OpenSettings, PrevTab, PushChanges, RefreshGitStatus, ReloadFlowGraph,
+    RenameActiveProject, ResetLeftDockWidth, RunFlow, ShowFlowGraph, ShowLeftDockFiles,
+    ShowLeftDockGit, ShowLeftDockLanes, SplitDown, SplitRight, SwitchRightPanelFlows,
+    SwitchRightPanelSkills, SwitchRightPanelTasks, SwitchRightPanelTools, SwitchRightPanelUsage,
+    ToggleActiveLaneRailGrouping, ToggleBottomDock, ToggleCommandPalette, ToggleFilesFocus,
+    ToggleGitChangesFocus, ToggleLaneSwitcher, ToggleLeftDock, ToggleRightDock, ValidateFlow,
+    ZoomWindow,
 };
 use crate::{CloseProject, OpenFolder, Quit};
 use daruda_terminal::view::{Copy, Paste, SelectAll};
@@ -131,6 +132,8 @@ pub fn apply_keybinding_overrides(
             "close_project" => CloseProject,
             "new_group" => NewGroup,
             "rename_project" => RenameActiveProject,
+            "edit_project_alias" => EditActiveProjectAlias,
+            "toggle_lane_rail_grouping" => ToggleActiveLaneRailGrouping,
             "move_project_to_group" => MoveActiveProjectToGroup,
         );
     }
@@ -209,6 +212,8 @@ fn known_actions() -> Vec<&'static str> {
         "close_project",
         "new_group",
         "rename_project",
+        "edit_project_alias",
+        "toggle_lane_rail_grouping",
         "move_project_to_group",
     ];
     v.extend(crate::tab_slot_table!(@names));

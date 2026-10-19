@@ -15,13 +15,14 @@ impl Workspace {
         let open_source = self.add_group("Open source".into(), None, cx);
         self.move_project_to_group(self.active.project, Some(development), cx);
         if let Some(project) = self.active_project_mut() {
+            project.display_alias = Some("DA".into());
             let mut empty = crate::lane::Lane::default_for_project(77, project.root.clone());
             empty.name = Some("playground".into());
             empty.tab_order = 1;
             project.lanes.push(empty);
         }
         for (name, group) in [
-            ("Vibe", development),
+            ("dashboard", development),
             ("UI Kit", open_source),
             ("Orbit", open_source),
         ] {
@@ -31,7 +32,9 @@ impl Workspace {
             );
             self.next_project_id += 1;
             project.name = name.into();
+            project.display_alias = (name == "dashboard").then(|| "DS".into());
             project.group_id = Some(group);
+            project.is_collapsed = true;
             project.tab_order = self.projects.len() as u32;
             self.projects.push(project);
         }
@@ -60,6 +63,26 @@ impl Workspace {
                 window,
                 cx,
             );
+        }
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn seed_collapsed_group_status_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(index) = self
+            .active_runtime()
+            .tabs
+            .iter()
+            .position(|tab| tab.user_label.as_deref() == Some("working"))
+        {
+            self.activate_tab(index, window, cx);
+        }
+        let groups: Vec<_> = self.groups.iter().map(|group| group.id).collect();
+        for group in groups {
+            self.toggle_group_collapse(group, cx);
         }
         cx.notify();
     }
@@ -122,6 +145,9 @@ mod tests {
         use crate::workspace::screenshot_scenario::ScreenshotScenario;
         for name in [
             "left-dock-groups",
+            "left-dock-group-status",
+            "left-dock-group-hover",
+            "left-dock-project-alias",
             "left-dock-worktrees",
             "left-dock-sessions",
             "left-dock-rail",

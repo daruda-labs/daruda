@@ -190,6 +190,7 @@ fn ungrouped_project_block(
         super::rows::ProjectHeaderArgs {
             project_id: project.id,
             name: project.name.clone(),
+            display_alias: project.display_alias.clone(),
             is_ungrouped: project.group_id.is_none(),
             is_active: is_active_project,
             is_git: project_is_git,

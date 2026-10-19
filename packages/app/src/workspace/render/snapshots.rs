@@ -48,6 +48,8 @@ impl Workspace {
             metrics: crate::ui::theme::UiMetrics(self.mirrors.left_dock_size),
             expanded: self.docks.left.read(cx).is_open,
             named_sessions,
+            rail_panes: self.rail_pane_snapshots(&acp_statuses, cx),
+            focused_pane: self.active_runtime().focused_pane_id,
             open_tabs: self
                 .main_area
                 .runtimes
@@ -73,6 +75,8 @@ impl Workspace {
                     .map(|p| crate::workspace::layout::snap::ProjectSnapshot {
                         id: p.id,
                         name: gpui::SharedString::from(p.name.clone()),
+                        display_alias: p.display_alias.clone().map(Into::into),
+                        rail_grouped_lanes: p.rail_grouped_lanes.clone(),
                         group_id: p.group_id,
                         color: p
                             .color

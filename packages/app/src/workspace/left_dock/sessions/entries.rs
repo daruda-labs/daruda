@@ -1,6 +1,6 @@
 //! Worktree and session choices retain their own typed selection identity.
 
-use super::SessionRow;
+use super::super::rail::PaneSnapshot;
 use crate::workspace::{Workspace, layout::DockSnapshot, main_area::pane_tree::PaneId};
 use daruda_agent::SessionStatus;
 use daruda_store::project::{LaneId, LaneRef, ProjectId};
@@ -8,7 +8,7 @@ use gpui::SharedString;
 
 #[derive(Clone, Copy)]
 pub(super) enum Target {
-    Sessions {
+    Panes {
         lane: LaneRef,
         selected: PaneId,
     },
@@ -21,7 +21,7 @@ pub(super) enum Target {
 impl Target {
     pub(super) fn same_list(self, other: Self) -> bool {
         match (self, other) {
-            (Self::Sessions { lane: a, .. }, Self::Sessions { lane: b, .. }) => a == b,
+            (Self::Panes { lane: a, .. }, Self::Panes { lane: b, .. }) => a == b,
             (Self::Worktrees { project: a, .. }, Self::Worktrees { project: b, .. }) => a == b,
             _ => false,
         }
@@ -29,7 +29,7 @@ impl Target {
 
     pub(super) fn select(&mut self, entry: &Entry) {
         match (self, entry) {
-            (Self::Sessions { selected, .. }, Entry::Session { row, .. }) => *selected = row.pane,
+            (Self::Panes { selected, .. }, Entry::Pane { row, .. }) => *selected = row.pane,
             (Self::Worktrees { selected, .. }, Entry::Worktree { lane, .. }) => {
                 *selected = Some(lane.lane)
             }
@@ -39,7 +39,7 @@ impl Target {
 
     pub(super) fn is_selected(self, entry: &Entry) -> bool {
         match (self, entry) {
-            (Self::Sessions { lane: a, selected }, Entry::Session { lane: b, row }) => {
+            (Self::Panes { lane: a, selected }, Entry::Pane { lane: b, row }) => {
                 a == *b && selected == row.pane
             }
             (Self::Worktrees { project, selected }, Entry::Worktree { lane, .. }) => {
@@ -52,9 +52,9 @@ impl Target {
 
 #[derive(Clone)]
 pub(super) enum Entry {
-    Session {
+    Pane {
         lane: LaneRef,
-        row: SessionRow,
+        row: PaneSnapshot,
     },
     Worktree {
         lane: LaneRef,
@@ -68,10 +68,10 @@ pub(super) enum Entry {
 impl Workspace {
     pub(super) fn rail_chooser_entries(&self, target: Target, cx: &gpui::App) -> Vec<Entry> {
         match target {
-            Target::Sessions { lane, .. } => self
-                .chooser_rows(lane, cx)
+            Target::Panes { lane, .. } => self
+                .rail_chooser_panes(lane, cx)
                 .into_iter()
-                .map(|row| Entry::Session { lane, row })
+                .map(|row| Entry::Pane { lane, row })
                 .collect(),
             Target::Worktrees { project, .. } => {
                 let dock = self.docks.left.read(cx);

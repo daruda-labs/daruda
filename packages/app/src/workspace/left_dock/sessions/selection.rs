@@ -1,12 +1,24 @@
 //! Live session identity, display names, and entry into the selected pane.
 
-use super::SessionRow;
-use crate::workspace::{Workspace, main_area::tab_ops::PaneEntry};
+use super::{RowTarget, SessionRow};
+use crate::workspace::Workspace;
 use daruda_agent::SessionStatus;
 use daruda_store::project::LaneRef;
 use gpui::{Context, Window};
 
 impl Workspace {
+    pub(super) fn activate_dock_row(
+        &mut self,
+        target: &RowTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match target {
+            RowTarget::Session(lane, row) => self.activate_dock_session(*lane, row, window, cx),
+            RowTarget::Pane(lane, row) => self.activate_rail_pane(*lane, row.pane, window, cx),
+        }
+    }
+
     pub(in crate::workspace) fn named_lane_sessions(
         &self,
         lane: LaneRef,
@@ -92,38 +104,7 @@ impl Workspace {
             self.close_session_chooser(true, window, cx);
             return;
         };
-        let pane = target.pane;
-        self.close_session_chooser(false, window, cx);
-        self.activate_lane_as(lane, PaneEntry::Preview, window, cx);
-        if self.active != lane {
-            return;
-        }
-        let Some(tab) = self
-            .active_runtime()
-            .tabs
-            .iter()
-            .position(|t| t.layout.contains(pane))
-        else {
-            return;
-        };
-        self.activate_tab_as(tab, PaneEntry::Preview, window, cx);
-        if self
-            .main_area
-            .zoomed_pane_id
-            .is_some_and(|zoomed| zoomed != pane)
-        {
-            self.main_area.zoomed_pane_id = None;
-            self.main_area.pending_resize = true;
-        }
-        // Keyboard focus alone does not move the shared input's draft owner
-        // or the tab's return target; keep both aligned with this session.
-        self.set_focused_pane(pane, window, cx);
-        if let Some(tab) = self.active_tab_mut() {
-            tab.last_focused_pane = pane;
-        }
-        self.bump_activity(pane);
-        self.focus_pane(pane, window, cx);
-        self.mutate_durable(cx, |_, _| {});
+        self.activate_rail_pane(lane, target.pane, window, cx);
     }
 }
 

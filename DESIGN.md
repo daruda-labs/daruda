@@ -407,19 +407,38 @@ border-right: 1px hairline  (LeftDock)
 border-left:  1px hairline  (RightDock)
 ```
 
-The left dock collapses to a 48px rail instead of disappearing. Projects keep
-initial badges; lanes keep the same 16px status indicators and show a total
-session count only when multiple sessions are represented. Clicking that lane
-opens a root-deployed session chooser beside the rail without resizing the
-terminal. The chooser shows named rows, status text, and the current session;
-Clicking the same trigger again, Escape, or an outside press dismisses it.
-Selecting a session updates the input target and tab focus together, revealing
-the chosen pane if a sibling was zoomed. Expanded lanes show named session
-child rows. In the rail, only groups fold: a short group label accompanies the
-chevron, with no vertical group guide. Project initials use bordered 28px tiles
-and open a worktree chooser without changing the expanded tree's fold state.
-Worktrees with no open tabs take no rail row but remain reachable in that chooser;
-terminal-only worktrees retain a neutral marker. Full names remain on hover.
+The left dock collapses to a fixed 48px rail instead of disappearing. Project
+marks are bordered 28px tiles. Their context menu edits a workspace-local
+one- or two-grapheme display alias; an empty alias uses the project's first
+letter. Both dock layouts use the same mark, and hover retains the full name.
+Clicking a rail project only folds its children, preserving the current pane,
+input draft, and keyboard focus.
+
+Rail worktrees show individual pane rows by default, including terminal and
+file panes. Branch and worktree names appear only in tooltips, not as separate
+rail labels. Each pane keeps the shared 16px status indicator without a number,
+so only grouped rows show a count. Its tooltip names the project, worktree, and
+pane. One click updates the input target and tab focus together, revealing the
+chosen pane if a sibling was zoomed. Empty worktrees retain a neutral entry so
+project folding never hides their only
+navigation path.
+
+Each worktree's context menu can group its panes into one status/count row.
+That preference persists per workspace and survives project folding. Grouped
+rows open a root-deployed pane chooser beside the rail without resizing the
+terminal; a single pane is entered directly. Escape, an outside press, or a
+second trigger click dismisses the chooser. The expanded dock keeps named
+agent-session child rows.
+
+Compact project groups use full-width, quiet horizontal headers and a small
+vertical gap between groups, without chevrons, guides, or child indentation.
+Hover adds emphasis over the header's existing background rather than replacing
+it with a lane-row surface. The whole header toggles the group, including its
+status line. A collapsed group shows one thin, full-width line attached to the
+header's bottom edge, without an intervening gap:
+the active group's line uses only the currently focused pane's status color,
+never an aggregate of its siblings. Other groups, a resting pane, and workspace
+pages use a neutral line. Expanded groups have no status line.
 
 **ViewSwitcher (icon tab strip at top)**
 ```

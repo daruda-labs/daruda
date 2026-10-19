@@ -8,7 +8,7 @@ mod selection;
 #[cfg(test)]
 mod tests;
 
-use crate::workspace::{Workspace, layout::DockSnapshot, main_area::pane_tree::PaneId};
+use crate::workspace::{Workspace, main_area::pane_tree::PaneId};
 use daruda_agent::SessionStatus;
 use daruda_store::project::{LaneRef, ProjectId};
 use entries::{Entry, Target};
@@ -24,6 +24,12 @@ pub(in crate::workspace) struct SessionRow {
     pub pane: PaneId,
     pub title: SharedString,
     pub status: SessionStatus,
+}
+
+#[derive(Clone)]
+pub(super) enum RowTarget {
+    Session(LaneRef, SessionRow),
+    Pane(LaneRef, super::rail::PaneSnapshot),
 }
 
 pub(in crate::workspace) struct Chooser {
@@ -61,8 +67,12 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let rows = self.chooser_rows(lane, cx);
+        let rows = self.rail_chooser_panes(lane, cx);
         if rows.len() < 2 {
+            if let Some(pane) = rows.first() {
+                self.activate_rail_pane(lane, pane.pane, window, cx);
+                return;
+            }
             self.close_session_chooser(false, window, cx);
             let was_active = self.active == lane;
             self.activate_lane(lane, window, cx);
@@ -76,12 +86,7 @@ impl Workspace {
             .find(|r| lane == self.active && r.pane == self.active_runtime().focused_pane_id)
             .unwrap_or(&rows[0])
             .pane;
-        self.open_rail_chooser(
-            Target::Sessions { lane, selected },
-            trigger_bounds,
-            window,
-            cx,
-        );
+        self.open_rail_chooser(Target::Panes { lane, selected }, trigger_bounds, window, cx);
     }
 
     pub(in crate::workspace) fn choose_project_from_rail(
@@ -148,7 +153,7 @@ impl Workspace {
 
     fn activate_rail_choice(&mut self, entry: &Entry, window: &mut Window, cx: &mut Context<Self>) {
         match entry {
-            Entry::Session { lane, row } => self.activate_dock_session(*lane, row, window, cx),
+            Entry::Pane { lane, row } => self.activate_rail_pane(*lane, row.pane, window, cx),
             Entry::Worktree { lane, .. } => {
                 let Some(bounds) = self
                     .docks
@@ -164,18 +169,6 @@ impl Workspace {
                     self.close_session_chooser(true, window, cx);
                 }
             }
-        }
-    }
-
-    pub(in crate::workspace) fn chooser_rows(
-        &self,
-        lane: LaneRef,
-        cx: &gpui::App,
-    ) -> Vec<SessionRow> {
-        let dock = self.docks.left.read(cx);
-        match &dock.snap {
-            DockSnapshot::Left(snap) => snap.named_sessions.get(&lane).cloned().unwrap_or_default(),
-            _ => Vec::new(),
         }
     }
 
@@ -229,7 +222,7 @@ impl Workspace {
         };
         let rows = self.rail_chooser_entries(chooser.target, cx);
         let valid = match chooser.target {
-            Target::Sessions { lane, .. } => self.lane_for(lane).is_some() && !rows.is_empty(),
+            Target::Panes { lane, .. } => self.lane_for(lane).is_some() && !rows.is_empty(),
             Target::Worktrees { project, .. } => self.project_for(project).is_some(),
         };
         if chooser.origin != self.session_chooser_origin(cx)

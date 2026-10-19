@@ -57,6 +57,11 @@ pub(in crate::workspace::left_dock) fn lane_menu(
         project: project_id,
         lane: lane.id,
     };
+    let grouped = snap
+        .projects
+        .iter()
+        .any(|project| project.id == project_id && project.rail_grouped_lanes.contains(&lane.id));
+    let workspace = snap.workspace.clone();
     let (source_branch, source_repo_root, is_detached) = match &lane.kind {
         daruda_store::project::LaneKind::Git {
             branch, repo_root, ..
@@ -84,6 +89,16 @@ pub(in crate::workspace::left_dock) fn lane_menu(
         removable: crate::workspace::Workspace::lane_removable(lane),
     };
     move |menu, _, _| {
+        let menu = menu.item(ws_popup_menu_item(
+            workspace.clone(),
+            if grouped {
+                surface_strings::dock::expand_lane_panes()
+            } else {
+                surface_strings::dock::group_lane_panes()
+            },
+            false,
+            move |ws, _, cx| ws.set_lane_rail_grouped(target, !grouped, cx),
+        ));
         build_context_menu_items(args.clone())
             .into_iter()
             .fold(menu, |menu, item| menu.item(item))

@@ -1,4 +1,5 @@
 use super::*;
+use crate::workspace::layout::DockSnapshot;
 use crate::workspace::tests::build_workspace;
 use gpui::{AppContext as _, Focusable as _, TestAppContext, point, px};
 
@@ -228,6 +229,7 @@ async fn rail_trigger_click_toggles_the_chooser_and_outside_click_dismisses(
         entity.update(cx, |ws, cx| {
             ws.open_agent_chat_pane(window, cx);
             ws.open_agent_chat_pane(window, cx);
+            ws.set_lane_rail_grouped(ws.active, true, cx);
             ws.docks.left.update(cx, |dock, cx| {
                 dock.is_open = false;
                 cx.notify();
@@ -240,7 +242,7 @@ async fn rail_trigger_click_toggles_the_chooser_and_outside_click_dismisses(
     vcx.run_until_parked();
     let lane = entity.read_with(vcx, |ws, _| ws.active);
     let selector: &'static str =
-        Box::leak(format!("rail-lane-{}-{}", lane.project, lane.lane).into_boxed_str());
+        Box::leak(format!("rail-lane-trigger-{}-{}", lane.project, lane.lane).into_boxed_str());
     let row = vcx
         .debug_bounds(selector)
         .expect("the active worktree renders in the rail");
@@ -288,19 +290,25 @@ async fn project_choices_drill_into_sessions_and_back_without_resizing(cx: &mut 
     let vcx = &mut gpui::VisualTestContext::from_window(wh.into(), cx);
     vcx.run_until_parked();
     let lane = entity.read_with(vcx, |ws, _| ws.active);
-    let project_selector: &'static str =
-        Box::leak(format!("rail-project-{}", lane.project).into_boxed_str());
     let row_selector: &'static str =
         Box::leak(format!("dock-worktree-{}-{}", lane.project, lane.lane).into_boxed_str());
-    let project_bounds = vcx.debug_bounds(project_selector).unwrap();
-    vcx.simulate_click(project_bounds.center(), Default::default());
+    vcx.update(|window, cx| {
+        entity.update(cx, |workspace, cx| {
+            workspace.choose_project_from_rail(
+                lane.project,
+                gpui::Bounds::new(point(px(0.0), px(80.0)), gpui::size(px(48.0), px(36.0))),
+                window,
+                cx,
+            );
+        });
+    });
     vcx.run_until_parked();
     let worktree = vcx.debug_bounds(row_selector).unwrap();
     vcx.simulate_click(worktree.center(), Default::default());
     vcx.run_until_parked();
     assert!(entity.read_with(vcx, |ws, cx| matches!(
         ws.docks.session_chooser.as_ref().unwrap().target,
-        Target::Sessions { .. }
+        Target::Panes { .. }
     ) && !ws.docks.left.read(cx).is_open));
     let back = vcx.debug_bounds("dock-worktrees-back").unwrap();
     vcx.simulate_click(back.center(), Default::default());

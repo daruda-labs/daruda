@@ -174,6 +174,7 @@ pub(in crate::workspace::left_dock::projects) fn group_header_row(
 pub(in crate::workspace::left_dock::projects) struct ProjectHeaderArgs {
     pub project_id: ProjectId,
     pub name: SharedString,
+    pub display_alias: Option<SharedString>,
     pub is_ungrouped: bool,
     pub is_active: bool,
     pub is_git: bool,
@@ -209,6 +210,7 @@ pub(in crate::workspace::left_dock::projects) fn project_header_row(
     let ProjectHeaderArgs {
         project_id,
         name,
+        display_alias,
         is_ungrouped,
         is_active,
         is_git,
@@ -315,7 +317,10 @@ pub(in crate::workspace::left_dock::projects) fn project_header_row(
         .child({
             let ws_for_toggle = snap.workspace.clone();
             crate::ui::button_bare_compact(("project-fold", project_id as usize))
-                .label(crate::workspace::left_dock::rail::project_initial(&name))
+                .label(crate::workspace::left_dock::rail::project_badge_label(
+                    &name,
+                    display_alias.as_deref(),
+                ))
                 .text_size(px(snap.metrics.text(theme::FONT_SIZE_MD)))
                 .w(px(row_metrics.leading_width))
                 .h(px(row_metrics.leading_width))

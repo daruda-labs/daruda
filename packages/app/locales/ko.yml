@@ -250,11 +250,14 @@ titlebar:
 
 # Dock / sidebar tabs
 dock:
+  expand_lane_panes: "개별 페인 펼치기"
+  pane_count: "페인 %{count}개"
+  group_lane_panes: "Worktree로 묶기"
+  toggle_lane_grouping: "Worktree 페인 묶기 전환"
   worktree_count: "Worktree %{count}개"
   open_tab_count: "열린 탭 %{count}개"
   no_open_tabs: "열린 탭 없음"
   session_title: "세션 %{session} · %{title}"
-  session_count: "세션 %{count}개"
   session_idle: "대기 중"
   session_connecting: "연결 중"
   session_executing: "도구 실행 중"
@@ -677,6 +680,10 @@ group:
 
 # Project context menu
 project:
+  menu_edit_alias: "표시 약칭 변경…"
+  alias_title: "프로젝트 표시 약칭"
+  alias_placeholder: "1–2글자 · 비우면 기본값 사용"
+  alias_hint: "1–2글자를 입력하세요. 비우면 프로젝트명의 첫 글자를 사용합니다."
   menu_rename: "프로젝트 이름 바꾸기…"
   menu_move_to_group: "그룹으로 이동…"
   menu_delete: "프로젝트 삭제…"

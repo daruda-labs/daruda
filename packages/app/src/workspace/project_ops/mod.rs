@@ -508,6 +508,8 @@ mod tests {
             uuid: ProjectUuid::new(),
             root: path,
             name: String::new(),
+            display_alias: None,
+            rail_grouped_lanes: Default::default(),
             default_branch: None,
             base_branch: None,
             lanes: vec![lane],

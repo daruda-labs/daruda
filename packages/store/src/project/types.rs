@@ -122,6 +122,10 @@ pub struct ProjectState {
 /// grouped one way in workspace A and another in workspace B.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct ProjectOverride {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_alias: Option<String>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub rail_grouped_lanes: std::collections::BTreeSet<LaneId>,
     #[serde(default)]
     pub color: Option<String>,
     #[serde(default)]

@@ -1,7 +1,7 @@
 //! Named session rows and a chooser deployed above the dock's scroll clip.
 
 use super::{
-    SessionRow,
+    RowTarget,
     entries::{Entry, Target},
 };
 use crate::ui::Sizable as _;
@@ -29,8 +29,7 @@ fn status_label(status: daruda_agent::SessionStatus) -> String {
 }
 
 fn session_row(
-    lane: LaneRef,
-    row: &SessionRow,
+    target: RowTarget,
     current: bool,
     selected: bool,
     workspace: WeakEntity<Workspace>,
@@ -38,9 +37,16 @@ fn session_row(
     cx: &App,
 ) -> impl IntoElement + use<> {
     let t = theme::current(cx);
-    let target = row.clone();
+    let (pane, title, status) = match &target {
+        RowTarget::Session(_, row) => (row.pane, row.title.clone(), row.status),
+        RowTarget::Pane(_, row) => (
+            row.pane,
+            row.title.clone(),
+            row.status.unwrap_or(daruda_agent::SessionStatus::Idle),
+        ),
+    };
     div()
-        .id(("dock-session", row.pane as usize))
+        .id(("dock-session", pane as usize))
         .flex()
         .items_center()
         .gap(px(theme::GAP_LG))
@@ -60,8 +66,7 @@ fn session_row(
         .hover(|style| style.bg(t.lane_row_hover_bg))
         .cursor_pointer()
         .child(
-            AgentStatusBadge::for_status(row.status, IndicatorSize::Leading, cx)
-                .with_metrics(metrics),
+            AgentStatusBadge::for_status(status, IndicatorSize::Leading, cx).with_metrics(metrics),
         )
         .child(
             div()
@@ -74,13 +79,13 @@ fn session_row(
                         .text_size(px(metrics.text(theme::FONT_SIZE_MD)))
                         .text_color(t.text_primary)
                         .text_ellipsis()
-                        .child(row.title.clone()),
+                        .child(title.clone()),
                 )
                 .child(
                     div()
                         .text_size(px(metrics.text(theme::FONT_SIZE_SM)))
                         .text_color(t.text_muted)
-                        .child(status_label(row.status)),
+                        .child(status_label(status)),
                 ),
         )
         .when(current, |el| {
@@ -89,13 +94,11 @@ fn session_row(
                     .with_size(px(metrics.icon(theme::CONTROL_ICON_SIZE))),
             )
         })
-        .tooltip(crate::ui::tooltip::text(row.title.clone()))
+        .tooltip(crate::ui::tooltip::text(title))
         .on_click(move |_, window, cx| {
             cx.stop_propagation();
             if let Some(ws) = workspace.upgrade() {
-                ws.update(cx, |ws, cx| {
-                    ws.activate_dock_session(lane, &target, window, cx)
-                });
+                ws.update(cx, |ws, cx| ws.activate_dock_row(&target, window, cx));
             }
         })
 }
@@ -115,8 +118,7 @@ pub(in crate::workspace) fn named_rows(
                 .flatten()
                 .map(|row| {
                     session_row(
-                        lane,
-                        row,
+                        RowTarget::Session(lane, row.clone()),
                         snap.active == lane
                             && snap.agent_active_session_id.as_deref() == Some(&row.id),
                         false,
@@ -141,9 +143,7 @@ pub(in crate::workspace) fn chooser_overlay(
     let rows = ws.rail_chooser_entries(chooser.target, cx);
     let t = theme::current(cx);
     let (title, subtitle) = match chooser.target {
-        Target::Sessions { lane, .. } => {
-            (ws.lane_label_for(lane), s::dock::session_count(rows.len()))
-        }
+        Target::Panes { lane, .. } => (ws.lane_label_for(lane), s::dock::pane_count(rows.len())),
         Target::Worktrees { project, .. } => (
             ws.project_for(project)
                 .map(|p| p.name.clone())
@@ -185,7 +185,7 @@ pub(in crate::workspace) fn chooser_overlay(
             .border_color(t.border)
             .when_some(
                 match chooser.target {
-                    Target::Sessions { lane, .. } => Some(lane.project),
+                    Target::Panes { lane, .. } => Some(lane.project),
                     _ => None,
                 },
                 |header, project| {
@@ -238,9 +238,8 @@ pub(in crate::workspace) fn chooser_overlay(
             .track_scroll(&chooser.scroll)
             .children(rows.iter().map(|entry| {
                 match entry {
-                    Entry::Session { lane, row } => session_row(
-                        *lane,
-                        row,
+                    Entry::Pane { lane, row } => session_row(
+                        RowTarget::Pane(*lane, row.clone()),
                         ws.active == *lane && ws.active_runtime().focused_pane_id == row.pane,
                         chooser.target.is_selected(entry),
                         weak.clone(),

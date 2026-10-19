@@ -21,6 +21,12 @@ pub(in crate::workspace::left_dock) fn build_project_menu_items(
     ws: WeakEntity<Workspace>,
 ) -> Vec<PopupMenuItem> {
     let mut items: Vec<PopupMenuItem> = Vec::new();
+    items.push(ws_popup_menu_item(
+        ws.clone(),
+        s::project::menu_edit_alias(),
+        false,
+        move |ws, window, cx| ws.open_project_alias_editor(project_id, window, cx),
+    ));
 
     let snap_target = LaneRef {
         project: project_id,

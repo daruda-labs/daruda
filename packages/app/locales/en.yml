@@ -265,11 +265,14 @@ titlebar:
 
 # Dock / sidebar tabs (display labels only — DOCK_PANEL_* identity consts stay &'static str)
 dock:
+  expand_lane_panes: "Show Individual Panes"
+  pane_count: "%{count} panes"
+  group_lane_panes: "Group Panes by Worktree"
+  toggle_lane_grouping: "Toggle Worktree Pane Grouping"
   worktree_count: "%{count} worktrees"
   open_tab_count: "%{count} open tabs"
   no_open_tabs: "No open tabs"
   session_title: "Session %{session} · %{title}"
-  session_count: "%{count} sessions"
   session_idle: "Idle"
   session_connecting: "Connecting"
   session_executing: "Running a tool"
@@ -883,6 +886,10 @@ group:
 
 # Project context menu
 project:
+  menu_edit_alias: "Change Display Initials…"
+  alias_title: "Project Display Initials"
+  alias_placeholder: "1–2 characters; leave empty for the default"
+  alias_hint: "Use 1–2 characters. Leave empty to use the project's first letter."
   menu_rename: "Rename Project…"
   menu_move_to_group: "Move to Group…"
   menu_delete: "Delete Project…"

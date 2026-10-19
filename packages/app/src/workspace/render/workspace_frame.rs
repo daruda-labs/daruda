@@ -428,6 +428,8 @@ impl Workspace {
             .on_action(cx.listener(Self::on_toggle_zoom_pane))
             .on_action(cx.listener(Self::on_new_group))
             .on_action(cx.listener(Self::on_rename_active_project))
+            .on_action(cx.listener(Self::on_edit_active_project_alias))
+            .on_action(cx.listener(Self::on_toggle_active_lane_rail_grouping))
             .on_action(cx.listener(Self::on_move_active_project_to_group))
             .child(title_bar)
             .child(body_layout)

@@ -36,6 +36,8 @@ pub struct Project {
     pub uuid: ProjectUuid,
     pub root: PathBuf,
     pub name: String,
+    pub display_alias: Option<String>,
+    pub rail_grouped_lanes: std::collections::BTreeSet<LaneId>,
     /// Repo's actual default branch (e.g. "main"). Detected at project
     /// open (origin/HEAD → local main/master → current HEAD). `None`
     /// for non-git projects or when detection fails. Display + reconcile
@@ -125,6 +127,8 @@ impl Project {
             uuid,
             root,
             name,
+            display_alias: None,
+            rail_grouped_lanes: Default::default(),
             default_branch: None,
             base_branch: None,
             lanes,
@@ -172,6 +176,8 @@ impl Project {
             uuid: ps.uuid,
             root: ps.root.clone(),
             name: ps.name.clone().unwrap_or_default(),
+            display_alias: ov.display_alias.clone(),
+            rail_grouped_lanes: ov.rail_grouped_lanes.clone(),
             default_branch: ps.default_branch.clone(),
             base_branch: ps.base_branch.clone(),
             lanes,

@@ -18,6 +18,8 @@ fn fixture(window: &mut Window, cx: &mut gpui::App) -> LeftDockSnapshot {
         expanded: true,
         open_tabs: Default::default(),
         named_sessions: Default::default(),
+        rail_panes: Default::default(),
+        focused_pane: 0,
         left_dock_view: daruda_store::project::LeftDockView::default(),
         workspace_page: None,
         lanes: Vec::new(),

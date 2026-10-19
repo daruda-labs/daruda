@@ -277,6 +277,8 @@ actions!(
         /// Rename the active workspace project via a single-field modal.
         /// Wired from `rename_project`.
         RenameActiveProject,
+        EditActiveProjectAlias,
+        ToggleActiveLaneRailGrouping,
         /// Move the active project into a group by name (blank =
         /// ungrouped, unknown name creates one). Wired from
         /// `move_project_to_group`.

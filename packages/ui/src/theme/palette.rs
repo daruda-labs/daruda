@@ -228,6 +228,8 @@ pub const PANEL_BODY_GAP: f32 = GAP_STANDARD;
 pub const DOCK_LEFT_RAIL_W: f32 = 48.0;
 pub const DOCK_RAIL_ROW_H: f32 = 36.0;
 pub const DOCK_RAIL_INITIAL_SIZE: f32 = 28.0;
+pub const DOCK_RAIL_PANE_ROW_H: f32 = 28.0;
+pub const DOCK_RAIL_GROUP_LINE_H: f32 = 2.0;
 /// Opaque project marks need more separation than hover surfaces in a compact rail.
 pub const RAIL_PROJECT_BG: Hsla = hsla(215.45455, 11.0 / 59.0, 59.0 / 255.0, 1.0);
 pub const DOCK_SESSION_ROW_H: f32 = 44.0;

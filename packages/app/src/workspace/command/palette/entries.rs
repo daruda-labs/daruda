@@ -370,6 +370,16 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
         shortcut: k::SHORTCUT_MOVE_PROJECT_TO_GROUP,
     },
     PaletteEntry {
+        id: "edit_project_alias",
+        label: s::project::menu_edit_alias,
+        shortcut: "",
+    },
+    PaletteEntry {
+        id: "toggle_lane_rail_grouping",
+        label: s::dock::toggle_lane_grouping,
+        shortcut: "",
+    },
+    PaletteEntry {
         id: "close_project",
         label: s::command::close_project,
         shortcut: k::SHORTCUT_CLOSE_PROJECT,

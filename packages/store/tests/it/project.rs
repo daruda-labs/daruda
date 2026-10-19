@@ -1176,6 +1176,21 @@ mod new_schema {
     };
 
     #[test]
+    fn project_navigation_defaults_and_roundtrips() {
+        let old: ProjectOverride = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert!(old.display_alias.is_none());
+        assert!(old.rail_grouped_lanes.is_empty());
+        let configured = ProjectOverride {
+            display_alias: Some("개발".into()),
+            rail_grouped_lanes: [0, 3].into(),
+            ..ProjectOverride::default()
+        };
+        let stored = serde_json::to_string(&configured).unwrap();
+        let restored: ProjectOverride = serde_json::from_str(&stored).unwrap();
+        assert_eq!(restored, configured);
+    }
+
+    #[test]
     fn project_state_roundtrip() {
         let p = sample_project();
         let json = serde_json::to_string(&p).unwrap();
@@ -1297,6 +1312,8 @@ mod new_schema {
         ws_a.project_overrides.insert(
             proj,
             ProjectOverride {
+                display_alias: Some("A".into()),
+                rail_grouped_lanes: [0].into(),
                 color: Some("#f87171".into()),
                 tab_order: 0,
                 group_id: Some(Default::default()),
@@ -1306,6 +1323,8 @@ mod new_schema {
         ws_b.project_overrides.insert(
             proj,
             ProjectOverride {
+                display_alias: Some("B".into()),
+                rail_grouped_lanes: Default::default(),
                 color: Some("#60a5fa".into()),
                 tab_order: 2,
                 group_id: None,

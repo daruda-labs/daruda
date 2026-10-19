@@ -82,6 +82,9 @@ pub(crate) enum ScreenshotScenario {
     LeftDockRail,
     LeftDockExpanded,
     LeftDockGroups,
+    LeftDockGroupStatus,
+    LeftDockGroupHover,
+    LeftDockProjectAlias,
     LeftDockWorktrees,
     LeftDockGit,
     /// Open the command palette (`CommandPaletteState::open`).
@@ -618,14 +621,47 @@ pub(crate) fn drive(
         ScreenshotScenario::LeftDockGit => {
             workspace.update(cx, |ws, cx| ws.seed_left_dock_git_for_shot(window, cx));
         }
-        ScreenshotScenario::LeftDockGroups | ScreenshotScenario::LeftDockWorktrees => {
+        ScreenshotScenario::LeftDockGroups
+        | ScreenshotScenario::LeftDockWorktrees
+        | ScreenshotScenario::LeftDockGroupStatus
+        | ScreenshotScenario::LeftDockGroupHover
+        | ScreenshotScenario::LeftDockProjectAlias => {
             workspace.update(cx, |ws, cx| {
                 ws.seed_left_dock_groups_for_shot(
                     scenario == ScreenshotScenario::LeftDockWorktrees,
                     window,
                     cx,
-                )
+                );
+                if matches!(
+                    scenario,
+                    ScreenshotScenario::LeftDockGroupStatus
+                        | ScreenshotScenario::LeftDockGroupHover
+                ) {
+                    ws.seed_collapsed_group_status_for_shot(window, cx);
+                }
+                if scenario == ScreenshotScenario::LeftDockProjectAlias {
+                    ws.open_project_alias_editor(ws.active.project, window, cx);
+                }
             });
+            if scenario == ScreenshotScenario::LeftDockGroupHover {
+                use crate::ui::theme;
+                window.draw(cx).clear();
+                window.dispatch_event(
+                    gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
+                        position: gpui::point(
+                            px(theme::DOCK_LEFT_RAIL_W / 2.0),
+                            px(theme::TITLE_BAR_HEIGHT
+                                + theme::PAD_XS * 2.0
+                                + theme::CONTROL_TARGET_SIZE * 5.0
+                                + theme::GAP_LG
+                                + theme::CONTROL_TARGET_SIZE / 2.0),
+                        ),
+                        pressed_button: None,
+                        modifiers: Default::default(),
+                    }),
+                    cx,
+                );
+            }
         }
         ScreenshotScenario::LeftDockSessions
         | ScreenshotScenario::LeftDockSessionsSix

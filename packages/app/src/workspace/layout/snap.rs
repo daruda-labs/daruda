@@ -34,6 +34,8 @@ use crate::workspace::Workspace;
 pub(in crate::workspace) struct ProjectSnapshot {
     pub id: daruda_store::project::ProjectId,
     pub name: gpui::SharedString,
+    pub display_alias: Option<gpui::SharedString>,
+    pub rail_grouped_lanes: std::collections::BTreeSet<daruda_store::project::LaneId>,
     /// Group membership. When `Some`, the project renders nested under
     /// its group's accordion in the left dock; ungrouped projects sit
     /// at the top level.
@@ -90,6 +92,11 @@ pub(in crate::workspace) struct LeftDockSnapshot {
         daruda_store::project::LaneRef,
         Vec<crate::workspace::left_dock::sessions::SessionRow>,
     >,
+    pub rail_panes: std::collections::HashMap<
+        daruda_store::project::LaneRef,
+        Vec<crate::workspace::left_dock::rail::PaneSnapshot>,
+    >,
+    pub focused_pane: u64,
     pub left_dock_view: daruda_store::project::LeftDockView,
     pub workspace_page: Option<crate::workspace::pages::Page>,
     pub lanes: Vec<crate::lane::Lane>,

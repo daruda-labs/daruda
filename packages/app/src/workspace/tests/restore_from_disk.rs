@@ -91,6 +91,8 @@ fn restore_into_empty_workspace_applies_dock_state(cx: &mut TestAppContext) {
     project_overrides.insert(
         project_uuid,
         ProjectOverride {
+            display_alias: None,
+            rail_grouped_lanes: Default::default(),
             color: None,
             tab_order: 0,
             group_id: None,

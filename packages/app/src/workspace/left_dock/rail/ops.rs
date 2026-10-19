@@ -6,8 +6,9 @@ use gpui::{Bounds, Context, KeyDownEvent, Pixels, Window};
 
 pub(super) enum RailItem {
     Group(GroupId),
-    Project(ProjectId, Bounds<Pixels>),
+    Project(ProjectId),
     Lane(LaneRef, Bounds<Pixels>),
+    Pane(LaneRef, u64),
 }
 
 impl Workspace {
@@ -25,10 +26,9 @@ impl Workspace {
         }
         match item {
             RailItem::Group(group) => self.toggle_group_collapse(group, cx),
-            RailItem::Project(project, bounds) => {
-                self.choose_project_from_rail(project, bounds, window, cx)
-            }
+            RailItem::Project(project) => self.toggle_project_collapse(project, cx),
             RailItem::Lane(lane, bounds) => self.choose_lane_from_rail(lane, bounds, window, cx),
+            RailItem::Pane(lane, pane) => self.activate_rail_pane(lane, pane, window, cx),
         }
         cx.stop_propagation();
     }

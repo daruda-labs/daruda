@@ -1,8 +1,15 @@
 //! Collapsed navigation with one group fold level and typed worktree/session choices.
 
 use crate::ui::Sizable as _;
+mod alias_modal;
+mod groups;
+mod lanes;
 mod ops;
+mod panes;
+mod preferences;
 mod projects;
+
+pub(in crate::workspace) use panes::PaneSnapshot;
 
 use projects::project;
 
@@ -24,6 +31,17 @@ pub(super) fn project_initial(name: &str) -> String {
         .next()
         .unwrap_or("?")
         .to_uppercase()
+}
+
+pub(in crate::workspace::left_dock) fn project_badge_label(
+    name: &str,
+    alias: Option<&str>,
+) -> String {
+    alias
+        .map(str::trim)
+        .filter(|alias| !alias.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| project_initial(name))
 }
 
 pub(in crate::workspace) fn render(
@@ -103,53 +121,7 @@ pub(in crate::workspace) fn render(
         }
         if let Some(id) = group {
             let g = snap.groups.iter().find(|g| g.id == id).unwrap();
-            let ws = snap.workspace.clone();
-            let key_ws = ws.clone();
-            let icon = if g.is_collapsed {
-                ui::icons::CHEVRON_RIGHT
-            } else {
-                ui::icons::EXPAND_MORE
-            };
-            tree = tree.child(
-                div()
-                    .id(("rail-group", id as usize))
-                    .debug_selector(move || format!("rail-group-{id}"))
-                    .focusable()
-                    .tab_stop(true)
-                    .cursor_pointer()
-                    .mt(px(theme::GAP_LG))
-                    .h(px(snap.metrics.target(theme::CONTROL_TARGET_SIZE)))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(theme::GAP_XS))
-                    .text_size(px(snap.metrics.text(theme::FONT_SIZE_XS)))
-                    .text_color(t.text_muted)
-                    .hover(|el| el.bg(t.lane_row_hover_bg))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .text_ellipsis()
-                            .child(group_abbreviation(&g.name)),
-                    )
-                    .child(
-                        ui::icons::icon(icon)
-                            .with_size(px(snap.metrics.icon(theme::CONTROL_ICON_SIZE))),
-                    )
-                    .tooltip(ui::tooltip::text(g.name.clone()))
-                    .on_key_down(move |event, window, cx| {
-                        if let Some(ws) = key_ws.upgrade() {
-                            ws.update(cx, |ws, cx| {
-                                ws.on_rail_key(ops::RailItem::Group(id), event, window, cx)
-                            });
-                        }
-                    })
-                    .on_click(move |_, _, cx| {
-                        if let Some(ws) = ws.upgrade() {
-                            ws.update(cx, |ws, cx| ws.toggle_group_collapse(id, cx));
-                        }
-                    }),
-            );
+            tree = tree.child(groups::header(g, snap, cx));
             if !g.is_collapsed {
                 for p in snap.projects.iter().filter(|p| p.group_id == Some(id)) {
                     tree = tree.child(project(p, snap, cx));

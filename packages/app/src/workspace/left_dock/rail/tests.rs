@@ -16,113 +16,257 @@ fn group_labels_are_short_unicode_abbreviations() {
 }
 
 #[gpui::test]
-async fn groups_are_the_only_fold_and_empty_worktrees_remain_reachable(
+async fn project_and_group_folding_preserve_the_active_pane_and_input(
     cx: &mut gpui::TestAppContext,
 ) {
-    let root = std::env::temp_dir().join("daruda-compact-group-test");
+    use gpui::{AppContext as _, Focusable as _};
+    let root = std::env::temp_dir().join("daruda-rail-fold-input");
     std::fs::create_dir_all(&root).unwrap();
-    let (wh, entity) = crate::workspace::tests::build_workspace_with(
+    let (window, workspace) = crate::workspace::tests::build_workspace_with(
         cx,
         &daruda_config::Config::default(),
         Some(daruda_store::project::Project::from_path(&root)),
     );
-    use gpui::AppContext as _;
-    cx.update_window(wh.into(), |_, window, cx| {
-        entity.update(cx, |ws, cx| {
-            let original = ws.active;
-            let group = ws.add_group("Development".into(), None, cx);
-            ws.move_project_to_group(ws.active.project, Some(group), cx);
-            let project = ws.active_project_mut().unwrap();
-            project.is_collapsed = true;
-            project
+    cx.update_window(window.into(), |_, window, cx| {
+        workspace.update(cx, |workspace, cx| {
+            let group = workspace.add_group("Development".into(), None, cx);
+            workspace.move_project_to_group(workspace.active.project, Some(group), cx);
+            workspace
+                .active_project_mut()
+                .unwrap()
                 .lanes
                 .push(crate::lane::Lane::default_for_project(77, root.clone()));
-            project
-                .lanes
-                .push(crate::lane::Lane::default_for_project(78, root.clone()));
-            ws.activate_lane(
-                daruda_store::project::LaneRef {
-                    project: original.project,
-                    lane: 78,
-                },
-                window,
-                cx,
-            );
-            ws.open_agent_chat_pane(window, cx);
-            ws.activate_lane(original, window, cx);
-            ws.docks.left.update(cx, |dock, cx| {
+            workspace.input_dock.visible = true;
+            workspace.input_dock.input.update(cx, |input, cx| {
+                input.set_value("keep this draft", window, cx)
+            });
+            workspace.docks.left.update(cx, |dock, cx| {
                 dock.is_open = false;
                 cx.notify();
             });
+            workspace
+                .input_dock
+                .input
+                .read(cx)
+                .focus_handle(cx)
+                .focus(window, cx);
             cx.notify();
         });
     })
     .unwrap();
-    let vcx = &mut gpui::VisualTestContext::from_window(wh.into(), cx);
+    let vcx = &mut gpui::VisualTestContext::from_window(window.into(), cx);
     vcx.run_until_parked();
-    let (active, group) = entity.read_with(vcx, |ws, _| (ws.active, ws.groups[0].id));
-    let project_selector: &'static str =
-        Box::leak(format!("rail-project-{}", active.project).into_boxed_str());
-    let lane_selector: &'static str =
-        Box::leak(format!("rail-lane-{}-{}", active.project, active.lane).into_boxed_str());
-    let empty_selector: &'static str =
-        Box::leak(format!("rail-lane-{}-77", active.project).into_boxed_str());
-    let group_selector: &'static str = Box::leak(format!("rail-group-{group}").into_boxed_str());
-    assert!(
-        bounds(vcx, lane_selector).is_some(),
-        "a terminal-only worktree remains visible even if the expanded project is folded"
-    );
-    assert!(
-        bounds(vcx, empty_selector).is_none(),
-        "an empty worktree takes no rail row"
-    );
-    vcx.update(|window, cx| {
-        entity.update(cx, |ws, cx| ws.close_tab_at(0, window, cx));
+    let (active, pane, group) = workspace.read_with(vcx, |workspace, _| {
+        (
+            workspace.active,
+            workspace.active_runtime().focused_pane_id,
+            workspace.groups[0].id,
+        )
     });
-    vcx.run_until_parked();
-    assert!(
-        bounds(vcx, lane_selector).is_none(),
-        "closing the last tab removes the rail row immediately"
-    );
-    let project = bounds(vcx, project_selector).unwrap();
-    vcx.simulate_click(project.center(), Default::default());
-    vcx.run_until_parked();
-    assert!(
-        entity.read_with(vcx, |ws, _| ws.active_project().unwrap().is_collapsed),
-        "the project click leaves the expanded tree's fold state alone"
-    );
-    let empty_choice: &'static str =
-        Box::leak(format!("dock-worktree-{}-77", active.project).into_boxed_str());
-    assert!(
-        bounds(vcx, empty_choice).is_some(),
-        "hidden worktrees are present in the project chooser"
-    );
-    vcx.simulate_click(project.center(), Default::default());
-    vcx.run_until_parked();
-    assert!(
-        entity.read_with(vcx, |ws, _| ws.docks.session_chooser.is_none()),
-        "the project trigger also toggles closed"
-    );
-    vcx.simulate_keystrokes("enter");
-    vcx.run_until_parked();
-    vcx.simulate_keystrokes("down enter");
-    vcx.run_until_parked();
-    assert_eq!(
-        entity.read_with(vcx, |ws, _| ws.active.lane),
-        77,
-        "keyboard selection can enter an empty worktree"
-    );
-    assert!(bounds(vcx, empty_selector).is_none());
+    let project_selector = Box::leak(format!("rail-project-{}", active.project).into_boxed_str());
+    let empty_selector = Box::leak(format!("rail-lane-{}-77", active.project).into_boxed_str());
+    assert!(bounds(vcx, empty_selector).is_some());
+    for _ in 0..2 {
+        let project = bounds(vcx, project_selector).unwrap();
+        vcx.simulate_click(project.center(), Default::default());
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            workspace
+                .read(cx)
+                .assert_fold_state(active, pane, window, cx)
+        });
+    }
+    let group_selector = Box::leak(format!("rail-group-{group}").into_boxed_str());
+    let line_selector = Box::leak(format!("rail-group-status-{group}").into_boxed_str());
+    assert!(bounds(vcx, line_selector).is_none());
     let group_bounds = bounds(vcx, group_selector).unwrap();
     vcx.simulate_click(group_bounds.center(), Default::default());
     vcx.run_until_parked();
-    assert!(
-        bounds(vcx, project_selector).is_none(),
-        "the group folds its projects"
-    );
-    vcx.simulate_keystrokes("enter");
+    assert!(bounds(vcx, project_selector).is_none());
+    vcx.update(|window, cx| {
+        workspace
+            .read(cx)
+            .assert_fold_state(active, pane, window, cx)
+    });
+    let line = bounds(vcx, line_selector).unwrap();
+    assert_eq!(line.left(), group_bounds.left());
+    assert_eq!(line.right(), group_bounds.right());
+    assert_eq!(line.bottom(), group_bounds.bottom());
+    vcx.simulate_click(line.center(), Default::default());
     vcx.run_until_parked();
     assert!(bounds(vcx, project_selector).is_some());
+    assert!(bounds(vcx, line_selector).is_none());
+    let empty = bounds(vcx, empty_selector).unwrap();
+    vcx.simulate_click(empty.center(), Default::default());
+    vcx.run_until_parked();
+    assert_eq!(
+        workspace.read_with(vcx, |workspace, _| workspace.active.lane),
+        77
+    );
+}
+
+impl crate::workspace::Workspace {
+    fn assert_fold_state(
+        &self,
+        active: daruda_store::project::LaneRef,
+        pane: u64,
+        window: &gpui::Window,
+        cx: &gpui::App,
+    ) {
+        use gpui::Focusable as _;
+        assert_eq!(self.active, active);
+        assert_eq!(self.active_runtime().focused_pane_id, pane);
+        assert!(self.docks.session_chooser.is_none());
+        assert_eq!(
+            self.input_dock.input.read(cx).value().as_str(),
+            "keep this draft"
+        );
+        assert!(
+            self.input_dock
+                .input
+                .read(cx)
+                .focus_handle(cx)
+                .contains_focused(window, cx)
+        );
+    }
+}
+
+#[gpui::test]
+async fn expanded_rail_selects_terminal_and_agent_panes_without_a_chooser(
+    cx: &mut gpui::TestAppContext,
+) {
+    use gpui::AppContext as _;
+    let root = std::env::temp_dir().join("daruda-rail-direct-panes");
+    std::fs::create_dir_all(&root).unwrap();
+    let (window, workspace) = crate::workspace::tests::build_workspace_with(
+        cx,
+        &daruda_config::Config::default(),
+        Some(daruda_store::project::Project::from_path(root)),
+    );
+    let (terminal, agent) = cx
+        .update_window(window.into(), |_, window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                let terminal = workspace.active_runtime().focused_pane_id;
+                workspace.open_agent_chat_pane(window, cx);
+                let agent = workspace.active_runtime().focused_pane_id;
+                workspace.docks.left.update(cx, |dock, cx| {
+                    dock.is_open = false;
+                    cx.notify();
+                });
+                cx.notify();
+                (terminal, agent)
+            })
+        })
+        .unwrap();
+    let vcx = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+    vcx.run_until_parked();
+    for pane in [terminal, agent] {
+        let selector = Box::leak(format!("rail-pane-{pane}").into_boxed_str());
+        let row = bounds(vcx, selector).unwrap();
+        vcx.simulate_click(row.center(), Default::default());
+        vcx.run_until_parked();
+        workspace.read_with(vcx, |workspace, _| {
+            assert_eq!(workspace.active_runtime().focused_pane_id, pane);
+            assert_eq!(workspace.input_dock.owner, Some(pane));
+            assert!(workspace.docks.session_chooser.is_none());
+        });
+    }
+}
+
+#[gpui::test]
+fn navigation_preferences_survive_disk_roundtrip(cx: &mut gpui::TestAppContext) {
+    let root = std::env::temp_dir().join("daruda-rail-preferences");
+    let (_, workspace) = crate::workspace::tests::build_workspace_with(
+        cx,
+        &daruda_config::Config::default(),
+        Some(daruda_store::project::Project::from_path(root)),
+    );
+    workspace.update(cx, |workspace, cx| {
+        let active = workspace.active;
+        let original_name = workspace.active_project().unwrap().name.clone();
+        workspace.set_project_display_alias(active.project, Some(" 개발 ".into()), cx);
+        workspace.set_lane_rail_grouped(active, true, cx);
+        workspace.toggle_project_collapse(active.project, cx);
+        let (stored, projects) = workspace.snapshot_for_disk(cx);
+        let encoded = serde_json::to_string(&stored).unwrap();
+        let decoded: daruda_store::project::WorkspaceState =
+            serde_json::from_str(&encoded).unwrap();
+        let project = &projects[0];
+        let restored = crate::project::Project::from_disk(
+            active.project,
+            project,
+            &decoded.project_overrides[&project.uuid],
+        );
+        assert_eq!(restored.display_alias.as_deref(), Some("개발"));
+        assert!(restored.rail_grouped_lanes.contains(&active.lane));
+        assert!(restored.is_collapsed);
+        assert_eq!(restored.name, original_name);
+        workspace.set_project_display_alias(active.project, Some("three".into()), cx);
+        assert_eq!(
+            workspace.active_project().unwrap().display_alias.as_deref(),
+            Some("개발")
+        );
+        workspace.set_project_display_alias(active.project, None, cx);
+        assert!(workspace.active_project().unwrap().display_alias.is_none());
+        workspace.set_lane_rail_grouped(active, false, cx);
+        assert!(
+            workspace
+                .active_project()
+                .unwrap()
+                .rail_grouped_lanes
+                .is_empty()
+        );
+    });
+}
+
+#[gpui::test]
+fn collapsed_group_indicator_uses_only_the_focused_pane(cx: &mut gpui::TestAppContext) {
+    use crate::workspace::tab_indicator::TabIndicator;
+    use daruda_agent::SessionStatus;
+    let root = std::env::temp_dir().join("daruda-rail-group-indicator");
+    let (_, workspace) = crate::workspace::tests::build_workspace_with(
+        cx,
+        &daruda_config::Config::default(),
+        Some(daruda_store::project::Project::from_path(root)),
+    );
+    workspace.update(cx, |workspace, cx| {
+        let group = workspace.add_group("Development".into(), None, cx);
+        workspace.move_project_to_group(workspace.active.project, Some(group), cx);
+        workspace.toggle_group_collapse(group, cx);
+        let mut snap = workspace.prepare_left_dock_snapshot(cx);
+        let focused = snap.focused_pane;
+        snap.rail_panes.insert(
+            snap.active,
+            vec![
+                super::PaneSnapshot {
+                    pane: focused,
+                    title: "focused".into(),
+                    status: Some(SessionStatus::Working),
+                    outcome: None,
+                },
+                super::PaneSnapshot {
+                    pane: focused + 1,
+                    title: "sibling".into(),
+                    status: Some(SessionStatus::Failed),
+                    outcome: None,
+                },
+            ],
+        );
+        assert_eq!(
+            super::groups::active_indicator(&snap.groups[0], &snap),
+            Some(TabIndicator::Working)
+        );
+        snap.focused_pane = focused + 1;
+        assert_eq!(
+            super::groups::active_indicator(&snap.groups[0], &snap),
+            Some(TabIndicator::Failed)
+        );
+        snap.projects[0].group_id = None;
+        assert_eq!(
+            super::groups::active_indicator(&snap.groups[0], &snap),
+            None
+        );
+    });
 }
 
 fn bounds(

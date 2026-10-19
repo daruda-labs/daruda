@@ -131,6 +131,13 @@ impl Workspace {
             project_overrides.insert(
                 project.uuid,
                 ProjectOverride {
+                    display_alias: project.display_alias.clone(),
+                    rail_grouped_lanes: project
+                        .rail_grouped_lanes
+                        .iter()
+                        .copied()
+                        .filter(|lane| project.lane(*lane).is_some())
+                        .collect(),
                     color: project.color.clone(),
                     tab_order: project.tab_order as usize,
                     group_id: project.group_id,
