@@ -1,7 +1,6 @@
 //! The flow runs this process is running, owned by [`RunsHost`] rather than
 //! by the window that started them: closing that window leaves a run going,
-//! and any window holding its worktree can still watch, answer and stop it
-//! (F6).
+//! and any window holding its worktree can still watch, answer and stop it.
 //!
 //! A run is keyed by its worktree, resolved, the unit its lock admits one run
 //! to. A window asks with its own spelling of a lane's folder — a symlinked
@@ -106,6 +105,9 @@ impl FlowRuns {
     /// `spelling` resolved, remembered. Also asked after a run ended and
     /// left the map, by the windows working out which of their lanes it was.
     fn resolve(&self, spelling: &Path) -> Option<CanonicalTree> {
+        // Read through `&App` every frame, hence the cell. The borrow cannot
+        // re-enter: it ends in this statement, and resolving only touches
+        // the filesystem, never the app.
         self.spellings
             .borrow_mut()
             .entry(spelling.to_path_buf())

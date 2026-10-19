@@ -49,46 +49,38 @@ impl RunColouring {
     }
 }
 
-/// Fold one event into the per-node states.
+/// Fold one event into the per-node states; `true` when a state changed.
 ///
 /// Pure so the projection is testable without a run: every rule here is a
 /// claim about what the engine's stream means, and getting one wrong leaves
 /// a node showing the wrong colour for the rest of the run.
-pub(crate) fn apply_run_event(states: &mut NodeRunStates, event: &FlowEvent) {
+pub(crate) fn apply_run_event(states: &mut NodeRunStates, event: &FlowEvent) -> bool {
+    let mut set =
+        |node: &NodeId, state: NodeRunState| states.insert(node.clone(), state) != Some(state);
     match event {
         // The node set comes from the file, which is already drawn. Seeding
         // from the run as well would make a file edited mid-run disagree with
         // itself, and the states default to `Pending` regardless.
-        FlowEvent::RunStarted { .. } => {}
+        FlowEvent::RunStarted { .. } => false,
         FlowEvent::NodeStarted { node, attempt } => {
-            states.insert(node.clone(), NodeRunState::Running { attempt: *attempt });
+            set(node, NodeRunState::Running { attempt: *attempt })
         }
-        FlowEvent::NodePassed { node, .. } => {
-            states.insert(node.clone(), NodeRunState::Passed);
-        }
-        FlowEvent::NodeFailed { node, .. } => {
-            states.insert(node.clone(), NodeRunState::Failed);
-        }
-        FlowEvent::FixStarted { gate } => {
-            states.insert(gate.clone(), NodeRunState::Fixing);
-        }
+        FlowEvent::NodePassed { node, .. } => set(node, NodeRunState::Passed),
+        FlowEvent::NodeFailed { node, .. } => set(node, NodeRunState::Failed),
+        FlowEvent::FixStarted { gate } => set(gate, NodeRunState::Fixing),
         // The fix is over but the gate has not re-run, so it is still the
         // failure it was — not a pass, and no longer fixing.
-        FlowEvent::FixEnded { gate, .. } => {
-            states.insert(gate.clone(), NodeRunState::Failed);
-        }
+        FlowEvent::FixEnded { gate, .. } => set(gate, NodeRunState::Failed),
         // The one transition a host cannot infer (`event.rs` says so): these
         // already passed, and are about to be derived again. Left alone they
         // would keep the colour of a result that no longer holds.
-        FlowEvent::Rerunning { members, .. } => {
-            for node in members {
-                states.insert(node.clone(), NodeRunState::Pending);
-            }
-        }
+        FlowEvent::Rerunning { members, .. } => members.iter().fold(false, |changed, node| {
+            set(node, NodeRunState::Pending) | changed
+        }),
         // A wait before the first node changes no node.
-        FlowEvent::Settling { .. } => {}
+        FlowEvent::Settling { .. } => false,
         // Whatever the last word on each node was, it stands.
-        FlowEvent::RunEnded { .. } => {}
+        FlowEvent::RunEnded { .. } => false,
     }
 }
 
@@ -96,7 +88,7 @@ pub(crate) fn apply_run_event(states: &mut NodeRunStates, event: &FlowEvent) {
 ///
 /// The stream says only what happened while a watcher listened: a resumed
 /// run never re-announces the nodes an earlier process passed, and a stopped
-/// attempt narrates nothing at all. The log is what settles both (F12).
+/// attempt narrates nothing at all. The log is what settles both.
 pub(crate) fn states_from_log(log: &FlowRunState) -> NodeRunStates {
     log.node_states()
         .map(|(id, node)| {

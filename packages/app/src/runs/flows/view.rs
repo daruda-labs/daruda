@@ -5,8 +5,8 @@
 //! Questions and progress are separate fields on purpose. Nodes running
 //! together ask independently and keep working while one waits, so a
 //! question is not a stage the run is in: an event from a sibling must never
-//! be able to take one down (F1). Only an answer, a stop, or the engine
-//! closing its reply channel does.
+//! be able to take one down, or its node waits on a reply nobody can send.
+//! Only an answer, a stop, or the engine closing its reply channel does.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -102,7 +102,7 @@ pub(crate) enum AnswerRefused {
     /// was answered. Nothing to tell anyone.
     NotOpen,
     /// The engine had already abandoned the question, so the answer reached
-    /// nobody (F13).
+    /// nobody; the person is told rather than shown an answer that landed.
     Closed,
 }
 
@@ -198,8 +198,7 @@ impl RunView {
     /// Fold one event in. Questions are untouched except for the ones the
     /// engine has already closed.
     pub(crate) fn advance(&mut self, event: &FlowEvent) -> Advanced {
-        let before = self.nodes.clone();
-        apply_run_event(&mut self.nodes, event);
+        let nodes_moved = apply_run_event(&mut self.nodes, event);
         let lull = match event {
             FlowEvent::Settling { .. } => Some(Lull::Settling),
             FlowEvent::NodeStarted { node, attempt } => Some(Lull::After {
@@ -217,7 +216,7 @@ impl RunView {
             self.lull = lull;
         }
         let pruned = self.prune_closed();
-        if self.nodes != before || lull_moved || pruned {
+        if nodes_moved || lull_moved || pruned {
             Advanced::Moved { left_setup }
         } else {
             Advanced::Nothing
@@ -264,10 +263,8 @@ impl RunView {
 
     /// Take every question down. Dropping the reply channels is what tells
     /// the engine nobody will answer them.
-    pub(crate) fn withdraw_questions(&mut self) -> bool {
-        let had = !self.questions.is_empty();
+    pub(crate) fn withdraw_questions(&mut self) {
         self.questions.clear();
-        had
     }
 
     /// What this run makes of the flow it is of, when it can name one.

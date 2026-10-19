@@ -63,8 +63,8 @@ fn questions_are_held_as_a_set() {
     assert_eq!(open_ids(&view), [1, 2]);
 }
 
-/// F1: a sibling's progress used to replace the stage holding the question,
-/// leaving its node parked on a reply nobody could send.
+/// A sibling's progress leaves the question standing; taking it down would
+/// leave its node parked on a reply nobody could send.
 #[test]
 fn a_sibling_event_never_drops_an_open_question() {
     let mut view = view();
@@ -105,8 +105,8 @@ fn answering_takes_down_only_the_question_it_names() {
     assert_eq!(open_ids(&view), [1]);
 }
 
-/// F13: the engine abandoned the question, so the answer reached nobody —
-/// and says so — and the question does not stay up.
+/// The engine abandoned the question, so the answer reaches nobody — and
+/// says so — and the question does not stay up.
 #[test]
 fn an_answer_to_an_abandoned_question_is_refused() {
     let mut view = view();
@@ -143,7 +143,7 @@ fn stopping_withdraws_every_question() {
     let (second, rx2) = ask(2, "build");
     view.park(first);
     view.park(second);
-    assert!(view.withdraw_questions());
+    view.withdraw_questions();
     assert!(open_ids(&view).is_empty());
     assert!(rx1.is_closed() && rx2.is_closed(), "the engine is released");
 }
@@ -183,7 +183,7 @@ fn every_node_under_way_is_running() {
     assert_eq!(view.running().len(), 1);
 }
 
-/// F12: the log's word replaces what the stream left behind — a stopped
+/// The log's word replaces what the stream left behind — a stopped
 /// node that was still drawn running, a carried node never re-announced.
 #[test]
 fn the_log_settles_every_node() {
