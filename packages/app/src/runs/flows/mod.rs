@@ -47,15 +47,22 @@ pub(crate) struct FlowRun {
     /// Read when the run ends, to say why it was canceled.
     overage: OverageStop,
     caller: Caller,
-    /// Seeded runs have no engine behind them.
-    thread: Option<std::thread::JoinHandle<()>>,
+    /// Disconnects when the run's thread returns, so a quit can block on
+    /// it with a deadline. Seeded runs have no engine behind them.
+    finished: Option<std::sync::mpsc::Receiver<std::convert::Infallible>>,
 }
 
 impl FlowRun {
-    fn has_ended(&self) -> bool {
-        self.thread
-            .as_ref()
-            .is_none_or(std::thread::JoinHandle::is_finished)
+    /// Whether the run's thread returned by `until`.
+    fn wait_ended(&self, until: std::time::Instant) -> bool {
+        let Some(finished) = &self.finished else {
+            return true;
+        };
+        let left = until.saturating_duration_since(std::time::Instant::now());
+        match finished.recv_timeout(left) {
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => true,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => false,
+        }
     }
 
     pub(crate) fn view(&self) -> &RunView {
@@ -125,22 +132,20 @@ impl FlowRuns {
         Ok(())
     }
 
-    /// Tell every run the app is quitting and wait, up to `deadline`, for
-    /// their threads to end their processes and drain their logs. `false`
-    /// when one was still going; the resume's orphan clean-up is the
-    /// backstop for what it leaves.
-    pub(super) fn shut_down(&self, deadline: std::time::Duration) -> bool {
+    /// Tell every run the app is quitting. Their threads end their
+    /// processes and drain their logs on their own; [`Self::wait_ended`]
+    /// waits for that.
+    fn shut_down(&self) {
         for run in self.runs.values() {
             run.cancel.shut_down();
         }
-        let until = std::time::Instant::now() + deadline;
-        while !self.runs.values().all(FlowRun::has_ended) {
-            if std::time::Instant::now() >= until {
-                return false;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-        true
+    }
+
+    /// Wait, until `until`, for every run's thread to return. `false` when
+    /// one was still going; the resume's orphan clean-up is the backstop for
+    /// what it leaves.
+    fn wait_ended(&self, until: std::time::Instant) -> bool {
+        self.runs.values().all(|run| run.wait_ended(until))
     }
 
     fn remove(&mut self, tree: &Path) -> Option<FlowRun> {
@@ -250,9 +255,13 @@ impl RunsHost {
             .map(|node| node.id.clone())
             .collect();
         let cancel = CancelToken::default();
-        let thread = {
+        let (finished_tx, finished) = std::sync::mpsc::channel();
+        {
             let cancel = cancel.clone();
             std::thread::spawn(move || {
+                // Dropped when this returns, panicking or not: the signal
+                // `wait_ended` blocks on.
+                let _finished = finished_tx;
                 let runners = runners(&request);
                 let report = daruda_flow::schedule::execute(&request, &runners, &cancel);
                 // A run refused before it started records nothing and only
@@ -262,14 +271,14 @@ impl RunsHost {
                     // SILENT-OK: a closed channel means the pump is gone.
                     let _ = events.try_send(RunNotice::Unrecorded(RunEnd::from(&report.outcome)));
                 }
-            })
-        };
+            });
+        }
         let run = FlowRun {
             view: RunView::new(run_dir.clone(), source, nodes_at_start),
             cancel,
             overage,
             caller: Caller::Desktop,
-            thread: Some(thread),
+            finished: Some(finished),
         };
         cx.update_global::<RunsHost, _>(|host, _| host.flows.insert(tree.clone(), run))?;
         Self::tell_windows(tree.clone(), FlowChanged::Repainted, cx);
@@ -292,10 +301,16 @@ impl RunsHost {
         })
     }
 
-    /// The app is quitting: every run ends what it started and stays
-    /// resumable. `false` when one was still going after `deadline`.
-    pub(crate) fn shut_down_flows(deadline: std::time::Duration, cx: &App) -> bool {
-        cx.global::<RunsHost>().flows.shut_down(deadline)
+    /// The app is quitting: tell every run to end what it started and stay
+    /// resumable. Returns at once; [`Self::wait_flows_ended`] waits.
+    pub(crate) fn shut_down_flows(cx: &App) {
+        cx.global::<RunsHost>().flows.shut_down();
+    }
+
+    /// Wait, until `until`, for every run told to shut down to end. `false`
+    /// when one was still going.
+    pub(crate) fn wait_flows_ended(until: std::time::Instant, cx: &App) -> bool {
+        cx.global::<RunsHost>().flows.wait_ended(until)
     }
 
     /// Stop the run in `worktree`. Its questions go with it: they belong to
@@ -439,7 +454,7 @@ impl RunsHost {
             cancel: CancelToken::default(),
             overage: OverageStop::default(),
             caller: Caller::Desktop,
-            thread: None,
+            finished: None,
         };
         // A seed lands on whatever a test left there: it stands in for
         // state, not for a start.

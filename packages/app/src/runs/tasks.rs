@@ -18,7 +18,8 @@ use gpui::{App, BorrowAppContext as _, Global};
 
 use super::{RunsEffects, TaskIntent};
 
-/// How long quitting waits for queued task commits to become durable.
+/// How long quitting waits, in all, for queued task commits to become
+/// durable and for flow runs to end their processes.
 const QUIT_FLUSH_DEADLINE: Duration = Duration::from_secs(2);
 
 /// The read-only task projection every window renders from. Only
@@ -342,20 +343,16 @@ impl RunsHost {
     }
 
     /// Wait for every queued task commit to become durable before quitting,
-    /// and for running flows to end what they started.
+    /// and for running flows to end what they started. Both share one
+    /// deadline: flows are told first, so their threads wind down while the
+    /// task log flushes, and the wait for them gets what time is left.
     pub(crate) fn install_quit_flush(cx: &mut App) {
         cx.on_app_quit(|cx| {
-            if !Self::shut_down_flows(QUIT_FLUSH_DEADLINE, cx) {
-                LogWriter::log(
-                    ErrorReport::new("A flow run was still ending its processes at quit")
-                        .severity(ErrorSeverity::Warning)
-                        .at(file!(), line!())
-                        .dedup("flows.quit_shutdown")
-                        .build(),
-                );
-            }
+            let until = std::time::Instant::now() + QUIT_FLUSH_DEADLINE;
+            Self::shut_down_flows(cx);
             if let Access::Writable(store) = &cx.global::<RunsHost>().access
-                && let Err(error) = store.flush(QUIT_FLUSH_DEADLINE)
+                && let Err(error) =
+                    store.flush(until.saturating_duration_since(std::time::Instant::now()))
             {
                 LogWriter::log(
                     ErrorReport::new("Task commits were still queued at quit")
@@ -363,6 +360,15 @@ impl RunsHost {
                         .from_error(&error)
                         .at(file!(), line!())
                         .dedup("tasks.quit_flush")
+                        .build(),
+                );
+            }
+            if !Self::wait_flows_ended(until, cx) {
+                LogWriter::log(
+                    ErrorReport::new("A flow run was still ending its processes at quit")
+                        .severity(ErrorSeverity::Warning)
+                        .at(file!(), line!())
+                        .dedup("flows.quit_shutdown")
                         .build(),
                 );
             }

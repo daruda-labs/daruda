@@ -957,7 +957,8 @@ async fn closing_the_window_that_started_a_run_keeps_it_stoppable(cx: &mut TestA
 }
 
 /// Quitting is not a Stop: the command the run started is ended, but the
-/// run records no ending, so it is left to resume like a crashed one.
+/// run records no ending, so it is left to resume like a crashed one. Driven
+/// through the app's own quit hook, which is the only production caller.
 #[cfg(unix)]
 #[gpui::test]
 async fn quitting_ends_a_runs_command_and_leaves_it_resumable(cx: &mut TestAppContext) {
@@ -969,6 +970,9 @@ nodes:
     run: \"echo $$ > quit.pid; sleep 30\"
 ";
     let (lane, ws, flow_path, wh) = workspace_with_a_flow(cx, RECORDS_ITS_PID);
+    cx.update(crate::runs::RunsHost::install_quit_flush);
+    // A real run: its log thread wakes the app from outside the scheduler.
+    cx.executor().allow_parking();
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             assert!(ws.run_flow_at(
@@ -1001,11 +1005,17 @@ nodes:
             .to_path_buf()
     });
 
-    let ended = cx.update(|cx| {
-        crate::runs::RunsHost::shut_down_flows(std::time::Duration::from_secs(10), cx)
-    });
+    let quit_at = std::time::Instant::now();
+    cx.quit();
+    assert!(
+        quit_at.elapsed() < std::time::Duration::from_secs(3),
+        "quitting waited past its deadline"
+    );
+    assert!(
+        cx.update(|cx| crate::runs::RunsHost::wait_flows_ended(std::time::Instant::now(), cx)),
+        "quit returned while the run's thread was still going"
+    );
 
-    assert!(ended, "the run was still going at quit");
     let pid = pid.expect("a pid");
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while daruda_core::process::is_alive(pid) && std::time::Instant::now() < deadline {

@@ -9,7 +9,7 @@ fn run_in(run_dir: &str) -> FlowRun {
         cancel: CancelToken::default(),
         overage: OverageStop::default(),
         caller: Caller::Desktop,
-        thread: None,
+        finished: None,
     }
 }
 
@@ -51,4 +51,21 @@ fn every_spelling_of_a_worktree_finds_its_run() {
     assert!(runs.get(links.path()).is_none());
     assert!(runs.remove(key.as_path()).is_some());
     assert!(runs.get(&link).is_none());
+}
+
+/// A quit waits for a run's thread with the time it has left and no longer:
+/// a thread still going reads as not ended once the deadline passes, and one
+/// that returned reads as ended at once.
+#[test]
+fn waiting_for_a_run_ends_at_its_thread_or_its_deadline() {
+    let (finished_tx, finished) = std::sync::mpsc::channel();
+    let run = FlowRun {
+        finished: Some(finished),
+        ..run_in("/run")
+    };
+    let now = std::time::Instant::now();
+    assert!(!run.wait_ended(now + std::time::Duration::from_millis(20)));
+    let thread = std::thread::spawn(move || drop(finished_tx));
+    thread.join().expect("the thread returned");
+    assert!(run.wait_ended(std::time::Instant::now()));
 }
