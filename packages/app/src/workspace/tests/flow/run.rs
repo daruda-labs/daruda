@@ -1217,16 +1217,13 @@ async fn the_run_button_on_a_row_does_not_also_open_the_graph(cx: &mut TestAppCo
 /// view is checked against its log when it starts.
 #[gpui::test]
 async fn a_resumed_run_colours_carried_nodes_from_the_log(cx: &mut TestAppContext) {
-    let gate = tempfile::tempdir().expect("tempdir");
-    let go = gate.path().join("go");
-    std::fs::write(&go, "").expect("go");
     // `slow` is quick the first time; on the resume it waits, which is the
-    // window this test reads the run in.
-    let flow = format!(
-        "version: 1\nnodes:\n  - id: carried\n    kind: command\n    run: \"true\"\n  - id: slow\n    kind: command\n    deps: [carried]\n    run: \"test -f {} || sleep 30\"\n",
-        go.display()
-    );
-    let (lane, ws, flow_path, wh) = workspace_with_a_flow(cx, &flow);
+    // window this test reads the run in. The gate is named relative to the
+    // command's cwd: a Windows path breaks both the YAML quoting and `sh`.
+    const FLOW: &str = "version: 1\nnodes:\n  - id: carried\n    kind: command\n    run: \"true\"\n  - id: slow\n    kind: command\n    deps: [carried]\n    run: \"test -f go || sleep 30\"\n";
+    let (lane, ws, flow_path, wh) = workspace_with_a_flow(cx, FLOW);
+    let go = lane.path().join("go");
+    std::fs::write(&go, "").expect("go");
     // A real run: its log thread wakes the app from outside the scheduler,
     // so the opt-out has to come before the run starts.
     cx.executor().allow_parking();
@@ -1262,10 +1259,18 @@ async fn a_resumed_run_colours_carried_nodes_from_the_log(cx: &mut TestAppContex
         .lines()
         .position(|line| line.contains("\"attempt_passed\"") && line.contains("\"carried\""))
         .expect("`carried` passed");
+    // Dated a minute back, as a crash someone returns to: a resume right
+    // after the last record waits out the engine's settle window for the
+    // dead run's orphans, which would outlast this test's patience.
     let kept: String = text
         .lines()
         .take(cut + 1)
-        .map(|line| format!("{line}\n"))
+        .map(|line| {
+            let mut record: serde_json::Value = serde_json::from_str(line).expect("a record");
+            let at_ms = record["at_ms"].as_u64().expect("a record's time");
+            record["at_ms"] = (at_ms - 60_000).into();
+            format!("{record}\n")
+        })
         .collect();
     std::fs::write(&log, kept).expect("cut the log");
     // The marker is written after the end is recorded, so a crash leaves
