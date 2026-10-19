@@ -52,6 +52,10 @@ pub fn is_resumable(status: RunStatus) -> bool {
 
 /// What a resumed run starts from, as read before its lock.
 pub struct Resumed {
+    /// Original reused nodes, for describing the run without applying pins again.
+    pub pinned: Vec<NodeId>,
+    /// The original starter, absent in legacy logs.
+    pub started_by: Option<crate::request::StartedBy>,
     /// The flow as the earlier process resolved it, read back from
     /// `run.yaml`.
     pub loaded: LoadedFlow,
@@ -65,15 +69,18 @@ impl Resumed {
     pub fn continuation(&self) -> Continuation {
         Continuation {
             until: self.until.clone(),
+            pinned: self.pinned.clone(),
             settle: SETTLE_AFTER_CRASH,
         }
     }
 }
 
 /// The part of a run fixed when it started, which a request to continue it
-/// needs before its lock: which nodes it reaches.
+/// needs before its lock: selection and original reuse intent.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Continuation {
+    /// Original reused nodes; scheduling replays their progress under the lock.
+    pub pinned: Vec<NodeId>,
     pub until: Option<NodeId>,
     /// [`SETTLE_AFTER_CRASH`] outside the tests, which resume at once.
     pub(crate) settle: Duration,
@@ -144,7 +151,10 @@ pub fn prepare(
     // `run.yaml` deliberately carries no profile list to choose from. The
     // name the run went by comes back from its record instead.
     let loaded = crate::load::load(&text, None).map_err(ResumeError::Load)?;
+    let replay = reader::read(run_dir);
     Ok(Resumed {
+        pinned: replay.pinned,
+        started_by: replay.started_by,
         loaded,
         until: reader::selection(run_dir),
     })

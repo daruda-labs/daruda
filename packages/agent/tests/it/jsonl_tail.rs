@@ -59,3 +59,24 @@ fn missing_file_returns_error() {
     let err = read_last_n_lines(&p, 10).unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
 }
+
+#[test]
+fn huge_lines_do_not_hide_earlier_complete_lines() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("huge.jsonl");
+    let huge = "가".repeat(400_000);
+    std::fs::write(&path, format!("{huge}\nanswer\n{huge}\n")).unwrap();
+    assert_eq!(read_last_n_lines(&path, 2).unwrap(), vec!["answer", &huge]);
+    assert_eq!(read_last_n_lines(&path, 0).unwrap(), Vec::<String>::new());
+}
+
+#[test]
+fn invalid_utf8_is_an_error_instead_of_a_valid_prefix() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("invalid.jsonl");
+    std::fs::write(&path, b"valid\n\xff\n").unwrap();
+    assert_eq!(
+        read_last_n_lines(path, 10).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidData
+    );
+}

@@ -18,7 +18,7 @@ mod tests;
 pub(crate) use auth::TokenGate;
 pub(crate) use files::{Runtime, runtime_path};
 pub(crate) use frame::MAX_FRAME_BYTES;
-pub(crate) use server::{Inbound, Server};
+pub(crate) use server::{Inbound, Outgoing, Server};
 
 // Reached from outside this module only by tests: a fixture standing in for a
 // live surface, and the shim's round-trip against a real socket.
@@ -49,3 +49,6 @@ impl std::fmt::Display for SocketError {
         }
     }
 }
+
+#[cfg(test)]
+mod wait_tests;

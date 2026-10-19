@@ -11,11 +11,15 @@ use crate::run_log::line::{EndLine, FailureLine};
 pub(super) fn apply(state: &mut FlowRunState, event: &E) {
     match event {
         E::RunStarted {
+            started_by,
             nodes,
             until,
             pinned,
             profile,
-        } => start(state, nodes, until.clone(), pinned.clone(), profile.clone()),
+        } => {
+            start(state, nodes, until.clone(), pinned.clone(), profile.clone());
+            state.start.started_by = *started_by;
+        }
         E::Imported(imported) => import(state, imported),
         E::Resumed { .. } => {
             for node in state.nodes.values_mut() {
@@ -158,6 +162,7 @@ fn start(
         passed(state, pin, AttemptState::Pinned);
     }
     state.start = StartFacts {
+        started_by: None,
         order: nodes.iter().map(|node| node.id.clone()).collect(),
         until,
         pinned,

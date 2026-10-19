@@ -11,8 +11,8 @@ mod event;
 mod lifecycle;
 mod rejected;
 
-pub use book::{TaskRecord, TaskSpec, TasksBook};
-pub use event::{EventKind, SettleOutcome, StopCause, TaskEdit, TaskEvent, TodoItem};
+pub use book::{EndedExecution, ExecutionDescription, TaskRecord, TaskSpec, TasksBook};
+pub use event::{EventKind, SettleOutcome, StartedBy, StopCause, TaskEdit, TaskEvent, TodoItem};
 pub use lifecycle::{
     ErrorCause, InterruptCause, Lifecycle, LifecycleKind, StartFailure, UndeliveredReason,
 };
@@ -28,7 +28,7 @@ impl daruda_runlog::Machine for TaskMachine {
     type Rejected = TaskRejected;
     // Bump with any change to how `TaskEvent` or `TasksBook` serializes, so an older
     // build refuses the log as too new.
-    const SCHEMA: u32 = 1;
+    const SCHEMA: u32 = 4;
 
     fn check(state: &TasksBook, event: &TaskEvent) -> Result<(), TaskRejected> {
         check::check(state, event)

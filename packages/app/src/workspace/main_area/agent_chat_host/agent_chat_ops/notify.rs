@@ -138,10 +138,16 @@ impl Workspace {
                 },
             },
         };
-        self.settle_agent_chat_task(pane_id, settled, cx);
+        let result = matches!(outcome, TurnOutcome::Completed)
+            .then(|| self.control_read(pane_id, cx).ok().flatten())
+            .flatten();
+        self.settle_agent_chat_task(pane_id, settled, result, cx);
         // Last, because handing `outcome` on moves it — the matches above
         // bind nothing and so only read it.
         self.answer_waiting_ask(pane_id, outcome, cx);
+        if self.is_orchestrator_pane(pane_id) {
+            crate::control::notices::schedule(cx);
+        }
     }
 
     /// Answer a `daruda_chat_ask` waiting on this pane, if one is.

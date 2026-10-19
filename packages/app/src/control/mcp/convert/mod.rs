@@ -56,6 +56,13 @@ impl ConvertError {
 /// entry points, so the conversion is where they part.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Command {
+    RunWait {
+        handles: Option<Vec<String>>,
+        timeout: u64,
+    },
+    RunStatus {
+        handles: Option<Vec<String>>,
+    },
     Immediate(ResolvedCommand),
     /// Runs at once but answers later: the reply is the turn it starts, or
     /// the task change it writes. Not `Gated` — nobody is asked, so nothing
@@ -71,6 +78,20 @@ pub(crate) enum Command {
 /// MCP has no notion of a strict schema.
 pub(crate) fn to_command(id: ToolId, args: &Value) -> Result<Command, ConvertError> {
     let command = match id {
+        ToolId::RunWait => {
+            let timeout = args
+                .get("timeout")
+                .ok_or(ConvertError::MissingArgument { name: "timeout" })?
+                .as_u64()
+                .ok_or(ConvertError::BadArgument { name: "timeout" })?;
+            Command::RunWait {
+                handles: handles_arg(args)?,
+                timeout,
+            }
+        }
+        ToolId::RunStatus => Command::RunStatus {
+            handles: handles_arg(args)?,
+        },
         ToolId::ChatList => Command::Immediate(ResolvedCommand::List),
         ToolId::Status => Command::Immediate(ResolvedCommand::Brief),
         ToolId::LaneList => Command::Immediate(ResolvedCommand::LaneList),
@@ -94,6 +115,7 @@ pub(crate) fn to_command(id: ToolId, args: &Value) -> Result<Command, ConvertErr
             text: string_arg(args, "text")?,
         }),
         ToolId::FlowStop => Command::Immediate(ResolvedCommand::Flow(ResolvedFlowCommand::Stop {
+            run: optional_flow_handle(args)?,
             lane: lane_arg(args, "worktree")?,
         })),
         ToolId::LaneCreate => Command::Gated(GatedCommand::LaneCreate {
@@ -168,7 +190,7 @@ pub(crate) fn unknown_tool_result(name: &str) -> Value {
 /// `structuredContent` is what a client parses; the text block is the same
 /// object serialized, which is what the spec asks a structured result to also
 /// return and what a client with no structured support renders.
-fn tool_result(is_error: bool, payload: Value) -> Value {
+pub(super) fn tool_result(is_error: bool, payload: Value) -> Value {
     serde_json::json!({
         "content": [{ "type": "text", "text": payload.to_string() }],
         "structuredContent": payload,
@@ -234,5 +256,35 @@ fn uuid_arg(
         .map_err(|_| ConvertError::BadArgument { name })
 }
 
+/// A stop may guard against a stale execution, but never targets a task.
+fn optional_flow_handle(
+    args: &Value,
+) -> Result<Option<daruda_control_types::runs::RunHandle>, ConvertError> {
+    optional_string_arg(args, "run")?
+        .map(|value| match value.parse() {
+            Ok(handle @ daruda_control_types::runs::RunHandle::Flow { .. }) => Ok(handle),
+            _ => Err(ConvertError::BadArgument { name: "run" }),
+        })
+        .transpose()
+}
+
 #[cfg(test)]
 mod tests;
+
+fn handles_arg(args: &Value) -> Result<Option<Vec<String>>, ConvertError> {
+    match args.get("handles") {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => value
+            .as_array()
+            .ok_or(ConvertError::BadArgument { name: "handles" })?
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .map(str::to_owned)
+                    .ok_or(ConvertError::BadArgument { name: "handles" })
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(Some),
+    }
+}

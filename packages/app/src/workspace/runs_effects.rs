@@ -19,6 +19,32 @@ impl Workspace {
 struct WorkspaceEffects;
 
 impl RunsEffects for WorkspaceEffects {
+    fn run_event(&self, event: crate::runs::watch::RunEvent, cx: &mut App) {
+        crate::control::notices::enqueue(event, cx);
+    }
+
+    fn locate_flow_run(
+        &self,
+        run_id: &str,
+        cx: &mut App,
+    ) -> Option<crate::runs::result::FlowRunLocation> {
+        let mut found = None;
+        WindowRegistry::for_each_workspace(cx, |ws, _window, _cx| {
+            if found.is_none() {
+                found = ws.projects.lanes().find_map(|(_, _, lane)| {
+                    let run_dir = super::flow_paths::runs_dir(&lane.path).join(run_id);
+                    run_dir
+                        .exists()
+                        .then(|| crate::runs::result::FlowRunLocation {
+                            run_dir,
+                            lock_dir: super::flow_paths::lane_lock_dir(&ws.lock_root, &lane.path),
+                        })
+                });
+            }
+        });
+        found
+    }
+
     fn flow_changed(&self, change: &crate::runs::FlowChange, cx: &mut App) {
         crate::workspace::flow_events::deliver_flow_change(change, cx);
     }

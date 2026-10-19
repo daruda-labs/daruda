@@ -3,60 +3,50 @@
 //! Ported from c9watch (`src-tauri/src/session/parser.rs:255-303`,
 //! MIT — see `LICENSE-THIRD-PARTY.md`).
 //!
-//! Strategy:
-//! - Empty file → `Ok(vec![])`.
-//! - Files under 10 KB → read normally (the linewise iterator is
-//!   already efficient at that size).
-//! - Larger files → seek to `file_size - chunk_size` and read forward.
-//!   `chunk_size` defaults to `n * 2 KB`; the caller asks for `n=20`
-//!   and the average JSONL line is well under 1 KB, so 40 KB lookback
-//!   is plenty.
+//! Seek backward until enough complete lines are available; tool results can
+//! occupy megabytes on one line, so byte estimates cannot bound the lookback.
 
 use std::fs::File;
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
-const SMALL_FILE_BYTES: u64 = 10_000;
-const BYTES_PER_LINE_ESTIMATE: usize = 1024;
-const SEEK_BUFFER_FACTOR: usize = 2;
+const READ_CHUNK_BYTES: u64 = 64 * 1024;
 
-/// Read the last `n` non-blank lines from `path`. Missing or
-/// unreadable files return an `io::Error`.
+/// Read the last `n` non-blank lines. I/O and invalid UTF-8 fail the whole read.
 pub fn read_last_n_lines<P: AsRef<Path>>(path: P, n: usize) -> Result<Vec<String>, std::io::Error> {
-    let file = File::open(path.as_ref())?;
-    let metadata = file.metadata()?;
-    let file_size = metadata.len();
-
-    if file_size == 0 {
+    if n == 0 {
         return Ok(Vec::new());
     }
-
-    if file_size < SMALL_FILE_BYTES {
-        let reader = BufReader::new(file);
-        let lines: Vec<String> = reader
+    let mut file = File::open(path.as_ref())?;
+    let size = file.metadata()?.len();
+    let mut lookback = READ_CHUNK_BYTES.min(size);
+    loop {
+        let start = size - lookback;
+        file.seek(SeekFrom::Start(start))?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+        // A seek can split UTF-8 or JSON; discard only that incomplete line.
+        let complete = if start == 0 {
+            bytes.as_slice()
+        } else if let Some(newline) = bytes.iter().position(|byte| *byte == b'\n') {
+            &bytes[newline + 1..]
+        } else {
+            &[]
+        };
+        let text = std::str::from_utf8(complete)
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+        let lines: Vec<_> = text
             .lines()
-            .map_while(Result::ok)
             .filter(|line| !line.trim().is_empty())
             .collect();
-        let start = lines.len().saturating_sub(n);
-        return Ok(lines[start..].to_vec());
+        if start == 0 || lines.len() >= n {
+            return Ok(lines[lines.len().saturating_sub(n)..]
+                .iter()
+                .map(|line| (*line).to_owned())
+                .collect());
+        }
+        lookback = lookback.saturating_mul(2).min(size);
     }
-
-    let chunk_size = (n
-        .saturating_mul(BYTES_PER_LINE_ESTIMATE)
-        .saturating_mul(SEEK_BUFFER_FACTOR)) as u64;
-    let chunk_size = chunk_size.min(file_size);
-    let mut file = file;
-    file.seek(SeekFrom::End(-(chunk_size as i64)))?;
-
-    let reader = BufReader::new(file);
-    let lines: Vec<String> = reader
-        .lines()
-        .map_while(Result::ok)
-        .filter(|line| !line.trim().is_empty())
-        .collect();
-    let start = lines.len().saturating_sub(n);
-    Ok(lines[start..].to_vec())
 }
 
 #[cfg(test)]
@@ -78,7 +68,7 @@ mod tests {
         drop(f);
 
         let size = std::fs::metadata(&p).unwrap().len();
-        assert!(size >= SMALL_FILE_BYTES, "test fixture should be large");
+        assert!(size >= 10_000, "test fixture should be large");
 
         let lines = read_last_n_lines(&p, 5).unwrap();
         assert_eq!(lines.len(), 5);

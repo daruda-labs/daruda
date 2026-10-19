@@ -93,6 +93,7 @@ pub(crate) fn run(id: &str, run: &SeedRun, end: SeedEnd) -> Vec<TaskEvent> {
     let at = |n: i64| -> DateTime<Utc> { Utc::now() + chrono::Duration::milliseconds(n) };
     let exec = run.exec(id);
     let mut events = vec![TaskEvent::DispatchRequested {
+        started_by: None,
         id: id.to_owned(),
         execution_id: run.execution_id.clone(),
         source: match &run.source {
@@ -179,6 +180,7 @@ pub(crate) fn run(id: &str, run: &SeedRun, end: SeedEnd) -> Vec<TaskEvent> {
             }),
     );
     let settle = |outcome| TaskEvent::Settled {
+        result: None,
         exec: exec.clone(),
         outcome,
         at: at(4),
@@ -218,6 +220,10 @@ pub(crate) fn record(
 ) -> daruda_store::tasks::TaskRecord {
     let spec = TaskSpec::new(project, title.into(), String::new(), None, Utc::now());
     daruda_store::tasks::TaskRecord {
+        description: None,
+        started_by: None,
+        started_at: None,
+        ended_executions: Vec::new(),
         spec,
         lifecycle,
         execution: None,

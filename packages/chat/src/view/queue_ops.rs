@@ -103,6 +103,15 @@ impl AgentChatView {
         self.send_prompt_text_inner(text, PromptOrigin::InApp, None, cx)
     }
 
+    /// Append a literal host notice without consuming a composer's queued edit.
+    pub fn send_internal_prompt_text(
+        &mut self,
+        text: String,
+        cx: &mut Context<Self>,
+    ) -> PromptDispatch {
+        self.send_prompt_text_inner(text, PromptOrigin::Internal, None, cx)
+    }
+
     /// Send `text` on behalf of the task run `task`. Behaves as
     /// [`Self::send_prompt_text`], and additionally reports
     /// [`AgentChatEvent::PromptSent`] when the prompt reaches the wire or
@@ -182,6 +191,7 @@ impl AgentChatView {
         let ready = matches!(self.status, AgentSessionStatus::Connected)
             && self.live_handle().is_some()
             && self.queue.turn.can_dispatch()
+            && (origin != PromptOrigin::Internal || self.queued_prompt_count() == 0)
             && attachments
                 .iter()
                 .all(|attachment| attachment.supported_by(self.session_capabilities));

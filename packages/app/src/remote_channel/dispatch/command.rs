@@ -37,6 +37,7 @@ pub(crate) fn run_command(
                         destination,
                         connecting,
                     },
+                    crate::control::exec::CommandOrigin::Phone,
                     cx,
                 );
                 // Its answer arrives as a bystander ping, so asking is what
@@ -59,6 +60,7 @@ pub(crate) fn run_command(
                     crate::control::spec::ResolvedCommand::Flow(
                         crate::control::spec::ResolvedFlowCommand::Run { name, lane },
                     ),
+                    crate::control::exec::CommandOrigin::Phone,
                     cx,
                 )
             })(),
@@ -70,6 +72,7 @@ pub(crate) fn run_command(
         command::Resolution::StopTask(task) => {
             let started = crate::control::exec::run_waiting(
                 crate::control::spec::ResolvedCommand::TaskStop { task },
+                crate::control::exec::CommandOrigin::Phone,
                 cx,
             );
             let deferred = match started {
@@ -86,9 +89,10 @@ pub(crate) fn run_command(
             }));
         }
         command::Resolution::OpenTask(task) => (crate::control::exec::open_task(task, cx), None),
-        command::Resolution::Run(resolved, addressed) => {
-            (crate::control::exec::run(resolved, cx), addressed)
-        }
+        command::Resolution::Run(resolved, addressed) => (
+            crate::control::exec::run(resolved, crate::control::exec::CommandOrigin::Phone, cx),
+            addressed,
+        ),
     };
     render_reply(&outcome, addressed, target, cx).map_or(super::Effect::None, super::Effect::Reply)
 }
@@ -108,7 +112,11 @@ fn render_reply(
 /// git and the agent are up, the outcome follows as its own message — a
 /// chat announced as the new target, or a notice.
 fn start_task(task: String, cx: &mut App) -> ControlOutcome {
-    let pending = crate::control::exec::begin_task_start(task, cx)?;
+    let pending = crate::control::exec::begin_task_start(
+        task,
+        crate::control::exec::CommandOrigin::Phone,
+        cx,
+    )?;
     if let Some(outcome) = pending.try_finish(cx) {
         return outcome;
     }

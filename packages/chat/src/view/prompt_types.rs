@@ -13,13 +13,14 @@ impl std::fmt::Display for PromptId {
     }
 }
 
-/// Where a prompt came from — the bottom-dock composer, or a phone-relayed
-/// Telegram reply. Only the latter arms the Telegram first-response watch on
-/// dispatch; an in-app prompt never does.
+/// Where a prompt came from: the composer, a phone relay, or a host notice.
+/// Only Telegram arms the phone first-response watch when dispatched.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PromptOrigin {
     InApp,
     Telegram,
+    /// Host-generated literal prompt; preserves composer edits and queue order.
+    Internal,
 }
 
 /// Whether a send put the prompt on the wire immediately or only queued it

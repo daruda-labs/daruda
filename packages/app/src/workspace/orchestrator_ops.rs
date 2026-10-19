@@ -142,6 +142,7 @@ impl Workspace {
             account,
             agent_id: content.agent_id,
         });
+        crate::control::notices::schedule(cx);
         cx.notify();
         pane.id
     }

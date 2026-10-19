@@ -124,6 +124,7 @@ pub(crate) struct RunsHost {
     pub(super) effects: Option<Rc<dyn RunsEffects>>,
     /// The flow runs in flight; they belong to the process, not to a log.
     pub(super) flows: super::flows::FlowRuns,
+    pub(super) watch: super::watch::RunWatch,
     /// Closes once the newest proposal has reached the projection; the next
     /// proposal waits on it, so projections apply in proposal order.
     tail: smol::channel::Receiver<()>,
@@ -168,6 +169,23 @@ impl RunsHost {
                 return OpenedRuns::unavailable();
             }
         };
+        let carried = store
+            .current()
+            .ok()
+            .map(|(_, book)| {
+                book.records()
+                    .filter(|record| {
+                        !record.lifecycle.is_terminal()
+                            && matches!(
+                                record.started_by,
+                                Some(daruda_store::tasks::machine::StartedBy::Orchestrator)
+                            )
+                    })
+                    .filter_map(|record| record.current_exec().cloned())
+                    .map(super::result::RunKey::Task)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         let access = match reconcile(&store) {
             Ok(()) => Access::Writable(store.clone()),
             Err(cause) => Access::ReadOnly {
@@ -189,6 +207,17 @@ impl RunsHost {
                 return OpenedRuns::unavailable();
             }
         };
+        let mut watch = super::watch::RunWatch::default();
+        for key in carried {
+            watch.register(key);
+        }
+        for record in projection.records() {
+            for ended in &record.ended_executions {
+                if let Some(snapshot) = super::result::task_snapshot(record, &ended.exec) {
+                    watch.retain(snapshot);
+                }
+            }
+        }
         OpenedRuns {
             host: RunsHost {
                 access,
@@ -196,6 +225,7 @@ impl RunsHost {
                 cli: None,
                 effects: None,
                 flows: Default::default(),
+                watch,
                 tail: settled_tail(),
                 #[cfg(any(test, feature = "screenshot"))]
                 _scratch: None,
@@ -207,7 +237,22 @@ impl RunsHost {
     }
 
     pub(crate) fn install_effects(effects: Rc<dyn RunsEffects>, cx: &mut App) {
-        cx.update_global::<Self, _>(|host, _| host.effects = Some(effects));
+        let (sender, events) = smol::channel::unbounded();
+        cx.update_global::<Self, _>(|host, _| {
+            host.effects = Some(effects);
+            host.watch.event_sender = Some(sender);
+        });
+        cx.spawn(async move |cx| {
+            while let Ok(event) = events.recv().await {
+                cx.update(|cx| {
+                    let effects = cx.global::<Self>().effects.clone();
+                    if let Some(effects) = effects {
+                        effects.run_event(event, cx);
+                    }
+                });
+            }
+        })
+        .detach();
     }
 
     pub(crate) fn task(
@@ -382,10 +427,15 @@ impl RunsHost {
     /// the process, not to the task log being swapped.
     pub(crate) fn install(mut opened: OpenedRuns, cx: &mut App) {
         if cx.try_global::<RunsHost>().is_some() {
-            let (flows, effects) = cx.update_global::<RunsHost, _>(|host, _| {
-                (std::mem::take(&mut host.flows), host.effects.take())
+            let (flows, effects, watch) = cx.update_global::<RunsHost, _>(|host, _| {
+                (
+                    std::mem::take(&mut host.flows),
+                    host.effects.take(),
+                    std::mem::take(&mut host.watch),
+                )
             });
             opened.host.flows = flows;
+            opened.host.watch = watch;
             opened.host.effects = opened.host.effects.take().or(effects);
         }
         cx.set_global(opened.projection);
@@ -493,6 +543,7 @@ impl OpenedRuns {
                 cli: None,
                 effects: None,
                 flows: Default::default(),
+                watch: Default::default(),
                 tail: settled_tail(),
                 #[cfg(any(test, feature = "screenshot"))]
                 _scratch: None,
@@ -643,6 +694,15 @@ fn apply_projection(seq: u64, state: TasksBook, cx: &mut App) {
     if !newer {
         return;
     }
+    cx.update_global::<RunsHost, _>(|host, _| {
+        for record in state.records() {
+            for ended in &record.ended_executions {
+                if let Some(snapshot) = super::result::task_snapshot(record, &ended.exec) {
+                    host.watch.retain(snapshot);
+                }
+            }
+        }
+    });
     // `update_global` wakes each Workspace's `observe_global`, which
     // notifies that workspace alone.
     cx.update_global::<GlobalTasks, _>(|projection, _| {

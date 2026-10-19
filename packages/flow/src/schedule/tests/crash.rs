@@ -71,6 +71,7 @@ pub(super) fn process_asking<B: LogBackend + Send + 'static>(
         RunPhase::Ended(_) => return Process::AlreadyEnded,
         RunPhase::Fresh => FlowRunStore::spawn(log, &run_dir, None).and_then(|store| {
             let started = FlowRunEvent::RunStarted {
+                started_by: None,
                 nodes: crate::run_log::node_starts(loaded),
                 until: None,
                 pinned: Vec::new(),

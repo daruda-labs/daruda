@@ -553,6 +553,7 @@ mod tests {
         let mut log = crate::run_log::store::open_file_log(run_dir)
             .unwrap_or_else(|e| panic!("the log opens: {e:?}"));
         log.commit(crate::run_log::machine::FlowRunEvent::RunStarted {
+            started_by: None,
             nodes: Vec::new(),
             until: None,
             pinned: Vec::new(),

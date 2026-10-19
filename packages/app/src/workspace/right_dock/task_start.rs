@@ -12,8 +12,8 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::tasks::machine::StartFailure;
 use daruda_store::tasks::{
-    CliProcessState, ExecutionRef, Lifecycle, TaskAgentSurface, TaskEvent, TaskExecutionSource,
-    TaskRecord, TaskRunIn,
+    CliProcessState, ExecutionRef, Lifecycle, StartedBy, TaskAgentSurface, TaskEvent,
+    TaskExecutionSource, TaskRecord, TaskRunIn,
 };
 use gpui::{App, Context, Window};
 
@@ -64,6 +64,8 @@ pub(crate) enum TaskStartError {
 /// Where an accepted start handed the task's prompt to a pane.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TaskStarted {
+    /// Identity captured by the start, even if the task has since run again.
+    pub(crate) exec: ExecutionRef,
     pub(crate) worktree: PathBuf,
     pub(crate) pane: PaneId,
     pub(crate) surface: TaskAgentSurface,
@@ -181,7 +183,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        drop(self.begin_task_start(task_id, window, cx));
+        drop(self.begin_task_start(task_id, StartedBy::Desktop, window, cx));
     }
 
     /// Start a Backlog task: record the start, open the lane (`git worktree
@@ -196,6 +198,7 @@ impl Workspace {
     pub(crate) fn begin_task_start(
         &mut self,
         task_id: &str,
+        started_by: StartedBy,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> smol::channel::Receiver<TaskStartOutcome> {
@@ -209,7 +212,7 @@ impl Workspace {
             return rx;
         }
         if RunsHost::settled(cx) {
-            if let Err(e) = self.start_task_into(task_id, answer.clone(), window, cx) {
+            if let Err(e) = self.start_task_into(task_id, started_by, answer.clone(), window, cx) {
                 self.finish_task_start(Err(e), None, &answer, cx);
             }
             return rx;
@@ -219,7 +222,7 @@ impl Workspace {
         cx.spawn_in(window, async move |ws, cx| {
             barrier.await;
             let entered = ws.update_in(cx, |ws, window, cx| {
-                if let Err(e) = ws.start_task_into(&id, answer.clone(), window, cx) {
+                if let Err(e) = ws.start_task_into(&id, started_by, answer.clone(), window, cx) {
                     ws.finish_task_start(Err(e), None, &answer, cx);
                 }
             });
@@ -260,6 +263,7 @@ impl Workspace {
     fn start_task_into(
         &mut self,
         task_id: &str,
+        started_by: StartedBy,
         answer: Answer,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -287,6 +291,7 @@ impl Workspace {
             crate::runs::TaskIntent::Start {
                 exec: exec.clone(),
                 source: source_for(task.spec.agent_surface),
+                started_by,
             },
             cx,
         );
@@ -441,6 +446,7 @@ impl Workspace {
                                 )?;
                                 Ok((
                                     TaskStarted {
+                                        exec: exec.clone(),
                                         worktree: plan.new_path.clone(),
                                         pane,
                                         surface,

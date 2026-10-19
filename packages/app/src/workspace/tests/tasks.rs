@@ -511,7 +511,8 @@ fn a_task_starts_in_its_own_project_while_another_is_active(cx: &mut TestAppCont
                     &task.branch_name,
                 );
                 let id = crate::runs::seed::task(task, None, cx);
-                let rx = ws.begin_task_start(&id, window, cx);
+                let rx =
+                    ws.begin_task_start(&id, daruda_store::tasks::StartedBy::Desktop, window, cx);
                 assert!(rx.try_recv().is_err(), "git has yet to run");
                 (id, expected, rx)
             })

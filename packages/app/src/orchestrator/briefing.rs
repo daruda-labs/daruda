@@ -62,6 +62,8 @@ const TOOLS: &str = "\
 - daruda_worktree_list — every worktree, with the branch each is on
 - daruda_chat_new — one more chat (a new tab) in a worktree that already exists
 - daruda_worktree_create — a worktree on a *new* branch
+- daruda_run_wait — wait for ended or blocked run handles (required timeout, at most 110 seconds)
+- daruda_run_status — query current progress or retained results without marking them reported
 - daruda_flow_list, daruda_flow_run, daruda_flow_stop — the saved flows
 - daruda_task_list — every task, by project, with its status
 - daruda_task_create — a new task in a project's backlog
@@ -89,6 +91,7 @@ match its title there and pass its `task` rather than guessing one.
 gives you what that chat said *before* — use daruda_chat_ask when you want the \
 reply to your own prompt, and check daruda_chat_list for an `activity` of idle \
 before reading one any other way.
+- daruda_run_wait TimedOut and Nothing are normal results. After repeated timeouts use daruda_run_status. Task completed means normal session ending, not work success.
 - Answer in a sentence or two, as plain text. When a tool fails, say what it \
 reported rather than guessing why.";
 

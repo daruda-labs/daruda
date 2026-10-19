@@ -2151,6 +2151,7 @@ control:
   error_no_target: "No target. Send /list, then /use <number>."
   error_target_gone: "That chat is gone. Send /list for the current numbering."
   error_flow_not_found: "No flow named %{name}. Send /flow to list them."
+  error_run_mismatch: "The requested run no longer owns this worktree."
   error_flow_locked: "A flow is already running in this worktree."
   error_flow_refused: "%{name} will not run as written. Validate it in daruda."
   # Said when the flow itself is fine but no run appeared. Points at daruda

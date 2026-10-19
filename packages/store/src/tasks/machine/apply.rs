@@ -17,8 +17,12 @@ pub(super) fn apply(book: &mut TasksBook, event: &TaskEvent) {
             }
         }
         TaskEvent::Created { spec } => book.insert(TaskRecord {
+            description: None,
             spec: spec.clone(),
             lifecycle: Lifecycle::Backlog,
+            started_by: None,
+            started_at: None,
+            ended_executions: Vec::new(),
             execution: None,
             session_ids: Vec::new(),
             subtasks: Vec::new(),
@@ -87,6 +91,7 @@ fn apply_to(record: &mut TaskRecord, event: &TaskEvent) {
             id,
             execution_id,
             source,
+            started_by,
             at,
         } => {
             record.lifecycle = Lifecycle::Preparing {
@@ -96,6 +101,12 @@ fn apply_to(record: &mut TaskRecord, event: &TaskEvent) {
                 },
                 source: source.clone(),
             };
+            record.description = Some(super::ExecutionDescription {
+                title: record.spec.title.clone(),
+                prompt: record.spec.prompt.clone(),
+            });
+            record.started_by = *started_by;
+            record.started_at = Some(*at);
             record.execution = None;
             record.updated_at = *at;
         }
@@ -128,7 +139,7 @@ fn apply_to(record: &mut TaskRecord, event: &TaskEvent) {
         TaskEvent::DispatchFailed { exec, cause, at } => {
             let worktree = record.lifecycle.worktree().map(ToOwned::to_owned);
             let cause = ErrorCause::StartFailed(*cause);
-            finish(record, error(exec, worktree, cause), *at);
+            finish(record, error(exec, worktree, cause), None, *at);
         }
         TaskEvent::Dispatched {
             exec,
@@ -149,7 +160,7 @@ fn apply_to(record: &mut TaskRecord, event: &TaskEvent) {
         TaskEvent::Undelivered { exec, reason, at } => {
             let worktree = record.lifecycle.worktree().map(ToOwned::to_owned);
             let next = undelivered(exec, worktree, *reason);
-            finish(record, next, *at);
+            finish(record, next, None, *at);
         }
         TaskEvent::ExecutionSessionBound { session_id, at, .. } => {
             if bind_session(record, session_id) {
@@ -191,15 +202,28 @@ fn apply_to(record: &mut TaskRecord, event: &TaskEvent) {
                 record.updated_at = *at;
             }
         }
-        TaskEvent::Settled { exec, outcome, at } => {
+        TaskEvent::Settled {
+            exec,
+            outcome,
+            result,
+            at,
+        } => {
             if let Some(worktree) = record.lifecycle.worktree().map(ToOwned::to_owned) {
                 let next = settle(exec, worktree, outcome);
-                finish(record, next, *at);
+                let result = matches!(next, Lifecycle::Done { .. })
+                    .then(|| result.clone())
+                    .flatten();
+                finish(record, next, result, *at);
             }
         }
         TaskEvent::ToolFailuresEscalated { exec, at } => {
             let worktree = record.lifecycle.worktree().map(ToOwned::to_owned);
-            finish(record, error(exec, worktree, ErrorCause::ToolFailures), *at);
+            finish(
+                record,
+                error(exec, worktree, ErrorCause::ToolFailures),
+                None,
+                *at,
+            );
         }
         TaskEvent::CancelRequested { exec, at } => {
             let worktree = record.lifecycle.worktree().map(ToOwned::to_owned);
@@ -207,12 +231,12 @@ fn apply_to(record: &mut TaskRecord, event: &TaskEvent) {
                 exec: exec.clone(),
                 worktree,
             };
-            finish(record, next, *at);
+            finish(record, next, None, *at);
         }
         TaskEvent::LaneLost { exec, at } => {
             if let Some(worktree) = record.lifecycle.worktree().map(ToOwned::to_owned) {
                 let next = interrupted(exec, worktree, InterruptCause::LaneGone);
-                finish(record, next, *at);
+                finish(record, next, None, *at);
             }
         }
         TaskEvent::Reconciled { exec, at } => {
@@ -223,7 +247,7 @@ fn apply_to(record: &mut TaskRecord, event: &TaskEvent) {
                 }
                 (_, worktree) => undelivered(exec, worktree, UndeliveredReason::AppRestart),
             };
-            finish(record, next, *at);
+            finish(record, next, None, *at);
         }
         TaskEvent::Reopened { run_in, at, .. } => {
             record.lifecycle = Lifecycle::Backlog;
@@ -310,7 +334,20 @@ fn bind_session(record: &mut TaskRecord, session_id: &str) -> bool {
 }
 
 /// Every terminal state ends the run's sessions and stamps its end.
-fn finish(record: &mut TaskRecord, next: Lifecycle, at: DateTime<Utc>) {
+fn finish(record: &mut TaskRecord, next: Lifecycle, result: Option<String>, at: DateTime<Utc>) {
+    if let Some(exec) = next.exec().cloned() {
+        record.retain_ended(super::EndedExecution {
+            description: record.description.clone(),
+            exec,
+            started_by: record.started_by,
+            ended_as: next.clone(),
+            execution: record.execution.clone(),
+            session_ids: record.session_ids.clone(),
+            started_at: record.started_at,
+            finished_at: at,
+            result,
+        });
+    }
     record.lifecycle = next;
     record.session_ids.clear();
     record.finished_at = Some(at);

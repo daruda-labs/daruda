@@ -134,7 +134,7 @@ impl Workspace {
             );
             return Some(PromptDispatch::ReadOnly);
         }
-        let dispatch = if task.is_some() {
+        let dispatch = if task.is_some() || origin == PromptOrigin::Internal {
             SlashDispatch::Forward
         } else {
             classify_slash(&text)
@@ -147,6 +147,9 @@ impl Workspace {
             SlashDispatch::Forward => {
                 let view = self.agent_chat_view(pane_id).cloned()?;
                 let prompt_dispatch = match (origin, task) {
+                    (PromptOrigin::Internal, _) => {
+                        view.update(cx, |v, cx| v.send_internal_prompt_text(text, cx))
+                    }
                     (PromptOrigin::Telegram, _) => {
                         view.update(cx, |v, cx| v.send_prompt_text_for_telegram(text, cx))
                     }
@@ -161,12 +164,26 @@ impl Workspace {
                 // working-indicator elapsed anchor at send). A returned
                 // `Some` is unexpected on open but harmless to fire — the
                 // single completion firing point stays consistent.
-                let edge = view.update(cx, |v, cx| v.tick_activity(std::time::Instant::now(), cx));
-                if let Some(outcome) = edge {
-                    self.fire_activity_completion(pane_id, outcome, cx);
-                }
+                self.reconcile_agent_chat_activity(pane_id, cx);
                 Some(prompt_dispatch)
             }
+        }
+    }
+
+    /// Reconcile before another turn can start, preserving every completion edge.
+    pub(in crate::workspace) fn reconcile_agent_chat_activity(
+        &mut self,
+        pane_id: PaneId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+            return;
+        };
+        let edge = view.update(cx, |view, cx| {
+            view.tick_activity(std::time::Instant::now(), cx)
+        });
+        if let Some(outcome) = edge {
+            self.fire_activity_completion(pane_id, outcome, cx);
         }
     }
 

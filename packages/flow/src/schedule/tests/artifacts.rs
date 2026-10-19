@@ -919,3 +919,12 @@ fn the_journal_keeps_the_attempts_that_failed_too() {
         design.attempts[0].outcome
     );
 }
+
+#[test]
+fn run_yaml_preserves_the_flow_display_name() {
+    let yaml = run_yaml_of(
+        "version: 1\nname: Named flow\nnodes:\n  - id: a\n    kind: command\n    run: echo a\n",
+    );
+    let file = crate::parse::parse_flow_file(&yaml).unwrap();
+    assert_eq!(file.name.as_deref(), Some("Named flow"));
+}

@@ -25,7 +25,8 @@ pub mod task;
 pub use branch::{branch_name_for, random_branch_name};
 pub use daruda_runlog::{AfterCommit, CommitError, Committed, Machine};
 pub use machine::{
-    Lifecycle, LifecycleKind, TaskEvent, TaskMachine, TaskRecord, TaskRejected, TaskSpec, TasksBook,
+    Lifecycle, LifecycleKind, StartedBy, TaskEvent, TaskMachine, TaskRecord, TaskRejected,
+    TaskSpec, TasksBook,
 };
 pub use migrate::migrate_legacy;
 pub use persistence::{load_tasks, load_tasks_in, tasks_path_in};

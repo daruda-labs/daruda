@@ -94,8 +94,13 @@ async fn say_by_ordinal_resolves_to_the_listed_pane(cx: &mut TestAppContext) {
     assert_eq!(text, "go on");
     assert_eq!(addressed, Some(target));
 
-    let outcome =
-        cx.update(|cx| crate::control::exec::run(ResolvedCommand::Say { target, text }, cx));
+    let outcome = cx.update(|cx| {
+        crate::control::exec::run(
+            ResolvedCommand::Say { target, text },
+            crate::control::exec::CommandOrigin::Orchestrator,
+            cx,
+        )
+    });
     assert!(outcome.is_ok(), "the pane accepted the prompt: {outcome:?}");
 }
 
@@ -168,7 +173,13 @@ async fn answering_a_command_does_not_steal_the_plain_text_target(cx: &mut TestA
     else {
         panic!("/list reaches the executor");
     };
-    let outcome = cx.update(|cx| crate::control::exec::run(resolved, cx));
+    let outcome = cx.update(|cx| {
+        crate::control::exec::run(
+            resolved,
+            crate::control::exec::CommandOrigin::Orchestrator,
+            cx,
+        )
+    });
     absorb(&outcome, addressed, core.command_state_mut());
 
     // The fallback is still the pinged pane, not anything the listing named.

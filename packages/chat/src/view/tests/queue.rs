@@ -381,7 +381,11 @@ fn a_drained_telegram_prompt_arms_the_watch_and_an_in_app_one_never_does(
     cx: &mut gpui::TestAppContext,
 ) {
     use crate::view::PromptOrigin;
-    for (origin, arms) in [(PromptOrigin::Telegram, true), (PromptOrigin::InApp, false)] {
+    for (origin, arms) in [
+        (PromptOrigin::Telegram, true),
+        (PromptOrigin::InApp, false),
+        (PromptOrigin::Internal, false),
+    ] {
         let window = make_test_view(cx);
         window
             .update(cx, |view, _window, cx| {
@@ -469,6 +473,73 @@ fn turn_end_resolves_telegram_watch_after_finalizing_streaming_text(cx: &mut gpu
                 !view.is_phone_turn_waiting(),
                 "the resolved watch is cleared at the terminal boundary"
             );
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+fn internal_notice_preserves_parked_edit_and_fifo(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.queue.paused_prompts.push(queued(1, "user draft"));
+            view.begin_edit(crate::view::PromptId(1), cx);
+            let dispatch = view.send_internal_prompt_text("/clear literal notice".into(), cx);
+            assert_eq!(dispatch, crate::view::PromptDispatch::Queued);
+            assert_eq!(texts(&view.queue.paused_prompts), vec!["user draft"]);
+            assert_eq!(view.queue.editing_prompt, Some(crate::view::PromptId(1)));
+            assert_eq!(
+                texts(&view.queue.pending_prompts),
+                vec!["/clear literal notice"]
+            );
+            view.resume_queue(cx);
+            assert_eq!(
+                texts(&view.queue.pending_prompts),
+                vec!["user draft", "/clear literal notice"]
+            );
+            assert!(!view.is_phone_turn_waiting());
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+fn internal_notice_queues_behind_users_even_when_connected_and_idle(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    let (handle, mut probe) = daruda_acp::AcpSessionHandle::detached_for_test();
+    window
+        .update(cx, |view, _window, cx| {
+            view.send_prompt_text("first user".into(), cx);
+            view.send_prompt_text("second user".into(), cx);
+            view.status = crate::view::AgentSessionStatus::Connected;
+            view.attach_handle(handle);
+            assert_eq!(
+                view.send_internal_prompt_text("/clear literal notice".into(), cx),
+                crate::view::PromptDispatch::Queued
+            );
+            assert_eq!(
+                texts(&view.queue.pending_prompts),
+                vec!["first user", "second user", "/clear literal notice"]
+            );
+            assert_eq!(probe.drain().0, 0, "the notice cannot jump the user's FIFO");
+            assert!(!view.is_phone_turn_waiting());
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+fn internal_notice_buffers_during_stop_cancel_ack(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.set_turn_in_flight();
+            view.cancel_turn(cx);
+            assert!(view.turn_awaiting_cancel_ack());
+            assert_eq!(
+                view.send_internal_prompt_text("notice".into(), cx),
+                crate::view::PromptDispatch::Queued
+            );
+            assert!(view.turn_awaiting_cancel_ack());
+            assert_eq!(texts(&view.queue.pending_prompts), vec!["notice"]);
         })
         .unwrap();
 }

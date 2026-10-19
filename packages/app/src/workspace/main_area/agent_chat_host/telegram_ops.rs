@@ -364,6 +364,18 @@ impl Workspace {
             let Some(view) = self.agent_chat_view(pane_id).cloned() else {
                 continue;
             };
+            if let Some(exec) =
+                crate::runs::RunsHost::pane_execution(self.run_pane(pane_id), cx).cloned()
+            {
+                let waiting = (view.read(cx).activity_state()
+                    == daruda_chat::view::ActivityState::AwaitingPermission)
+                    .then_some(crate::runs::result::WaitingOn::Permission { tool: None });
+                crate::runs::RunsHost::observe_task_waiting(
+                    crate::runs::result::RunKey::Task(exec),
+                    waiting,
+                    cx,
+                );
+            }
             let untold = view.update(cx, |v, _| v.take_permissions_untold_to_phone());
             for prompt in untold {
                 self.relay_permission_wait_to_telegram(pane_id, &prompt, cx);

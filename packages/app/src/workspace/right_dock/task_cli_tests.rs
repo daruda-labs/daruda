@@ -237,6 +237,7 @@ fn start(
     let at = Utc::now();
     commit_now(
         vec![TaskEvent::DispatchRequested {
+            started_by: None,
             id: id.to_owned(),
             execution_id: exec.execution_id.clone(),
             source: TaskExecutionSource::ClaudeCli {

@@ -132,6 +132,7 @@ impl Workspace {
         let dispatched = self.dispatch_claude_for_task(exec, &root, &branch, pane, window, cx)?;
         Ok((
             TaskStarted {
+                exec: exec.clone(),
                 worktree: root,
                 pane,
                 surface,

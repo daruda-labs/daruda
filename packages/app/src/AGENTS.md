@@ -86,11 +86,20 @@ agent/ → lane/
 - `lane/` imports nothing from `workspace/`, `project/`, or `agent/`.
 - `project/` imports `lane/` only; nothing from `workspace/` or `agent/`.
 - `agent/` imports `lane/` only; nothing from `workspace/` or `project/`.
-- `runs/` owns the process-wide task log, execution bindings, CLI tracker
-  and the flow runs in flight.
-  It never imports this crate's `workspace/`, `project/` or `lane/`. Workspace installs
-  `RunsEffects` callbacks for window operations and reads the task projection;
-  only RunsHost writes it. `tasks.json` is read-only migration input.
+- `runs/` owns the process-wide task log, execution bindings, CLI tracker,
+  flow runs in flight, and `RunWatch` result snapshots, delivery ledger and waiters.
+  Its GPUI-free domain state uses its own `RunKey`, `RunSnapshot` and `RunEvent`
+  types. `runs/` never imports `daruda_control_types`, `control/`, chat views,
+  or this crate's `workspace/`, `project/` or `lane/`. Workspace installs
+  `RunsEffects` callbacks for window operations, flow location and run events;
+  control converts run-owned types at the MCP boundary and owns orchestrator
+  notices. Workspace reads the task projection; only RunsHost writes it.
+  `tasks.json` is read-only migration input.
+- Control entry points carry `control::exec::CommandOrigin`: phone commands
+  use `Phone`, MCP commands use `Orchestrator`. Convert it to each domain's
+  own `StartedBy` before dispatch; desktop starts pass `StartedBy::Desktop`
+  directly. Persist provenance with the start request, not with a later UI
+  annotation or an inference from the active session. Resume preserves it.
 - The Settings view is `daruda_settings` (`packages/settings/`); its host is
   `workspace/settings_ops.rs`, and the boundary between them is in
   `packages/settings/AGENTS.md`.

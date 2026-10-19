@@ -219,3 +219,35 @@ fn a_resume_wait_is_still_setup() {
         Advanced::Moved { left_setup: true }
     );
 }
+
+#[test]
+fn waiting_level_lasts_until_all_questions_close() {
+    use crate::runs::result::WaitingOn;
+    let mut view = view();
+    let (first, rx1) = ask(1, "design");
+    let (second, _rx2) = ask(2, "build");
+    view.park(first);
+    view.park(second);
+    assert_eq!(
+        view.waiting_on(),
+        Some(WaitingOn::Question {
+            node: "design".into()
+        })
+    );
+    drop(rx1);
+    assert_eq!(
+        view.waiting_on(),
+        Some(WaitingOn::Question {
+            node: "build".into()
+        })
+    );
+    view.advance(&started("build"));
+    view.answer(2, daruda_acp::PermissionDecision::Cancelled)
+        .unwrap();
+    assert_eq!(view.waiting_on(), None);
+    let (third, _rx3) = ask(3, "design");
+    view.park(third);
+    assert!(view.waiting_on().is_some());
+    view.withdraw_questions();
+    assert_eq!(view.waiting_on(), None);
+}

@@ -1478,6 +1478,7 @@ control:
   error_no_target: "대상이 없습니다. /list 후 /use <번호>를 보내세요."
   error_target_gone: "그 대화는 사라졌습니다. /list로 현재 번호를 확인하세요."
   error_flow_not_found: "%{name} 플로우가 없습니다. /flow로 목록을 확인하세요."
+  error_run_mismatch: "요청한 실행이 더 이상 이 워크트리를 소유하지 않습니다."
   error_flow_locked: "이 워크트리에서 이미 플로우가 실행 중입니다."
   error_flow_refused: "%{name}은(는) 지금 상태로는 실행할 수 없습니다. daruda에서 검사해 보세요."
   error_flow_not_started: "%{name}이(가) 시작되지 않았습니다. 이유는 daruda에 있습니다."

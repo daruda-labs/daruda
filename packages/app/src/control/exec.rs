@@ -25,11 +25,13 @@ use crate::workspace::Workspace;
 
 mod gated;
 mod listing;
+mod origin;
 
 pub(crate) use gated::{begin_task_start, open_task, run_gated};
 pub(crate) use listing::{brief, listing};
+pub(crate) use origin::CommandOrigin;
 
-pub(crate) fn run(cmd: ResolvedCommand, cx: &mut App) -> ControlOutcome {
+pub(crate) fn run(cmd: ResolvedCommand, origin: CommandOrigin, cx: &mut App) -> ControlOutcome {
     match cmd {
         ResolvedCommand::List => Ok(ControlResult::Listing(listing(cx))),
         ResolvedCommand::Brief => Ok(ControlResult::Brief(brief(cx))),
@@ -80,20 +82,31 @@ pub(crate) fn run(cmd: ResolvedCommand, cx: &mut App) -> ControlOutcome {
         // for.
         ResolvedCommand::Flow(ResolvedFlowCommand::Run { name, lane }) => {
             in_lane_window(lane, cx, |ws, window, cx| {
-                ws.control_flow_run(lane.lane_ref(), &name, window, cx)
+                ws.control_flow_run(lane.lane_ref(), &name, origin.flow_started_by(), window, cx)
             })
             // Named by the file that resolved, not by what the caller typed —
             // `ship` may pick `ship.yaml` or `ship.yml`, and the answer has to
             // say which.
-            .map(|entry| ControlResult::FlowStarting {
-                name: entry.name,
-                origin: entry.origin,
-                lane: entry.lane,
+            .map(|started| {
+                if matches!(origin, CommandOrigin::Orchestrator) {
+                    crate::runs::RunsHost::register_run(
+                        crate::runs::result::RunKey::Flow(started.run_id.clone()),
+                        cx,
+                    );
+                }
+                ControlResult::FlowStarting {
+                    handle: daruda_control_types::runs::RunHandle::Flow {
+                        run_id: started.run_id,
+                    },
+                    name: started.entry.name,
+                    origin: started.entry.origin,
+                    lane: started.entry.lane,
+                }
             })
         }
-        ResolvedCommand::Flow(ResolvedFlowCommand::Stop { lane }) => {
+        ResolvedCommand::Flow(ResolvedFlowCommand::Stop { lane, run }) => {
             in_lane_window(lane, cx, |ws, _window, cx| {
-                ws.control_flow_stop(lane.lane_ref(), cx)
+                ws.control_flow_stop(lane.lane_ref(), run.as_ref(), cx)
             })
             .map(|disposition| ControlResult::FlowStopped { lane, disposition })
         }
@@ -206,7 +219,7 @@ fn in_task_window<T>(
 /// already in flight would be answered by that turn's edge instead, which is
 /// somebody else's answer — so it is told `Queued` and can read the reply
 /// later.
-pub(crate) fn run_waiting(cmd: ResolvedCommand, cx: &mut App) -> Dispatch {
+pub(crate) fn run_waiting(cmd: ResolvedCommand, origin: CommandOrigin, cx: &mut App) -> Dispatch {
     if let ResolvedCommand::TaskStop { task } = cmd {
         return stop_task_waiting(task, cx);
     }
@@ -214,7 +227,7 @@ pub(crate) fn run_waiting(cmd: ResolvedCommand, cx: &mut App) -> Dispatch {
         // Unreachable: `convert` builds `Command::Waiting` for exactly one
         // tool. Answering through the immediate path is the harmless way to
         // be wrong.
-        return Dispatch::Ready(run(cmd, cx));
+        return Dispatch::Ready(run(cmd, origin, cx));
     };
     let sent = in_pane_window(target, cx, |ws, _window, cx| {
         ws.control_say(target.pane, text.clone(), cx)
@@ -589,7 +602,11 @@ mod tests {
                 ..daruda_config::Config::default()
             });
         });
-        run_gated(GatedCommand::ChatNew { lane, agent: None }, cx)
+        run_gated(
+            GatedCommand::ChatNew { lane, agent: None },
+            crate::control::exec::CommandOrigin::Orchestrator,
+            cx,
+        )
     }
 
     /// A name git will reject cannot become a worktree however the user
@@ -615,6 +632,7 @@ mod tests {
                     agent: None,
                     prompt: None,
                 },
+                crate::control::exec::CommandOrigin::Orchestrator,
                 cx,
             );
             match dispatch {
@@ -654,6 +672,7 @@ mod tests {
                     agent: None,
                     prompt: None,
                 },
+                crate::control::exec::CommandOrigin::Orchestrator,
                 cx,
             );
             match dispatch {
@@ -686,6 +705,7 @@ mod tests {
                     },
                     agent: None,
                 },
+                crate::control::exec::CommandOrigin::Orchestrator,
                 cx,
             );
             match dispatch {
@@ -757,6 +777,7 @@ mod tests {
                         target,
                         text: "hi".into()
                     },
+                    CommandOrigin::Orchestrator,
                     cx
                 ),
                 Err(ControlError::TargetGone)

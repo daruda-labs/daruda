@@ -80,6 +80,10 @@ fn migrate_task(task: &Task) -> TaskRecord {
         task.session_ids.clone()
     };
     TaskRecord {
+        description: None,
+        started_by: None,
+        started_at: None,
+        ended_executions: Vec::new(),
         spec: TaskSpec {
             id: task.id.clone(),
             project: task.project,

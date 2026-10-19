@@ -288,6 +288,7 @@ impl Workspace {
         // process could still be writing it before then.
         let continuation = resumed.continuation();
         let request = RunRequest {
+            started_by: resumed.started_by,
             until: None,
             pinned: Vec::new(),
             loaded: resumed.loaded,
@@ -385,6 +386,7 @@ impl Workspace {
         let (ask_tx, ask_rx) = smol::channel::unbounded();
 
         let request = RunRequest {
+            started_by: Some(daruda_flow::request::StartedBy::Desktop),
             until: selection.until.clone(),
             pinned,
             loaded,

@@ -7,6 +7,7 @@
 
 pub mod agent_text;
 pub mod result;
+pub mod runs;
 pub mod spec;
 
 use daruda_store::project::WorkspaceUuid;

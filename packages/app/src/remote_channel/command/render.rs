@@ -260,6 +260,7 @@ pub(crate) fn render_error(error: &ControlError) -> String {
         ControlError::FlowNeedsInteraction { name } => {
             s::control::error_flow_needs_interaction(name)
         }
+        ControlError::RunMismatch => s::control::error_run_mismatch(),
         ControlError::NoActiveLane => s::control::error_no_active_lane(),
         ControlError::OrchestratorDisabled => s::control::error_orchestrator_disabled(),
         ControlError::OrchestratorUnresolvable => s::control::error_orchestrator_unresolvable(),
@@ -473,6 +474,49 @@ mod tests {
     use super::*;
     use crate::remote_channel::bridge::PaneRef;
     use crate::telegram::command::tests::{listing_of, pane};
+    #[test]
+    fn start_handles_do_not_change_phone_confirmation_text() {
+        let lane = crate::control::result::LaneHandle {
+            workspace: pane(1).workspace,
+            project: 1,
+            lane: 2,
+        };
+        let cases = [
+            (
+                ControlResult::FlowStarting {
+                    handle: "flow:run-1".parse().unwrap(),
+                    name: "ship.yaml".into(),
+                    origin: crate::control::result::FlowOriginKind::Repo,
+                    lane,
+                },
+                s::control::flow_starting("ship.yaml"),
+            ),
+            (
+                ControlResult::TaskStarted {
+                    handle: "task:task-1/exec-1".parse().unwrap(),
+                    task: "task-1".into(),
+                    lane,
+                    chat: None,
+                },
+                s::control::task_started(),
+            ),
+        ];
+        for (result, expected) in cases {
+            assert_eq!(
+                render(&Ok(result), Absorbed::Nothing, &CommandState::default()).text,
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn stale_run_errors_are_localized() {
+        assert_eq!(
+            render_error(&ControlError::RunMismatch),
+            s::control::error_run_mismatch()
+        );
+    }
+
     #[test]
     fn a_long_listing_is_truncated_under_the_telegram_limit() {
         let chats: Vec<PaneRef> = (0..400).map(pane).collect();

@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use daruda_store::tasks::machine::TaskEdit;
 use daruda_store::tasks::{
-    ExecutionRef, SubTask, TaskEvent, TaskExecutionSource, TaskRunIn, TaskSpec,
+    ExecutionRef, StartedBy, SubTask, TaskEvent, TaskExecutionSource, TaskRunIn, TaskSpec,
 };
 
 pub(crate) enum TaskIntent {
@@ -35,6 +35,7 @@ pub(crate) enum TaskIntent {
     Start {
         exec: ExecutionRef,
         source: TaskExecutionSource,
+        started_by: StartedBy,
     },
     Cancel {
         exec: ExecutionRef,
@@ -68,10 +69,15 @@ impl TaskIntent {
             Self::DeleteSubtask { id, subtask_id } => {
                 TaskEvent::SubtaskDeleted { id, subtask_id, at }
             }
-            Self::Start { exec, source } => TaskEvent::DispatchRequested {
+            Self::Start {
+                exec,
+                source,
+                started_by,
+            } => TaskEvent::DispatchRequested {
                 id: exec.task_id,
                 execution_id: exec.execution_id,
                 source,
+                started_by: Some(started_by),
                 at,
             },
             Self::Cancel { exec } => TaskEvent::CancelRequested { exec, at },

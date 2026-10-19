@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::Lifecycle;
+use super::{Lifecycle, StartedBy};
 use crate::project::ProjectUuid;
 use crate::tasks::{
     AgentType, ExecutionRef, SubTask, TaskAgentSurface, TaskExecution, TaskId, TaskRunIn,
@@ -57,14 +57,52 @@ impl TaskSpec {
     }
 }
 
+/// The title and prompt accepted when an execution was requested.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionDescription {
+    pub title: String,
+    pub prompt: String,
+}
+
+/// A finished execution, retained independently of the next attempt.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EndedExecution {
+    /// Absent when an older snapshot did not retain the original description.
+    #[serde(default)]
+    pub description: Option<ExecutionDescription>,
+    pub exec: ExecutionRef,
+    #[serde(default)]
+    pub started_by: Option<StartedBy>,
+    pub ended_as: Lifecycle,
+    pub execution: Option<TaskExecution>,
+    pub session_ids: Vec<String>,
+    #[serde(default)]
+    pub started_at: Option<DateTime<Utc>>,
+    pub finished_at: DateTime<Utc>,
+    #[serde(default)]
+    pub result: Option<String>,
+}
+
+const ENDED_EXECUTIONS_LIMIT: usize = 5;
+
 /// One task as the log knows it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskRecord {
+    /// Frozen at dispatch; older snapshots and imported rows may not know it.
+    #[serde(default)]
+    pub description: Option<ExecutionDescription>,
     pub spec: TaskSpec,
     pub lifecycle: Lifecycle,
+    /// The last requested run's origin; reopening keeps it until a new start.
+    #[serde(default)]
+    pub started_by: Option<StartedBy>,
     /// Recorded at `LanePrepared` from the pane the run uses, never edited:
     /// later spec edits never reach a run.
     pub execution: Option<TaskExecution>,
+    #[serde(default)]
+    pub started_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub ended_executions: Vec<EndedExecution>,
     /// CLI sessions attached to the running lane.
     pub session_ids: Vec<String>,
     pub subtasks: Vec<SubTask>,
@@ -73,6 +111,15 @@ pub struct TaskRecord {
 }
 
 impl TaskRecord {
+    pub(super) fn retain_ended(&mut self, ended: EndedExecution) {
+        self.ended_executions.push(ended);
+        let excess = self
+            .ended_executions
+            .len()
+            .saturating_sub(ENDED_EXECUTIONS_LIMIT);
+        self.ended_executions.drain(..excess);
+    }
+
     pub fn id(&self) -> &str {
         &self.spec.id
     }

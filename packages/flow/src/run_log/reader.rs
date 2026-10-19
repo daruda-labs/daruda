@@ -41,6 +41,7 @@ pub struct Replay {
     pub records: Vec<NodeRecord>,
     pub spent: Spent,
     pub profile: Option<String>,
+    pub started_by: Option<crate::request::StartedBy>,
     /// The selection the run was started under.
     pub until: Option<NodeId>,
     /// Nodes reused rather than run. Also in `passed`.
@@ -131,6 +132,54 @@ pub fn state(run_dir: &Path) -> Option<FlowRunState> {
     history(run_dir)?.ok().map(|history| history.state)
 }
 
+/// A strict read-only status inspection. Unlike history-list helpers, replay
+/// errors remain visible to callers; this never opens a writable log.
+#[derive(Debug)]
+pub struct Inspection {
+    /// Sequence of the latest durable resume, or zero for the initial episode.
+    pub resumed_at: u64,
+    pub state: FlowRunState,
+    pub replay: Replay,
+    pub end: Option<crate::event::RunEnd>,
+}
+
+/// `None` leaves inspection to the legacy journal, including an interrupted
+/// resume that opened its modern log before importing the journal.
+pub fn inspect(run_dir: &Path) -> Result<Option<Inspection>, daruda_runlog::OpenError> {
+    let Some(history) = history(run_dir) else {
+        return Ok(None);
+    };
+    let history = history?;
+    if awaits(&history.state, run_dir) {
+        return Ok(None);
+    }
+    let mut after = FlowRunState::default();
+    let mut end = None;
+    for event in history.records.iter().filter_map(event_of) {
+        FlowRunMachine::apply(&mut after, event);
+        if let Some(FlowEvent::RunEnded { end: ended }) =
+            super::narrate::narrate(run_dir, event, &after)
+        {
+            end = Some(ended);
+        }
+        if matches!(event, E::Resumed { .. }) {
+            end = None;
+        }
+    }
+    Ok(Some(Inspection {
+        resumed_at: history
+            .records
+            .iter()
+            .rev()
+            .find(|record| matches!(event_of(record), Some(E::Resumed { .. })))
+            .map(|record| record.seq)
+            .unwrap_or_default(),
+        state: history.state,
+        replay: replay_events(history.records.iter().filter_map(event_of)),
+        end,
+    }))
+}
+
 /// When the log was last written, for a run it says is still going: the
 /// moment a dead holder stopped. `None` for a run that ended, keeps no log,
 /// or keeps one replay refuses.
@@ -195,11 +244,13 @@ pub(crate) fn replay_events<'e>(events: impl IntoIterator<Item = &'e E>) -> Repl
         FlowRunMachine::apply(&mut state, event);
         match event {
             E::RunStarted {
+                started_by,
                 until,
                 pinned,
                 profile,
                 ..
             } => {
+                replay.started_by = *started_by;
                 replay.profile = profile.clone();
                 replay.until = until.clone();
                 replay.pinned = pinned.clone();
@@ -303,12 +354,37 @@ mod tests {
     use super::*;
     use crate::run_log::machine::{NodeStart, Produces};
 
+    #[test]
+    fn strict_inspection_preserves_fine_ending_and_leaves_bytes_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let loaded = crate::load::load(
+            "version: 1\nnodes:\n  - id: a\n    kind: command\n    run: echo a\n",
+            None,
+        )
+        .unwrap();
+        let store = super::super::testing::started_store(dir.path(), &loaded, None, vec![]);
+        let event = serde_json::from_value(serde_json::json!({"type":"run_ended","end":{"kind":"budget_exhausted","limit":"node_runs"}})).unwrap();
+        smol::block_on(store.commit(event)).unwrap();
+        drop(store);
+        let path = super::super::log_file(dir.path());
+        let before = std::fs::read(&path).unwrap();
+        assert!(matches!(
+            inspect(dir.path()).unwrap().unwrap().end,
+            Some(crate::event::RunEnd::BudgetExhausted { .. })
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        std::fs::write(&path, b"broken\nbroken\n").unwrap();
+        assert!(inspect(dir.path()).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"broken\nbroken\n");
+    }
+
     /// Pins count as passed; a lost output and an invalidation take a pass
     /// back, the way the journal's reader did.
     #[test]
     fn passes_are_folded_in_order_and_taken_back() {
         let events = [
             E::RunStarted {
+                started_by: None,
                 nodes: vec![NodeStart {
                     id: "design".into(),
                     produces: Produces::File,
@@ -360,6 +436,7 @@ mod tests {
         };
         let events = [
             E::RunStarted {
+                started_by: None,
                 nodes: vec![node("a"), node("b"), node("c")],
                 until: None,
                 pinned: Vec::new(),
@@ -421,6 +498,7 @@ mod tests {
         let mut log =
             crate::run_log::store::open_file_log(dir.path()).unwrap_or_else(|_| panic!("open"));
         log.commit(E::RunStarted {
+            started_by: None,
             nodes: vec![NodeStart {
                 id: "design".into(),
                 produces: Produces::File,

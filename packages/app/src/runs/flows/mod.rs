@@ -10,6 +10,9 @@
 //! [`super::RunsEffects`] after the state changed — never from inside it.
 
 mod colour;
+mod metadata;
+#[cfg(any(test, feature = "screenshot"))]
+use metadata::flow_metadata;
 mod view;
 
 use std::cell::RefCell;
@@ -30,22 +33,16 @@ pub(crate) use view::{AnswerRefused, FlowSource, Lull, ParkedAsk, RunView};
 
 use super::RunsHost;
 
-/// What a run owes the caller that asked for it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Caller {
-    /// Started at the desktop, which shows its own toast.
-    Desktop,
-    /// Asked for from a phone, which has no screen to read a toast on.
-    Remote,
-}
-
 /// A run in flight.
 pub(crate) struct FlowRun {
     view: RunView,
+    snapshot: super::result::RunSnapshot,
+    pointers: super::result::Pointers,
+    started: std::time::Instant,
     cancel: CancelToken,
     /// Read when the run ends, to say why it was canceled.
     overage: OverageStop,
-    caller: Caller,
+    started_by: Option<daruda_flow::request::StartedBy>,
     /// Disconnects when the run's thread returns, so a quit can block on
     /// it with a deadline. Seeded runs have no engine behind them.
     finished: Option<std::sync::mpsc::Receiver<std::convert::Infallible>>,
@@ -62,6 +59,34 @@ impl FlowRun {
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => true,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => false,
         }
+    }
+
+    pub(super) fn result(&self) -> super::result::RunSnapshot {
+        let mut snapshot = self.snapshot.clone();
+        let (node, attempt) = self
+            .view
+            .running()
+            .first()
+            .map(|(node, state)| {
+                (
+                    Some(node.to_string()),
+                    match state {
+                        NodeRunState::Running { attempt } => Some(*attempt),
+                        _ => None,
+                    },
+                )
+            })
+            .unwrap_or_default();
+        snapshot.state = super::result::RunState::Running {
+            progress: super::result::Progress {
+                node,
+                attempt,
+                elapsed_secs: self.started.elapsed().as_secs(),
+                ..Default::default()
+            },
+            waiting_on: self.view.waiting_on(),
+        };
+        snapshot
     }
 
     pub(crate) fn view(&self) -> &RunView {
@@ -90,6 +115,16 @@ pub(crate) struct FlowRuns {
 }
 
 impl FlowRuns {
+    pub(super) fn by_id(&self, id: &str) -> Option<&FlowRun> {
+        self.runs.values().find(|run| {
+            run.view
+                .run_dir()
+                .file_name()
+                .and_then(|name| name.to_str())
+                == Some(id)
+        })
+    }
+
     /// The key `spelling` names, as the lock would resolve it. `None` when
     /// nothing runs, without touching the filesystem.
     fn key_for(&self, spelling: &Path) -> Option<CanonicalTree> {
@@ -119,6 +154,7 @@ impl FlowRuns {
         self.runs.get(&self.key_for(spelling)?)
     }
 
+    #[cfg(test)]
     fn get_mut(&mut self, spelling: &Path) -> Option<&mut FlowRun> {
         let key = self.key_for(spelling)?;
         self.runs.get_mut(&key)
@@ -249,6 +285,11 @@ impl RunsHost {
             return Err(AlreadyRunning);
         }
         let run_dir = request.run_dir.clone();
+        let location = super::result::FlowRunLocation {
+            run_dir: run_dir.clone(),
+            lock_dir: Some(request.lock_dir.clone()),
+        };
+        let started_by = request.started_by;
         let nodes_at_start = request
             .loaded
             .flow()
@@ -256,6 +297,7 @@ impl RunsHost {
             .iter()
             .map(|node| node.id.clone())
             .collect();
+        let (snapshot, pointers) = metadata::for_request(&request, &source);
         let cancel = CancelToken::default();
         let (finished_tx, finished) = std::sync::mpsc::channel();
         {
@@ -276,31 +318,25 @@ impl RunsHost {
             });
         }
         let run = FlowRun {
+            snapshot,
+            pointers,
+            started: std::time::Instant::now(),
             view: RunView::new(run_dir.clone(), source, nodes_at_start),
             cancel,
             overage,
-            caller: Caller::Desktop,
+            started_by,
             finished: Some(finished),
         };
-        cx.update_global::<RunsHost, _>(|host, _| host.flows.insert(tree.clone(), run))?;
+        cx.update_global::<RunsHost, _>(|host, _| {
+            host.watch.begin(&run.snapshot.key);
+            host.flows.insert(tree.clone(), run)?;
+            host.watch.locate(location);
+            Ok(())
+        })?;
         Self::tell_windows(tree.clone(), FlowChanged::Repainted, cx);
         cx.spawn(async move |cx| pump(tree, run_dir, events, asks, cx).await)
             .detach();
         Ok(())
-    }
-
-    /// Owe `worktree`'s run's outcome to a remote caller. `false` when no
-    /// run is there, which is also how a caller learns its submission
-    /// produced none.
-    #[must_use = "a submission that produced no run has to be answered"]
-    pub(crate) fn owe_flow_outcome_remotely(worktree: &Path, cx: &mut App) -> bool {
-        cx.update_global::<RunsHost, _>(|host, _| match host.flows.get_mut(worktree) {
-            Some(run) => {
-                run.caller = Caller::Remote;
-                true
-            }
-            None => false,
-        })
     }
 
     /// The app is quitting: tell every run to end what it started and stay
@@ -324,6 +360,7 @@ impl RunsHost {
             let run = host.flows.runs.get_mut(&key)?;
             run.cancel.cancel();
             run.view.withdraw_questions();
+            host.watch.observe_waiting(run.result());
             Some(key)
         });
         match stopped {
@@ -348,7 +385,11 @@ impl RunsHost {
                 return (None, Err(AnswerRefused::NotOpen));
             };
             match host.flows.runs.get_mut(&key) {
-                Some(run) => (Some(key), run.view.answer(ask_id, decision)),
+                Some(run) => {
+                    let answer = run.view.answer(ask_id, decision);
+                    host.watch.observe_waiting(run.result());
+                    (Some(key), answer)
+                }
                 None => (None, Err(AnswerRefused::NotOpen)),
             }
         });
@@ -379,8 +420,12 @@ impl RunsHost {
                 .flows
                 .runs
                 .get_mut(&key)
-                .filter(|run| run.view.run_dir() == run_dir)?;
-            Some((key, run.view.park(ParkedAsk::new(pending))))
+                .filter(|run| run.view.run_dir() == run_dir && !run.cancel.is_canceled())?;
+            // A closed question followed immediately by a new ask is a new episode.
+            host.watch.observe_waiting(run.result());
+            let parked = run.view.park(ParkedAsk::new(pending));
+            host.watch.observe_waiting(run.result());
+            Some((key, parked))
         });
         if let Some((key, parked)) = parked {
             let what = FlowChanged::Asked {
@@ -388,6 +433,23 @@ impl RunsHost {
                 alone: parked == Parked::Alone,
             };
             Self::tell_windows(key, what, cx);
+        }
+    }
+
+    fn withdraw_flow_asks(worktree: &Path, run_dir: &Path, cx: &mut App) {
+        let changed = cx.update_global::<RunsHost, _>(|host, _| {
+            let key = host.flows.key_for(worktree)?;
+            let run = host
+                .flows
+                .runs
+                .get_mut(&key)
+                .filter(|run| run.view.run_dir() == run_dir)?;
+            run.view.withdraw_questions();
+            host.watch.observe_waiting(run.result());
+            Some(key)
+        });
+        if let Some(key) = changed {
+            Self::tell_windows(key, FlowChanged::Repainted, cx);
         }
     }
 
@@ -411,11 +473,26 @@ impl RunsHost {
                 if let Some(states) = from_log {
                     run.view.reconcile(states);
                 }
+                run.view.withdraw_questions();
+                host.watch.observe_waiting(run.result());
+                if !matches!(end, RunEnd::ShutDown) {
+                    host.watch.retain(super::result::flow_ended(
+                        run.snapshot.clone(),
+                        end,
+                        run.pointers.clone(),
+                    ));
+                }
                 let ended = FlowChanged::Ended(Box::new(FlowEnded {
                     end: end.clone(),
                     run_dir: run_dir.to_path_buf(),
                     overage: run.overage.tripped().cloned(),
-                    owes_remote_answer: run.caller == Caller::Remote,
+                    owes_remote_answer: matches!(
+                        run.started_by,
+                        Some(
+                            daruda_flow::request::StartedBy::Phone
+                                | daruda_flow::request::StartedBy::Orchestrator
+                        )
+                    ),
                     colouring: run.view.colouring(),
                 }));
                 return Some((key, ended));
@@ -423,6 +500,7 @@ impl RunsHost {
             let run = host.flows.runs.get_mut(&key)?;
             let advanced = run.view.advance(event);
             let reconciled = from_log.is_some_and(|states| run.view.reconcile(states));
+            host.watch.observe_waiting(run.result());
             let what = match (advanced, reconciled) {
                 (Advanced::Moved { left_setup }, _) => FlowChanged::Progressed { left_setup },
                 (Advanced::Nothing, true) => FlowChanged::Progressed { left_setup: false },
@@ -449,13 +527,32 @@ impl RunsHost {
     /// `--screenshot`. Keyed as a started run is, by the folder resolved.
     #[cfg(any(test, feature = "screenshot"))]
     pub(crate) fn seed_flow_run(worktree: PathBuf, view: RunView, cx: &mut App) {
+        Self::seed_flow_run_started_by(
+            worktree,
+            view,
+            daruda_flow::request::StartedBy::Desktop,
+            cx,
+        );
+    }
+
+    #[cfg(any(test, feature = "screenshot"))]
+    pub(crate) fn seed_flow_run_started_by(
+        worktree: PathBuf,
+        view: RunView,
+        started_by: daruda_flow::request::StartedBy,
+        cx: &mut App,
+    ) {
         let tree = CanonicalTree::resolve(&worktree)
             .unwrap_or_else(|_| CanonicalTree::unchecked(worktree));
+        let (snapshot, pointers) = flow_metadata(view.run_dir(), view.source(), None);
         let run = FlowRun {
+            snapshot,
+            pointers,
+            started: std::time::Instant::now(),
             view,
             cancel: CancelToken::default(),
             overage: OverageStop::default(),
-            caller: Caller::Desktop,
+            started_by: Some(started_by),
             finished: None,
         };
         // A seed lands on whatever a test left there: it stands in for
@@ -549,9 +646,26 @@ async fn pump(
             }
             Next::AsksDone => {
                 asks = None;
+                cx.update(|cx| RunsHost::withdraw_flow_asks(worktree.as_path(), &run_dir, cx));
                 continue;
             }
-            Next::Notice(notice) => notice.into_event(),
+            Next::Notice(notice) => {
+                if let RunNotice::Recorded(record) = &notice {
+                    let key = super::result::RunKey::Flow(
+                        run_dir
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .into_owned(),
+                    );
+                    cx.update(|cx| {
+                        cx.update_global::<RunsHost, _>(|host, _| {
+                            host.watch.record_flow_sequence(key, record.seq)
+                        })
+                    });
+                }
+                notice.into_event()
+            }
             // The engine reports by recording, and the thread by returning;
             // a thread that did neither panicked, and the run still ends.
             Next::Silent => FlowEvent::RunEnded {
@@ -572,9 +686,35 @@ async fn pump(
             None
         };
         let ended = matches!(event, FlowEvent::RunEnded { .. });
-        cx.update(|cx| {
-            RunsHost::apply_flow_event(worktree.as_path(), &run_dir, &event, from_log, cx)
+        let settled = cx.update(|cx| {
+            RunsHost::apply_flow_event(worktree.as_path(), &run_dir, &event, from_log, cx);
+            if ended
+                && !matches!(
+                    event,
+                    FlowEvent::RunEnded {
+                        end: RunEnd::ShutDown
+                    }
+                )
+            {
+                let key = super::result::RunKey::Flow(
+                    run_dir
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned(),
+                );
+                cx.global::<RunsHost>().watch.retained_observation(&key)
+            } else {
+                None
+            }
         });
+        if let Some((snapshot, revision)) = settled {
+            let enriched = cx
+                .background_executor()
+                .spawn(async move { super::result_io::enrich(snapshot) })
+                .await;
+            cx.update(|cx| RunsHost::seed_run_wait_if_current(enriched, revision, cx));
+        }
         if ended {
             break;
         }

@@ -16,6 +16,7 @@ pub(crate) struct RunPane {
 #[derive(Default)]
 pub(super) struct Delivery {
     pub(super) bindings: HashMap<RunPane, ExecutionRef>,
+    pub(super) settling: Vec<ExecutionRef>,
     pending_writes: Vec<(ExecutionRef, smol::channel::Receiver<()>)>,
 }
 
@@ -200,14 +201,19 @@ impl RunsHost {
         })
     }
 
-    pub(crate) fn settle_execution(exec: ExecutionRef, outcome: SettleOutcome, cx: &mut App) {
+    pub(crate) fn settle_execution(
+        exec: ExecutionRef,
+        outcome: SettleOutcome,
+        result: Option<String>,
+        cx: &mut App,
+    ) {
         let running = cx
             .global::<GlobalTasks>()
             .get(&exec.task_id)
             .is_some_and(|task| matches!(task.lifecycle, Lifecycle::Running { .. }));
         let operation = move |cx: &mut App| {
             if cx.global::<GlobalTasks>().get(&exec.task_id).is_some_and(|task| matches!(&task.lifecycle, Lifecycle::Running { exec: current, .. } if current == &exec)) {
-                Self::propose_fact(TaskEvent::Settled { exec, outcome, at: chrono::Utc::now() }, cx);
+                Self::propose_fact(TaskEvent::Settled { result, exec, outcome, at: chrono::Utc::now() }, cx);
             }
         };
         if running {
@@ -266,6 +272,7 @@ fn apply_failure(exec: ExecutionRef, failure: DeliveryFailure, cx: &mut App) {
             TaskEvent::Undelivered { exec, reason, at }
         }
         (Lifecycle::Running { .. }, _) => TaskEvent::Settled {
+            result: None,
             exec,
             outcome: SettleOutcome::Errored,
             at,

@@ -51,6 +51,8 @@ pub enum EndKind {
 /// What a run was asked to be, fixed when it started.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct StartFacts {
+    #[serde(default)]
+    pub(crate) started_by: Option<crate::request::StartedBy>,
     /// Topological order, the order a host draws.
     pub(crate) order: Vec<NodeId>,
     pub(crate) until: Option<NodeId>,

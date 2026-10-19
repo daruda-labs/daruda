@@ -2,6 +2,19 @@ use daruda_store::tasks::ExecutionRef;
 use gpui::App;
 
 pub(crate) trait RunsEffects {
+    /// An episode arrived or became available after waiter coverage ended.
+    /// Identity stays stable on retries; called after releasing process-owned state.
+    fn run_event(&self, _event: super::watch::RunEvent, _cx: &mut App) {}
+
+    /// Locate an explicit execution in the host's open projects.
+    fn locate_flow_run(
+        &self,
+        _run_id: &str,
+        _cx: &mut App,
+    ) -> Option<super::result::FlowRunLocation> {
+        None
+    }
+
     fn stop_execution(&self, exec: &ExecutionRef, cx: &mut App);
 
     /// A flow run changed; the windows holding its worktree redraw it.
@@ -75,5 +88,59 @@ mod tests {
         let rejected = cx.update(|cx| RunsHost::task(TaskIntent::Cancel { exec }, cx));
         assert!(matches!(rejected.await, Err(TaskCommitError::Rejected(_))));
         assert_eq!(calls.borrow().len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod run_event_tests {
+    use super::*;
+    use crate::runs::{
+        RunsHost, no_hook,
+        result::{EndedAs, RunKey, RunSnapshot, RunState},
+    };
+    use gpui::TestAppContext;
+    use std::{cell::RefCell, rc::Rc};
+
+    struct Events(Rc<RefCell<Vec<u64>>>);
+    impl RunsEffects for Events {
+        fn stop_execution(&self, _exec: &ExecutionRef, _cx: &mut App) {}
+        fn run_event(&self, event: super::super::watch::RunEvent, cx: &mut App) {
+            assert_eq!(
+                RunsHost::unreported_run_events(cx).len(),
+                1,
+                "global state is readable outside its mutation"
+            );
+            self.0.borrow_mut().push(event.sequence);
+        }
+    }
+    #[gpui::test]
+    fn event_pump_survives_attaching_the_task_store(cx: &mut TestAppContext) {
+        let dir = tempfile::tempdir().unwrap();
+        let events = Rc::new(RefCell::new(Vec::new()));
+        cx.update(|cx| {
+            RunsHost::ensure_installed(cx);
+            RunsHost::install_effects(Rc::new(Events(events.clone())), cx);
+            let store =
+                daruda_store::tasks::TaskStore::in_directory(dir.path(), None, "test", no_hook())
+                    .unwrap();
+            RunsHost::install(RunsHost::open(Ok(store)), cx);
+            let key = RunKey::Flow("attached".into());
+            RunsHost::register_run(key.clone(), cx);
+            RunsHost::seed_run_wait(
+                RunSnapshot {
+                    key,
+                    what: "attached".into(),
+                    why: None,
+                    state: RunState::Ended {
+                        ended_as: EndedAs::Completed,
+                        text: None,
+                        pointers: Default::default(),
+                    },
+                },
+                cx,
+            );
+        });
+        cx.run_until_parked();
+        assert_eq!(*events.borrow(), vec![1]);
     }
 }

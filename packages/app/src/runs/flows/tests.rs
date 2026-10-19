@@ -4,11 +4,21 @@ use super::*;
 
 fn run_in(run_dir: &str) -> FlowRun {
     let run_dir = PathBuf::from(run_dir);
+    let (snapshot, pointers) = flow_metadata(
+        &run_dir,
+        &FlowSource::Resumed {
+            run_dir: run_dir.clone(),
+        },
+        None,
+    );
     FlowRun {
+        snapshot,
+        pointers,
+        started: std::time::Instant::now(),
         view: RunView::new(run_dir.clone(), FlowSource::Resumed { run_dir }, Vec::new()),
         cancel: CancelToken::default(),
         overage: OverageStop::default(),
-        caller: Caller::Desktop,
+        started_by: Some(daruda_flow::request::StartedBy::Desktop),
         finished: None,
     }
 }

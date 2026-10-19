@@ -8,14 +8,20 @@
 //! Workspaces, installed as [`RunsEffects`].
 
 mod cli;
+mod cli_result;
 mod delivery;
 mod effects;
 mod flows;
 mod inbox;
 mod intent;
+pub(crate) mod result;
+pub(crate) mod result_host;
+mod result_io;
 #[cfg(any(test, feature = "screenshot"))]
 pub(crate) mod seed;
 mod tasks;
+mod wait_host;
+pub(crate) mod watch;
 
 pub(crate) use cli::sessions_dir as cli_sessions_dir;
 pub(crate) use delivery::{DeliveryFailure, RunPane, TerminalDispatchError};

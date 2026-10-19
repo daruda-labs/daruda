@@ -1,6 +1,6 @@
 //! The tool table daruda advertises. GPUI-free.
 //!
-//! Seventeen tools, all for the orchestrator. A lane's own agent gets none — it
+//! Nineteen tools, all for the orchestrator. A lane's own agent gets none — it
 //! reads untrusted text and could be steered into calling them — so there is
 //! no per-caller filtering here.
 //! Descriptions and schemas are English and not localized: a tool definition
@@ -13,10 +13,9 @@
 //! and the model has the vocabulary to resolve it. `ToolId`'s variants keep
 //! the internal names because that is what the types are called.
 //!
-//! Every identifier a tool accepts is one daruda handed out earlier in the
-//! same session (`daruda_chat_list`, `daruda_worktree_list`) — runtime ids, not
-//! persisted uuids. One kind of handle, so a value read from one tool can be
-//! passed to another without conversion.
+//! Chat and worktree targets come from the current runtime's listing tools.
+//! Execution handles come from start results and identify a durable flow run
+//! or task execution; explicit result queries can reuse them after restart.
 
 /// Which tool a call named. The table is static, so this is the whole
 /// vocabulary — a name outside it is a tool error, not a protocol one.
@@ -39,6 +38,8 @@ pub(crate) enum ToolId {
     TaskStart,
     TaskStop,
     TaskOpen,
+    RunStatus,
+    RunWait,
 }
 
 /// Whether a tool's effect needs the user's say-so before it runs.
@@ -255,7 +256,14 @@ fn chat_new_properties() -> serde_json::Value {
 }
 
 fn flow_stop_properties() -> serde_json::Value {
-    serde_json::json!({ "worktree": lane_ref_schema() })
+    serde_json::json!({
+        "worktree": lane_ref_schema(),
+        "run": {
+            "type": "string",
+            "description": "Optional flow:<run-id> returned by daruda_flow_run. Refuses to stop a different execution.",
+            "examples": ["flow:1929fcd-a1-5"],
+        },
+    })
 }
 
 fn flow_run_properties() -> serde_json::Value {
@@ -312,6 +320,22 @@ pub(crate) fn table_for_test() -> &'static [Tool] {
 
 /// The advertised vocabulary. Order is the order `tools/list` reports.
 static TABLE: &[Tool] = &[
+    Tool {
+        id: ToolId::RunWait,
+        name: "daruda_run_wait",
+        description: "Wait for the first ended or blocked flow/task execution. Omit handles for successful orchestrator starts and unfinished orchestrator Tasks carried into this process. Only one omitted-handles wait may be active (WaiterBusy). timeout is required in seconds: 0 polls, values above 110 are clamped and displayed. TimedOut and Nothing are normal results; after repeated timeouts call daruda_run_status. Completed Task means its session ended normally, not that its work succeeded. Reported results remain queryable with daruda_run_status.",
+        gate: Gate::Open,
+        properties: run_wait_properties,
+        required: &["timeout"],
+    },
+    Tool {
+        id: ToolId::RunStatus,
+        name: "daruda_run_status",
+        description: "Query flow/task progress and results by handles, including runs from before restart. Omit handles for successful orchestrator starts in this process and unfinished orchestrator Tasks carried into it. Completed Task means its session ended normally, not that its work succeeded. Querying never marks results reported.",
+        gate: Gate::Open,
+        properties: run_status_properties,
+        required: &[],
+    },
     Tool {
         id: ToolId::ChatList,
         name: "daruda_chat_list",
@@ -505,3 +529,13 @@ static TABLE: &[Tool] = &[
 
 #[cfg(test)]
 mod tests;
+
+fn run_status_properties() -> serde_json::Value {
+    serde_json::json!({"handles": {"type":"array", "items":{"type":"string"}, "examples":[["flow:run-id", "task:task-id/execution-id"]], "description":"Concrete flow/task handles, or task:<task-id> for its latest execution. Omit for the current process scope."}})
+}
+
+fn run_wait_properties() -> serde_json::Value {
+    let mut properties = run_status_properties();
+    properties["timeout"] = serde_json::json!({"type":"integer", "minimum":0, "description":"Required seconds to wait; 0 polls, above 110 clamps to 110."});
+    properties
+}

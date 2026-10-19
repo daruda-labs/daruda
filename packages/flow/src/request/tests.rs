@@ -27,6 +27,7 @@ fn spec(command: &str) -> daruda_acp::LaunchSpec {
 fn request_for(text: &str, agents: &[&str], dir: &std::path::Path) -> RunRequest {
     let loaded = load(text, None).expect("valid flow");
     RunRequest {
+        started_by: Some(crate::request::StartedBy::Desktop),
         loaded,
         until: None,
         pinned: Vec::new(),

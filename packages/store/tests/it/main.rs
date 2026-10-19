@@ -19,6 +19,7 @@ mod support;
 mod system_info;
 mod tasks;
 mod tasks_cli;
+mod tasks_description;
 mod tasks_machine;
 mod tasks_migrate;
 mod telegram;

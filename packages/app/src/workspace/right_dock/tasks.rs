@@ -350,6 +350,10 @@ mod tests {
         );
         spec.branch_name = "feat-login".into();
         TaskRecord {
+            description: None,
+            started_by: None,
+            started_at: None,
+            ended_executions: Vec::new(),
             spec,
             lifecycle: Lifecycle::Backlog,
             execution: None,

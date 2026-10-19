@@ -154,6 +154,15 @@ pub(crate) fn register_test_orchestrator(
     // working directory (`control_test_data_dir` keys on pid + a counter).
     let cwd = control_test_data_dir().join("orchestrator-cwd");
     std::fs::create_dir_all(&cwd).expect("cwd");
+    // Match production preparation: the host is registered before pane creation.
+    cx.update(|cx| {
+        crate::window_registry::WindowRegistry::register(window.into(), ws.downgrade(), cx);
+        crate::window_registry::WindowRegistry::register_orchestrator(
+            window.into(),
+            ws.downgrade(),
+            cx,
+        );
+    });
     let agent = config.resolved_agents()[0].id.clone();
     cx.update_window(window.into(), |_, win, cx| {
         ws.update(cx, |ws, cx| {
@@ -169,15 +178,7 @@ pub(crate) fn register_test_orchestrator(
     })
     .expect("window is live")
     .expect("seeded");
-    cx.update(|cx| {
-        crate::window_registry::WindowRegistry::register(window.into(), ws.downgrade(), cx);
-        crate::window_registry::WindowRegistry::register_orchestrator(
-            window.into(),
-            ws.downgrade(),
-            cx,
-        );
-        crate::orchestrator::pane(cx).expect("the orchestrator reports its pane")
-    })
+    cx.update(|cx| crate::orchestrator::pane(cx).expect("the orchestrator reports its pane"))
 }
 
 /// A unique temp directory per fixture so parallel tests never share

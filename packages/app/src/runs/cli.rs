@@ -5,6 +5,8 @@ use std::time::Duration;
 use chrono::Utc;
 use daruda_agent::pty_tracker::{PtyBinding, PtyTracker, PtyTrackerEvent};
 use daruda_store::accounts::{AccountId, AccountRecipeId};
+use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
+use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::project::WorkspaceUuid;
 use daruda_store::tasks::{
     CliProcessState, ExecutionRef, Lifecycle, SessionEndReason, TaskEvent, TaskExecution,
@@ -339,31 +341,112 @@ impl RunsHost {
         let session = session.to_owned();
         Self::after_projection(
             move |cx| {
-                let events: Vec<_> = cli_runs(cx.global::<GlobalTasks>(), |_| true)
-                    .filter(|(task, run, _)| {
+                let runs: Vec<_> = cli_runs(cx.global::<GlobalTasks>(), |_| true)
+                    .filter(|(task, run, exec)| {
                         matches!(task.lifecycle, Lifecycle::Running { .. })
+                            && !cx.global::<Self>().delivery.settling.contains(exec)
                             && (run.session_id.as_deref() == Some(&session)
                                 || task.session_ids.contains(&session))
                     })
-                    .map(|(_, _, exec)| TaskEvent::Settled {
-                        exec,
-                        outcome: daruda_store::tasks::machine::SettleOutcome::Completed {
-                            end_reason: reason,
-                        },
-                        at: Utc::now(),
+                    .map(|(_, run, exec)| {
+                        (
+                            exec,
+                            match &run.source {
+                                daruda_store::tasks::TaskExecutionSource::ClaudeCli {
+                                    transcript_path,
+                                    ..
+                                } => transcript_path.clone(),
+                                _ => None,
+                            },
+                        )
                     })
                     .collect();
-                for event in events {
-                    Self::propose_fact(event, cx);
+                for (exec, path) in runs {
+                    cx.update_global::<Self, _>(|host, _| {
+                        host.delivery.settling.push(exec.clone())
+                    });
+                    let Some(path) = path.filter(|_| reason != SessionEndReason::Error) else {
+                        Self::finish_cli_result(exec, reason, None, cx);
+                        continue;
+                    };
+                    let reading = cx
+                        .background_executor()
+                        .spawn(async move { super::cli_result::read(&path) });
+                    cx.spawn(async move |cx| {
+                        let result = reading.await;
+                        cx.update(|cx| {
+                            Self::after_projection(
+                                move |cx| {
+                                    Self::finish_cli_result(exec, reason, result, cx);
+                                },
+                                cx,
+                            )
+                        });
+                    })
+                    .detach();
                 }
             },
             cx,
         );
     }
 
+    fn finish_cli_result(
+        exec: ExecutionRef,
+        reason: SessionEndReason,
+        result: Option<String>,
+        cx: &mut App,
+    ) {
+        let current = cx.global::<GlobalTasks>().get(&exec.task_id)
+            .is_some_and(|task| matches!(&task.lifecycle, Lifecycle::Running { exec: current, .. } if current == &exec));
+        let proposal = current.then(|| {
+            Self::propose(
+                TaskEvent::Settled {
+                    exec: exec.clone(),
+                    outcome: daruda_store::tasks::machine::SettleOutcome::Completed {
+                        end_reason: reason,
+                    },
+                    result,
+                    at: Utc::now(),
+                },
+                cx,
+            )
+        });
+        cx.spawn(async move |cx| {
+            if let Some(proposal) = proposal
+                && let Err(error) = proposal.await
+            {
+                let severity = match &error {
+                    super::TaskCommitError::Rejected(_) => ErrorSeverity::Info,
+                    super::TaskCommitError::ReadOnly(_) | super::TaskCommitError::Unavailable => {
+                        ErrorSeverity::Warning
+                    }
+                    super::TaskCommitError::Failed(_) => ErrorSeverity::Error,
+                };
+                LogWriter::log(
+                    ErrorReport::new("A task result was not recorded")
+                        .severity(severity)
+                        .from_error(&error)
+                        .at(file!(), line!())
+                        .build(),
+                );
+            }
+            // `propose` resolves only after the durable event is projected.
+            cx.update(|cx| {
+                cx.update_global::<Self, _>(|host, _| {
+                    host.delivery.settling.retain(|settling| settling != &exec)
+                });
+                Self::reconcile_lost_cli(exec, cx);
+            });
+        })
+        .detach();
+    }
+
     fn reconcile_lost_cli(exec: ExecutionRef, cx: &mut App) {
         Self::after_projection(
             move |cx| {
+                if cx.global::<Self>().delivery.settling.contains(&exec) {
+                    return;
+                }
                 if cx
                     .global::<Self>()
                     .delivery
@@ -413,9 +496,116 @@ impl RunsHost {
 
 #[cfg(test)]
 mod tests {
+    mod wait_tests;
     use super::*;
     use crate::runs::seed::{self, SeedEnd, SeedRun};
     use gpui::TestAppContext;
+
+    #[gpui::test]
+    fn cli_result_read_protects_the_execution_from_exit_reconciliation(cx: &mut TestAppContext) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("result.jsonl");
+        std::fs::write(
+            &path,
+            super::super::cli_result::tests::assistant("completed CLI answer", false),
+        )
+        .unwrap();
+        let store = daruda_store::tasks::TaskStore::in_directory(
+            dir.path().join("task-log"),
+            None,
+            "test",
+            super::super::no_hook(),
+        )
+        .unwrap();
+        let id = cx.update(|cx| {
+            RunsHost::install(RunsHost::open(Ok(store.clone())), cx);
+            let run = SeedRun::cli("/cli", CliProcessState::Running { pid: 42 }).session("s");
+            let id = seed::task(
+                seed::spec(Default::default(), "CLI"),
+                Some((&run, SeedEnd::Running)),
+                cx,
+            );
+            seed::commit_now(
+                vec![TaskEvent::CliTranscriptFound {
+                    exec: run.exec(&id),
+                    transcript_path: path.clone(),
+                    at: Utc::now(),
+                }],
+                cx,
+            );
+            RunsHost::settle_cli_session("s", SessionEndReason::Stop, cx);
+            assert!(
+                cx.global::<RunsHost>()
+                    .delivery
+                    .settling
+                    .contains(&run.exec(&id))
+            );
+            RunsHost::record_cli_exit("s", 42, cx);
+            assert!(matches!(
+                cx.global::<GlobalTasks>().get(&id).unwrap().lifecycle,
+                Lifecycle::Running { .. }
+            ));
+            id
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            let task = cx.global::<GlobalTasks>().get(&id).unwrap();
+            assert!(matches!(task.lifecycle, Lifecycle::Done { .. }));
+            assert_eq!(
+                task.ended_executions.last().unwrap().result.as_deref(),
+                Some("completed CLI answer")
+            );
+            assert!(cx.global::<RunsHost>().delivery.settling.is_empty());
+            assert_eq!(store.current().unwrap().1.get(&id), Some(task));
+        });
+    }
+
+    #[gpui::test]
+    fn a_cli_result_read_cannot_settle_a_restarted_execution(cx: &mut TestAppContext) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("answer.jsonl");
+        std::fs::write(
+            &path,
+            super::super::cli_result::tests::assistant("old answer", false),
+        )
+        .unwrap();
+        let (id, replacement) = cx.update(|cx| {
+            RunsHost::inline_commits_for_test(cx);
+            let run = SeedRun::cli("/cli", CliProcessState::Running { pid: 42 }).session("old");
+            let id = seed::task(
+                seed::spec(Default::default(), "CLI"),
+                Some((&run, SeedEnd::Running)),
+                cx,
+            );
+            RunsHost::record_cli_transcript("old", &path, cx);
+            RunsHost::settle_cli_session("old", SessionEndReason::Stop, cx);
+            seed::commit_now(
+                vec![
+                    TaskEvent::CancelRequested {
+                        exec: run.exec(&id),
+                        at: Utc::now(),
+                    },
+                    TaskEvent::Reopened {
+                        id: id.clone(),
+                        run_in: Default::default(),
+                        at: Utc::now(),
+                    },
+                ],
+                cx,
+            );
+            let replacement = SeedRun::cli("/cli", CliProcessState::Running { pid: 43 });
+            seed::commit_now(seed::run(&id, &replacement, SeedEnd::Running), cx);
+            (id, replacement)
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            let record = cx.global::<GlobalTasks>().get(&id).unwrap();
+            assert!(matches!(&record.lifecycle, Lifecycle::Running { exec, .. } if exec == &replacement.exec(&id)));
+            assert_eq!(record.ended_executions.len(), 1);
+            assert_eq!(record.ended_executions[0].result, None);
+            assert!(cx.global::<RunsHost>().delivery.settling.is_empty());
+        });
+    }
 
     #[gpui::test]
     fn an_exit_after_a_pending_binding_is_recorded_durably(cx: &mut TestAppContext) {

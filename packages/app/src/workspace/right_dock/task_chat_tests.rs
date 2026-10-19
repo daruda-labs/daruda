@@ -81,7 +81,7 @@ fn task_chat_completion_uses_execution_not_cwd(cx: &mut TestAppContext) {
                     cx,
                 );
                 bind(ws, &owned, pane, cx);
-                ws.settle_agent_chat_task(pane, ended(SessionEndReason::Stop), cx);
+                ws.settle_agent_chat_task(pane, ended(SessionEndReason::Stop), None, cx);
                 (pane, owned, unrelated)
             })
         })
@@ -102,7 +102,7 @@ fn task_chat_completion_uses_execution_not_cwd(cx: &mut TestAppContext) {
         )
     });
     workspace.update(cx, |ws, cx| {
-        ws.settle_agent_chat_task(pane, ended(SessionEndReason::Error), cx)
+        ws.settle_agent_chat_task(pane, ended(SessionEndReason::Error), None, cx)
     });
     cx.run_until_parked();
     assert!(matches!(lifecycle(&owned, cx), Lifecycle::Done { .. }));
@@ -172,7 +172,7 @@ fn task_chat_changed_session_cannot_replace_identity_or_finish_task(cx: &mut Tes
                     view.set_session_id_for_test(Some("another-session".into()))
                 });
                 ws.record_task_chat_session(pane, cx);
-                ws.settle_agent_chat_task(pane, ended(SessionEndReason::Error), cx);
+                ws.settle_agent_chat_task(pane, ended(SessionEndReason::Error), None, cx);
                 assert!(!ws.is_task_chat_restore(pane, cx));
                 id
             })
@@ -200,7 +200,7 @@ fn task_chat_history_has_no_completion_ownership(cx: &mut TestAppContext) {
                 bind(ws, &id, pane, cx);
                 RunsHost::unbind_execution(ws.run_pane(pane), cx);
                 assert!(ws.is_task_chat_restore(pane, cx));
-                ws.settle_agent_chat_task(pane, ended(SessionEndReason::Error), cx);
+                ws.settle_agent_chat_task(pane, ended(SessionEndReason::Error), None, cx);
                 id
             })
         })
@@ -417,6 +417,7 @@ fn task_chat_pending_identity_records_once_and_old_run_cannot_finish_retry(
                     at,
                 },
                 TaskEvent::DispatchRequested {
+                    started_by: None,
                     id: id.clone(),
                     execution_id: "retry-run".into(),
                     source: TaskExecutionSource::AgentChat,
@@ -427,7 +428,7 @@ fn task_chat_pending_identity_records_once_and_old_run_cannot_finish_retry(
         )
     });
     workspace.update(cx, |ws, cx| {
-        ws.settle_agent_chat_task(pane, ended(SessionEndReason::Stop), cx)
+        ws.settle_agent_chat_task(pane, ended(SessionEndReason::Stop), None, cx)
     });
     cx.run_until_parked();
     assert!(
@@ -486,7 +487,7 @@ fn task_chat_closed_pane_reopens_exact_session_without_execution_ownership(
                 ws.open_task_chat(&id, window, cx);
                 assert_eq!(ws.active_runtime().panes.len(), count);
                 assert_eq!(ws.active_runtime().focused_pane_id, reopened);
-                ws.settle_agent_chat_task(reopened, ended(SessionEndReason::Error), cx);
+                ws.settle_agent_chat_task(reopened, ended(SessionEndReason::Error), None, cx);
                 id
             })
         })
@@ -523,4 +524,54 @@ fn task_chat_open_answers_with_the_pane_or_why_not(cx: &mut TestAppContext) {
         })
     })
     .unwrap();
+}
+
+#[gpui::test]
+fn task_completion_retains_the_completed_answer_only(cx: &mut TestAppContext) {
+    for outcome in [
+        daruda_chat::view::TurnOutcome::Completed,
+        daruda_chat::view::TurnOutcome::Errored,
+        daruda_chat::view::TurnOutcome::Stopped,
+    ] {
+        let completed = matches!(outcome, daruda_chat::view::TurnOutcome::Completed);
+        let (window, workspace) = build_workspace(cx);
+        let id = cx
+            .update_window(window.into(), |_, window, cx| {
+                workspace.update(cx, |ws, cx| {
+                    let pane = pane(ws, window, cx);
+                    let id = task(cx);
+                    bind(ws, &id, pane, cx);
+                    ws.agent_chat_view(pane).unwrap().update(cx, |view, cx| {
+                        view.seed_items_for_test(
+                            vec![
+                                daruda_acp::ChatItem::AssistantText {
+                                    text: "completed answer".into(),
+                                    streaming: false,
+                                    message_id: None,
+                                    phase: Default::default(),
+                                },
+                                daruda_acp::ChatItem::AssistantText {
+                                    text: "unfinished".into(),
+                                    streaming: true,
+                                    message_id: None,
+                                    phase: Default::default(),
+                                },
+                            ],
+                            cx,
+                        );
+                    });
+                    ws.fire_activity_completion(pane, outcome, cx);
+                    id
+                })
+            })
+            .unwrap();
+        cx.run_until_parked();
+        cx.update(|cx| {
+            let record = cx.global::<GlobalTasks>().get(&id).unwrap();
+            assert_eq!(
+                record.ended_executions.last().unwrap().result.as_deref(),
+                completed.then_some("completed answer")
+            );
+        });
+    }
 }

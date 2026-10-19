@@ -21,11 +21,17 @@ use crate::{parse, resolve, validate};
 /// [`load`], which is the only thing that builds them in step.
 #[derive(Debug)]
 pub struct LoadedFlow {
+    name: Option<String>,
     flow: Flow,
     graph: FlowGraph,
 }
 
 impl LoadedFlow {
+    /// The optional title carried into the resolved run specification.
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
     pub fn flow(&self) -> &Flow {
         &self.flow
     }
@@ -70,11 +76,12 @@ pub fn inspect(text: &str, profile: Option<&str>) -> Result<Inspected, FlowError
     if !issues.is_empty() {
         return Err(FlowError::Validate(issues));
     }
+    let name = file.name.clone();
     let flow = resolve::resolve(file, profile).map_err(FlowError::Validate)?;
     let graph = FlowGraph::build(&flow).map_err(|e| FlowError::Validate(vec![graph_issue(e)]))?;
     let issues = validate::validate(&flow, &graph);
     Ok(Inspected {
-        loaded: LoadedFlow { flow, graph },
+        loaded: LoadedFlow { name, flow, graph },
         issues,
     })
 }

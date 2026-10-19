@@ -18,7 +18,7 @@ use super::{Dispatch, Pending, in_lane_window, in_pane_window, in_project_window
 /// The order matters. A budget the agent has spent and a pane it may not
 /// address are refusals the user has no say in, so they are answered before a
 /// card is ever put on their phone.
-pub(crate) fn run_gated(cmd: GatedCommand, cx: &mut App) -> Dispatch {
+pub(crate) fn run_gated(cmd: GatedCommand, origin: super::CommandOrigin, cx: &mut App) -> Dispatch {
     if let Err(refusal) = guard_gated(&cmd, cx) {
         return Dispatch::Ready(Err(refusal));
     }
@@ -31,7 +31,7 @@ pub(crate) fn run_gated(cmd: GatedCommand, cx: &mut App) -> Dispatch {
             // before *this* request waited, so N cards opened together would
             // all have passed a budget that only one of them can spend.
             Ok(ApprovalOutcome::Approved) => Some(match cx.update(|cx| guard_gated(&cmd, cx)) {
-                Ok(()) => perform_gated(cmd, cx).await,
+                Ok(()) => perform_gated(cmd, origin, cx).await,
                 Err(refusal) => Err(refusal),
             }),
             // Not a refusal: the user never said no, and the caller has freed
@@ -152,7 +152,11 @@ fn approval_summary(cmd: &GatedCommand, cx: &mut App) -> String {
 }
 
 /// Do the thing, now that the user has said yes.
-async fn perform_gated(cmd: GatedCommand, cx: &mut gpui::AsyncApp) -> ControlOutcome {
+async fn perform_gated(
+    cmd: GatedCommand,
+    origin: super::CommandOrigin,
+    cx: &mut gpui::AsyncApp,
+) -> ControlOutcome {
     let created = match cmd {
         GatedCommand::TaskCreate {
             workspace,
@@ -178,7 +182,7 @@ async fn perform_gated(cmd: GatedCommand, cx: &mut gpui::AsyncApp) -> ControlOut
                 .await
                 .map(|task| ControlResult::TaskCreated { task });
         }
-        GatedCommand::TaskStart { task } => return start_task(task, cx).await,
+        GatedCommand::TaskStart { task } => return start_task(task, origin, cx).await,
         GatedCommand::TaskOpen { task } => return cx.update(|cx| open_task(task, cx)),
         GatedCommand::ChatNew { lane, agent } => cx
             .update(|cx| {
@@ -220,13 +224,36 @@ async fn perform_gated(cmd: GatedCommand, cx: &mut gpui::AsyncApp) -> ControlOut
 }
 
 /// A start for the agent: approved already, so this only waits for it.
-async fn start_task(task: String, cx: &mut gpui::AsyncApp) -> ControlOutcome {
+async fn start_task(
+    task: String,
+    origin: super::CommandOrigin,
+    cx: &mut gpui::AsyncApp,
+) -> ControlOutcome {
     let creates_lane = cx.update(|cx| {
         cx.global::<GlobalTasks>()
             .get(&task)
             .is_some_and(task_creates_lane)
     });
-    let outcome = cx.update(|cx| begin_task_start(task, cx))?.finish(cx).await;
+    let outcome = cx
+        .update(|cx| begin_task_start(task, origin, cx))?
+        .finish(cx)
+        .await;
+    if matches!(origin, super::CommandOrigin::Orchestrator)
+        && let Ok(ControlResult::TaskStarted {
+            handle:
+                daruda_control_types::runs::RunHandle::Task {
+                    task_id,
+                    execution_id,
+                },
+            ..
+        }) = &outcome
+    {
+        let key = crate::runs::result::RunKey::Task(daruda_store::tasks::ExecutionRef {
+            task_id: task_id.clone(),
+            execution_id: execution_id.clone(),
+        });
+        cx.update(|cx| crate::runs::RunsHost::register_run(key, cx));
+    }
     if creates_lane && outcome.is_ok() {
         // Spent only now: a refused or failed start costs the agent nothing.
         cx.update(crate::control::guards::note_agent_created_lane);
@@ -246,11 +273,15 @@ pub(crate) struct PendingTaskStart {
 /// runs is already in the answer — see [`PendingTaskStart::try_finish`].
 pub(crate) fn begin_task_start(
     task: String,
+    origin: super::CommandOrigin,
     cx: &mut App,
 ) -> Result<PendingTaskStart, ControlError> {
     let title = task_title(&task, cx);
     let (workspace, answer) = in_task_window(&task, cx, |ws, window, cx| {
-        Ok((ws.uuid(), ws.control_task_start(&task, window, cx)))
+        Ok((
+            ws.uuid(),
+            ws.control_task_start(&task, origin.task_started_by(), window, cx),
+        ))
     })?;
     Ok(PendingTaskStart {
         task,
@@ -279,7 +310,7 @@ impl PendingTaskStart {
 
     /// Name a started task's chat for the phone, which then talks to it.
     fn started(&self, outcome: crate::workspace::ControlTaskStart, cx: &mut App) -> ControlOutcome {
-        let (lane, pane) = outcome?;
+        let (exec, lane, pane) = outcome?;
         let chat = pane.map(|pane| PaneRef {
             workspace: self.workspace,
             pane,
@@ -288,6 +319,10 @@ impl PendingTaskStart {
             announce_chat(chat, cx);
         }
         Ok(ControlResult::TaskStarted {
+            handle: daruda_control_types::runs::RunHandle::Task {
+                task_id: exec.task_id,
+                execution_id: exec.execution_id,
+            },
             task: self.task.clone(),
             lane: LaneHandle::new(self.workspace, lane),
             chat,

@@ -29,13 +29,65 @@ pub(super) const HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::f
 /// reading, and a separate writer sends each answer whenever it resolves.
 /// JSON-RPC matches replies by `id`, so answering out of order is legal — and
 /// it is what keeps a `ping` from queueing behind a five-minute approval.
-pub(crate) struct Inbound {
-    pub frame: String,
-    pub reply: smol::channel::Sender<String>,
-    /// Which connection this arrived on. A new connection is a new session:
-    /// the socket serves them one at a time, but *sequentially*, so without
-    /// this a second shim would inherit the first's completed handshake.
-    pub connection: u64,
+pub(crate) enum Inbound {
+    Frame {
+        frame: String,
+        reply: smol::channel::Sender<Outgoing>,
+        /// A reconnect must never inherit the previous MCP session.
+        connection: u64,
+    },
+    Disconnected {
+        connection: u64,
+    },
+}
+
+/// One response, optionally acknowledging handoff to the socket's kernel buffer.
+/// This receipt does not acknowledge that the model consumed the response.
+pub(crate) struct Outgoing {
+    pub text: String,
+    receipt: Option<futures::channel::oneshot::Sender<()>>,
+}
+
+impl Outgoing {
+    pub(crate) fn plain(text: String) -> Self {
+        Self {
+            text,
+            receipt: None,
+        }
+    }
+
+    /// Dropping the response or failing its write closes the receipt with an error.
+    pub(crate) fn with_receipt(text: String) -> (Self, futures::channel::oneshot::Receiver<()>) {
+        let (receipt, received) = futures::channel::oneshot::channel();
+        (
+            Self {
+                text,
+                receipt: Some(receipt),
+            },
+            received,
+        )
+    }
+}
+
+impl From<String> for Outgoing {
+    fn from(text: String) -> Self {
+        Self::plain(text)
+    }
+}
+
+pub(super) async fn write_response(
+    writer: &mut (impl futures::AsyncWrite + Unpin),
+    response: Outgoing,
+) -> std::io::Result<()> {
+    use futures::AsyncWriteExt as _;
+    writer
+        .write_all(format!("{}\n", response.text).as_bytes())
+        .await?;
+    if let Some(receipt) = response.receipt {
+        // The waiter may have cancelled while the write was in flight.
+        let _ = receipt.send(());
+    }
+    Ok(())
 }
 
 /// A running control socket.
@@ -162,14 +214,10 @@ pub(super) async fn serve(
 
     // Replies fan in here from however many calls are outstanding, and one
     // task owns the write half so the frames cannot interleave mid-line.
-    let (out_tx, out_rx) = smol::channel::unbounded::<String>();
+    let (out_tx, out_rx) = smol::channel::unbounded::<Outgoing>();
     let writes = smol::spawn(async move {
-        while let Ok(reply) = out_rx.recv().await {
-            if writer
-                .write_all(format!("{reply}\n").as_bytes())
-                .await
-                .is_err()
-            {
+        while let Ok(response) = out_rx.recv().await {
+            if write_response(&mut writer, response).await.is_err() {
                 return;
             }
         }
@@ -212,11 +260,10 @@ pub(super) async fn serve(
             );
             break;
         }
-        let (reply_tx, reply_rx) = smol::channel::bounded(1);
         if inbound
-            .send(Inbound {
+            .send(Inbound::Frame {
                 frame,
-                reply: reply_tx,
+                reply: out_tx.clone(),
                 connection,
             })
             .await
@@ -225,17 +272,9 @@ pub(super) async fn serve(
             // The app stopped draining, so it is going away.
             break;
         }
-        // Whenever this one resolves. A notification produces no reply: the
-        // sender is dropped without a send, which arrives as a closed channel
-        // and this task simply ends.
-        let out = out_tx.clone();
-        smol::spawn(async move {
-            if let Ok(reply) = reply_rx.recv().await {
-                let _ = out.send(reply).await;
-            }
-        })
-        .detach();
     }
-    drop(out_tx);
-    writes.await;
+    // Withdraw foreground waits before cancelling the writer. Keeping an old
+    // reply sender alive must not keep this serial accept loop occupied.
+    let _ = inbound.send(Inbound::Disconnected { connection }).await;
+    drop(writes);
 }

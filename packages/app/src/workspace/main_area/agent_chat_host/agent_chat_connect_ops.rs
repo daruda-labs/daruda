@@ -519,7 +519,7 @@ impl Workspace {
     fn mcp_servers_for_pane(
         &self,
         pane_id: PaneId,
-        cx: &Context<Self>,
+        cx: &mut Context<Self>,
     ) -> Vec<daruda_acp::McpServer> {
         let Some((_, weak)) = crate::window_registry::WindowRegistry::orchestrator(cx) else {
             return Vec::new();
@@ -544,7 +544,7 @@ impl Workspace {
     pub(crate) fn mcp_servers_for_pane_for_test(
         &self,
         pane_id: PaneId,
-        cx: &Context<Self>,
+        cx: &mut Context<Self>,
     ) -> Vec<daruda_acp::McpServer> {
         self.mcp_servers_for_pane(pane_id, cx)
     }

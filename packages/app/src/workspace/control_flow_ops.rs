@@ -20,6 +20,13 @@ use crate::workspace::flow_paths::{FlowOrigin, FoundFlow, flow_label};
 use crate::workspace::flow_request::FlowSelection;
 use daruda_store::project::LaneRef;
 
+/// A successful dispatch and the exact run it inserted.
+#[derive(Debug, PartialEq)]
+pub(crate) struct FlowStarted {
+    pub entry: FlowEntry,
+    pub run_id: String,
+}
+
 impl Workspace {
     /// Every flow the active lane can run, in the order the flows panel shows
     /// them (by file name, whatever scope each came from).
@@ -62,9 +69,10 @@ impl Workspace {
         &mut self,
         lane: LaneRef,
         name: &str,
-        window: &mut gpui::Window,
+        started_by: daruda_flow::request::StartedBy,
+        _window: &mut gpui::Window,
         cx: &mut Context<Self>,
-    ) -> Result<FlowEntry, ControlError> {
+    ) -> Result<FlowStarted, ControlError> {
         let Some(cwd) = self.lane_for(lane).map(|l| l.path.clone()) else {
             return Err(ControlError::TargetGone);
         };
@@ -77,11 +85,8 @@ impl Workspace {
         if needs_desktop_answer(&found.path) {
             return Err(ControlError::FlowNeedsInteraction { name: label });
         }
-        // Both halves of "a run is already going": the on-disk lock catches
-        // another process, and the run host catches this one. Asking only the lock
-        // leaves the guard inside `run_flow_at` to answer the second case by
-        // opening its "stop it?" picker — a desktop dialog raised by a phone
-        // command, which is the one thing this surface must never do.
+        // Check both the process host and the on-disk lock without raising
+        // the desktop guard's stop dialog: this caller cannot answer it.
         if self.lane_holder(&cwd).is_some() || self.is_flow_running_in(lane, cx) {
             return Err(ControlError::FlowLocked { name: label });
         }
@@ -102,35 +107,22 @@ impl Workspace {
             origin: map_origin(found.origin),
             lane: LaneHandle::new(self.uuid(), lane),
         };
-        // The guard reads the lock again, so a run that took it in between is
-        // still caught — and answered, rather than reported as started.
-        if !self.run_flow_at(
-            lane,
-            &found.path,
-            crate::workspace::command::flow_picker::FlowPurpose::Run,
-            FlowSelection::default(),
-            window,
-            cx,
-        ) {
+        if self.lane_holder(&cwd).is_some() || self.is_flow_running_in(lane, cx) {
             return Err(ControlError::FlowLocked { name: entry.name });
         }
-        // The guard passing does not mean a run exists: the request builder
-        // can still refuse after it — an unusable session host, an account
-        // directory it cannot prepare. Marking the run is how that is
-        // detected: no run, nothing to mark.
-        //
-        // WORKAROUND: `submit_flow_run` discards its typed `FlowSubmitError`
-        // into `report_flow_refusal`, so the reason only ever reaches the
-        // screen. Surfacing it would restructure the flow host's dispatch, a
-        // separate subsystem — until then the answer says what is known.
-        //
-        // Marked after dispatch rather than threaded into the submission: the
-        // run is inserted synchronously and nothing here awaits, so the event
-        // pump cannot retire it in between.
-        if !crate::runs::RunsHost::owe_flow_outcome_remotely(&cwd, cx) {
-            return Err(ControlError::FlowNotStarted { name: entry.name });
-        }
-        Ok(entry)
+        let run_id = self
+            .submit_flow_run(
+                lane,
+                &found.path,
+                None,
+                &FlowSelection::default(),
+                started_by,
+                cx,
+            )
+            .ok_or_else(|| ControlError::FlowNotStarted {
+                name: entry.name.clone(),
+            })?;
+        Ok(FlowStarted { entry, run_id })
     }
 
     /// Stop the run `lane` holds.
@@ -142,10 +134,21 @@ impl Workspace {
     pub(crate) fn control_flow_stop(
         &mut self,
         lane: LaneRef,
+        requested: Option<&daruda_control_types::runs::RunHandle>,
         cx: &mut Context<Self>,
     ) -> Result<StopDisposition, ControlError> {
         if self.lane_for(lane).is_none() {
             return Err(ControlError::TargetGone);
+        }
+        if let Some(requested) = requested {
+            let current = self
+                .flow_run_in(lane, cx)
+                .and_then(|run| run.view().run_dir().file_name())
+                .and_then(|name| name.to_str());
+            if !matches!(requested, daruda_control_types::runs::RunHandle::Flow { run_id } if current == Some(run_id.as_str()))
+            {
+                return Err(ControlError::RunMismatch);
+            }
         }
         if !self.is_flow_running_in(lane, cx) {
             return Ok(StopDisposition::AlreadyIdle);

@@ -38,7 +38,26 @@ pub(crate) struct ConnectionSession {
 
 /// A `tools/call` whose answer has not been sent yet.
 struct Outstanding {
-    pending: Pending,
+    pending: PendingCall,
+}
+#[derive(Clone, Copy)]
+enum PendingCall {
+    Control(Pending),
+    RunWait(super::run_wait::PendingRunWait),
+}
+impl PendingCall {
+    fn is_live(self, cx: &App) -> bool {
+        match self {
+            Self::Control(p) => p.is_live(cx),
+            Self::RunWait(p) => p.is_live(cx),
+        }
+    }
+    fn withdraw(self, cx: &mut App) {
+        match self {
+            Self::Control(p) => p.withdraw(cx),
+            Self::RunWait(p) => p.withdraw(cx),
+        }
+    }
 }
 
 impl ConnectionSession {
@@ -53,20 +72,24 @@ impl ConnectionSession {
         }
     }
 
-    fn for_connection(&mut self, connection: u64) -> &mut Session {
+    fn for_connection(&mut self, connection: u64, cx: &mut App) -> &mut Session {
         if self.connection != connection {
             self.connection = connection;
             self.session = Session::default();
-            // A new connection cannot cancel the previous one's calls, and
-            // whatever they were waiting on is answered by its own card.
-            self.outstanding.clear();
+            self.withdraw_all(cx);
         }
         &mut self.session
     }
 
+    fn withdraw_all(&mut self, cx: &mut App) {
+        for (_, entry) in self.outstanding.drain() {
+            entry.pending.withdraw(cx);
+        }
+    }
+
     /// Remember a call that has not been answered yet, and forget the ones
     /// whose card has since been decided.
-    fn track(&mut self, request: String, pending: Pending, cx: &App) {
+    fn track(&mut self, request: String, pending: PendingCall, cx: &App) {
         self.outstanding.retain(|_, o| o.pending.is_live(cx));
         self.outstanding.insert(request, Outstanding { pending });
     }
@@ -86,13 +109,21 @@ impl ConnectionSession {
         entry.pending.withdraw(cx);
     }
 }
-use crate::control::mcp::socket::Inbound;
+use crate::control::mcp::socket::{Inbound, Outgoing};
 use crate::control::mcp::tools::{Gate, ToolId, ToolTable};
 use crate::control::result::{ControlError, ControlOutcome};
 use crate::control::spec::ResolvedCommand;
 
 /// What answering a frame produced.
 enum Answer {
+    RunWait {
+        id: serde_json::Value,
+        wait: super::run_wait::PreparedWait,
+    },
+    RunStatus {
+        id: serde_json::Value,
+        query: super::runs::StatusQuery,
+    },
     /// Send this back now.
     Now(String),
     /// A notification: no reply, ever.
@@ -116,16 +147,25 @@ pub(crate) fn answer(
     protected: Option<PaneRef>,
     cx: &mut App,
 ) {
-    let Inbound {
-        frame,
-        reply,
-        connection,
-    } = message;
+    let (frame, reply, connection) = match message {
+        Inbound::Frame {
+            frame,
+            reply,
+            connection,
+        } => (frame, reply, connection),
+        Inbound::Disconnected { connection } => {
+            if session.connection == connection {
+                session.withdraw_all(cx);
+                session.session = Session::default();
+            }
+            return;
+        }
+    };
     // A new connection is a new session. The socket serves them one at a time
     // but *sequentially*, so without this a second shim would inherit the
     // first's completed handshake and could call a tool having never sent
     // `initialize` — the one admission gate, off from connection two on.
-    session.for_connection(connection);
+    session.for_connection(connection, cx);
     // A cancellation is the one notification that means something here: it
     // names a call the app may still be able to stop.
     if let Some(request) = protocol::cancellation_target(&frame) {
@@ -133,11 +173,31 @@ pub(crate) fn answer(
         return;
     }
     match answer_frame(&frame, &mut session.session, protected, cx) {
+        Answer::RunWait { id, wait } => {
+            session.track(
+                protocol::request_key(&id),
+                PendingCall::RunWait(wait.pending),
+                cx,
+            );
+            wait.send(id, reply, cx);
+        }
+        Answer::RunStatus { id, query } => {
+            cx.background_spawn(async move {
+                let result = query.read();
+                if reply
+                    .send(Outgoing::plain(protocol::result_frame(id, result)))
+                    .await
+                    .is_err()
+                {
+                    log_unanswered(connection);
+                }
+            })
+            .detach();
+        }
         Answer::Silence => {}
         Answer::Now(text) => {
-            // Bounded at one and never contended: the socket task awaits
-            // exactly this send.
-            if reply.try_send(text).is_err() {
+            // Responses share the connection writer's unbounded queue.
+            if reply.try_send(Outgoing::plain(text)).is_err() {
                 log_unanswered(connection);
             }
         }
@@ -146,7 +206,11 @@ pub(crate) fn answer(
             outcome,
             pending,
         } => {
-            session.track(protocol::request_key(&id), pending, cx);
+            session.track(
+                protocol::request_key(&id),
+                PendingCall::Control(pending),
+                cx,
+            );
             cx.background_spawn(async move {
                 // A closed channel means the task that would have answered
                 // is gone (the app is shutting down) — the target, not the
@@ -162,7 +226,10 @@ pub(crate) fn answer(
                     return;
                 };
                 if reply
-                    .send(protocol::result_frame(id, convert::to_tool_result(&result)))
+                    .send(Outgoing::plain(protocol::result_frame(
+                        id,
+                        convert::to_tool_result(&result),
+                    )))
                     .await
                     .is_err()
                 {
@@ -250,9 +317,23 @@ fn answer_frame(
     };
 
     match command {
+        Command::RunWait { handles, timeout } => {
+            match super::run_wait::prepare(handles, timeout, cx) {
+                Ok(wait) => Answer::RunWait { id: call.id, wait },
+                Err(result) => Answer::Now(protocol::result_frame(call.id, result)),
+            }
+        }
+        Command::RunStatus { handles } => Answer::RunStatus {
+            id: call.id,
+            query: super::runs::prepare(handles, cx),
+        },
         Command::Immediate(resolved) => {
             let outcome = match guard_immediate(id, &resolved, protected, cx) {
-                Ok(()) => exec::run(resolved, cx),
+                Ok(()) => exec::run(
+                    resolved,
+                    crate::control::exec::CommandOrigin::Orchestrator,
+                    cx,
+                ),
                 Err(refusal) => Err(refusal),
             };
             Answer::Now(protocol::result_frame(
@@ -268,7 +349,11 @@ fn answer_frame(
                 call.id,
                 convert::to_tool_result(&Err(refusal)),
             )),
-            Ok(()) => match exec::run_waiting(resolved, cx) {
+            Ok(()) => match exec::run_waiting(
+                resolved,
+                crate::control::exec::CommandOrigin::Orchestrator,
+                cx,
+            ) {
                 Dispatch::Ready(outcome) => Answer::Now(protocol::result_frame(
                     call.id,
                     convert::to_tool_result(&outcome),
@@ -280,17 +365,19 @@ fn answer_frame(
                 },
             },
         },
-        Command::Gated(gated) => match exec::run_gated(gated, cx) {
-            Dispatch::Ready(outcome) => Answer::Now(protocol::result_frame(
-                call.id,
-                convert::to_tool_result(&outcome),
-            )),
-            Dispatch::Deferred { outcome, pending } => Answer::Later {
-                id: call.id,
-                outcome,
-                pending,
-            },
-        },
+        Command::Gated(gated) => {
+            match exec::run_gated(gated, crate::control::exec::CommandOrigin::Orchestrator, cx) {
+                Dispatch::Ready(outcome) => Answer::Now(protocol::result_frame(
+                    call.id,
+                    convert::to_tool_result(&outcome),
+                )),
+                Dispatch::Deferred { outcome, pending } => Answer::Later {
+                    id: call.id,
+                    outcome,
+                    pending,
+                },
+            }
+        }
     }
 }
 

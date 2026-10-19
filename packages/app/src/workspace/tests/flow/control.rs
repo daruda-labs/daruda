@@ -163,7 +163,13 @@ async fn an_unknown_flow_name_is_refused(cx: &mut TestAppContext) {
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             assert_eq!(
-                ws.control_flow_run(ws.active, "nope", window, cx),
+                ws.control_flow_run(
+                    ws.active,
+                    "nope",
+                    daruda_flow::request::StartedBy::Phone,
+                    window,
+                    cx
+                ),
                 Err(ControlError::FlowNotFound {
                     name: "nope".into()
                 })
@@ -183,7 +189,13 @@ async fn a_name_resolves_with_or_without_its_extension(cx: &mut TestAppContext) 
             // — which is what proves resolution happened at all.
             for name in ["ship", "ship.yaml"] {
                 assert_eq!(
-                    ws.control_flow_run(ws.active, name, window, cx),
+                    ws.control_flow_run(
+                        ws.active,
+                        name,
+                        daruda_flow::request::StartedBy::Phone,
+                        window,
+                        cx
+                    ),
                     Err(ControlError::FlowNeedsInteraction {
                         name: "ship.yaml".into()
                     }),
@@ -201,7 +213,13 @@ async fn a_flow_that_asks_a_person_is_refused_before_it_can_hang(cx: &mut TestAp
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             assert_eq!(
-                ws.control_flow_run(ws.active, "ship", window, cx),
+                ws.control_flow_run(
+                    ws.active,
+                    "ship",
+                    daruda_flow::request::StartedBy::Phone,
+                    window,
+                    cx
+                ),
                 Err(ControlError::FlowNeedsInteraction {
                     name: "ship.yaml".into()
                 })
@@ -219,7 +237,13 @@ async fn a_flow_declaring_profiles_is_refused_for_the_same_reason(cx: &mut TestA
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             assert_eq!(
-                ws.control_flow_run(ws.active, "ship", window, cx),
+                ws.control_flow_run(
+                    ws.active,
+                    "ship",
+                    daruda_flow::request::StartedBy::Phone,
+                    window,
+                    cx
+                ),
                 Err(ControlError::FlowNeedsInteraction {
                     name: "ship.yaml".into()
                 })
@@ -237,7 +261,13 @@ async fn a_flow_that_will_not_run_is_answered_not_reported_as_started(cx: &mut T
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             assert_eq!(
-                ws.control_flow_run(ws.active, "ship", window, cx),
+                ws.control_flow_run(
+                    ws.active,
+                    "ship",
+                    daruda_flow::request::StartedBy::Phone,
+                    window,
+                    cx
+                ),
                 Err(ControlError::FlowRefused {
                     name: "ship.yaml".into()
                 })
@@ -279,10 +309,19 @@ async fn a_runnable_flow_starts_and_names_the_file_that_ran(cx: &mut TestAppCont
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             let entry = ws
-                .control_flow_run(ws.active, "ship", window, cx)
+                .control_flow_run(
+                    ws.active,
+                    "ship",
+                    daruda_flow::request::StartedBy::Phone,
+                    window,
+                    cx,
+                )
                 .expect("a command-only flow needs neither an agent nor a person");
-            assert_eq!(entry.name, "ship.yaml", "named by the file, not the input");
-            assert_eq!(entry.origin, FlowOriginKind::Repo);
+            assert_eq!(
+                entry.entry.name, "ship.yaml",
+                "named by the file, not the input"
+            );
+            assert_eq!(entry.entry.origin, FlowOriginKind::Repo);
             assert!(
                 !ws.overlays.flow_picker.is_open(),
                 "a phone command must never raise a desktop dialog"
@@ -303,7 +342,13 @@ async fn a_lane_already_running_a_flow_refuses_the_next(cx: &mut TestAppContext)
             let lane_ref = ws.active_ref();
             ws.seed_flow_run_for_test(lane_ref, std::path::PathBuf::from("/tmp/seeded-run"), cx);
             assert_eq!(
-                ws.control_flow_run(ws.active, "ship", window, cx),
+                ws.control_flow_run(
+                    ws.active,
+                    "ship",
+                    daruda_flow::request::StartedBy::Phone,
+                    window,
+                    cx
+                ),
                 Err(ControlError::FlowLocked {
                     name: "ship.yaml".into()
                 })
@@ -334,7 +379,13 @@ async fn a_flow_runs_in_the_named_worktree_not_the_active_one(cx: &mut TestAppCo
             assert_ne!(other, active, "the fixture must give two worktrees");
             // The worktree on screen does not hold it...
             assert_eq!(
-                ws.control_flow_run(active, "deploy", window, cx),
+                ws.control_flow_run(
+                    active,
+                    "deploy",
+                    daruda_flow::request::StartedBy::Phone,
+                    window,
+                    cx
+                ),
                 Err(ControlError::FlowNotFound {
                     name: "deploy".into()
                 }),
@@ -342,10 +393,16 @@ async fn a_flow_runs_in_the_named_worktree_not_the_active_one(cx: &mut TestAppCo
             );
             // ...and the one that does runs it, and says so.
             let entry = ws
-                .control_flow_run(other, "deploy", window, cx)
+                .control_flow_run(
+                    other,
+                    "deploy",
+                    daruda_flow::request::StartedBy::Phone,
+                    window,
+                    cx,
+                )
                 .expect("the named worktree holds it");
-            assert_eq!(entry.name, "deploy.yaml");
-            assert_eq!(entry.lane.lane_ref(), other, "ran where it was told");
+            assert_eq!(entry.entry.name, "deploy.yaml");
+            assert_eq!(entry.entry.lane.lane_ref(), other, "ran where it was told");
             assert_eq!(
                 ws.active, active,
                 "a targeted run must not move what the person is looking at"
@@ -368,7 +425,13 @@ async fn a_worktree_that_is_gone_is_not_reported_as_a_missing_flow(cx: &mut Test
                 lane: ws.active.lane + 9,
             };
             assert_eq!(
-                ws.control_flow_run(gone, "ship", window, cx),
+                ws.control_flow_run(
+                    gone,
+                    "ship",
+                    daruda_flow::request::StartedBy::Phone,
+                    window,
+                    cx
+                ),
                 Err(ControlError::TargetGone)
             );
         });
@@ -388,7 +451,13 @@ async fn a_named_worktree_already_running_refuses_without_a_dialog(cx: &mut Test
         ws.update(cx, |ws, cx| {
             ws.seed_flow_run_for_test(other, std::path::PathBuf::from("/tmp/seeded-elsewhere"), cx);
             assert_eq!(
-                ws.control_flow_run(other, "deploy", window, cx),
+                ws.control_flow_run(
+                    other,
+                    "deploy",
+                    daruda_flow::request::StartedBy::Phone,
+                    window,
+                    cx
+                ),
                 Err(ControlError::FlowLocked {
                     name: "deploy.yaml".into()
                 })
@@ -679,7 +748,7 @@ async fn a_stop_reaches_the_named_worktree_not_the_active_one(cx: &mut TestAppCo
         ws.seed_flow_run_for_test(other, lane.path().join("run-elsewhere"), cx);
 
         assert_eq!(
-            ws.control_flow_stop(other, cx),
+            ws.control_flow_stop(other, None, cx),
             Ok(crate::control::result::StopDisposition::Stopped)
         );
         // The token is the stop; the entry stays until the event pump retires
@@ -704,7 +773,7 @@ async fn stopping_a_worktree_with_no_run_is_an_ok_disposition(cx: &mut TestAppCo
     let (_lane, ws, _path, _wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
     ws.update(cx, |ws, cx| {
         assert_eq!(
-            ws.control_flow_stop(ws.active, cx),
+            ws.control_flow_stop(ws.active, None, cx),
             Ok(crate::control::result::StopDisposition::AlreadyIdle)
         );
         // And a worktree that is not there at all is a different answer.
@@ -713,7 +782,7 @@ async fn stopping_a_worktree_with_no_run_is_an_ok_disposition(cx: &mut TestAppCo
             lane: ws.active.lane + 9,
         };
         assert_eq!(
-            ws.control_flow_stop(gone, cx),
+            ws.control_flow_stop(gone, None, cx),
             Err(ControlError::TargetGone)
         );
     });
@@ -745,6 +814,20 @@ async fn the_default_target_separates_no_flow_from_no_worktree(cx: &mut TestAppC
 /// run report both land on a desktop they are not at.
 #[gpui::test]
 async fn a_phone_started_run_reports_its_outcome_back(cx: &mut TestAppContext) {
+    started_run_reports_its_outcome(crate::control::exec::CommandOrigin::Phone, cx).await;
+}
+
+#[gpui::test]
+async fn an_orchestrator_started_run_records_its_origin_and_keeps_phone_notice(
+    cx: &mut TestAppContext,
+) {
+    started_run_reports_its_outcome(crate::control::exec::CommandOrigin::Orchestrator, cx).await;
+}
+
+async fn started_run_reports_its_outcome(
+    origin: crate::control::exec::CommandOrigin,
+    cx: &mut TestAppContext,
+) {
     let mut outbound =
         cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
     let lane = tempfile::tempdir().expect("tempdir");
@@ -762,17 +845,24 @@ async fn a_phone_started_run_reports_its_outcome_back(cx: &mut TestAppContext) {
     // so the opt-out has to come before the run starts.
     cx.executor().allow_parking();
 
-    cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.control_flow_run(ws.active, "ship", window, cx)
-                .expect("dispatched");
-        });
-    })
-    .expect("window is live");
+    let run_id = cx
+        .update_window(wh.into(), |_, window, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.control_flow_run(ws.active, "ship", origin.flow_started_by(), window, cx)
+                    .expect("dispatched")
+                    .run_id
+            })
+        })
+        .expect("window is live");
 
     // The *real* engine and the *real* event pump produce the outcome — the
     // flow is `run: "true"`, so it finishes on its own.
     let sent = outcome_reaches_the_phone(&mut outbound, cx).expect("the outcome reaches the phone");
+    let run_dir = crate::workspace::flow_paths::runs_dir(lane.path()).join(run_id);
+    assert_eq!(
+        daruda_flow::run_log::reader::read(&run_dir).started_by,
+        Some(origin.flow_started_by())
+    );
     match sent {
         crate::telegram::bridge::Outbound::Notice(text) => {
             assert_eq!(
@@ -834,8 +924,14 @@ async fn a_cancelled_phone_started_run_still_reports_back(cx: &mut TestAppContex
 
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.control_flow_run(ws.active, "ship", window, cx)
-                .expect("dispatched");
+            ws.control_flow_run(
+                ws.active,
+                "ship",
+                daruda_flow::request::StartedBy::Phone,
+                window,
+                cx,
+            )
+            .expect("dispatched");
             // A stop trips the token and leaves the run in place, so the
             // engine returns and the run still gets to say how it ended.
             let lane_ref = ws.active_ref();
@@ -868,15 +964,12 @@ async fn a_phone_started_run_answers_with_no_window_open(cx: &mut TestAppContext
         let source = crate::runs::FlowSource::Resumed {
             run_dir: run_dir.clone(),
         };
-        crate::runs::RunsHost::seed_flow_run(
+        crate::runs::RunsHost::seed_flow_run_started_by(
             lane.path().to_path_buf(),
             crate::runs::RunView::new(run_dir.clone(), source, Vec::new()),
+            daruda_flow::request::StartedBy::Phone,
             cx,
         );
-        assert!(crate::runs::RunsHost::owe_flow_outcome_remotely(
-            lane.path(),
-            cx
-        ));
         crate::runs::RunsHost::apply_flow_event_for_test(
             lane.path(),
             &daruda_flow::event::FlowEvent::RunEnded {
@@ -1049,3 +1142,69 @@ nodes:
     kind: command
     run: \"sleep 30\"
 ";
+
+#[gpui::test]
+async fn a_stale_flow_handle_does_not_stop_a_new_run_in_the_same_worktree(cx: &mut TestAppContext) {
+    let (lane, ws, _path, _wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
+    ws.update(cx, |ws, cx| {
+        let active = ws.active;
+        ws.seed_flow_run_for_test(active, lane.path().join("new-run"), cx);
+        let stale = "flow:old-run".parse().unwrap();
+        assert_eq!(
+            ws.control_flow_stop(active, Some(&stale), cx),
+            Err(ControlError::RunMismatch)
+        );
+        assert!(!ws.flow_run_in(active, cx).unwrap().is_stopping());
+        let current = "flow:new-run".parse().unwrap();
+        assert_eq!(
+            ws.control_flow_stop(active, Some(&current), cx),
+            Ok(crate::control::result::StopDisposition::Stopped)
+        );
+    });
+}
+
+#[gpui::test]
+async fn a_flow_start_response_names_the_execution_dispatched(cx: &mut TestAppContext) {
+    use crate::control::{
+        exec,
+        result::{ControlResult, LaneHandle},
+        spec::{ResolvedCommand, ResolvedFlowCommand},
+    };
+    cx.executor().allow_parking();
+    let (_lane, ws, _path, _wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
+    let target = ws.read_with(cx, |ws, _| LaneHandle::new(ws.uuid(), ws.active));
+    let outcome = cx.update(|cx| {
+        exec::run(
+            ResolvedCommand::Flow(ResolvedFlowCommand::Run {
+                name: "ship".into(),
+                lane: target,
+            }),
+            exec::CommandOrigin::Orchestrator,
+            cx,
+        )
+    });
+    let ControlResult::FlowStarting { handle, .. } = outcome.expect("dispatch") else {
+        panic!("flow start");
+    };
+    cx.update(|cx| {
+        assert_eq!(
+            crate::runs::RunsHost::run_scope(cx),
+            vec![crate::runs::result::RunKey::Flow(match &handle {
+                daruda_control_types::runs::RunHandle::Flow { run_id } => run_id.clone(),
+                _ => panic!("flow handle"),
+            })]
+        );
+    });
+    ws.read_with(cx, |ws, cx| {
+        let id = ws
+            .flow_run_in(ws.active, cx)
+            .unwrap()
+            .view()
+            .run_dir()
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert_eq!(handle.to_string(), format!("flow:{id}"));
+    });
+}

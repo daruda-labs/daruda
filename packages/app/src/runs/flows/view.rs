@@ -191,6 +191,14 @@ impl RunView {
         self.questions.values()
     }
 
+    pub(super) fn waiting_on(&self) -> Option<super::super::result::WaitingOn> {
+        self.questions().find(|ask| !ask.is_closed()).map(|ask| {
+            super::super::result::WaitingOn::Question {
+                node: ask.node().to_string(),
+            }
+        })
+    }
+
     pub(crate) fn question(&self, ask_id: u64) -> Option<&ParkedAsk> {
         self.questions.get(&ask_id)
     }

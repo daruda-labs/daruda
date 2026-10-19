@@ -235,6 +235,7 @@ fn immediate_sending_and_a_late_completion_are_ordered_after_preparation(cx: &mu
                         daruda_store::tasks::machine::SettleOutcome::Completed {
                             end_reason: daruda_store::tasks::SessionEndReason::Stop,
                         },
+                        None,
                         cx,
                     );
                 });
@@ -297,6 +298,7 @@ fn running_chat_uses_its_frozen_surface_after_the_task_is_edited(cx: &mut TestAp
                     daruda_store::tasks::machine::SettleOutcome::Stopped {
                         cause: daruda_store::tasks::machine::StopCause::UserStop,
                     },
+                    None,
                     cx,
                 );
                 exec.task_id

@@ -9,9 +9,20 @@ use daruda_acp::LaunchSpec;
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
+/// The surface that started a flow, preserved across resumes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StartedBy {
+    Desktop,
+    Phone,
+    Orchestrator,
+}
+
 /// Everything one run needs. The host resolves lanes, agents and paths
 /// before this point; the engine only ever sees finished values.
 pub struct RunRequest {
+    /// Unknown only when continuing a run recorded before origins existed.
+    pub started_by: Option<StartedBy>,
     /// The flow and its graph, which only mean anything as a pair.
     pub loaded: crate::load::LoadedFlow,
     /// The working directory every node shares.

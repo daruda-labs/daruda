@@ -97,6 +97,7 @@ impl Workspace {
         let at = chrono::Utc::now();
         crate::runs::seed::commit_now(
             vec![TaskEvent::DispatchRequested {
+                started_by: None,
                 id: id.to_owned(),
                 execution_id: exec.execution_id.clone(),
                 source: daruda_store::tasks::TaskExecutionSource::AgentChat,

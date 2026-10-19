@@ -4,9 +4,9 @@
 use super::{RunInputs, RunOutcome, RunReport, run_flow};
 use crate::error::{FlowIoError, IoSite};
 use crate::event::{FlowEvent, RunEnd, RunNotice, Sequenced, emit};
+use crate::load::LoadedFlow;
 use crate::lock::{LockError, RunLock};
 use crate::marker::{DEFAULT_KEEP_RUNS, sweep_old_runs, write_marker};
-use crate::model::Flow;
 use crate::request::RunRequest;
 use crate::run_log::line::EndLine;
 use crate::run_log::machine::FlowRunEvent;
@@ -267,7 +267,7 @@ fn begin(request: &RunRequest, warnings: &mut Vec<String>) -> Result<Begun, RunO
     // After the lock and before the first node: earlier would write into a
     // directory another run owns, later would leave a crashed run — the one
     // whose settings someone needs — with no spec at all.
-    if let Err(e) = write_run_yaml(&request.run_dir, request.loaded.flow(), &request.flow_dir) {
+    if let Err(e) = write_run_yaml(&request.run_dir, &request.loaded, &request.flow_dir) {
         warnings.push(e.to_string());
     }
     let log = crate::run_log::store::open_file_log(&request.run_dir)?;
@@ -275,6 +275,7 @@ fn begin(request: &RunRequest, warnings: &mut Vec<String>) -> Result<Begun, RunO
     // Its presence is what tells a later resume that the crash was not in
     // setup. Narrated as `RunStarted`.
     let started = FlowRunEvent::RunStarted {
+        started_by: request.started_by,
         nodes: crate::run_log::node_starts(&request.loaded),
         until: request.until.clone(),
         pinned: pinned.clone(),
@@ -466,9 +467,11 @@ fn write_gitignore(runs_dir: &Path) -> Result<(), FlowIoError> {
 /// Leave the settings each node resolved to, which `defaults` merging has
 /// already erased by this point. A serialization failure is folded into
 /// `io::Error` so both ways of failing reach the caller as one warning.
-fn write_run_yaml(run_dir: &Path, flow: &Flow, flow_dir: &Path) -> Result<(), FlowIoError> {
+fn write_run_yaml(run_dir: &Path, loaded: &LoadedFlow, flow_dir: &Path) -> Result<(), FlowIoError> {
     let path = run_dir.join(RUN_YAML);
-    yaml_serde::to_string(&crate::resolve::to_flow_file(flow, flow_dir))
+    let mut file = crate::resolve::to_flow_file(loaded.flow(), flow_dir);
+    file.name = loaded.name().map(str::to_owned);
+    yaml_serde::to_string(&file)
         .map_err(std::io::Error::other)
         .and_then(|text| {
             std::fs::create_dir_all(run_dir).and_then(|()| std::fs::write(&path, text))

@@ -127,6 +127,7 @@ async fn a_daruda_prompt_reaches_the_live_orchestrator(cx: &mut TestAppContext) 
                     destination,
                     connecting,
                 },
+                crate::control::exec::CommandOrigin::Orchestrator,
                 cx,
             ),
             Ok(ControlResult::Accepted {

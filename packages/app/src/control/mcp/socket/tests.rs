@@ -181,7 +181,9 @@ fn a_client_handshakes_and_gets_its_frames_answered() {
             // Stand in for the app's foreground drain: echo the frame.
             let echo = smol::spawn(async move {
                 while let Ok(msg) = inbound.recv().await {
-                    let _ = msg.reply.send(format!("echo:{}", msg.frame)).await;
+                    if let Inbound::Frame { reply, frame, .. } = msg {
+                        let _ = reply.send(format!("echo:{frame}").into()).await;
+                    }
                 }
             });
 
@@ -262,29 +264,44 @@ fn a_slow_reply_does_not_stop_the_next_frame() {
             let _ = lines.next().await.expect("handshake reply");
 
             writer.write_all(b"slow\n").await.expect("sent");
-            let slow = within(inbound.recv())
+            let Inbound::Frame { reply: slow, .. } = within(inbound.recv())
                 .await
                 .expect("first frame arrived")
-                .expect("channel open");
+                .expect("channel open")
+            else {
+                panic!("frame expected")
+            };
 
             // Nothing has answered `slow`, and the second frame still has
             // to reach the app. Deadlined so a regression *fails* here
             // rather than hanging the suite — which is exactly what a
             // read loop that awaits each reply does.
             writer.write_all(b"quick\n").await.expect("sent");
-            let quick = within(inbound.recv())
+            let Inbound::Frame {
+                reply: quick,
+                frame,
+                ..
+            } = within(inbound.recv())
                 .await
                 .expect("a slow reply must not stop the next frame")
-                .expect("channel open");
-            assert_eq!(quick.frame, "quick");
+                .expect("channel open")
+            else {
+                panic!("frame expected")
+            };
+            assert_eq!(frame, "quick");
 
             // Answering out of order is legal — JSON-RPC matches on `id`.
-            quick.reply.send("quick-reply".into()).await.expect("sent");
+            quick
+                .send(Outgoing::plain("quick-reply".into()))
+                .await
+                .expect("sent");
             assert_eq!(
                 lines.next().await.expect("reply").expect("line"),
                 "quick-reply"
             );
-            slow.reply.send("slow-reply".into()).await.expect("sent");
+            slow.send(Outgoing::plain("slow-reply".into()))
+                .await
+                .expect("sent");
             assert_eq!(
                 lines.next().await.expect("reply").expect("line"),
                 "slow-reply"
@@ -364,7 +381,7 @@ fn a_connection_outliving_its_token_stops_being_served() {
             .await
             .expect("the live session is served")
             .expect("channel open");
-        assert_eq!(first.frame, "before");
+        assert!(matches!(&first, Inbound::Frame { frame, .. } if frame == "before"));
         drop(first);
 
         rotating.rotate();
@@ -374,7 +391,10 @@ fn a_connection_outliving_its_token_stops_being_served() {
             "a retired connection must be dropped, not kept open"
         );
         assert!(
-            inbound_rx.try_recv().is_err(),
+            matches!(
+                inbound_rx.try_recv(),
+                Ok(Inbound::Disconnected { connection: 1 })
+            ),
             "and the frame it sent afterwards must not reach the app"
         );
     });
@@ -470,7 +490,10 @@ fn an_oversized_frame_ends_the_connection() {
                 "the connection closes rather than leaving an id unanswered"
             );
             assert!(
-                inbound.is_empty(),
+                matches!(
+                    inbound.try_recv(),
+                    Ok(Inbound::Disconnected { connection: 1 })
+                ),
                 "and the oversized frame never reached the app"
             );
         })
@@ -482,4 +505,145 @@ fn an_oversized_frame_ends_the_connection() {
 #[test]
 fn each_run_gets_its_own_identity() {
     assert_ne!(new_runtime_id(), new_runtime_id());
+}
+
+#[test]
+fn disconnection_is_delivered_while_a_reply_sender_stays_alive() {
+    use futures::{AsyncWriteExt as _, StreamExt as _};
+    drive_serve("tok", |mut lines, mut writer, inbound| {
+        Box::pin(async move {
+            writer.write_all(b"{\"token\":\"tok\"}\n").await.unwrap();
+            lines.next().await.unwrap().unwrap();
+            writer.write_all(b"waiting\n").await.unwrap();
+            let pending = inbound.recv().await.unwrap();
+            drop(lines);
+            drop(writer);
+            assert!(
+                matches!(
+                    within(inbound.recv()).await,
+                    Some(Ok(Inbound::Disconnected { connection: 1 }))
+                ),
+                "disconnect must precede waiting for pending replies"
+            );
+            let Inbound::Frame { reply, .. } = pending else {
+                panic!("pending frame")
+            };
+            drop(reply);
+        })
+    });
+}
+
+#[test]
+fn a_receipt_waits_until_the_complete_frame_is_written() {
+    use futures::FutureExt as _;
+    smol::block_on(async {
+        let (response, mut receipt) = Outgoing::with_receipt("reply".into());
+        assert!(receipt.try_recv().unwrap().is_none());
+        let mut bytes = futures::io::Cursor::new(Vec::new());
+        super::server::write_response(&mut bytes, response)
+            .await
+            .unwrap();
+        assert_eq!(bytes.into_inner(), b"reply\n");
+        assert_eq!(receipt.now_or_never(), Some(Ok(())));
+    });
+}
+
+#[test]
+fn failed_or_cancelled_writes_close_the_receipt() {
+    use futures::FutureExt as _;
+    struct Writer {
+        fail: bool,
+    }
+    impl futures::AsyncWrite for Writer {
+        fn poll_write(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+            _: &[u8],
+        ) -> std::task::Poll<std::io::Result<usize>> {
+            if self.fail {
+                std::task::Poll::Ready(Err(std::io::Error::other("write failed")))
+            } else {
+                std::task::Poll::Pending
+            }
+        }
+        fn poll_flush(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+        fn poll_close(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+    }
+    smol::block_on(async {
+        let (response, receipt) = Outgoing::with_receipt("reply".into());
+        assert!(
+            super::server::write_response(&mut Writer { fail: true }, response)
+                .await
+                .is_err()
+        );
+        assert!(receipt.await.is_err());
+        let (response, mut receipt) = Outgoing::with_receipt("reply".into());
+        let mut writer = Writer { fail: false };
+        let mut write = Box::pin(super::server::write_response(&mut writer, response));
+        assert!((&mut write).now_or_never().is_none());
+        assert!(receipt.try_recv().unwrap().is_none());
+        drop(write);
+        assert!(receipt.await.is_err());
+        let (response, receipt) = Outgoing::with_receipt("queued".into());
+        drop(response);
+        assert!(receipt.await.is_err());
+    });
+}
+
+#[test]
+fn reconnect_proceeds_while_the_old_reply_sender_is_retained() {
+    use futures::{AsyncBufReadExt as _, AsyncWriteExt as _, StreamExt as _};
+    fn pair() -> (
+        crate::platform::local_socket::Stream,
+        crate::platform::local_socket::Stream,
+    ) {
+        let (a, b) = crate::platform::local_socket::BlockingStream::pair().unwrap();
+        (
+            crate::platform::local_socket::Stream::try_from(a).unwrap(),
+            crate::platform::local_socket::Stream::try_from(b).unwrap(),
+        )
+    }
+    let (first, mut client) = pair();
+    let (second, mut next) = pair();
+    let (inbound, received) = smol::channel::unbounded();
+    smol::block_on(async move {
+        let served = smol::spawn(async move {
+            let gate = TokenGate::holding("tok");
+            serve(first, &gate, "rt-1", &inbound, 1).await;
+            serve(second, &gate, "rt-1", &inbound, 2).await;
+        });
+        let mut lines = futures::io::BufReader::new(client.clone()).lines();
+        client
+            .write_all(b"{\"token\":\"tok\"}\nwaiting\n")
+            .await
+            .unwrap();
+        lines.next().await.unwrap().unwrap();
+        let old = received.recv().await.unwrap();
+        drop(lines);
+        drop(client);
+        next.write_all(b"{\"token\":\"tok\"}\n").await.unwrap();
+        let mut lines = futures::io::BufReader::new(next).lines();
+        assert!(
+            within(lines.next())
+                .await
+                .flatten()
+                .unwrap()
+                .unwrap()
+                .contains("rt-1"),
+            "the second connection must handshake without releasing the old call"
+        );
+        assert!(matches!(old, Inbound::Frame { .. }));
+        drop(old);
+        drop(served);
+    });
 }

@@ -229,6 +229,7 @@ fn every_new_refusal_travels_as_its_code() {
         (ControlError::ApprovalTimedOut, "approval_timed_out"),
         (ControlError::AgentLimitReached, "agent_limit_reached"),
         (ControlError::QueueFull, "queue_full"),
+        (ControlError::RunMismatch, "run_mismatch"),
         (ControlError::SelfTargetRefused, "self_target_refused"),
         (ControlError::LaneCreateBusy, "lane_create_busy"),
         (
@@ -362,6 +363,12 @@ fn leaked(key: String) -> &'static str {
 /// A value of the type a property declares. Objects are filled from their
 /// own nested schema, so a handle argument gets every key it needs.
 fn dummy_for(schema: &Value) -> Value {
+    if let Some(example) = schema["examples"]
+        .as_array()
+        .and_then(|values| values.first())
+    {
+        return example.clone();
+    }
     match schema["type"].as_str() {
         Some("integer") => serde_json::json!(1),
         Some("object") => schema["properties"]
@@ -379,4 +386,96 @@ fn dummy_for(schema: &Value) -> Value {
         Some("string") => serde_json::json!(uuid::Uuid::nil()),
         other => panic!("unhandled schema type: {other:?}"),
     }
+}
+
+#[test]
+fn flow_stop_accepts_only_flow_handles_and_keeps_omitted_behavior() {
+    let worktree = serde_json::json!({"workspace": workspace_json(), "project": 1, "worktree": 2});
+    for value in ["task:a/b", "flow:../a", "flow:", "flow:a/b"] {
+        assert_eq!(
+            to_command(
+                ToolId::FlowStop,
+                &serde_json::json!({"worktree":worktree, "run":value})
+            ),
+            Err(ConvertError::BadArgument { name: "run" })
+        );
+    }
+    for run in [None, Some("flow:old-run")] {
+        let mut args = serde_json::json!({"worktree":worktree});
+        if let Some(run) = run {
+            args["run"] = run.into();
+        }
+        let Command::Immediate(ResolvedCommand::Flow(ResolvedFlowCommand::Stop {
+            run: actual,
+            ..
+        })) = to_command(ToolId::FlowStop, &args).unwrap()
+        else {
+            panic!("stop");
+        };
+        assert_eq!(actual.map(|run| run.to_string()), run.map(str::to_owned));
+    }
+}
+
+#[test]
+fn run_status_accepts_raw_handles_for_per_item_errors_but_checks_array_types() {
+    for value in [
+        serde_json::json!(42),
+        serde_json::json!(["flow:a", 42]),
+        serde_json::json!("flow:a"),
+    ] {
+        assert_eq!(
+            to_command(ToolId::RunStatus, &serde_json::json!({"handles":value})),
+            Err(ConvertError::BadArgument { name: "handles" })
+        );
+    }
+    assert_eq!(
+        to_command(ToolId::RunStatus, &serde_json::json!({})).unwrap(),
+        Command::RunStatus { handles: None }
+    );
+    assert_eq!(
+        to_command(
+            ToolId::RunStatus,
+            &serde_json::json!({"handles":["broken","task:a/b"]})
+        )
+        .unwrap(),
+        Command::RunStatus {
+            handles: Some(vec!["broken".into(), "task:a/b".into()])
+        }
+    );
+}
+
+#[test]
+fn wait_requires_nonnegative_integer_timeout_and_keeps_raw_handles_for_item_errors() {
+    for args in [
+        serde_json::json!({"timeout":-1}),
+        serde_json::json!({"timeout":0.5}),
+        serde_json::json!({"timeout":"1"}),
+        serde_json::json!({"timeout":null}),
+    ] {
+        assert_eq!(
+            to_command(ToolId::RunWait, &args),
+            Err(ConvertError::BadArgument { name: "timeout" })
+        );
+    }
+    assert_eq!(
+        to_command(ToolId::RunWait, &serde_json::json!({})),
+        Err(ConvertError::MissingArgument { name: "timeout" })
+    );
+    assert_eq!(
+        to_command(
+            ToolId::RunWait,
+            &serde_json::json!({"timeout":0, "handles":["malformed"]})
+        ),
+        Ok(Command::RunWait {
+            handles: Some(vec!["malformed".into()]),
+            timeout: 0
+        })
+    );
+    assert_eq!(
+        to_command(ToolId::RunWait, &serde_json::json!({"timeout":111})),
+        Ok(Command::RunWait {
+            handles: None,
+            timeout: 111
+        })
+    );
 }

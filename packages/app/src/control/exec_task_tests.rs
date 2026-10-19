@@ -51,7 +51,7 @@ async fn the_listing_groups_by_project_and_ends_with_closed_ones(cx: &mut gpui::
     let (uuid, project) = project_of(&fixture, cx);
     let closed = add_task(ProjectUuid::new(), "closed", cx);
     let open = add_task(uuid, "open", cx);
-    let outcome = cx.update(|cx| run(ResolvedCommand::TaskList, cx));
+    let outcome = cx.update(|cx| run(ResolvedCommand::TaskList, CommandOrigin::Orchestrator, cx));
     let Ok(ControlResult::TaskList { tasks }) = outcome else {
         panic!("{outcome:?}");
     };
@@ -76,6 +76,7 @@ async fn an_empty_title_refuses_before_the_card(cx: &mut gpui::TestAppContext) {
                 prompt: "p".into(),
                 worktree: None,
             },
+            crate::control::exec::CommandOrigin::Orchestrator,
             cx,
         ));
         assert_eq!(outcome, Err(ControlError::TaskTitleEmpty));
@@ -98,6 +99,7 @@ async fn an_approved_create_adds_a_backlog_task_to_that_project(cx: &mut gpui::T
                 prompt: "p".into(),
                 worktree: None,
             },
+            crate::control::exec::CommandOrigin::Orchestrator,
             cx,
         )
     });
@@ -126,9 +128,14 @@ async fn a_start_in_a_closed_project_refuses_before_the_card(cx: &mut gpui::Test
     let task = add_task(ProjectUuid::new(), "closed", cx);
     cx.update(|cx| {
         pair_bridge(cx);
-        let outcome = ready(run_gated(GatedCommand::TaskStart { task }, cx));
+        let outcome = ready(run_gated(
+            GatedCommand::TaskStart { task },
+            crate::control::exec::CommandOrigin::Orchestrator,
+            cx,
+        ));
         assert_eq!(outcome, Err(ControlError::TaskProjectNotOpen));
         assert_eq!(crate::control::approval::waiting_count_for_test(cx), 0);
+        assert!(crate::runs::RunsHost::run_scope(cx).is_empty());
     });
 }
 
@@ -140,7 +147,11 @@ async fn a_refused_start_runs_nothing(cx: &mut gpui::TestAppContext) {
     let task = add_task(uuid, "t", cx);
     let dispatch = cx.update(|cx| {
         pair_bridge(cx);
-        run_gated(GatedCommand::TaskStart { task: task.clone() }, cx)
+        run_gated(
+            GatedCommand::TaskStart { task: task.clone() },
+            crate::control::exec::CommandOrigin::Orchestrator,
+            cx,
+        )
     });
     let Dispatch::Deferred { outcome: rx, .. } = dispatch else {
         panic!("a start asks first");
@@ -164,13 +175,20 @@ async fn only_a_running_task_stops(cx: &mut gpui::TestAppContext) {
     let fixture = workspace_with_agent_chat(cx);
     let (uuid, _) = project_of(&fixture, cx);
     let task = add_task(uuid, "t", cx);
-    let outcome = cx.update(|cx| ready(run_waiting(ResolvedCommand::TaskStop { task }, cx)));
+    let outcome = cx.update(|cx| {
+        ready(run_waiting(
+            ResolvedCommand::TaskStop { task },
+            crate::control::exec::CommandOrigin::Orchestrator,
+            cx,
+        ))
+    });
     assert_eq!(outcome, Err(ControlError::TaskNotRunning));
     let outcome = cx.update(|cx| {
         ready(run_waiting(
             ResolvedCommand::TaskStop {
                 task: "missing".into(),
             },
+            crate::control::exec::CommandOrigin::Orchestrator,
             cx,
         ))
     });
@@ -186,13 +204,24 @@ async fn task_stop_answers_after_the_projection_changes(cx: &mut gpui::TestAppCo
         let run = crate::runs::seed::SeedRun::chat(fixture.root());
         crate::runs::seed::task(spec, Some((&run, crate::runs::seed::SeedEnd::Running)), cx)
     });
-    let immediate = cx.update(|cx| run(ResolvedCommand::TaskStop { task: task.clone() }, cx));
+    let immediate = cx.update(|cx| {
+        run(
+            ResolvedCommand::TaskStop { task: task.clone() },
+            CommandOrigin::Orchestrator,
+            cx,
+        )
+    });
     assert!(matches!(
         immediate,
         Err(ControlError::TaskNotRecorded { .. })
     ));
-    let dispatch =
-        cx.update(|cx| run_waiting(ResolvedCommand::TaskStop { task: task.clone() }, cx));
+    let dispatch = cx.update(|cx| {
+        run_waiting(
+            ResolvedCommand::TaskStop { task: task.clone() },
+            crate::control::exec::CommandOrigin::Orchestrator,
+            cx,
+        )
+    });
     let Dispatch::Deferred { outcome, .. } = dispatch else {
         panic!("task_stop waits for its commit");
     };
@@ -223,7 +252,11 @@ async fn an_approved_start_answers_with_its_worktree_and_chat(cx: &mut gpui::Tes
     let task = created.await.expect("recorded");
     let dispatch = cx.update(|cx| {
         pair_bridge(cx);
-        run_gated(GatedCommand::TaskStart { task: task.clone() }, cx)
+        run_gated(
+            GatedCommand::TaskStart { task: task.clone() },
+            crate::control::exec::CommandOrigin::Orchestrator,
+            cx,
+        )
     });
     let Dispatch::Deferred { outcome: rx, .. } = dispatch else {
         panic!("a start asks first");
@@ -232,12 +265,28 @@ async fn an_approved_start_answers_with_its_worktree_and_chat(cx: &mut gpui::Tes
     cx.run_until_parked();
     let Ok(Some(Ok(ControlResult::TaskStarted {
         task: started,
+        handle: run,
         lane: handle,
         chat: Some(chat),
     }))) = rx.recv().await
     else {
         panic!("not started");
     };
+    cx.update(|cx| {
+        assert_eq!(
+            crate::runs::RunsHost::run_scope(cx),
+            vec![crate::runs::result::RunKey::Task(
+                daruda_store::tasks::ExecutionRef {
+                    task_id: task.clone(),
+                    execution_id: match &run {
+                        daruda_control_types::runs::RunHandle::Task { execution_id, .. } =>
+                            execution_id.clone(),
+                        _ => panic!("task handle"),
+                    }
+                }
+            )]
+        );
+    });
     assert_eq!(started, task);
     assert_eq!(handle, LaneHandle::new(workspace, lane));
     assert_eq!(chat.workspace, workspace);
@@ -245,5 +294,39 @@ async fn an_approved_start_answers_with_its_worktree_and_chat(cx: &mut gpui::Tes
         let task = cx.global::<GlobalTasks>().get(&task).unwrap();
         assert_ne!(task.lifecycle, Lifecycle::Backlog);
         assert!(task.execution.is_some(), "the run is bound to the task");
+        assert_eq!(
+            run.to_string(),
+            format!("task:{}/{}", task.id(), task.execution.as_ref().unwrap().id)
+        );
+        assert_eq!(
+            serde_json::to_value(task).unwrap()["started_by"],
+            "orchestrator"
+        );
+    });
+}
+
+#[gpui::test]
+async fn a_phone_task_start_records_phone_provenance(cx: &mut gpui::TestAppContext) {
+    let fixture = workspace_with_agent_chat(cx);
+    let _connections = cx.update(crate::workspace::Workspace::fake_agent_connections_for_test);
+    let lane = fixture
+        .workspace
+        .read_with(cx, |ws, _| ws.control_active_lane());
+    let created = fixture.workspace.update(cx, |ws, cx| {
+        ws.control_task_create(lane.project, "Phone", "p".into(), Some(lane), cx)
+            .unwrap()
+    });
+    cx.run_until_parked();
+    let task = created.await.unwrap();
+    let pending =
+        cx.update(|cx| super::begin_task_start(task.clone(), CommandOrigin::Phone, cx).unwrap());
+    cx.run_until_parked();
+    assert!(cx.update(|cx| pending.try_finish(cx)).unwrap().is_ok());
+    cx.update(|cx| {
+        assert_eq!(
+            cx.global::<GlobalTasks>().get(&task).unwrap().started_by,
+            Some(daruda_store::tasks::StartedBy::Phone)
+        );
+        assert!(crate::runs::RunsHost::run_scope(cx).is_empty());
     });
 }

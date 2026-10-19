@@ -16,6 +16,7 @@ pub(crate) mod ask;
 pub(crate) mod exec;
 pub(crate) mod guards;
 pub(crate) mod mcp;
+pub(crate) mod notices;
 pub(crate) mod resolve;
 pub(crate) use daruda_control_types::{result, spec};
 

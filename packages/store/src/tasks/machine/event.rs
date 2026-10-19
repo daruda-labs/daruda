@@ -14,6 +14,15 @@ use crate::tasks::{
     TaskExecutionSource, TaskId, TaskRunIn,
 };
 
+/// The surface that requested an execution, independent of its agent transport.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StartedBy {
+    Desktop,
+    Phone,
+    Orchestrator,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TaskEvent {
@@ -67,6 +76,8 @@ pub enum TaskEvent {
         id: TaskId,
         execution_id: String,
         source: TaskExecutionSource,
+        #[serde(default)]
+        started_by: Option<StartedBy>,
         at: DateTime<Utc>,
     },
     /// The pane the run uses exists; its identity completes the run.
@@ -121,6 +132,8 @@ pub enum TaskEvent {
         at: DateTime<Utc>,
     },
     Settled {
+        #[serde(default)]
+        result: Option<String>,
         exec: ExecutionRef,
         outcome: SettleOutcome,
         at: DateTime<Utc>,

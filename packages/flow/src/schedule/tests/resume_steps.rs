@@ -37,6 +37,7 @@ pub(super) fn resume_request(
     let dead = |_: u32| false;
     let resumed = crate::resume::prepare(run_dir, Some(&super::lock_dir_of(&request)), &dead)?;
     request.resume = Some(at_once(&resumed));
+    request.started_by = resumed.started_by;
     request.loaded = resumed.loaded;
     request.run_dir = run_dir.to_path_buf();
     request.is_alive = Box::new(dead);
@@ -786,6 +787,7 @@ nodes:
         };
         for event in [
             FlowRunEvent::RunStarted {
+                started_by: None,
                 nodes: crate::run_log::node_starts(&loaded),
                 until: None,
                 pinned: Vec::new(),
@@ -843,6 +845,34 @@ nodes:
         assert!(
             bystander.0.try_wait().expect("try_wait").is_none(),
             "a process that only shares the pid was signalled"
+        );
+    }
+}
+
+#[test]
+fn resumed_requests_keep_the_original_starter() {
+    use crate::request::StartedBy;
+    for origin in [
+        StartedBy::Desktop,
+        StartedBy::Phone,
+        StartedBy::Orchestrator,
+    ] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let text = "version: 1\nnodes:\n  - id: one\n    kind: command\n    run: \"true\"\n";
+        let mut request = request_for(text, dir.path());
+        request.started_by = Some(origin);
+        let report = execute(
+            &request,
+            &FakeRunner::new().cancel_at("one", 1),
+            &CancelToken::default(),
+        );
+        as_if_killed(&request, &report.run_dir);
+        let resumed = resume_request(text, dir.path(), &report.run_dir).expect("resume");
+        assert_eq!(resumed.started_by, Some(origin));
+        let report = execute(&resumed, &FakeRunner::new(), &CancelToken::default());
+        assert_eq!(
+            crate::run_log::reader::read(&report.run_dir).started_by,
+            Some(origin)
         );
     }
 }

@@ -114,7 +114,9 @@ fn remote_lanes_are_refused_before_dispatch_requested(cx: &mut TestAppContext) {
             );
             let id = existing_lane_task(&path, TaskAgentSurface::AgentChat, cx);
             let before = crate::runs::RunsHost::sequence_for_test(cx);
-            let result = ws.begin_task_start(&id, window, cx).try_recv();
+            let result = ws
+                .begin_task_start(&id, daruda_store::tasks::StartedBy::Desktop, window, cx)
+                .try_recv();
             assert_eq!(result, Ok(Err(super::TaskStartError::RemoteLane)));
             assert_eq!(crate::runs::RunsHost::sequence_for_test(cx), before);
             assert_eq!(

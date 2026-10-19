@@ -8,7 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::PaneRef;
+use crate::{PaneRef, runs::RunHandle};
 
 /// A pane's live agent activity.
 ///
@@ -365,6 +365,7 @@ pub enum ControlResult {
     /// reports that failure asynchronously. Naming this `FlowStarted` would
     /// promise something the caller cannot know yet.
     FlowStarting {
+        handle: RunHandle,
         name: String,
         origin: FlowOriginKind,
         /// Which worktree it started in. The command names no target, so this
@@ -434,6 +435,7 @@ pub enum ControlResult {
     /// The task is running: in `lane`, and in `chat` when it runs as an
     /// agent chat. A terminal task has no chat to address.
     TaskStarted {
+        handle: RunHandle,
         task: String,
         lane: LaneHandle,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -488,6 +490,8 @@ pub enum ControlError {
     FlowNeedsInteraction {
         name: String,
     },
+    /// The requested execution no longer owns this worktree.
+    RunMismatch,
     NoActiveLane,
     /// `[orchestrator] enabled = false` — nothing to hand the prompt to.
     OrchestratorDisabled,
@@ -581,6 +585,7 @@ impl std::fmt::Display for ControlError {
             Self::FlowRefused { name } => write!(f, "flow will not run as written: {name}"),
             Self::FlowNotStarted { name } => write!(f, "flow did not start: {name}"),
             Self::FlowNeedsInteraction { name } => write!(f, "flow needs desktop input: {name}"),
+            Self::RunMismatch => write!(f, "the requested run no longer owns this worktree"),
             Self::NoActiveLane => write!(f, "no active lane"),
             Self::OrchestratorDisabled => write!(f, "orchestrator is disabled"),
             Self::OrchestratorUnresolvable => write!(f, "orchestrator names no runnable agent"),

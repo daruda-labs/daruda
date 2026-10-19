@@ -1173,3 +1173,64 @@ fn test_data_dir() -> std::path::PathBuf {
     let id = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     std::env::temp_dir().join(format!("daruda_telegram_ops_test_{id}"))
 }
+
+#[gpui::test]
+async fn permission_levels_reach_task_results_with_phone_disabled(cx: &mut gpui::TestAppContext) {
+    use crate::runs::result::{RunKey, RunState, WaitingOn};
+    use crate::runs::{
+        RunsHost,
+        seed::{self, SeedEnd, SeedRun},
+    };
+    let config = daruda_config::Config::default();
+    assert!(!config.telegram.enabled);
+    let (handle, workspace) = make_window(cx, &config);
+    let pane = handle
+        .update(cx, |_, window, cx| {
+            workspace.update(cx, |ws, cx| ws.open_agent_chat_pane_for_test(window, cx))
+        })
+        .unwrap();
+    cx.run_until_parked();
+    workspace.update(cx, |ws, cx| {
+        let run = SeedRun::chat("/work");
+        let id = seed::task(
+            seed::spec(Default::default(), "permission task"),
+            Some((&run, SeedEnd::Running)),
+            cx,
+        );
+        let key = RunKey::Task(run.exec(&id));
+        RunsHost::bind_execution(ws.run_pane(pane), run.exec(&id), cx);
+        let view = ws.agent_chat_view(pane).cloned().unwrap();
+        view.update(cx, |view, cx| {
+            view.hold_permission_card_for_test(
+                daruda_acp::PermissionItem {
+                    id: 7,
+                    tool_call_id: String::new(),
+                    tool_title: Some("Write".into()),
+                    raw_input_summary: None,
+                    options: vec![],
+                    resolved: None,
+                },
+                cx,
+            )
+        });
+        ws.relay_outstanding_permissions(cx);
+        assert!(matches!(
+            RunsHost::run_query(key.clone(), cx).read().state,
+            RunState::Running {
+                waiting_on: Some(WaitingOn::Permission { .. }),
+                ..
+            }
+        ));
+        view.update(cx, |view, cx| {
+            view.respond_permission(7, "reject_once".into(), PermissionKindView::RejectOnce, cx)
+        });
+        ws.relay_outstanding_permissions(cx);
+        assert!(matches!(
+            RunsHost::run_query(key, cx).read().state,
+            RunState::Running {
+                waiting_on: None,
+                ..
+            }
+        ));
+    });
+}

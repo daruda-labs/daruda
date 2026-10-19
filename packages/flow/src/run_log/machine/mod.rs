@@ -27,7 +27,7 @@ impl daruda_runlog::Machine for FlowRunMachine {
     type Rejected = FlowRunRejected;
     // Bump with any change to how `FlowRunEvent` or `FlowRunState`
     // serializes, so an older build refuses the run's log as too new.
-    const SCHEMA: u32 = 1;
+    const SCHEMA: u32 = 2;
 
     fn check(state: &FlowRunState, event: &FlowRunEvent) -> Result<(), FlowRunRejected> {
         check::check(state, event)

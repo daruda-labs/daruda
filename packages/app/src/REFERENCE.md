@@ -11,7 +11,7 @@ app/src/
 ├── (top-level)           # App entry, window/menu lifecycle, PTY, config watcher, slot actions
 ├── startup/              # Desktop startup and optional replay, capture, and smoke flows
 ├── agent/                # Agent-side data models — MCP, skills — plus GPUI-free account + ACP launch resolution
-├── runs/                 # Process-wide task log owner, flow runs in flight, read-only projections, and host-installed effects
+├── runs/                 # Process-wide task log, live flows, result snapshots, delivery ledger, and host-installed effects
 ├── surface/              # App-shell constants — name, shortcuts, strings, keybinding action map
 ├── title_bar/            # Window chrome — who draws the frame (GPUI-free `policy.rs`), the drag strip, the app-drawn caption controls, the application-menu button
 ├── ui/                   # Facade over `daruda_ui` (packages/ui/) + localized and agent-domain widgets
@@ -84,6 +84,126 @@ run's start and end. Windows read the view through the lanes they hold and
 are told of changes through `RunsEffects::flow_changed`, deferred past the
 update that made them; only windows holding the worktree repaint, and one of
 them speaks for the run's end. Closing a window leaves its runs going.
+
+### Execution results and provenance
+
+`runs/result.rs` defines the run-owned `RunKey`, `RunSnapshot`, progress,
+waiting state, end reason and artifact pointers. `control/mcp/runs.rs` resolves
+external handles and converts these types to `daruda_control_types`; `runs/`
+does not import the control protocol or chat views. Workspace installs
+`RunsEffects::locate_flow_run`, returning `FlowRunLocation { run_dir, lock_dir }`,
+and `RunsEffects::run_event`, receiving the run-owned `RunEvent`.
+
+Phone and MCP starts carry `control::exec::CommandOrigin::{Phone, Orchestrator}`
+into each domain's own `StartedBy`. Desktop starts pass `StartedBy::Desktop`
+directly. Flow `RunStarted` and Task `DispatchRequested` persist this provenance;
+resume and Task reopen preserve it. Start responses construct handles from the
+actual returned run id or `ExecutionRef`: `flow:<run-id>` or
+`task:<task-id>/<execution-id>`. `task:<task-id>` resolves the latest execution
+once per result call. An optional `daruda_flow_stop.run` rejects a mismatched
+current run instead of stopping a replacement in the same worktree.
+
+`RunsHost::run_query` stages foreground facts; `RunQuery::read` performs disk
+reads and report enrichment off-thread. Flow state comes from the live run
+first, then a retained ended snapshot, then strict read-only run-log inspection
+at a known or host-located directory. The process's `FlowEnded` remains
+authoritative even if writing its log or report failed; `ShutDown` alone is
+not an end. Task state comes from the task book and execution history, with
+retained ended snapshots as a fallback. Unknown flow location yields `Unknown`,
+a missing known directory or Task execution yields `Gone`, and failed log
+inspection yields `Unreadable` with a reason. Ended results include bounded
+text and pointers to reports, outputs, sessions or CLI transcripts when known.
+`what` names the flow or Task; `why` carries the Task prompt prefix or flow
+`until` and pinned-node context. Resume metadata carries the original pinned
+selection for this description without applying the outputs as new pins.
+
+Only `TaskEvent::Settled` carries a textual result. AgentChat captures its final
+answer at `fire_activity_completion`, after activity has settled; CLI settling
+marks the execution while a background reader finds the last assistant text
+in a bounded transcript tail. The execution is rechecked before commit, and
+missing or malformed transcripts yield no text. Text preserves up to 2,000
+leading and 2,000 trailing characters around a truncation marker. Every terminal
+path records execution identity, provenance, end state and pointers in the
+Task's five-entry history; reopen retains that history. `Completed` describes
+normal Task session termination, so work success must be judged from the result.
+
+### Result queries, waits and delivery
+
+The orchestrator's nineteen MCP tools include `daruda_run_status` and
+`daruda_run_wait`. These result tools are MCP-only; phone commands retain their
+existing surface. Status reads progress or results without consuming events.
+Both tools accept explicit handles from any origin, including older persisted
+runs. Omitting handles selects successful orchestrator starts in this process
+plus unfinished orchestrator Task executions captured before startup
+reconciliation, including Running CLI executions. Already-terminal Tasks and
+flows from earlier processes do not enter that omitted scope. Older flows
+remain explicitly queryable; flow startup carry is outside this contract.
+
+`RunWatch`, inside `RunsHost`, owns that process-wide scope, snapshots, waiters
+and delivery ledger. It survives orchestrator pane or session replacement and
+gate-token rotation, but has no durable delivery acknowledgment across app
+restart. Each end or waiting episode has a `(RunKey, sequence)` identity.
+Flow questions and level comparisons of the exact Running AgentChat Task's
+permission state produce waiting episodes. Closing a block or ending the run
+supersedes an unreported block; a resumed flow can produce a new end episode
+under the same handle.
+
+Wait requires an integer `timeout` in seconds: zero polls, and values above
+110 are clamped with requested/actual metadata. One omitted-handles waiter may
+be active (`WaiterBusy` for another); explicit waiters can coexist. Eligible
+events are delivered end-first, FIFO within each class, at most twenty per
+answer with a `more` count. Explicit waits return previously reported ends in
+`already_reported` and unknown, gone or unreadable entries in `not_running`;
+those entries do not end a wait while another selected execution is running.
+`TimedOut` and `Nothing` are normal outcomes. After repeated timeouts, inspect
+`daruda_run_status`. Externally running disk flows are refreshed off-thread
+every two seconds independently of unrelated run wakeups; per-key revisions
+prevent stale reads or enrichment from
+overwriting a newer lifecycle, including resume.
+
+An event moves `Unreported -> InFlight -> Reported`. Reservation keeps its
+waiter active through the socket receipt phase. Only successful `write_all`
+of the complete JSON response and its newline marks it reported; failed
+writes, cancellation and disconnect roll it back and withdraw the waiter.
+The read loop announces disconnect before waiting for its writer, so pending
+waits do not block reconnection. This receipt confirms a socket write, not
+that the model read or acknowledged the result. Status can recover retained
+results after such a loss. The 200-entry reported retention limit never
+evicts unreported or in-flight snapshots, even when Task history has rolled
+past them. Cheap reported-terminal identities remain after snapshot eviction
+to prevent a disk/history lookup from delivering the same end again.
+
+### Orchestrator run notices
+
+The `RunWatch` event channel is drained on the foreground, outside its state
+mutation, into `RunsEffects::run_event`. Workspace's effect forwards to
+`control/notices`; its deferred flush avoids re-entering an active Workspace
+update. Notices scan the delivery ledger afresh instead of retaining duplicate
+result payloads. They select only omitted-scope, unreported episodes that no
+active waiter covers, including coverage during the socket receipt phase.
+Releasing a waiter re-announces still-unreported events with their original
+identities after obsolete blocked episodes are pruned, so an idle replacement
+session can retry them without another run event.
+
+A notice can dispatch immediately when an event arrives at an idle orchestrator,
+at `fire_activity_completion` after a busy orchestrator settles, or after pane
+creation or session replacement rotates its gate epoch. No pane or a rejected
+prompt leaves episodes eligible for a later opportunity; failures use deduplicated
+`LogWriter` reporting. One pointer prompt contains at most twenty lines with
+handles, names, end/wait summaries and `call daruda_run_wait`, plus `+k more`.
+A process-global set records accepted `(RunKey, sequence)` identities for all
+eligible entries represented by the batch; waiter-covered and in-flight entries
+stay eligible later. Accepting a notice never marks a run result reported.
+
+`AgentChatView::send_internal_prompt_text` uses `PromptOrigin::Internal` for
+these literal prompts. It preserves composer and queued-edit state, appends
+behind existing prompts, and respects FIFO and the Stop/cancel-ack window.
+The host reconciles any owed completion before dispatch and reconciles the new
+activity afterward, routing both edges through `fire_activity_completion`.
+It does not interpret slash commands or arm a phone first-response watch.
+Phone relay behavior is unchanged: Phone and Orchestrator flow starts retain
+their direct result relay, and orchestrator answer relay follows the existing
+presence rules.
 
 ## `surface/`
 
@@ -225,7 +345,7 @@ daruda (app)  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
              →  daruda_flow_edit  →  daruda_flow   # YAML edits that keep comments and order
              →  daruda_project    →  daruda_config, daruda_store, daruda_core  # GPUI-free Project/Lane
              →  daruda_content    →  merman, resvg, image   # GPUI-free image + mermaid pipeline
-             →  daruda_control_types  →  daruda_store   # GPUI-free control contract, PaneRef
+             →  daruda_control_types  →  daruda_store, daruda_core   # GPUI-free control contract, PaneRef
              →  daruda_ui         →  daruda_terminal, daruda_config, gpui_component, ferrum_flow  # widgets
              →  daruda_transcript →  daruda_acp, daruda_config, daruda_ui   # transcript presentation, shared by chat + Settings
              →  daruda_chat       →  daruda_transcript, daruda_acp, daruda_content, daruda_ui, daruda_config, daruda_store, daruda_core  # the chat pane view

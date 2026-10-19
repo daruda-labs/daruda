@@ -9,7 +9,7 @@ use chrono::Utc;
 use gpui::{Context, Window};
 
 use daruda_store::project::{LaneRef, ProjectId, ProjectUuid};
-use daruda_store::tasks::{Lifecycle, TaskRunIn, TaskSpec};
+use daruda_store::tasks::{ExecutionRef, Lifecycle, StartedBy, TaskRunIn, TaskSpec};
 
 use crate::control::result::{ControlError, TaskProject};
 use crate::runs::{GlobalTasks, TaskCommitError, TaskIntent};
@@ -18,8 +18,8 @@ use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::right_dock::task_chat_ops::TaskChatError;
 use crate::workspace::right_dock::task_start::{TaskStartError, TaskStarted};
 
-/// A started task: the worktree it runs in, and its chat when it has one.
-pub(crate) type ControlTaskStart = Result<(LaneRef, Option<PaneId>), ControlError>;
+/// A started execution, its worktree, and its chat when it has one.
+pub(crate) type ControlTaskStart = Result<(ExecutionRef, LaneRef, Option<PaneId>), ControlError>;
 
 impl Workspace {
     /// Each open project's durable id, with the handle a caller names it by.
@@ -112,11 +112,12 @@ impl Workspace {
     pub(crate) fn control_task_start(
         &mut self,
         task: &str,
+        started_by: StartedBy,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> smol::channel::Receiver<ControlTaskStart> {
         let (tx, rx) = smol::channel::bounded(1);
-        let started = self.begin_task_start(task, window, cx);
+        let started = self.begin_task_start(task, started_by, window, cx);
         // SILENT-OK on each send below: a caller that stopped listening
         // has nothing left to tell.
         if let Ok(outcome) = started.try_recv() {
@@ -147,7 +148,7 @@ impl Workspace {
             .ok_or(ControlError::TargetGone)?;
         let chat = (started.surface == daruda_store::tasks::TaskAgentSurface::AgentChat)
             .then_some(started.pane);
-        Ok((lane, chat))
+        Ok((started.exec, lane, chat))
     }
 
     /// Bring up the chat `task`'s run belongs to.

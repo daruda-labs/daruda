@@ -44,6 +44,7 @@ async fn dispatch_while_switching_lanes(
                 };
                 crate::runs::seed::commit_now(
                     vec![TaskEvent::DispatchRequested {
+                        started_by: None,
                         id: id.clone(),
                         execution_id: exec.execution_id.clone(),
                         source: if surface == TaskAgentSurface::Terminal {
@@ -167,7 +168,12 @@ fn refusals_answer_before_anything_is_spawned(cx: &mut TestAppContext) {
                     Some((&SeedRun::chat(&gone), SeedEnd::Cancelled)),
                     cx,
                 );
-                let rx = ws.begin_task_start(&started, window, cx);
+                let rx = ws.begin_task_start(
+                    &started,
+                    daruda_store::tasks::StartedBy::Desktop,
+                    window,
+                    cx,
+                );
                 assert_eq!(
                     rx.try_recv(),
                     Ok(Err(TaskStartError::NotBacklog)),
@@ -190,7 +196,16 @@ fn refusals_answer_before_anything_is_spawned(cx: &mut TestAppContext) {
                 let answers: Vec<_> = cases
                     .into_iter()
                     .map(|(id, expected)| {
-                        (id.clone(), ws.begin_task_start(&id, window, cx), expected)
+                        (
+                            id.clone(),
+                            ws.begin_task_start(
+                                &id,
+                                daruda_store::tasks::StartedBy::Desktop,
+                                window,
+                                cx,
+                            ),
+                            expected,
+                        )
                     })
                     .collect();
                 (lanes, answers)
@@ -223,22 +238,71 @@ fn an_existing_lane_start_answers_with_where_it_runs(cx: &mut TestAppContext) {
     let project = daruda_store::project::Project::from_path(root.path());
     let (window, workspace) =
         build_workspace_with(cx, &daruda_config::Config::default(), Some(project));
-    let (lane, rx) = cx
+    let (id, lane, rx) = cx
         .update_window(window.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
                 let lane = ws.active_lane().unwrap().path.clone();
                 let mut t = task(ws.projects[0].uuid);
                 t.run_in = TaskRunIn::ExistingLane { path: lane.clone() };
                 let id = add(t, cx);
-                (lane, ws.begin_task_start(&id, window, cx))
+                (
+                    id.clone(),
+                    lane,
+                    ws.begin_task_start(&id, daruda_store::tasks::StartedBy::Desktop, window, cx),
+                )
             })
         })
         .unwrap();
     cx.run_until_parked();
     let pane = workspace.read_with(cx, |ws, _| ws.active_runtime().focused_pane_id);
+    let exec = cx.update(|cx| {
+        let record = cx.global::<crate::runs::GlobalTasks>().get(&id).unwrap();
+        assert_eq!(
+            record.started_by,
+            Some(daruda_store::tasks::StartedBy::Desktop)
+        );
+        record.current_exec().unwrap().clone()
+    });
+    cx.update(|cx| {
+        use daruda_store::tasks::{TaskEvent, TaskExecutionSource};
+        let now = chrono::Utc::now();
+        crate::runs::seed::commit_now(
+            vec![
+                TaskEvent::Settled {
+                    result: None,
+                    exec: exec.clone(),
+                    outcome: daruda_store::tasks::machine::SettleOutcome::Completed {
+                        end_reason: daruda_store::tasks::SessionEndReason::Stop,
+                    },
+                    at: now,
+                },
+                TaskEvent::Reopened {
+                    id: id.clone(),
+                    run_in: TaskRunIn::ExistingLane { path: lane.clone() },
+                    at: now,
+                },
+                TaskEvent::DispatchRequested {
+                    id: id.clone(),
+                    execution_id: "next-run".into(),
+                    source: TaskExecutionSource::AgentChat,
+                    started_by: Some(daruda_store::tasks::StartedBy::Orchestrator),
+                    at: now,
+                },
+            ],
+            cx,
+        );
+        assert_ne!(
+            cx.global::<crate::runs::GlobalTasks>()
+                .get(&id)
+                .unwrap()
+                .current_exec(),
+            Some(&exec)
+        );
+    });
     assert_eq!(
         rx.try_recv(),
         Ok(Ok(TaskStarted {
+            exec,
             worktree: lane,
             pane,
             surface: TaskAgentSurface::Terminal,

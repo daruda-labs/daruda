@@ -10,8 +10,8 @@ fn agents() -> Vec<daruda_config::AgentDefinition> {
 }
 
 #[test]
-fn seventeen_tools_are_exposed() {
-    assert_eq!(ToolTable::all(&agents()).describe().len(), 17);
+fn nineteen_tools_are_exposed() {
+    assert_eq!(ToolTable::all(&agents()).describe().len(), 19);
 }
 
 #[test]
@@ -220,4 +220,18 @@ fn an_empty_catalog_advertises_no_choices() {
     let agent = &t["inputSchema"]["properties"]["agent"];
     assert_eq!(agent["type"], "string");
     assert!(agent.get("enum").is_none(), "{agent}");
+}
+
+#[test]
+fn wait_is_advertised_with_required_timeout() {
+    let tools = ToolTable::all(&[]);
+    let wait = tools
+        .describe()
+        .into_iter()
+        .find(|t| t["name"] == "daruda_run_wait");
+    assert!(wait.is_some(), "run wait must be advertised");
+    assert_eq!(
+        wait.unwrap()["inputSchema"]["required"],
+        serde_json::json!(["timeout"])
+    );
 }

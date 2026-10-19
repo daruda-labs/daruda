@@ -113,9 +113,16 @@ fn every_result_variant_round_trips_through_json() {
             }],
         },
         ControlResult::FlowStarting {
+            handle: "flow:run-1".parse().unwrap(),
             name: "ship.yaml".into(),
             origin: FlowOriginKind::Global,
             lane: sample_lane().target,
+        },
+        ControlResult::TaskStarted {
+            task: "task-1".into(),
+            handle: "task:task-1/exec-1".parse().unwrap(),
+            lane: sample_lane().target,
+            chat: Some(target),
         },
         ControlResult::FlowStopped {
             lane: sample_lane().target,
@@ -229,6 +236,7 @@ fn every_error_variant_round_trips_through_json() {
         ControlError::FlowNeedsInteraction {
             name: "ship.yaml".into(),
         },
+        ControlError::RunMismatch,
         ControlError::NoActiveLane,
         ControlError::OrchestratorDisabled,
         ControlError::OrchestratorUnresolvable,

@@ -11,6 +11,7 @@ fn id(name: &str) -> NodeId {
 
 fn started() -> FlowRunEvent {
     FlowRunEvent::RunStarted {
+        started_by: None,
         nodes: vec![
             NodeStart {
                 id: id("design"),
@@ -386,6 +387,7 @@ fn a_fix_asks_as_its_gate_only_while_it_runs() {
 #[test]
 fn a_pin_counts_as_passed_and_cannot_be_lost() {
     let (state, _) = run(vec![FlowRunEvent::RunStarted {
+        started_by: None,
         nodes: vec![NodeStart {
             id: id("design"),
             produces: Produces::File,
@@ -614,4 +616,90 @@ fn a_spawned_group_belongs_to_its_attempt_until_it_settles() {
         },
     ]);
     assert!(settled.unsettled_processes().is_empty());
+}
+
+#[test]
+fn started_by_round_trips_in_start_events() {
+    for origin in ["desktop", "phone", "orchestrator"] {
+        let mut value = serde_json::to_value(started()).expect("serialize");
+        value["started_by"] = origin.into();
+        let event: FlowRunEvent = serde_json::from_value(value).expect("deserialize");
+        let encoded = serde_json::to_value(event).expect("encode");
+        assert_eq!(encoded["started_by"], origin);
+    }
+}
+
+#[test]
+fn legacy_start_events_replay_with_unknown_origin() {
+    let mut value = serde_json::to_value(started()).expect("serialize");
+    value.as_object_mut().expect("object").remove("started_by");
+    let event = serde_json::from_value(value).expect("legacy event");
+    assert_eq!(run(vec![event]).0.start.started_by, None);
+}
+
+#[test]
+fn start_origin_survives_replay_and_resume() {
+    use crate::request::StartedBy;
+    for origin in [
+        StartedBy::Desktop,
+        StartedBy::Phone,
+        StartedBy::Orchestrator,
+    ] {
+        let mut event = started();
+        let FlowRunEvent::RunStarted { started_by, .. } = &mut event else {
+            panic!("start");
+        };
+        *started_by = Some(origin);
+        let (state, _) = run(vec![event, FlowRunEvent::Resumed { carried: 0 }]);
+        assert_eq!(state.start.started_by, Some(origin));
+    }
+}
+
+struct SchemaOne;
+
+impl daruda_runlog::Machine for SchemaOne {
+    type State = FlowRunState;
+    type Event = FlowRunEvent;
+    type Rejected = FlowRunRejected;
+    const SCHEMA: u32 = 1;
+
+    fn check(state: &Self::State, event: &Self::Event) -> Result<(), Self::Rejected> {
+        FlowRunMachine::check(state, event)
+    }
+    fn assign(state: &Self::State, event: &mut Self::Event) {
+        FlowRunMachine::assign(state, event);
+    }
+    fn apply(state: &mut Self::State, event: &Self::Event) {
+        FlowRunMachine::apply(state, event);
+    }
+}
+
+#[test]
+fn schema_two_accepts_legacy_logs_and_schema_one_refuses_new_logs() {
+    use daruda_runlog::{FileBackend, OpenError, RunLog, Versioned};
+    let legacy = tempfile::tempdir().expect("tempdir");
+    let mut log =
+        RunLog::<SchemaOne, _>::open(FileBackend::new(legacy.path()), "old").expect("open");
+    log.commit(started()).expect("start");
+    drop(log);
+    let (_, state) = RunLog::<FlowRunMachine, _>::read_only(&FileBackend::new(legacy.path()))
+        .expect("read legacy");
+    assert_eq!(state.start.started_by, None);
+
+    let current = tempfile::tempdir().expect("tempdir");
+    let log =
+        RunLog::<FlowRunMachine, _>::open(FileBackend::new(current.path()), "new").expect("open");
+    drop(log);
+    let backend = FileBackend::new(current.path());
+    let path = backend.log_path(0);
+    let before = std::fs::read(&path).expect("bytes");
+    assert!(matches!(
+        RunLog::<SchemaOne, _>::open(backend, "old"),
+        Err(OpenError::TooNew {
+            what: Versioned::Schema,
+            found: 2,
+            supported: 1
+        })
+    ));
+    assert_eq!(std::fs::read(path).expect("bytes"), before);
 }

@@ -241,6 +241,10 @@ async fn a_pinned_node_reaches_the_run_as_a_file_to_copy(cx: &mut TestAppContext
             .map(|submission| submission.request)
         })
         .expect("the request assembles");
+    assert_eq!(
+        request.started_by,
+        Some(daruda_flow::request::StartedBy::Desktop)
+    );
     assert_eq!(request.until, Some("design".into()));
     assert_eq!(
         request.pinned,

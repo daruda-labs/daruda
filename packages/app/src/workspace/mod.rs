@@ -75,6 +75,7 @@ mod project_palette_ops;
 mod render;
 mod right_dock;
 mod root_menu;
+mod run_notice_ops;
 mod runs_effects;
 #[cfg(feature = "screenshot")]
 pub(crate) mod screenshot_scenario;

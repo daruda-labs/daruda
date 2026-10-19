@@ -54,10 +54,10 @@ pub enum ResolvedFlowCommand {
         name: String,
         lane: crate::result::LaneHandle,
     },
-    /// Stop whatever `lane` is running. Names no flow: a worktree runs one at
-    /// a time, so the worktree *is* the identifier.
+    /// Stop the worktree, optionally only if this execution still owns it.
     Stop {
         lane: crate::result::LaneHandle,
+        run: Option<crate::runs::RunHandle>,
     },
 }
 

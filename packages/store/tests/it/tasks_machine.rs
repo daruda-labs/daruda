@@ -126,6 +126,10 @@ fn lifecycle(kind: LifecycleKind, source: Source) -> Lifecycle {
 /// only the table decides.
 fn record(kind: LifecycleKind, source: Source) -> TaskRecord {
     TaskRecord {
+        description: None,
+        started_by: None,
+        started_at: None,
+        ended_executions: Vec::new(),
         spec: spec(),
         lifecycle: lifecycle(kind, source),
         // A run is recorded from `LanePrepared` on.
@@ -222,6 +226,7 @@ fn sample(kind: EventKind) -> TaskEvent {
             at: t,
         },
         EventKind::DispatchRequested => TaskEvent::DispatchRequested {
+            started_by: Some(daruda_store::tasks::StartedBy::Orchestrator),
             id,
             execution_id: RUN.into(),
             source: source_of(Source::Cli),
@@ -276,6 +281,7 @@ fn sample(kind: EventKind) -> TaskEvent {
             at: t,
         },
         EventKind::Settled => TaskEvent::Settled {
+            result: None,
             exec,
             outcome: SettleOutcome::Completed {
                 end_reason: SessionEndReason::Stop,
@@ -520,6 +526,7 @@ fn start(book: &mut TasksBook, source: Source, run: &str) {
     commit(
         book,
         TaskEvent::DispatchRequested {
+            started_by: None,
             id: ID.into(),
             execution_id: run.into(),
             source: source_of(source),
@@ -558,6 +565,7 @@ fn task(book: &TasksBook) -> &TaskRecord {
 fn a_late_settle_from_an_earlier_execution_is_stale() {
     let mut book = running_book(Source::Chat, "run-1");
     let settle = |run: &str| TaskEvent::Settled {
+        result: None,
         exec: exec_of(run),
         outcome: SettleOutcome::Completed {
             end_reason: SessionEndReason::Stop,
@@ -668,6 +676,7 @@ fn a_stop_is_interrupted_not_done() {
         commit(
             &mut book,
             TaskEvent::Settled {
+                result: None,
                 exec: exec(),
                 outcome: SettleOutcome::Stopped { cause },
                 at: at(5),
@@ -692,6 +701,7 @@ fn settling_maps_the_session_end_like_the_legacy_hooks() {
         commit(
             &mut book,
             TaskEvent::Settled {
+                result: None,
                 exec: exec(),
                 outcome,
                 at: at(5),
@@ -863,6 +873,7 @@ fn reconciling_before_a_lane_exists_is_undelivered_without_a_worktree() {
     commit(
         &mut book,
         TaskEvent::DispatchRequested {
+            started_by: None,
             id: ID.into(),
             execution_id: RUN.into(),
             source: source_of(Source::Chat),
@@ -1099,7 +1110,16 @@ fn law_states() -> Vec<TasksBook> {
 
 #[test]
 fn the_machine_obeys_the_run_log_laws() {
-    assert_machine_laws::<TaskMachine>(&law_states(), &all_samples());
+    let mut samples = all_samples();
+    samples.push(TaskEvent::Settled {
+        exec: exec(),
+        outcome: SettleOutcome::Completed {
+            end_reason: SessionEndReason::Stop,
+        },
+        result: Some("final answer".into()),
+        at: at(19),
+    });
+    assert_machine_laws::<TaskMachine>(&law_states(), &samples);
 }
 
 #[test]
@@ -1109,6 +1129,7 @@ fn every_crash_point_recovers_a_committed_prefix() {
         sample(EventKind::Edited),
         sample(EventKind::SubtaskAdded),
         TaskEvent::DispatchRequested {
+            started_by: Some(daruda_store::tasks::StartedBy::Orchestrator),
             id: ID.into(),
             execution_id: RUN.into(),
             source: source_of(Source::Cli),
@@ -1127,7 +1148,14 @@ fn every_crash_point_recovers_a_committed_prefix() {
         },
         sample(EventKind::TodoMerged),
         sample(EventKind::CliProcessObserved),
-        sample(EventKind::Settled),
+        TaskEvent::Settled {
+            exec: exec(),
+            outcome: SettleOutcome::Completed {
+                end_reason: SessionEndReason::Stop,
+            },
+            result: Some("durable final answer".into()),
+            at: at(19),
+        },
         TaskEvent::CliProcessObserved {
             exec: exec(),
             process: CliProcessState::ExitConfirmed { ended_at: at(20) },
@@ -1181,6 +1209,7 @@ fn every_lifecycle_and_event_round_trips_through_json() {
         ]
         .into_iter()
         .map(|outcome| TaskEvent::Settled {
+            result: None,
             exec: exec(),
             outcome,
             at: at(1),
@@ -1219,6 +1248,7 @@ fn an_undelivered_reason_round_trips_through_the_task_log() {
         let events = [
             TaskEvent::Created { spec: spec() },
             TaskEvent::DispatchRequested {
+                started_by: None,
                 id: ID.into(),
                 execution_id: RUN.into(),
                 source: source_of(Source::Chat),
@@ -1256,4 +1286,241 @@ fn an_undelivered_reason_round_trips_through_the_task_log() {
         serde_json::to_string(&UndeliveredReason::SessionFailed).unwrap(),
         "\"session_failed\""
     );
+}
+
+#[test]
+fn execution_descriptions_require_schema_four() {
+    assert_eq!(TaskMachine::SCHEMA, 4);
+}
+
+#[test]
+fn dispatch_provenance_survives_reopen_and_is_overwritten_by_the_next_start() {
+    let mut book = TasksBook::default();
+    commit(&mut book, TaskEvent::Created { spec: spec() });
+    for origin in ["desktop", "phone", "orchestrator"] {
+        let event: TaskEvent = serde_json::from_value(serde_json::json!({
+            "type": "dispatch_requested", "id": ID, "execution_id": RUN,
+            "source": source_of(Source::Chat), "started_by": origin, "at": at(1)
+        }))
+        .unwrap();
+        commit(&mut book, event);
+        assert_eq!(
+            serde_json::to_value(task(&book)).unwrap()["started_by"],
+            origin
+        );
+        commit(
+            &mut book,
+            TaskEvent::DispatchFailed {
+                exec: exec(),
+                cause: StartFailure::WindowClosed,
+                at: at(2),
+            },
+        );
+        assert_eq!(
+            serde_json::to_value(task(&book).ended_executions.last().unwrap()).unwrap()["started_by"],
+            origin
+        );
+        commit(
+            &mut book,
+            TaskEvent::Reopened {
+                id: ID.into(),
+                run_in: TaskRunIn::NewWorktree,
+                at: at(3),
+            },
+        );
+        assert_eq!(
+            serde_json::to_value(task(&book)).unwrap()["started_by"],
+            origin
+        );
+    }
+}
+
+#[test]
+fn old_dispatch_and_records_have_unknown_provenance() {
+    let event: TaskEvent = serde_json::from_value(serde_json::json!({
+        "type": "dispatch_requested", "id": ID, "execution_id": RUN,
+        "source": source_of(Source::Chat), "at": at(1)
+    }))
+    .unwrap();
+    let mut book = TasksBook::default();
+    commit(&mut book, TaskEvent::Created { spec: spec() });
+    commit(&mut book, event);
+    assert!(serde_json::to_value(task(&book)).unwrap()["started_by"].is_null());
+    let mut value = serde_json::to_value(task(&book)).unwrap();
+    value.as_object_mut().unwrap().remove("started_by");
+    let old: TaskRecord = serde_json::from_value(value).unwrap();
+    assert!(serde_json::to_value(old).unwrap()["started_by"].is_null());
+}
+
+#[test]
+fn provenance_survives_log_reopening_and_an_old_machine_refuses_it() {
+    use daruda_runlog::{FileBackend, OpenError, RunLog, Versioned};
+
+    struct OldTaskMachine;
+    impl daruda_runlog::Machine for OldTaskMachine {
+        type State = TasksBook;
+        type Event = TaskEvent;
+        type Rejected = TaskRejected;
+        const SCHEMA: u32 = 2;
+        fn check(state: &TasksBook, event: &TaskEvent) -> Result<(), TaskRejected> {
+            TaskMachine::check(state, event)
+        }
+        fn apply(state: &mut TasksBook, event: &TaskEvent) {
+            TaskMachine::apply(state, event);
+        }
+    }
+
+    for origin in ["desktop", "phone", "orchestrator"] {
+        let dir = tempfile::tempdir().unwrap();
+        let store = daruda_store::tasks::TaskStore::in_directory(
+            dir.path(),
+            None,
+            "test",
+            Box::new(|_, _| {}),
+        )
+        .unwrap();
+        smol::block_on(store.propose(TaskEvent::Created { spec: spec() })).unwrap();
+        let event = serde_json::from_value(serde_json::json!({
+            "type": "dispatch_requested", "id": ID, "execution_id": RUN,
+            "source": source_of(Source::Chat), "started_by": origin, "at": at(1)
+        }))
+        .unwrap();
+        smol::block_on(store.propose(event)).unwrap();
+        drop(store);
+        let opened = RunLog::<TaskMachine, _>::open(FileBackend::new(dir.path()), "test").unwrap();
+        assert_eq!(
+            serde_json::to_value(task(opened.state())).unwrap()["started_by"],
+            origin
+        );
+        drop(opened);
+        assert!(matches!(
+            RunLog::<OldTaskMachine, _>::open(FileBackend::new(dir.path()), "old"),
+            Err(OpenError::TooNew {
+                what: Versioned::Schema,
+                found: 4,
+                supported: 2
+            })
+        ));
+    }
+}
+
+#[test]
+fn every_terminal_transition_retains_exact_execution_facts() {
+    for source in [Source::Chat, Source::Cli] {
+        for from in [L::Preparing, L::Dispatching, L::Running] {
+            for event in all_samples() {
+                let original = record(from, source);
+                let mut book = TasksBook::default();
+                commit(
+                    &mut book,
+                    TaskEvent::Imported {
+                        tasks: vec![original.clone()],
+                    },
+                );
+                if TaskMachine::check(&book, &event).is_err() {
+                    continue;
+                }
+                commit(&mut book, event);
+                let Some(record) = book.get(ID) else {
+                    continue;
+                };
+                if !record.lifecycle.is_terminal() {
+                    continue;
+                }
+                let ended = record
+                    .ended_executions
+                    .last()
+                    .expect("terminal event records history");
+                assert_eq!(ended.exec, exec());
+                assert_eq!(ended.ended_as, record.lifecycle);
+                assert_eq!(ended.started_by, original.started_by);
+                assert_eq!(ended.started_at, original.started_at);
+                assert_eq!(ended.execution, original.execution);
+                assert_eq!(ended.session_ids, original.session_ids);
+                assert_eq!(Some(ended.finished_at), record.finished_at);
+                assert_eq!(ended.result, None);
+            }
+        }
+    }
+}
+
+#[test]
+fn execution_history_keeps_five_results_and_survives_reopening() {
+    let mut book = running_book(Source::Chat, "run-0");
+    for index in 0..7 {
+        let run = format!("run-{index}");
+        if index > 0 {
+            start(&mut book, Source::Chat, &run);
+        }
+        commit(
+            &mut book,
+            TaskEvent::Settled {
+                exec: exec_of(&run),
+                outcome: SettleOutcome::Completed {
+                    end_reason: SessionEndReason::Stop,
+                },
+                result: Some(format!("answer {index}")),
+                at: at(20 + index),
+            },
+        );
+        let history = task(&book).ended_executions.clone();
+        assert_eq!(history.len(), (index as usize + 1).min(5));
+        assert_eq!(history.last().unwrap().exec, exec_of(&run));
+        assert_eq!(history.last().unwrap().started_at, Some(at(1)));
+        assert_eq!(
+            history.last().unwrap().result,
+            Some(format!("answer {index}"))
+        );
+        commit(
+            &mut book,
+            TaskEvent::Reopened {
+                id: ID.into(),
+                run_in: TaskRunIn::NewWorktree,
+                at: at(30 + index),
+            },
+        );
+        assert_eq!(task(&book).ended_executions, history);
+    }
+    assert_eq!(task(&book).ended_executions[0].exec.execution_id, "run-2");
+}
+
+#[test]
+fn unsuccessful_outcomes_cannot_retain_an_answer() {
+    for outcome in [
+        SettleOutcome::Errored,
+        SettleOutcome::Stopped {
+            cause: StopCause::UserStop,
+        },
+        SettleOutcome::Completed {
+            end_reason: SessionEndReason::Error,
+        },
+    ] {
+        let mut book = running_book(Source::Chat, RUN);
+        commit(
+            &mut book,
+            TaskEvent::Settled {
+                exec: exec(),
+                outcome,
+                result: Some("partial".into()),
+                at: at(4),
+            },
+        );
+        assert_eq!(task(&book).ended_executions[0].result, None);
+    }
+}
+
+#[test]
+fn legacy_events_and_records_default_result_and_history() {
+    let mut event = serde_json::to_value(sample(EventKind::Settled)).unwrap();
+    event.as_object_mut().unwrap().remove("result");
+    assert!(matches!(
+        serde_json::from_value::<TaskEvent>(event).unwrap(),
+        TaskEvent::Settled { result: None, .. }
+    ));
+    let mut value = serde_json::to_value(record(L::Running, Source::Cli)).unwrap();
+    value.as_object_mut().unwrap().remove("ended_executions");
+    value.as_object_mut().unwrap().remove("started_at");
+    let legacy: TaskRecord = serde_json::from_value(value).unwrap();
+    assert!(legacy.ended_executions.is_empty());
+    assert!(legacy.started_at.is_none());
 }

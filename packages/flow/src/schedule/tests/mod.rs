@@ -237,6 +237,7 @@ pub(super) fn request_for_profile(
 ) -> crate::request::RunRequest {
     let loaded = load(text, profile).expect("valid flow");
     crate::request::RunRequest {
+        started_by: Some(crate::request::StartedBy::Desktop),
         loaded,
         until: None,
         pinned: Vec::new(),

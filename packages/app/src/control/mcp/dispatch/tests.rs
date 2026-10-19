@@ -18,7 +18,7 @@ fn answered(frame: &str, cx: &mut TestAppContext) -> serde_json::Value {
     let text = answer_on(frame, ConnectionSession::handshaked_for_test(1), 1, cx)
         .try_recv()
         .expect("answered now");
-    serde_json::from_str(&text).expect("json")
+    serde_json::from_str(&text.text).expect("json")
 }
 
 /// Drive one frame the way the socket task does, returning the reply
@@ -28,11 +28,11 @@ fn answer_on(
     mut session: ConnectionSession,
     connection: u64,
     cx: &mut TestAppContext,
-) -> smol::channel::Receiver<String> {
+) -> smol::channel::Receiver<Outgoing> {
     let (tx, rx) = smol::channel::bounded(1);
     cx.update(|cx| {
         answer(
-            Inbound {
+            Inbound::Frame {
                 frame: frame.to_owned(),
                 reply: tx,
                 connection,
@@ -74,11 +74,11 @@ fn deliver(
     frame: &str,
     session: &mut ConnectionSession,
     cx: &mut TestAppContext,
-) -> smol::channel::Receiver<String> {
+) -> smol::channel::Receiver<Outgoing> {
     let (tx, rx) = smol::channel::bounded(1);
     cx.update(|cx| {
         answer(
-            Inbound {
+            Inbound::Frame {
                 frame: frame.to_owned(),
                 reply: tx,
                 connection: session.connection.max(1),
@@ -200,7 +200,7 @@ async fn a_deferred_answer_comes_back_on_the_same_id(cx: &mut TestAppContext) {
 
     cx.run_until_parked();
     let text = reply.try_recv().expect("the deferred reply arrives");
-    let answer: serde_json::Value = serde_json::from_str(&text).expect("json");
+    let answer: serde_json::Value = serde_json::from_str(&text.text).expect("json");
     assert_eq!(
         answer["id"], 4242,
         "a reply on the wrong id is a reply the client cannot match: {answer}"
@@ -456,7 +456,7 @@ async fn a_call_before_the_handshake_is_refused(cx: &mut TestAppContext) {
     )
     .try_recv()
     .expect("answered now");
-    let reply: serde_json::Value = serde_json::from_str(&text).expect("json");
+    let reply: serde_json::Value = serde_json::from_str(&text.text).expect("json");
     assert_eq!(reply["error"]["code"], protocol::NOT_INITIALIZED);
 }
 
@@ -474,7 +474,7 @@ async fn a_second_connection_does_not_inherit_the_first_handshake(cx: &mut TestA
     )
     .try_recv()
     .expect("answered now");
-    let reply: serde_json::Value = serde_json::from_str(&text).expect("json");
+    let reply: serde_json::Value = serde_json::from_str(&text.text).expect("json");
     assert_eq!(
         reply["error"]["code"],
         protocol::NOT_INITIALIZED,
@@ -552,4 +552,83 @@ fn a_call_with_no_id_is_not_treated_as_a_call() {
     ] {
         assert!(ToolCall::parse(frame).is_none(), "{frame}");
     }
+}
+
+#[gpui::test]
+async fn a_new_connection_withdraws_old_waiters(cx: &mut TestAppContext) {
+    let mut session = ConnectionSession::handshaked_for_test(1);
+    cx.update(|cx| {
+        let pane = PaneRef {
+            workspace: daruda_store::project::WorkspaceUuid::new(),
+            pane: 1,
+        };
+        let (id, deadline, outcome) = crate::control::ask::wait_for(pane, cx);
+        session.track(
+            "1".into(),
+            PendingCall::Control(Pending::Waiter { pane, id, deadline }),
+            cx,
+        );
+        session.for_connection(2, cx);
+        assert_eq!(
+            outcome.try_recv(),
+            Ok(None),
+            "reconnect withdraws the old call"
+        );
+    });
+}
+
+#[gpui::test]
+async fn disconnect_withdraws_every_pending_call_but_ignores_stale_connections(
+    cx: &mut TestAppContext,
+) {
+    let fixture = crate::test_support::workspace_with_agent_chat(cx);
+    let (workspace, project) = fixture
+        .workspace
+        .read_with(cx, |ws, _| (ws.uuid(), ws.control_active_lane().project));
+    cx.update(reachable_phone);
+    let mut session = ConnectionSession::handshaked_for_test(2);
+    let approval = deliver(
+        &call(
+            7,
+            "daruda_worktree_create",
+            serde_json::json!({ "workspace": workspace, "project": project, "name": "x" }),
+        ),
+        &mut session,
+        cx,
+    );
+    cx.update(|cx| {
+        let pane = PaneRef {
+            workspace,
+            pane: 9999,
+        };
+        let (id, deadline, outcome) = crate::control::ask::wait_for(pane, cx);
+        session.track(
+            "8".into(),
+            PendingCall::Control(Pending::Waiter { pane, id, deadline }),
+            cx,
+        );
+        answer(
+            Inbound::Disconnected { connection: 1 },
+            &mut session,
+            None,
+            cx,
+        );
+        assert_eq!(crate::control::approval::waiting_count_for_test(cx), 1);
+        assert!(crate::control::ask::is_waiting(pane, id, cx));
+        answer(
+            Inbound::Disconnected { connection: 2 },
+            &mut session,
+            None,
+            cx,
+        );
+        assert_eq!(crate::control::approval::waiting_count_for_test(cx), 0);
+        assert!(!crate::control::ask::is_waiting(pane, id, cx));
+        assert_eq!(outcome.try_recv(), Ok(None));
+        assert!(session.outstanding.is_empty());
+    });
+    cx.run_until_parked();
+    assert!(
+        approval.try_recv().is_err(),
+        "withdrawn approval is not answered"
+    );
 }

@@ -63,6 +63,15 @@ pub fn render_task_prompt(task: &TaskRecord, branch: &str) -> String {
         LifecycleKind::Interrupted => "Interrupted",
     };
     let spec = &task.spec;
+    let description = task.description.as_ref().filter(|_| {
+        matches!(
+            task.lifecycle.kind(),
+            LifecycleKind::Preparing | LifecycleKind::Dispatching | LifecycleKind::Running
+        )
+    });
+    let (title, prompt) = description.map_or((&spec.title, &spec.prompt), |description| {
+        (&description.title, &description.prompt)
+    });
     format!(
         "Task: \"{title}\" ({branch})\n\
          Status: {status}\n\
@@ -72,9 +81,9 @@ pub fn render_task_prompt(task: &TaskRecord, branch: &str) -> String {
          Work in the current workspace. Inspect the relevant code, make the needed \
          changes, verify them when practical, and update task \"{id}\" with a short \
          summary when done.\n",
-        title = spec.title,
+        title = title,
         status = state_label,
-        body = spec.prompt,
+        body = prompt,
         id = spec.id,
     )
 }

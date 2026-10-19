@@ -295,12 +295,13 @@ impl Workspace {
         &mut self,
         pane_id: crate::workspace::main_area::pane_tree::PaneId,
         outcome: SettleOutcome,
+        result: Option<String>,
         cx: &mut Context<Self>,
     ) {
         let Some(exec) = self.task_chat_execution(pane_id, cx) else {
             return;
         };
-        RunsHost::settle_execution(exec, outcome, cx);
+        RunsHost::settle_execution(exec, outcome, result, cx);
     }
 
     pub(in crate::workspace) fn fail_agent_chat_start(

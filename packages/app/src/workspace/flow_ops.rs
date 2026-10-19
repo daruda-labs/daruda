@@ -349,7 +349,16 @@ impl Workspace {
         } = flow;
         match purpose {
             FlowPurpose::Validate => self.validate_flow(lane, path, profile, window, cx),
-            FlowPurpose::Run => self.submit_flow_run(lane, path, profile, selection, cx),
+            FlowPurpose::Run => {
+                self.submit_flow_run(
+                    lane,
+                    path,
+                    profile,
+                    selection,
+                    daruda_flow::request::StartedBy::Desktop,
+                    cx,
+                );
+            }
             // The picker's worktree is the one the graph then runs in.
             FlowPurpose::Graph => self.open_flow_graph(lane, path, window, cx),
         }
@@ -395,17 +404,24 @@ impl Workspace {
 
     // ---- Stage 2: the run ----
 
-    fn submit_flow_run(
+    pub(in crate::workspace) fn submit_flow_run(
         &mut self,
         lane: daruda_store::project::LaneRef,
         path: &Path,
         profile: Option<&str>,
         selection: &FlowSelection,
+        started_by: daruda_flow::request::StartedBy,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Option<String> {
         match self.build_flow_request(lane, path, profile, selection, cx) {
-            Ok(submission) => self.start_flow_thread(lane, submission, cx),
-            Err(e) => self.report_flow_refusal(e, cx),
+            Ok(mut submission) => {
+                submission.request.started_by = Some(started_by);
+                self.start_flow_thread(lane, submission, cx)
+            }
+            Err(e) => {
+                self.report_flow_refusal(e, cx);
+                None
+            }
         }
     }
 
@@ -422,7 +438,9 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         match self.build_resume_request(lane_ref, run_dir, cx) {
-            Ok(submission) => self.start_flow_thread(lane_ref, submission, cx),
+            Ok(submission) => {
+                self.start_flow_thread(lane_ref, submission, cx);
+            }
             Err(e) => self.report_flow_refusal(e, cx),
         }
     }
@@ -434,7 +452,7 @@ impl Workspace {
         lane: daruda_store::project::LaneRef,
         submission: FlowSubmission,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Option<String> {
         let FlowSubmission {
             tree,
             request,
@@ -450,6 +468,7 @@ impl Workspace {
                 runners_for(request, node_install_dir, overage)
             })
         };
+        let run_id = request.run_dir.file_name()?.to_string_lossy().into_owned();
         let started = crate::runs::RunsHost::start_flow(
             crate::runs::FlowStart {
                 tree,
@@ -467,7 +486,9 @@ impl Workspace {
         // stop the run that is there.
         if let Err(crate::runs::AlreadyRunning) = started {
             self.offer_to_stop_flow_in(lane, cx);
+            return None;
         }
+        Some(run_id)
     }
 
     /// Stop the run a named lane holds. The status bar lists every run in
@@ -645,6 +666,7 @@ nodes:
     fn request_with(strip: &[&str]) -> RunRequest {
         let loaded = daruda_flow::load(MIXED_FLOW, None).expect("the fixture flow loads");
         RunRequest {
+            started_by: Some(daruda_flow::request::StartedBy::Desktop),
             until: None,
             pinned: Vec::new(),
             loaded,
