@@ -81,7 +81,8 @@ impl Render for FlowAskModal {
 }
 
 impl FlowAskModal {
-    /// Raise the question for `lane`, if that is the lane in view.
+    /// Raise the question for `lane`, if that is the lane in view, and
+    /// return the modal that went up.
     ///
     /// `active` is passed rather than read: the only caller is inside
     /// `Workspace`'s own `update`, and reading the entity from there is a
@@ -94,12 +95,12 @@ impl FlowAskModal {
         ask: AskRowData,
         window: &mut Window,
         cx: &mut gpui::App,
-    ) {
+    ) -> Option<gpui::Entity<FlowAskModal>> {
         if active != lane {
-            return;
+            return None;
         }
         let weak = workspace;
-        open_form_modal::<FlowAskModal, _>(
+        let modal = open_form_modal::<FlowAskModal, _>(
             crate::surface::strings::flow::ask_modal_title(),
             None,
             move |_window, cx_modal| FlowAskModal {
@@ -111,6 +112,18 @@ impl FlowAskModal {
             window,
             cx,
         );
+        Some(modal)
+    }
+
+    /// The lane and question this modal answers.
+    pub(in crate::workspace) fn question(&self) -> (daruda_store::project::LaneRef, u64) {
+        (self.lane, self.ask.ask_id)
+    }
+
+    /// Whether this modal is the window's front dialog. A dialog only closes
+    /// from the front, and the front one holds the focus.
+    pub(in crate::workspace) fn is_in_front(&self, window: &Window, cx: &gpui::App) -> bool {
+        self.panel_focus_handle.contains_focused(window, cx)
     }
 
     /// Stop the run the question belongs to, and close. Not an answer:

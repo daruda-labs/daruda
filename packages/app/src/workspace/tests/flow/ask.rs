@@ -335,3 +335,99 @@ async fn a_question_beside_another_does_not_stack_a_second_modal(cx: &mut TestAp
         "a second question stacked a modal of its own"
     );
 }
+
+/// Two windows on one worktree, each showing the same run's question.
+struct TwoWindows {
+    _lane: tempfile::TempDir,
+    first: gpui::Entity<Workspace>,
+    first_wh: gpui::WindowHandle<gpui_component::Root>,
+    second: gpui::Entity<Workspace>,
+    second_wh: gpui::WindowHandle<gpui_component::Root>,
+    _reply: smol::channel::Receiver<daruda_acp::PermissionDecision>,
+}
+
+fn two_windows_asked(cx: &mut TestAppContext) -> TwoWindows {
+    let (lane, first, _flow_path, first_wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let built = build_workspace_with(
+        cx,
+        &daruda_config::Config::default(),
+        Some(daruda_store::project::Project::from_path(lane.path())),
+    );
+    let (second_wh, second) = registered(cx, built);
+    let run_dir = lane.path().join("run");
+    let here = first.read_with(cx, |ws, _| ws.active);
+    let seeded = run_dir.clone();
+    first.update(cx, |ws, cx| ws.seed_flow_run_for_test(here, seeded, cx));
+    let (reply, rx) = smol::channel::bounded(1);
+    let pending = question(1, "design", reply);
+    first.update(cx, |ws, cx| {
+        ws.park_flow_ask_for_test(here, &run_dir, pending, cx)
+    });
+    cx.run_until_parked();
+    let windows = TwoWindows {
+        _lane: lane,
+        first,
+        first_wh,
+        second,
+        second_wh,
+        _reply: rx,
+    };
+    assert!(dialog_up(cx, windows.first_wh), "no question in the first");
+    assert!(
+        dialog_up(cx, windows.second_wh),
+        "no question in the second"
+    );
+    windows
+}
+
+fn dialog_up(cx: &mut TestAppContext, wh: gpui::WindowHandle<gpui_component::Root>) -> bool {
+    cx.update_window(wh.into(), |_, window, cx| {
+        crate::ui::WindowExt::has_active_dialog(window, cx)
+    })
+    .expect("window is live")
+}
+
+/// A question answered in one window comes down in the other, rather than
+/// leaving buttons there that answer nothing.
+#[gpui::test]
+async fn a_question_answered_in_one_window_closes_in_the_other(cx: &mut TestAppContext) {
+    let w = two_windows_asked(cx);
+    let here = w.first.read_with(cx, |ws, _| ws.active);
+    w.first
+        .update(cx, |ws, cx| ws.answer_flow_ask(here, 1, allow(), cx));
+    cx.run_until_parked();
+    assert!(
+        !dialog_up(cx, w.second_wh),
+        "the other window kept a question already answered"
+    );
+}
+
+/// Stopping the run from one window takes its question down in every one.
+#[gpui::test]
+async fn a_run_stopped_in_one_window_closes_its_question_in_the_other(cx: &mut TestAppContext) {
+    let w = two_windows_asked(cx);
+    let here = w.first.read_with(cx, |ws, _| ws.active);
+    w.first.update(cx, |ws, cx| ws.stop_flow_run_in(here, cx));
+    cx.run_until_parked();
+    assert!(!dialog_up(cx, w.first_wh), "the stopping window kept it");
+    assert!(!dialog_up(cx, w.second_wh), "the other window kept it");
+}
+
+/// A run that ends leaves no question up anywhere.
+#[gpui::test]
+async fn a_run_that_ends_closes_its_question_in_every_window(cx: &mut TestAppContext) {
+    let w = two_windows_asked(cx);
+    let here = w.second.read_with(cx, |ws, _| ws.active);
+    w.second.update(cx, |ws, cx| {
+        ws.apply_flow_event_for_test(
+            here,
+            &daruda_flow::event::FlowEvent::RunEnded {
+                end: daruda_flow::event::RunEnd::Canceled { node: None },
+            },
+            cx,
+        )
+    });
+    cx.run_until_parked();
+    assert!(!dialog_up(cx, w.first_wh), "the first window kept it");
+    assert!(!dialog_up(cx, w.second_wh), "the second window kept it");
+}

@@ -1,12 +1,14 @@
-//! Flow state owned by [`super::Workspace`]: what the Flows tab browses.
+//! Flow state owned by [`super::Workspace`]: what the Flows tab browses,
+//! and the question modal this window has up.
 //! Running flows are not here — the process owns them
 //! ([`crate::runs::RunsHost`]), so closing this window leaves them going.
 //! Where flow locks live is not here either — lane and project removal read
 //! it too (`Workspace::lock_root`).
 
-use gpui::{Context, Window};
+use gpui::{Context, WeakEntity, Window};
 
 use super::Workspace;
+use super::flow_ask_modal::FlowAskModal;
 use super::flow_browser::FlowBrowser;
 use super::flow_browser::listing::FlowListing;
 use super::flow_cache::LaneCache;
@@ -21,6 +23,9 @@ pub(in crate::workspace) struct FlowContext {
     /// per frame is not what a panel costs.
     pub(in crate::workspace) list: LaneCache<FlowListing>,
     pub(in crate::workspace) browser: FlowBrowser,
+    /// The question modal this window raised. Weak: the dialog owns it, so
+    /// once the dialog closes this no longer upgrades.
+    pub(in crate::workspace) ask_modal: Option<WeakEntity<FlowAskModal>>,
 }
 
 impl FlowContext {
@@ -29,6 +34,7 @@ impl FlowContext {
             history: LaneCache::default(),
             list: LaneCache::default(),
             browser: FlowBrowser::new(window, cx),
+            ask_modal: None,
         }
     }
 }

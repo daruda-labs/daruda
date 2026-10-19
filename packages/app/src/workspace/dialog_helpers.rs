@@ -9,8 +9,8 @@ use std::rc::Rc;
 use crate::ui::theme;
 use daruda_store::observability::error_report::ErrorReport;
 use gpui::{
-    App, AppContext as _, Context, Focusable, ParentElement as _, Pixels, SharedString, WeakEntity,
-    Window, div, prelude::*, px,
+    App, AppContext as _, Context, Entity, Focusable, ParentElement as _, Pixels, SharedString,
+    WeakEntity, Window, div, prelude::*, px,
 };
 
 use crate::surface::strings as s;
@@ -127,14 +127,16 @@ pub(in crate::workspace) fn open_alert_dialog(
 /// [`gpui_component::WindowExt::close_dialog`].
 ///
 /// `width` is forwarded to `Dialog::width(...)` when supplied — pass
-/// `None` to keep the Dialog default (~480px).
+/// `None` to keep the Dialog default (~480px). The returned entity lives
+/// while the dialog is open, so a weak handle to it says whether it still is.
 pub(in crate::workspace) fn open_form_modal<E, B>(
     title: impl Into<SharedString>,
     width: Option<Pixels>,
     build: B,
     window: &mut Window,
     cx: &mut App,
-) where
+) -> Entity<E>
+where
     E: ModalView + 'static,
     B: FnOnce(&mut Window, &mut Context<E>) -> E + 'static,
 {
@@ -228,6 +230,7 @@ pub(in crate::workspace) fn open_form_modal<E, B>(
         // SILENT-OK: focus restore on possibly-dismissed dialog
         let _ = cx.update_window(wh, |_, window, cx| window.focus(&handle, cx));
     });
+    entity_for_focus
 }
 
 /// Open the Layer 2 Details modal for a captured [`ErrorReport`].

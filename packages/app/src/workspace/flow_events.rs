@@ -21,6 +21,7 @@ use super::Workspace;
 use super::flow_ops::issue_report;
 use crate::runs::{AnswerRefused, FlowChange, FlowChanged, FlowEnded, RunsHost};
 use crate::surface::strings as s;
+use crate::ui::WindowExt as _;
 use crate::window_registry::WindowRegistry;
 
 /// Hand `change` to every window, with the one that speaks for the run
@@ -85,6 +86,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.close_stale_flow_question(window, cx);
         let lane = self.lane_at(&change.worktree, cx);
         match (&change.what, lane) {
             (FlowChanged::Ended(ended), lane) => {
@@ -130,7 +132,7 @@ impl Workspace {
         else {
             return;
         };
-        super::flow_ask_modal::FlowAskModal::raise_if_in_view(
+        let raised = super::flow_ask_modal::FlowAskModal::raise_if_in_view(
             cx.weak_entity(),
             self.active,
             lane,
@@ -138,6 +140,31 @@ impl Workspace {
             window,
             cx,
         );
+        if let Some(modal) = raised {
+            self.flows.ask_modal = Some(modal.downgrade());
+        }
+    }
+
+    /// Close this window's question modal once its question is no longer
+    /// open — answered or stopped in another window, abandoned, or its run
+    /// ended — so no buttons stay up that answer nothing.
+    fn close_stale_flow_question(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(modal) = self.flows.ask_modal.as_ref().and_then(|m| m.upgrade()) else {
+            self.flows.ask_modal = None;
+            return;
+        };
+        let (lane, ask_id) = modal.read(cx).question();
+        let open = self
+            .flow_run_in(lane, cx)
+            .is_some_and(|run| run.view().question(ask_id).is_some());
+        if open {
+            return;
+        }
+        self.flows.ask_modal = None;
+        // Another dialog stacked over it would close in its place.
+        if modal.read(cx).is_in_front(window, cx) {
+            window.close_dialog(cx);
+        }
     }
 
     /// Answer question `ask_id` of the run in `lane`.
