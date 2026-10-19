@@ -10,8 +10,9 @@ use std::time::Duration;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::tasks::{
-    AfterCommit, CommitError, Lifecycle, ReconcileBlocked, TaskEvent, TaskExecutionSource,
-    TaskMachine, TaskRecord, TaskRejected, TaskStore, TaskStoreError, TasksBook,
+    AfterCommit, CommitError, ExecutionRef, Lifecycle, ReconcileBlocked, TaskEvent,
+    TaskExecutionSource, TaskMachine, TaskRecord, TaskRejected, TaskStore, TaskStoreError,
+    TasksBook,
 };
 use gpui::{App, BorrowAppContext as _, Global};
 
@@ -57,13 +58,27 @@ impl GlobalTasks {
     }
 }
 
+/// Why the task log takes no writes this session. The recovery differs, so
+/// the user is told which: a restart, or removing a marker by hand.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ReadOnlyCause {
+    /// An earlier start stopped while settling and left its marker; that
+    /// marker keeps every start read-only until it is removed by hand.
+    UnfinishedReconciliation,
+    /// This start could not settle the runs the last session left, and
+    /// cleared its marker: the next start tries again.
+    SettleFailed,
+    /// As `SettleFailed`, but the marker could not be cleared, so the next
+    /// start opens read-only as well.
+    SettleMarkerStuck,
+}
+
 /// Why a proposed task event did not commit.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TaskCommitError {
     Rejected(TaskRejected),
-    /// An earlier startup reconciliation did not finish; nothing is written
-    /// until the user restarts with that resolved.
-    ReadOnly,
+    /// Nothing is written this session; see [`ReadOnlyCause`].
+    ReadOnly(ReadOnlyCause),
     Unavailable,
     Failed(String),
 }
@@ -72,9 +87,16 @@ impl std::fmt::Display for TaskCommitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Rejected(rejected) => rejected.fmt(f),
-            Self::ReadOnly => {
+            Self::ReadOnly(ReadOnlyCause::UnfinishedReconciliation) => {
                 f.write_str("the task log is read-only after an unfinished startup reconciliation")
             }
+            Self::ReadOnly(ReadOnlyCause::SettleFailed) => f.write_str(
+                "the task log is read-only because this start could not settle lost runs",
+            ),
+            Self::ReadOnly(ReadOnlyCause::SettleMarkerStuck) => f.write_str(
+                "the task log is read-only because this start could not settle lost runs \
+                 nor clear its reconciliation marker",
+            ),
             Self::Unavailable => f.write_str("the task log could not be opened"),
             Self::Failed(detail) => f.write_str(detail),
         }
@@ -88,6 +110,7 @@ enum Access {
     /// Readable, never written: see [`TaskCommitError::ReadOnly`].
     ReadOnly {
         _store: TaskStore,
+        cause: ReadOnlyCause,
     },
     Unavailable,
 }
@@ -146,31 +169,10 @@ impl RunsHost {
         };
         let access = match reconcile(&store) {
             Ok(()) => Access::Writable(store.clone()),
-            Err(ReconcileBlocked::Unfinished) => {
-                LogWriter::log(
-                    ErrorReport::new(crate::surface::strings::error::tasks_read_only())
-                        .severity(ErrorSeverity::Error)
-                        .at(file!(), line!())
-                        .dedup("tasks.reconcile.unfinished")
-                        .build(),
-                );
-                Access::ReadOnly {
-                    _store: store.clone(),
-                }
-            }
-            Err(ReconcileBlocked::Io(e)) => {
-                LogWriter::log(
-                    ErrorReport::new(crate::surface::strings::error::tasks_settle_failed())
-                        .severity(ErrorSeverity::Error)
-                        .from_error(&e)
-                        .at(file!(), line!())
-                        .dedup("tasks.reconcile.io")
-                        .build(),
-                );
-                Access::ReadOnly {
-                    _store: store.clone(),
-                }
-            }
+            Err(cause) => Access::ReadOnly {
+                _store: store.clone(),
+                cause,
+            },
         };
         let projection = match store.current() {
             Ok((seq, book)) => GlobalTasks { seq, book },
@@ -252,7 +254,9 @@ impl RunsHost {
         let host = cx.global::<RunsHost>();
         let store = match &host.access {
             Access::Writable(store) => store.clone(),
-            Access::ReadOnly { .. } => return gpui::Task::ready(Err(TaskCommitError::ReadOnly)),
+            Access::ReadOnly { cause, .. } => {
+                return gpui::Task::ready(Err(TaskCommitError::ReadOnly(*cause)));
+            }
             Access::Unavailable => return gpui::Task::ready(Err(TaskCommitError::Unavailable)),
         };
         let (done, next_tail) = smol::channel::bounded::<()>(1);
@@ -302,7 +306,7 @@ impl RunsHost {
             if let Err(e) = commit.await {
                 let severity = match &e {
                     TaskCommitError::Rejected(_) => ErrorSeverity::Info,
-                    TaskCommitError::ReadOnly | TaskCommitError::Unavailable => {
+                    TaskCommitError::ReadOnly(_) | TaskCommitError::Unavailable => {
                         ErrorSeverity::Warning
                     }
                     TaskCommitError::Failed(_) => ErrorSeverity::Error,
@@ -502,55 +506,109 @@ pub(crate) fn no_hook() -> AfterCommit<TaskMachine> {
 
 /// Settle every run the previous process left starting or running in a
 /// chat: nothing of it survived. A CLI run is its tracker's to settle.
+/// Reports how it ended; `Err` says why tasks stay read-only.
 ///
 /// A failure handled here ends the pass and clears its marker: only a crash
 /// in the middle of it may leave the marker that keeps later starts from
 /// reconciling. A record the machine refuses is skipped and reported: the
 /// refusal leaves the log as it was, and the other records still need
 /// settling.
-fn reconcile(store: &TaskStore) -> Result<(), ReconcileBlocked> {
-    let claim = store.begin_reconcile()?;
+fn reconcile(store: &TaskStore) -> Result<(), ReadOnlyCause> {
+    use crate::surface::strings::error;
+    let claim = match store.begin_reconcile() {
+        Ok(claim) => claim,
+        Err(ReconcileBlocked::Unfinished) => {
+            report_reconcile(error::tasks_read_only(), None, "tasks.reconcile.unfinished");
+            return Err(ReadOnlyCause::UnfinishedReconciliation);
+        }
+        // No marker was written, so the next start tries again.
+        Err(ReconcileBlocked::Io(e)) => {
+            report_reconcile(
+                error::tasks_settle_failed(),
+                Some(&e),
+                "tasks.reconcile.begin",
+            );
+            return Err(ReadOnlyCause::SettleFailed);
+        }
+    };
     match settle_lost_runs(store) {
+        // The runs are settled and the log is sound, so this session writes;
+        // only the next start would open read-only on the leftover marker.
         Ok(()) => {
-            claim.finish()?;
+            if let Err(e) = claim.finish() {
+                report_reconcile(
+                    error::tasks_reconcile_marker_left(),
+                    Some(&e),
+                    "tasks.reconcile.finish",
+                );
+            }
             Ok(())
         }
-        Err(e) => {
-            if let Err(cleared) = claim.abandon() {
+        Err(settle) => match claim.abandon() {
+            Ok(()) => {
+                report_reconcile(
+                    error::tasks_settle_failed(),
+                    Some(&settle),
+                    "tasks.reconcile.io",
+                );
+                Err(ReadOnlyCause::SettleFailed)
+            }
+            Err(cleared) => {
                 LogWriter::log(
-                    ErrorReport::new(crate::surface::strings::error::tasks_settle_failed())
+                    ErrorReport::new(error::tasks_settle_marker_stuck())
                         .severity(ErrorSeverity::Error)
                         .from_error(&cleared)
+                        .with_context("settle_error", settle.to_string())
                         .at(file!(), line!())
                         .dedup("tasks.reconcile.abandon")
                         .build(),
                 );
+                Err(ReadOnlyCause::SettleMarkerStuck)
             }
-            Err(e)
-        }
+        },
     }
+}
+
+#[track_caller]
+fn report_reconcile(title: String, error: Option<&dyn std::error::Error>, dedup: &str) {
+    let location = std::panic::Location::caller();
+    let mut report = ErrorReport::new(title).severity(ErrorSeverity::Error);
+    if let Some(error) = error {
+        report = report.from_error(error);
+    }
+    LogWriter::log(
+        report
+            .at(location.file(), location.line())
+            .dedup(dedup)
+            .build(),
+    );
 }
 
 fn settle_lost_runs(store: &TaskStore) -> Result<(), ReconcileBlocked> {
     let (_, book) = store
         .current()
         .map_err(|e| ReconcileBlocked::Io(std::io::Error::other(e)))?;
-    let at = chrono::Utc::now();
-    for record in book.records() {
-        let Some(exec) = record.current_exec() else {
-            continue;
-        };
-        let stale = match &record.lifecycle {
+    settle(store, lost_runs(&book))
+}
+
+/// The runs a previous process left that no one will ever end.
+fn lost_runs(book: &TasksBook) -> Vec<ExecutionRef> {
+    book.records()
+        .filter(|record| match &record.lifecycle {
             Lifecycle::Preparing { .. } | Lifecycle::Dispatching { .. } => true,
             Lifecycle::Running { .. } => !matches!(
                 record.execution.as_ref().map(|run| &run.source),
                 Some(TaskExecutionSource::ClaudeCli { .. })
             ),
             _ => false,
-        };
-        if !stale {
-            continue;
-        }
+        })
+        .filter_map(|record| record.current_exec().cloned())
+        .collect()
+}
+
+fn settle(store: &TaskStore, lost: Vec<ExecutionRef>) -> Result<(), ReconcileBlocked> {
+    let at = chrono::Utc::now();
+    for exec in lost {
         let event = TaskEvent::Reconciled {
             exec: exec.clone(),
             at,

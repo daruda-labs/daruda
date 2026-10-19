@@ -10,7 +10,7 @@ use daruda_store::tasks::ExecutionRef;
 use futures::FutureExt as _;
 use gpui::{App, Context, WeakEntity};
 
-use crate::runs::{RunsEffects, RunsHost, TaskCommitError, TaskIntent};
+use crate::runs::{ReadOnlyCause, RunsEffects, RunsHost, TaskCommitError, TaskIntent};
 use crate::window_registry::WindowRegistry;
 use crate::workspace::Workspace;
 
@@ -23,8 +23,12 @@ pub(in crate::workspace) fn task_commit_report(e: &TaskCommitError) -> ErrorRepo
             ErrorSeverity::Info,
             "tasks.command_refused",
         ),
-        TaskCommitError::ReadOnly => (
-            error::tasks_read_only(),
+        TaskCommitError::ReadOnly(cause) => (
+            match cause {
+                ReadOnlyCause::UnfinishedReconciliation => error::tasks_read_only(),
+                ReadOnlyCause::SettleFailed => error::tasks_settle_failed(),
+                ReadOnlyCause::SettleMarkerStuck => error::tasks_settle_marker_stuck(),
+            },
             ErrorSeverity::Warning,
             "tasks.read_only",
         ),
@@ -174,4 +178,27 @@ impl RunsEffects for WorkspaceEffects {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+    use crate::surface::strings::error;
+
+    /// Each read-only cause has its own recovery, so each names it: a
+    /// marker only a person can delete is never blamed on a restart, and
+    /// a restart that would recover is never sent to hunt for a marker.
+    #[test]
+    fn a_read_only_task_log_names_its_own_cause() {
+        let title = |cause| task_commit_report(&TaskCommitError::ReadOnly(cause)).title;
+        assert_eq!(
+            title(ReadOnlyCause::UnfinishedReconciliation),
+            error::tasks_read_only()
+        );
+        assert_eq!(
+            title(ReadOnlyCause::SettleFailed),
+            error::tasks_settle_failed()
+        );
+        assert_eq!(
+            title(ReadOnlyCause::SettleMarkerStuck),
+            error::tasks_settle_marker_stuck()
+        );
+    }
+}

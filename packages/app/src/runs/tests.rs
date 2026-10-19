@@ -7,7 +7,7 @@ use daruda_store::tasks::machine::TaskEdit;
 use daruda_store::tasks::{
     CliProcessState, Lifecycle, TaskEvent, TaskSpec, TaskState, TaskStore, TasksState,
 };
-use gpui::TestAppContext;
+use gpui::{App, TestAppContext};
 
 use super::seed::{self, SeedEnd, SeedRun};
 use super::{GlobalTasks, RunsHost, TaskCommitError, TaskIntent, no_hook};
@@ -241,7 +241,12 @@ fn an_unfinished_reconciliation_reopens_read_only_and_preserves_files(cx: &mut T
         )
     });
     cx.run_until_parked();
-    assert_eq!(smol::block_on(refused), Err(TaskCommitError::ReadOnly));
+    assert_eq!(
+        smol::block_on(refused),
+        Err(TaskCommitError::ReadOnly(
+            super::ReadOnlyCause::UnfinishedReconciliation
+        ))
+    );
     cx.quit();
     assert_eq!(std::fs::read(&path).unwrap(), original);
     assert_eq!(
@@ -255,36 +260,80 @@ fn an_unfinished_reconciliation_reopens_read_only_and_preserves_files(cx: &mut T
     );
 }
 
+/// Seed one task per name, each left `Preparing` by a process that is gone.
+fn seed_lost_runs(store: &TaskStore, names: &[&str]) -> Vec<String> {
+    let mut ids = Vec::new();
+    for name in names {
+        let spec = seed::spec(ProjectUuid::new(), name);
+        let id = spec.id.clone();
+        let mut events = seed::created(spec);
+        events.extend(seed::run(
+            &id,
+            &SeedRun::chat(format!("/{name}")),
+            SeedEnd::Preparing,
+        ));
+        for event in events {
+            smol::block_on(store.propose(event)).unwrap();
+        }
+        ids.push(id);
+    }
+    ids
+}
+
+fn preparing(id: &str, cx: &App) -> bool {
+    matches!(
+        cx.global::<GlobalTasks>().get(id).unwrap().lifecycle,
+        Lifecycle::Preparing { .. }
+    )
+}
+
 /// A reconciliation that fails without crashing reports it and clears its
-/// marker: this start stays read-only, and the next one settles the tasks
-/// and is writable, rather than read-only for good.
+/// marker: this start stays read-only, and the next one settles what this
+/// one could not and is writable, rather than read-only for good.
 #[gpui::test]
 fn a_reconciliation_that_fails_without_crashing_leaves_the_next_start_writable(
     cx: &mut TestAppContext,
 ) {
     let dir = tempfile::tempdir().unwrap();
     let store = store_at(dir.path(), None);
-    let spec = seed::spec(ProjectUuid::new(), "lost");
-    let id = spec.id.clone();
-    let mut events = seed::created(spec);
-    events.extend(seed::run(&id, &SeedRun::chat("/lost"), SeedEnd::Preparing));
-    for event in events {
-        smol::block_on(store.propose(event)).unwrap();
-    }
+    let ids = seed_lost_runs(&store, &["first", "second"]);
     drop(store);
     // A hook that panics stops the committer at the first settle: a commit
-    // failure this process handles, not a crash of it.
+    // failure this process handles, not a crash of it. Only the first call
+    // panics, so the second run is left for the next start to settle.
+    let panicked = std::sync::atomic::AtomicBool::new(false);
     let failing = TaskStore::in_directory(
         dir.path(),
         None,
         "test",
-        Box::new(|_, _| panic!("the committer stops here")),
+        Box::new(move |_, _| {
+            if !panicked.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                panic!("the committer stops here");
+            }
+        }),
     )
     .unwrap();
     cx.update(|cx| {
         RunsHost::install(RunsHost::open(Ok(failing)), cx);
         assert!(!RunsHost::is_writable(cx), "this start could not settle");
+        assert!(preparing(&ids[1], cx), "the pass stopped at the first run");
     });
+    let refused = cx.update(|cx| {
+        RunsHost::propose(
+            TaskEvent::Deleted {
+                id: ids[0].clone(),
+                at: chrono::Utc::now(),
+            },
+            cx,
+        )
+    });
+    assert_eq!(
+        smol::block_on(refused),
+        Err(TaskCommitError::ReadOnly(
+            super::ReadOnlyCause::SettleFailed
+        )),
+        "a restart, not a hand-deleted marker, recovers this start"
+    );
     assert!(
         !dir.path().join(".reconciling").exists(),
         "a handled failure left the marker that makes tasks read-only for good"
@@ -293,10 +342,41 @@ fn a_reconciliation_that_fails_without_crashing_leaves_the_next_start_writable(
     cx.update(|cx| {
         RunsHost::install(RunsHost::open(Ok(store_at(dir.path(), None))), cx);
         assert!(RunsHost::is_writable(cx), "the next start stayed read-only");
-        assert!(matches!(
-            cx.global::<GlobalTasks>().get(&id).unwrap().lifecycle,
-            Lifecycle::Undelivered { .. }
-        ));
+        for id in &ids {
+            assert!(matches!(
+                cx.global::<GlobalTasks>().get(id).unwrap().lifecycle,
+                Lifecycle::Undelivered { .. }
+            ));
+        }
+    });
+}
+
+/// Settled runs with a marker that would not go away leave this session
+/// writable: the log is sound, and only the next start is affected.
+#[gpui::test]
+fn a_marker_that_cannot_be_cleared_after_settling_keeps_this_start_writable(
+    cx: &mut TestAppContext,
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_at(dir.path(), None);
+    let ids = seed_lost_runs(&store, &["lost"]);
+    drop(store);
+    let marker = dir.path().join(".reconciling");
+    let removing = marker.clone();
+    let store = TaskStore::in_directory(
+        dir.path(),
+        None,
+        "test",
+        Box::new(move |_, _| {
+            // SILENT-OK: only the first settle finds the marker to remove.
+            let _ = std::fs::remove_file(&removing);
+        }),
+    )
+    .unwrap();
+    cx.update(|cx| {
+        RunsHost::install(RunsHost::open(Ok(store)), cx);
+        assert!(RunsHost::is_writable(cx));
+        assert!(!preparing(&ids[0], cx));
     });
 }
 

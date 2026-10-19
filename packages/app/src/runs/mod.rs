@@ -27,7 +27,7 @@ pub(crate) use flows::{
 #[cfg(test)]
 pub(crate) use flows::{NodeRunStates, apply_run_event};
 pub(crate) use intent::TaskIntent;
-pub(crate) use tasks::{GlobalTasks, RunsHost, TaskCommitError, no_hook};
+pub(crate) use tasks::{GlobalTasks, ReadOnlyCause, RunsHost, TaskCommitError, no_hook};
 
 #[cfg(test)]
 mod tests;

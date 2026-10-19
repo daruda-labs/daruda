@@ -1491,11 +1491,17 @@ error:
   # The task log could not be opened; tasks show but no change is kept.
   tasks_unavailable: "Tasks could not be loaded, so changes to them are not saved"
   # An earlier start stopped while it settled tasks left running; tasks stay
-  # read-only until daruda restarts cleanly.
-  tasks_read_only: "Tasks are read-only: an earlier start did not finish settling them"
+  # read-only until the marker it left is removed by hand.
+  tasks_read_only: "Tasks are read-only: an earlier start did not finish settling them. Quit daruda and delete .reconciling in the task-log folder to recover"
   # Settling the runs the last session left failed this time, without a
   # crash; the next start tries again.
   tasks_settle_failed: "Tasks are read-only until daruda restarts: the runs left by the last session could not be settled"
+  # Settling failed this time, and the marker that lets the next start try
+  # again could not be removed either, so a restart alone does not recover.
+  tasks_settle_marker_stuck: "Tasks are read-only, also after a restart: the runs left by the last session could not be settled. Quit daruda and delete .reconciling in the task-log folder to recover"
+  # The runs the last session left were settled, but their marker could not
+  # be removed, so the next start opens tasks read-only.
+  tasks_reconcile_marker_left: "Tasks will open read-only on the next start: a settling marker could not be removed. Quit daruda and delete .reconciling in the task-log folder"
   # Quitting stopped waiting for task changes to become durable.
   tasks_quit_flush: "Task changes were still being saved at quit"
   # Quitting stopped waiting for a flow run to end the processes it started.
