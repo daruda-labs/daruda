@@ -3,15 +3,16 @@ use super::state::{EndState, Membership, RunEntry, RunWatch};
 use crate::runs::result::{RunKey, RunState};
 use std::collections::HashSet;
 
-/// Keys past this many drop the settled observations nobody follows; those
-/// are re-read from disk or the task log when next asked for. Also the most
-/// reported keys remembered after their results were evicted.
-pub(super) const ENTRIES_MAX: usize = 1000;
+/// Reported identities remembered after their result snapshots are evicted.
+pub(super) const RETIRED_MAX: usize = 1000;
+/// Reconstructible settled observations retained when nobody follows them.
+pub(super) const OBSERVATIONS_MAX: usize = 1000;
+const SWEEP_HEADROOM: usize = 256;
 
 impl RunWatch {
-    /// Called where entries are added, so the cap holds without a sweep timer.
+    /// Amortize observation sweeps over new keys, independently of protected entries.
     pub(super) fn bound(&mut self) {
-        if self.entries.len() > ENTRIES_MAX {
+        if self.entries.len() > self.next_sweep.max(OBSERVATIONS_MAX) {
             self.forget_idle();
         }
     }
@@ -20,6 +21,7 @@ impl RunWatch {
     /// the run locations of the flows among them. A key whose end was reported
     /// is kept, up to the cap, so a later read of it is not delivered again.
     pub(super) fn forget_idle(&mut self) {
+        let previous_len = self.entries.len();
         let busy: HashSet<RunKey> = self
             .events
             .iter()
@@ -31,9 +33,17 @@ impl RunWatch {
                     .cloned(),
             )
             .collect();
-        if self.entries.len() > ENTRIES_MAX {
-            for (key, entry) in &mut self.entries {
-                if !busy.contains(key) && unfollowed_settled(entry) {
+        let mut observations: Vec<_> = self
+            .entries
+            .iter()
+            .filter(|(key, entry)| !busy.contains(*key) && unfollowed_settled(key, entry))
+            .map(|(key, entry)| (entry.revision, key.clone()))
+            .collect();
+        let excess = observations.len().saturating_sub(OBSERVATIONS_MAX);
+        if excess > 0 {
+            observations.sort_unstable_by_key(|(revision, _)| *revision);
+            for (_, key) in observations.into_iter().take(excess) {
+                if let Some(entry) = self.entries.get_mut(&key) {
                     entry.snapshot = None;
                 }
             }
@@ -41,6 +51,10 @@ impl RunWatch {
         self.entries
             .retain(|key, entry| busy.contains(key) || !forgettable(entry));
         self.forget_oldest_retired(&busy);
+        if self.entries.len() != previous_len {
+            self.revisions += 1;
+        }
+        self.next_sweep = self.entries.len().saturating_add(SWEEP_HEADROOM);
         let entries = &self.entries;
         self.locations
             .retain(|id, _| entries.contains_key(&RunKey::Flow(id.clone())));
@@ -59,7 +73,7 @@ impl RunWatch {
             });
             retired.push((at, key.clone()));
         }
-        let excess = retired.len().saturating_sub(ENTRIES_MAX);
+        let excess = retired.len().saturating_sub(RETIRED_MAX);
         if excess == 0 {
             return;
         }
@@ -70,18 +84,19 @@ impl RunWatch {
     }
 }
 
-/// An observed end no waiter or notice can receive.
-fn unfollowed_settled(entry: &RunEntry) -> bool {
+/// Settled disk/task facts can be reread; an unreported local flow end cannot.
+fn unfollowed_settled(key: &RunKey, entry: &RunEntry) -> bool {
     entry.membership == Membership::Outside
         && entry.end != EndState::Held
-        && entry
-            .snapshot
-            .as_ref()
-            .is_some_and(|snapshot| !matches!(snapshot.state, RunState::Running { .. }))
+        && entry.snapshot.as_ref().is_some_and(|snapshot| {
+            !matches!(snapshot.state, RunState::Running { .. })
+                && !(matches!(key, RunKey::Flow(_))
+                    && entry.disk_episode.is_none()
+                    && matches!(snapshot.state, RunState::Ended { .. }))
+        })
 }
 
-/// Nothing retained, nothing held or reported, and outside the scope. The
-/// episode numbers go with it: no event of the key remains to collide with.
+/// Nothing retained, nothing held or reported, and outside the scope.
 fn forgettable(entry: &RunEntry) -> bool {
     entry.snapshot.is_none()
         && matches!(entry.end, EndState::Open | EndState::Ended)

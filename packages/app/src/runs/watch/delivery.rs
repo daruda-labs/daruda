@@ -165,6 +165,7 @@ impl RunWatch {
         for key in keys {
             if !self.events.iter().any(|e| e.snapshot.key == key)
                 && let Some(entry) = self.entries.get_mut(&key)
+                && entry.end == EndState::Reported
             {
                 entry.snapshot = None;
             }
@@ -173,8 +174,8 @@ impl RunWatch {
         let mut reported_snapshots: Vec<_> = self
             .entries
             .iter()
-            .filter(|(_, entry)| entry.snapshot.is_some())
-            .filter_map(|(key, entry)| {
+            .filter(|(_, entry)| entry.snapshot.is_some() && entry.end == EndState::Reported)
+            .filter_map(|(key, _)| {
                 let last = self
                     .events
                     .iter()
@@ -182,8 +183,7 @@ impl RunWatch {
                 let protected = self.events.iter().any(|event| {
                     &event.snapshot.key == key && event.delivery != Delivery::Reported
                 });
-                (!protected && (entry.end == EndState::Reported || last.is_some()))
-                    .then(|| (key.clone(), last))
+                (!protected).then(|| (key.clone(), last))
             })
             .collect();
         reported_snapshots.sort_by_key(|(_, last)| *last);

@@ -149,6 +149,9 @@ Flow questions and level comparisons of the exact Running AgentChat Task's
 permission state produce waiting episodes. Closing a block or ending the run
 supersedes an unreported block; a resumed flow can produce a new end episode
 under the same handle.
+Held flow ends carry a separate episode identity. Resuming announces the earlier
+held end before opening the new episode; a late report enriches only its own
+still-unreported end, even across consecutive resumes.
 
 Wait requires an integer `timeout` in seconds: zero polls, and values above
 110 are clamped with requested/actual metadata. One omitted-handles waiter may
@@ -159,9 +162,9 @@ answer with a `more` count. Explicit waits return previously reported ends in
 those entries do not end a wait while another selected execution is running.
 `TimedOut` and `Nothing` are normal outcomes. After repeated timeouts, inspect
 `daruda_run_status`. Externally running disk flows are refreshed off-thread
-every two seconds independently of unrelated run wakeups; per-key revisions
-prevent stale reads or enrichment from
-overwriting a newer lifecycle, including resume.
+every two seconds independently of unrelated run wakeups. Per-key revisions
+come from a watch-wide monotonic clock, so deleting and recreating a key cannot
+let an old background read overwrite a newer lifecycle, including resume.
 
 An event moves `Unreported -> InFlight -> Reported`. Reservation keeps its
 waiter active through the socket receipt phase. Only successful `write_all`
@@ -171,9 +174,17 @@ The read loop announces disconnect before waiting for its writer, so pending
 waits do not block reconnection. This receipt confirms a socket write, not
 that the model read or acknowledged the result. Status can recover retained
 results after such a loss. The 200-entry reported retention limit never
-evicts unreported or in-flight snapshots, even when Task history has rolled
-past them. Cheap reported-terminal identities remain after snapshot eviction
-to prevent a disk/history lookup from delivering the same end again.
+evicts running, held, unreported or in-flight snapshots, even when Task history
+has rolled past them or an earlier episode of the same key was reported.
+After snapshot eviction, up to 1000 cheap reported-terminal identities remain
+to prevent a disk/history lookup from delivering the same end again. The oldest
+retired identities are then forgotten with their scope membership and cached
+flow locations; explicitly querying a forgotten end may deliver it again.
+Separately, a sweep keeps the newest 1000 reconstructible settled observations
+that no waiter or event follows. Sweeps allow 256 additional keys between passes
+so retained identities and active runs do not force a scan on every progress
+update. Active runs, followed results and unreported local flow ends are protected
+independently of these limits: a local end can contain facts absent from disk.
 
 ### Orchestrator run notices
 

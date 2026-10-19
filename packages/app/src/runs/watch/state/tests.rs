@@ -1,6 +1,14 @@
 use super::super::tests::{ended, running};
 use super::*;
 
+fn end_with_text(key: &RunKey, content: Option<&str>) -> RunSnapshot {
+    let mut snapshot = ended(key.clone());
+    if let RunState::Ended { text, .. } = &mut snapshot.state {
+        *text = content.map(str::to_owned);
+    }
+    snapshot
+}
+
 #[test]
 fn retaining_an_identical_end_bumps_no_revision_and_wakes_no_waiter() {
     let mut watch = RunWatch::default();
@@ -112,5 +120,64 @@ fn a_held_end_survives_an_immediate_resume_and_its_late_release_adds_its_text() 
     assert!(
         watch.poll_wait(again, false).is_none(),
         "the new episode is still running"
+    );
+}
+
+#[test]
+fn consecutive_resumes_enrich_only_the_end_that_owns_each_report() {
+    for oldest_first in [true, false] {
+        let mut watch = RunWatch::default();
+        let key = RunKey::Flow("twice-resumed".into());
+        watch.register(key.clone());
+        watch.observe_waiting(running(
+            key.clone(),
+            Some(WaitingOn::Question {
+                node: "first".into(),
+            }),
+        ));
+        let first = watch.hold_end(end_with_text(&key, None));
+        watch.begin(&key);
+        let second = watch.hold_end(end_with_text(&key, None));
+        watch.begin(&key);
+        watch.observe_waiting(running(key.clone(), None));
+        let releases = if oldest_first {
+            [(first, "first report"), (second, "second report")]
+        } else {
+            [(second, "second report"), (first, "first report")]
+        };
+        for (token, text) in releases {
+            watch.release_end(token, end_with_text(&key, Some(text)));
+        }
+        let (wait, _) = watch.open_wait(None).unwrap();
+        let answer = watch.poll_wait(wait, false).unwrap();
+        assert_eq!(answer.ended.len(), 2);
+        for (snapshot, expected) in answer.ended.iter().zip(["first report", "second report"]) {
+            assert!(
+                matches!(&snapshot.state, RunState::Ended { text: Some(text), .. } if text == expected)
+            );
+        }
+        assert!(matches!(
+            watch.get(&key).unwrap().state,
+            RunState::Running { .. }
+        ));
+    }
+}
+
+#[test]
+fn an_outside_resume_invalidates_the_previous_report_without_a_ledger_event() {
+    let mut watch = RunWatch::default();
+    let key = RunKey::Flow("outside-resume".into());
+    let first = watch.hold_end(end_with_text(&key, None));
+    watch.begin(&key);
+    let second = watch.hold_end(end_with_text(&key, None));
+    watch.release_end(first, end_with_text(&key, Some("old report")));
+    assert!(watch.held_end(&key).is_some());
+    watch.register(key.clone());
+    watch.release_end(second, end_with_text(&key, Some("new report")));
+    let (wait, _) = watch.open_wait(None).unwrap();
+    let answer = watch.poll_wait(wait, false).unwrap();
+    assert_eq!(answer.ended.len(), 1);
+    assert!(
+        matches!(&answer.ended[0].state, RunState::Ended { text: Some(text), .. } if text == "new report")
     );
 }

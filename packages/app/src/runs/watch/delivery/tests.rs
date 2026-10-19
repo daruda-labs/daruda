@@ -72,3 +72,40 @@ fn scoped_keys_stay_in_the_ledger_after_an_explicit_wait() {
     watch.retain(ended(key));
     assert_eq!(watch.unreported().len(), 1);
 }
+
+#[test]
+fn evicting_an_old_reported_block_preserves_the_held_end_across_resume() {
+    let mut watch = RunWatch::default();
+    let key = RunKey::Flow("held-after-block".into());
+    watch.register(key.clone());
+    watch.observe_waiting(running(
+        key.clone(),
+        Some(WaitingOn::Question {
+            node: "gate".into(),
+        }),
+    ));
+    let (wait, _) = watch.open_wait(Some(vec![key.clone()])).unwrap();
+    assert_eq!(watch.poll_wait(wait, false).unwrap().blocked.len(), 1);
+    watch.finish_wait(wait, true);
+    let mut bare = ended(key.clone());
+    if let RunState::Ended { text, .. } = &mut bare.state {
+        *text = None;
+    }
+    let held = watch.hold_end(bare.clone());
+    for number in 0..REPORTED_MAX {
+        let other = RunKey::Flow(format!("other-{number}"));
+        watch.register(other.clone());
+        watch.retain(ended(other.clone()));
+        let (wait, _) = watch.open_wait(Some(vec![other])).unwrap();
+        watch.poll_wait(wait, false).unwrap();
+        watch.finish_wait(wait, true);
+    }
+    assert_eq!(watch.get(&key), Some(&bare));
+    assert!(watch.held_end(&key).is_some());
+    watch.begin(&key);
+    watch.observe_waiting(running(key.clone(), None));
+    watch.release_end(held, ended(key.clone()));
+    let (wait, _) = watch.open_wait(None).unwrap();
+    let answer = watch.poll_wait(wait, false).unwrap();
+    assert_eq!(answer.ended, vec![ended(key)]);
+}

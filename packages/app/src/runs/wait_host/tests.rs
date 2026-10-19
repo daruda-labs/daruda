@@ -144,6 +144,55 @@ fn stale_terminal_text_read_cannot_overwrite_a_resumed_flows_new_result(cx: &mut
 }
 
 #[gpui::test]
+fn a_cancelled_read_cannot_overwrite_a_recreated_keys_newer_observation(cx: &mut TestAppContext) {
+    use crate::runs::result::{RunSnapshot, RunState};
+    use gpui::BorrowAppContext as _;
+    let key = RunKey::Flow("recreated".into());
+    let snapshot = |state| RunSnapshot {
+        key: key.clone(),
+        what: "flow".into(),
+        why: None,
+        state,
+    };
+    cx.update(|cx| {
+        RunsHost::ensure_installed(cx);
+        let (cancelled, _) = RunsHost::open_run_wait(Some(vec![key.clone()]), cx).unwrap();
+        RunsHost::seed_run_wait(snapshot(RunState::Gone), cx);
+        let old = RunsHost::run_query(key.clone(), cx).read_observation();
+        let revision = RunsHost::run_revision(&key, cx);
+        RunsHost::finish_run_wait(cancelled, false, cx);
+        cx.update_global::<RunsHost, _>(|host, _| {
+            for number in 0..1300 {
+                host.watch.observe_disk(
+                    RunSnapshot {
+                        key: RunKey::Flow(format!("pressure-{number}")),
+                        what: String::new(),
+                        why: None,
+                        state: RunState::Gone,
+                    },
+                    0,
+                );
+            }
+            assert!(host.watch.get(&key).is_none());
+        });
+        let (current, _) = RunsHost::open_run_wait(Some(vec![key.clone()]), cx).unwrap();
+        RunsHost::seed_run_wait(
+            snapshot(RunState::Running {
+                progress: Default::default(),
+                waiting_on: None,
+            }),
+            cx,
+        );
+        RunsHost::seed_run_observation_if_current(old, revision, cx);
+        let answer = RunsHost::poll_run_wait(current, true, cx).unwrap();
+        assert_eq!(answer.outcome, WaitOutcome::TimedOut);
+        assert_eq!(answer.pending.len(), 1);
+        assert!(answer.not_running.is_empty());
+        RunsHost::finish_run_wait(current, false, cx);
+    });
+}
+
+#[gpui::test]
 fn shutdown_does_not_create_a_terminal_wait_event(cx: &mut TestAppContext) {
     let tree = std::path::PathBuf::from("/work/shutdown-flow");
     let run_dir = tree.join("run");

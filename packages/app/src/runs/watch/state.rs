@@ -41,9 +41,10 @@ pub(super) struct RunEntry {
     pub(super) snapshot: Option<RunSnapshot>,
     pub(super) end: EndState,
     pub(super) block: Option<Block>,
-    /// Bumped by every lifecycle change so a stale background read loses.
-    revision: u64,
-    /// The last issued episode number; never reset, so identities stay unique.
+    /// Allocated from the watch's clock so forgotten keys cannot reuse revisions.
+    pub(super) revision: u64,
+    episode: u64,
+    /// The last issued event number while this key is retained.
     last_sequence: u64,
     /// The first episode number of the current run; lower ones are history.
     pub(super) floor: u64,
@@ -54,8 +55,12 @@ pub(super) struct RunEntry {
 }
 
 impl RunEntry {
-    fn changed(&mut self) {
-        self.revision += 1;
+    fn new(revision: u64) -> Self {
+        Self {
+            revision,
+            episode: revision,
+            ..Self::default()
+        }
     }
 
     pub(super) fn blocked_sequence(&self) -> Option<u64> {
@@ -67,7 +72,7 @@ impl RunEntry {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct HeldEnd {
     key: RunKey,
-    floor: u64,
+    episode: u64,
 }
 
 #[derive(Default)]
@@ -80,12 +85,15 @@ pub(crate) struct RunWatch {
     pub(super) next_waiter: u64,
     /// Orders retirements so the oldest reported keys are forgotten first.
     pub(super) retirements: u64,
+    pub(super) revisions: u64,
+    pub(super) next_sweep: usize,
 }
 /// A process-local episode with a stable per-key identity.
 /// The channel may announce it again when waiter coverage is withdrawn.
 #[derive(Clone, Debug)]
 pub(crate) struct RunEvent {
     pub(crate) sequence: u64,
+    episode: u64,
     pub(crate) snapshot: RunSnapshot,
     pub(super) delivery: Delivery,
 }
@@ -94,6 +102,7 @@ impl RunEvent {
     pub(crate) fn for_test(sequence: u64, snapshot: RunSnapshot) -> Self {
         Self {
             sequence,
+            episode: 0,
             snapshot,
             delivery: Delivery::Unreported,
         }
@@ -101,7 +110,20 @@ impl RunEvent {
 }
 impl RunWatch {
     pub(super) fn entry(&mut self, key: &RunKey) -> &mut RunEntry {
-        self.entries.entry(key.clone()).or_default()
+        self.entries.entry(key.clone()).or_insert_with(|| {
+            self.revisions += 1;
+            RunEntry::new(self.revisions)
+        })
+    }
+    fn changed(&mut self, key: &RunKey) -> &mut RunEntry {
+        self.revisions += 1;
+        let revision = self.revisions;
+        let entry = self
+            .entries
+            .entry(key.clone())
+            .or_insert_with(|| RunEntry::new(revision));
+        entry.revision = revision;
+        entry
     }
     pub(super) fn membership(&self, key: &RunKey) -> Membership {
         self.entries
@@ -114,7 +136,9 @@ impl RunWatch {
     }
     /// A resumed flow can end again with the same external run handle.
     pub(crate) fn revision(&self, key: &RunKey) -> u64 {
-        self.entries.get(key).map_or(0, |entry| entry.revision)
+        self.entries
+            .get(key)
+            .map_or(self.revisions, |entry| entry.revision)
     }
     /// Open a new episode. An end still held for enrichment is announced first,
     /// as the closing episode's, so a resume during the report read cannot lose it.
@@ -126,10 +150,10 @@ impl RunWatch {
             entry.end = EndState::Ended;
             self.push_event(held);
         }
-        let entry = self.entry(key);
+        let entry = self.changed(key);
         entry.disk_episode = None;
         entry.local_sequence = None;
-        entry.changed();
+        entry.episode = entry.revision;
         entry.floor = entry.last_sequence + 1;
         entry.end = EndState::Open;
         entry.snapshot = None;
@@ -178,6 +202,7 @@ impl RunWatch {
         }
         let event = RunEvent {
             sequence,
+            episode: entry.episode,
             snapshot,
             delivery: Delivery::Unreported,
         };
@@ -200,11 +225,10 @@ impl RunWatch {
             return;
         };
         let key = snapshot.key.clone();
-        let entry = self.entries.entry(key.clone()).or_default();
-        if entry.snapshot.as_ref() == Some(&snapshot) {
+        if self.get(&key) == Some(&snapshot) {
             return;
         }
-        entry.changed();
+        let entry = self.changed(&key);
         match waiting_on {
             Some(waiting) => {
                 if let Some(block) = &mut entry.block {
@@ -321,8 +345,7 @@ impl RunWatch {
         else {
             return;
         };
-        let entry = self.entry(&snapshot.key);
-        entry.changed();
+        let entry = self.changed(&snapshot.key);
         let floor = entry.floor;
         if let Some(current) = &mut entry.snapshot
             && let RunState::Ended {
@@ -354,8 +377,8 @@ impl RunWatch {
         {
             return;
         }
+        let entry = self.changed(&snapshot.key);
         entry.disk_episode = None;
-        entry.changed();
         if ended {
             let first = matches!(entry.end, EndState::Open | EndState::Held);
             if first {
@@ -385,17 +408,16 @@ impl RunWatch {
     /// A later [`Self::retain`] of an end also releases it.
     pub(crate) fn hold_end(&mut self, snapshot: RunSnapshot) -> HeldEnd {
         let key = snapshot.key.clone();
-        let entry = self.entry(&key);
+        let entry = self.changed(&key);
         entry.disk_episode = None;
-        entry.changed();
         if entry.end == EndState::Open {
             entry.end = EndState::Held;
         }
-        let floor = entry.floor;
+        let episode = entry.episode;
         entry.snapshot = Some(snapshot);
         self.clear_waiting(&key);
         self.wake();
-        HeldEnd { key, floor }
+        HeldEnd { key, episode }
     }
     /// The held end and its release token, while it waits for enrichment.
     pub(crate) fn held_end(&self, key: &RunKey) -> Option<(RunSnapshot, HeldEnd)> {
@@ -405,7 +427,7 @@ impl RunWatch {
         }
         let held = HeldEnd {
             key: key.clone(),
-            floor: entry.floor,
+            episode: entry.episode,
         };
         Some((entry.snapshot.clone()?, held))
     }
@@ -416,24 +438,25 @@ impl RunWatch {
         if enriched.key != held.key {
             return;
         }
-        let entry = self.entry(&held.key);
-        if entry.floor != held.floor {
-            let closed = held.floor..entry.floor;
-            self.enrich_closed(closed, enriched);
+        let Some(entry) = self.entries.get(&held.key) else {
+            return;
+        };
+        if entry.episode != held.episode {
+            self.enrich_closed(held, enriched);
             return;
         }
         if entry.end != EndState::Held {
             return;
         }
+        let entry = self.changed(&held.key);
         entry.end = EndState::Ended;
-        entry.changed();
         entry.snapshot = Some(enriched.clone());
         self.push_event(enriched);
         self.wake();
     }
 
     /// Give an earlier episode's still-unreported end the text read for it.
-    fn enrich_closed(&mut self, episodes: std::ops::Range<u64>, enriched: RunSnapshot) {
+    fn enrich_closed(&mut self, held: HeldEnd, enriched: RunSnapshot) {
         let RunState::Ended {
             text: Some(text), ..
         } = enriched.state
@@ -443,7 +466,7 @@ impl RunWatch {
         for event in &mut self.events {
             if event.snapshot.key == enriched.key
                 && event.delivery == Delivery::Unreported
-                && episodes.contains(&event.sequence)
+                && event.episode == held.episode
                 && let RunState::Ended {
                     text: current @ None,
                     ..
