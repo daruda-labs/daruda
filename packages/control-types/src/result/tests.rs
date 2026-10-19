@@ -232,6 +232,7 @@ fn every_error_variant_round_trips_through_json() {
         },
         ControlError::FlowNotStarted {
             name: "ship.yaml".into(),
+            detail: "agent refused".into(),
         },
         ControlError::FlowNeedsInteraction {
             name: "ship.yaml".into(),

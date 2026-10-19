@@ -42,7 +42,9 @@ pub(crate) struct FlowRun {
     cancel: CancelToken,
     /// Read when the run ends, to say why it was canceled.
     overage: OverageStop,
-    started_by: Option<daruda_flow::request::StartedBy>,
+    /// Who submitted this episode, start or resume: the one owed its
+    /// answer. The run's first starter is provenance, kept in its log.
+    submitted_by: daruda_flow::request::StartedBy,
     /// Disconnects when the run's thread returns, so a quit can block on
     /// it with a deadline. Seeded runs have no engine behind them.
     finished: Option<std::sync::mpsc::Receiver<std::convert::Infallible>>,
@@ -207,6 +209,8 @@ pub(crate) struct FlowStart {
     pub source: FlowSource,
     pub runners: Box<dyn FnOnce(&RunRequest) -> Runners + Send>,
     pub overage: OverageStop,
+    /// Who submitted this episode; see [`FlowRun::submitted_by`].
+    pub submitted_by: daruda_flow::request::StartedBy,
     pub events: smol::channel::Receiver<RunNotice>,
     pub asks: smol::channel::Receiver<PendingAsk>,
 }
@@ -268,16 +272,18 @@ impl RunsHost {
         })
     }
 
-    /// Start a run: its thread, its pump, and its entry, together. Refused,
-    /// with nothing started, when the worktree already has a run: replacing
-    /// its entry would leave that run with no stop switch anywhere.
-    pub(crate) fn start_flow(start: FlowStart, cx: &mut App) -> Result<(), AlreadyRunning> {
+    /// Start a run: its thread, its pump, and its entry, together, returning
+    /// the run id its results are keyed by. Refused, with nothing started,
+    /// when the worktree already has a run: replacing its entry would leave
+    /// that run with no stop switch anywhere.
+    pub(crate) fn start_flow(start: FlowStart, cx: &mut App) -> Result<String, AlreadyRunning> {
         let FlowStart {
             tree,
             request,
             source,
             runners,
             overage,
+            submitted_by,
             events,
             asks,
         } = start;
@@ -289,7 +295,6 @@ impl RunsHost {
             run_dir: run_dir.clone(),
             lock_dir: Some(request.lock_dir.clone()),
         };
-        let started_by = request.started_by;
         let nodes_at_start = request
             .loaded
             .flow()
@@ -324,7 +329,7 @@ impl RunsHost {
             view: RunView::new(run_dir.clone(), source, nodes_at_start),
             cancel,
             overage,
-            started_by,
+            submitted_by,
             finished: Some(finished),
         };
         cx.update_global::<RunsHost, _>(|host, _| {
@@ -334,9 +339,10 @@ impl RunsHost {
             Ok(())
         })?;
         Self::tell_windows(tree.clone(), FlowChanged::Repainted, cx);
+        let run_id = super::result::flow_run_id(&run_dir);
         cx.spawn(async move |cx| pump(tree, run_dir, events, asks, cx).await)
             .detach();
-        Ok(())
+        Ok(run_id)
     }
 
     /// The app is quitting: tell every run to end what it started and stay
@@ -475,8 +481,10 @@ impl RunsHost {
                 }
                 run.view.withdraw_questions();
                 host.watch.observe_waiting(run.result());
+                // Held, not announced: the pump reads the run's report first,
+                // so no waiter or notice takes this end without its text.
                 if !matches!(end, RunEnd::ShutDown) {
-                    host.watch.retain(super::result::flow_ended(
+                    host.watch.hold_end(super::result::flow_ended(
                         run.snapshot.clone(),
                         end,
                         run.pointers.clone(),
@@ -487,11 +495,9 @@ impl RunsHost {
                     run_dir: run_dir.to_path_buf(),
                     overage: run.overage.tripped().cloned(),
                     owes_remote_answer: matches!(
-                        run.started_by,
-                        Some(
-                            daruda_flow::request::StartedBy::Phone
-                                | daruda_flow::request::StartedBy::Orchestrator
-                        )
+                        run.submitted_by,
+                        daruda_flow::request::StartedBy::Phone
+                            | daruda_flow::request::StartedBy::Orchestrator
                     ),
                     colouring: run.view.colouring(),
                 }));
@@ -527,7 +533,7 @@ impl RunsHost {
     /// `--screenshot`. Keyed as a started run is, by the folder resolved.
     #[cfg(any(test, feature = "screenshot"))]
     pub(crate) fn seed_flow_run(worktree: PathBuf, view: RunView, cx: &mut App) {
-        Self::seed_flow_run_started_by(
+        Self::seed_flow_run_submitted_by(
             worktree,
             view,
             daruda_flow::request::StartedBy::Desktop,
@@ -536,10 +542,10 @@ impl RunsHost {
     }
 
     #[cfg(any(test, feature = "screenshot"))]
-    pub(crate) fn seed_flow_run_started_by(
+    pub(crate) fn seed_flow_run_submitted_by(
         worktree: PathBuf,
         view: RunView,
-        started_by: daruda_flow::request::StartedBy,
+        submitted_by: daruda_flow::request::StartedBy,
         cx: &mut App,
     ) {
         let tree = CanonicalTree::resolve(&worktree)
@@ -552,7 +558,7 @@ impl RunsHost {
             view,
             cancel: CancelToken::default(),
             overage: OverageStop::default(),
-            started_by: Some(started_by),
+            submitted_by,
             finished: None,
         };
         // A seed lands on whatever a test left there: it stands in for
@@ -577,6 +583,9 @@ impl RunsHost {
             .then(|| states_in_log(&run_dir))
             .flatten();
         Self::apply_flow_event(worktree, &run_dir, event, from_log, cx);
+        if let Some((snapshot, held)) = held_end(&run_dir, event, cx) {
+            Self::release_run_end(held, super::result_io::enrich(snapshot), cx);
+        }
     }
 
     /// Stop `worktree`'s run for `limit` as its engine would, without one.
@@ -606,6 +615,21 @@ fn reconciles_with_log(event: &FlowEvent) -> bool {
 
 fn states_in_log(run_dir: &Path) -> Option<NodeRunStates> {
     daruda_flow::run_log::reader::state(run_dir).map(|state| colour::states_from_log(&state))
+}
+
+/// The end `event` held for the run in `run_dir`, with its release token,
+/// while its report is still to be read.
+fn held_end(
+    run_dir: &Path,
+    event: &FlowEvent,
+    cx: &App,
+) -> Option<(super::result::RunSnapshot, super::watch::HeldEnd)> {
+    if !matches!(event, FlowEvent::RunEnded { end } if !matches!(end, RunEnd::ShutDown)) {
+        return None;
+    }
+    cx.global::<RunsHost>()
+        .watch
+        .held_end(&super::result::RunKey::flow_of(run_dir))
 }
 
 /// What a run receives next.
@@ -651,13 +675,7 @@ async fn pump(
             }
             Next::Notice(notice) => {
                 if let RunNotice::Recorded(record) = &notice {
-                    let key = super::result::RunKey::Flow(
-                        run_dir
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                            .into_owned(),
-                    );
+                    let key = super::result::RunKey::flow_of(&run_dir);
                     cx.update(|cx| {
                         cx.update_global::<RunsHost, _>(|host, _| {
                             host.watch.record_flow_sequence(key, record.seq)
@@ -686,34 +704,18 @@ async fn pump(
             None
         };
         let ended = matches!(event, FlowEvent::RunEnded { .. });
-        let settled = cx.update(|cx| {
+        let held = cx.update(|cx| {
             RunsHost::apply_flow_event(worktree.as_path(), &run_dir, &event, from_log, cx);
-            if ended
-                && !matches!(
-                    event,
-                    FlowEvent::RunEnded {
-                        end: RunEnd::ShutDown
-                    }
-                )
-            {
-                let key = super::result::RunKey::Flow(
-                    run_dir
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .into_owned(),
-                );
-                cx.global::<RunsHost>().watch.retained_observation(&key)
-            } else {
-                None
-            }
+            held_end(&run_dir, &event, cx)
         });
-        if let Some((snapshot, revision)) = settled {
+        // Released whatever the read found: an unreadable report still ends
+        // the run, with its process facts and no text.
+        if let Some((snapshot, held)) = held {
             let enriched = cx
                 .background_executor()
                 .spawn(async move { super::result_io::enrich(snapshot) })
                 .await;
-            cx.update(|cx| RunsHost::seed_run_wait_if_current(enriched, revision, cx));
+            cx.update(|cx| RunsHost::release_run_end(held, enriched, cx));
         }
         if ended {
             break;

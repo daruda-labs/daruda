@@ -16,25 +16,26 @@ impl LocalEnd {
 
 impl RunWatch {
     pub(crate) fn record_flow_sequence(&mut self, key: RunKey, sequence: u64) {
-        self.local_sequences.insert(key, sequence);
+        self.entry(&key).local_sequence = Some(sequence);
     }
 
     pub(crate) fn local_end(&self, key: &RunKey) -> Option<LocalEnd> {
-        (!self.disk_episodes.contains_key(key)
-            && self
-                .get(key)
+        let entry = self.entries.get(key)?;
+        (entry.disk_episode.is_none()
+            && entry
+                .snapshot
+                .as_ref()
                 .is_some_and(|snapshot| matches!(snapshot.state, RunState::Ended { .. })))
         .then(|| {
-            self.local_sequences
-                .get(key)
-                .copied()
+            entry
+                .local_sequence
                 .map_or(LocalEnd::Unconfirmed, LocalEnd::RecordedThrough)
         })
     }
 
     pub(crate) fn observe_disk(&mut self, snapshot: RunSnapshot, episode: u64) {
         let key = snapshot.key.clone();
-        let previous = self.disk_episodes.get(&key).copied();
+        let previous = self.entries.get(&key).and_then(|entry| entry.disk_episode);
         if previous.is_some_and(|previous| episode < previous) {
             return;
         }
@@ -55,9 +56,9 @@ impl RunWatch {
         } else {
             self.retain(snapshot);
         }
-        self.disk_episodes.insert(key, episode);
+        self.entry(&key).disk_episode = Some(episode);
     }
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests;

@@ -138,9 +138,11 @@ impl Workspace {
                 },
             },
         };
-        let result = matches!(outcome, TurnOutcome::Completed)
-            .then(|| self.control_read(pane_id, cx).ok().flatten())
-            .flatten();
+        // Reading the transcript costs a scan; only a Task's chat has a result.
+        let result = (matches!(outcome, TurnOutcome::Completed)
+            && self.task_chat_execution(pane_id, cx).is_some())
+        .then(|| self.control_read(pane_id, cx).ok().flatten())
+        .flatten();
         self.settle_agent_chat_task(pane_id, settled, result, cx);
         // Last, because handing `outcome` on moves it — the matches above
         // bind nothing and so only read it.

@@ -84,10 +84,15 @@ pub(crate) fn to_command(id: ToolId, args: &Value) -> Result<Command, ConvertErr
                 .ok_or(ConvertError::MissingArgument { name: "timeout" })?
                 .as_u64()
                 .ok_or(ConvertError::BadArgument { name: "timeout" })?;
-            Command::RunWait {
-                handles: handles_arg(args)?,
-                timeout,
-            }
+            // `[]` would be an explicit wait over nothing, which settles at
+            // once; a model that meant "wait for my runs" omits the argument.
+            let handles = match handles_arg(args)? {
+                Some(handles) if handles.is_empty() => {
+                    return Err(ConvertError::BadArgument { name: "handles" });
+                }
+                handles => handles,
+            };
+            Command::RunWait { handles, timeout }
         }
         ToolId::RunStatus => Command::RunStatus {
             handles: handles_arg(args)?,

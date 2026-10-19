@@ -145,10 +145,12 @@ fn serve_control_surface(dir: &std::path::Path, cx: &mut App) -> Result<(), Ensu
 /// **Mints a token, so calling this is not free of consequence**: the token is
 /// bound to the session being created and rotating it retires the previous
 /// one, which is what makes a discarded session's shim stop working. Call it
-/// once per session, from the one place a session is planned. The deferred
-/// notice flush lets this new session pick up process-owned pending episodes.
-pub(crate) fn mcp_server(cx: &mut App) -> Option<daruda_acp::McpServer> {
-    cx.try_global::<ControlSurface>()?;
+/// once per session, from the one place a session is planned — through
+/// [`session_tools`]. `&App` rather than `&mut App` because the gate is shared
+/// with the accept loop and carries its own lock — the mutation is the gate's,
+/// not the global's.
+pub(crate) fn mcp_server(cx: &App) -> Option<daruda_acp::McpServer> {
+    let surface = cx.try_global::<ControlSurface>()?;
     // The shim is this same binary, so there is nothing to install and no
     // version skew between the app and its relay.
     let executable = match std::env::current_exe() {
@@ -170,8 +172,7 @@ pub(crate) fn mcp_server(cx: &mut App) -> Option<daruda_acp::McpServer> {
             return None;
         }
     };
-    let surface = cx.global::<ControlSurface>();
-    let server = daruda_acp::stdio_mcp_server(
+    Some(daruda_acp::stdio_mcp_server(
         mcp_server_name(&surface.runtime_id),
         executable,
         vec![crate::control::mcp::shim::SUBCOMMAND.to_owned()],
@@ -181,7 +182,15 @@ pub(crate) fn mcp_server(cx: &mut App) -> Option<daruda_acp::McpServer> {
             daruda_core::process_env::CONTROL_TOKEN.name().to_owned(),
             surface.gate.rotate(),
         )],
-    );
+    ))
+}
+
+/// The control server for a session being planned now.
+///
+/// A new or replaced orchestrator session is one of the moments stored run
+/// notices are offered again, so this also schedules their deferred flush.
+pub(crate) fn session_tools(cx: &mut App) -> Option<daruda_acp::McpServer> {
+    let server = mcp_server(cx)?;
     crate::control::notices::schedule(cx);
     Some(server)
 }

@@ -1,6 +1,6 @@
 //! Read-only enrichment of result snapshots, used off the UI thread by queries.
 use super::result::{self, EndedAs, Pointers, RunKey, RunSnapshot, RunState};
-use daruda_core::text::bound_agent_text;
+use daruda_control_types::agent_text::bound_agent_text;
 use std::path::Path;
 
 pub(super) fn flow_spec(dir: &Path) -> Option<daruda_flow::parse::FlowFile> {
@@ -10,16 +10,11 @@ pub(super) fn flow_spec(dir: &Path) -> Option<daruda_flow::parse::FlowFile> {
 }
 
 pub(super) fn flow_base(dir: &Path) -> RunSnapshot {
-    let id = dir
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .into_owned();
     let what = flow_spec(dir)
         .and_then(|spec| spec.name)
-        .unwrap_or_else(|| id.clone());
+        .unwrap_or_else(|| result::flow_run_id(dir));
     RunSnapshot {
-        key: RunKey::Flow(id),
+        key: RunKey::flow_of(dir),
         what,
         why: None,
         state: RunState::Unknown,

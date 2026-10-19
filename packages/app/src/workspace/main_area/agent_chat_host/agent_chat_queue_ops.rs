@@ -134,7 +134,7 @@ impl Workspace {
             );
             return Some(PromptDispatch::ReadOnly);
         }
-        let dispatch = if task.is_some() || origin == PromptOrigin::Internal {
+        let dispatch = if task.is_some() {
             SlashDispatch::Forward
         } else {
             classify_slash(&text)
@@ -147,9 +147,9 @@ impl Workspace {
             SlashDispatch::Forward => {
                 let view = self.agent_chat_view(pane_id).cloned()?;
                 let prompt_dispatch = match (origin, task) {
-                    (PromptOrigin::Internal, _) => {
-                        view.update(cx, |v, cx| v.send_internal_prompt_text(text, cx))
-                    }
+                    // Host notices go to `try_send_internal_prompt_text`, which
+                    // never queues; no caller routes one through this funnel.
+                    (PromptOrigin::Internal, _) => PromptDispatch::Unavailable,
                     (PromptOrigin::Telegram, _) => {
                         view.update(cx, |v, cx| v.send_prompt_text_for_telegram(text, cx))
                     }

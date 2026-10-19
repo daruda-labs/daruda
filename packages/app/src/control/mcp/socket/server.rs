@@ -273,8 +273,9 @@ pub(super) async fn serve(
             break;
         }
     }
-    // Withdraw foreground waits before cancelling the writer. Keeping an old
-    // reply sender alive must not keep this serial accept loop occupied.
+    // Only enqueues the disconnect: the app withdraws this connection's waits
+    // when it drains it, possibly after the writer below is gone. A reply in
+    // that gap fails its receipt, so its event returns to unreported.
     let _ = inbound.send(Inbound::Disconnected { connection }).await;
     drop(writes);
 }

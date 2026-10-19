@@ -17,6 +17,57 @@ fn ended(id: &str) -> RunSnapshot {
         },
     }
 }
+/// What the orchestrator agent received: notices sent as prompts.
+fn sent(cx: &mut TestAppContext) -> Vec<String> {
+    cx.update(|cx| {
+        let (_, ws) = WindowRegistry::orchestrator(cx).unwrap();
+        ws.upgrade()
+            .unwrap()
+            .read(cx)
+            .every_agent_chat()
+            .flat_map(|(_, view)| {
+                view.read(cx)
+                    .items()
+                    .iter()
+                    .filter_map(|item| match item {
+                        daruda_acp::model::ChatItem::UserText(text) => Some(text.clone()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    })
+}
+/// Give the orchestrator pane a live session, so a notice is sent rather than queued.
+fn connect(
+    pane: crate::telegram::bridge::PaneRef,
+    cx: &mut TestAppContext,
+) -> daruda_acp::HandleProbe {
+    let (handle, probe) = daruda_acp::AcpSessionHandle::detached_for_test();
+    host(cx).update(cx, |ws, cx| {
+        ws.agent_chat_view(pane.pane)
+            .unwrap()
+            .update(cx, |view, cx| {
+                view.set_status_for_test(daruda_chat::view::AgentSessionStatus::Connected);
+                view.attach_handle(handle);
+                cx.notify();
+            });
+    });
+    probe
+}
+/// End the orchestrator's turn at its reconciled completion.
+fn complete(pane: crate::telegram::bridge::PaneRef, cx: &mut TestAppContext) {
+    host(cx).update(cx, |ws, cx| {
+        ws.agent_chat_view(pane.pane)
+            .unwrap()
+            .update(cx, |view, _| {
+                view.set_turn_idle();
+                view.owe_completion_for_test(daruda_chat::view::TurnOutcome::Completed);
+            });
+        ws.pulse_agent_chats(cx);
+    });
+    cx.run_until_parked();
+}
 fn queued(cx: &mut TestAppContext) -> Vec<String> {
     cx.update(|cx| {
         let (_, ws) = WindowRegistry::orchestrator(cx).unwrap();
@@ -36,7 +87,8 @@ fn queued(cx: &mut TestAppContext) -> Vec<String> {
 }
 #[gpui::test]
 fn idle_orchestrator_gets_an_event_without_another_completion(cx: &mut TestAppContext) {
-    crate::test_support::register_test_orchestrator(cx);
+    let pane = crate::test_support::register_test_orchestrator(cx);
+    let _probe = connect(pane, cx);
     cx.update(|cx| {
         crate::workspace::Workspace::install_task_effects(cx);
         let snapshot = ended("one");
@@ -44,7 +96,8 @@ fn idle_orchestrator_gets_an_event_without_another_completion(cx: &mut TestAppCo
         RunsHost::seed_run_wait(snapshot, cx);
     });
     cx.run_until_parked();
-    let prompts = queued(cx);
+    assert!(queued(cx).is_empty());
+    let prompts = sent(cx);
     assert_eq!(prompts.len(), 1);
     assert!(prompts[0].contains("flow:one"));
     assert!(prompts[0].contains("call daruda_run_wait"));
@@ -74,6 +127,7 @@ fn install(cx: &mut TestAppContext) {
 fn busy_orchestrator_gets_one_group_at_reconciled_completion(cx: &mut TestAppContext) {
     let pane = crate::test_support::register_test_orchestrator(cx);
     install(cx);
+    let _probe = connect(pane, cx);
     let ws = host(cx);
     ws.update(cx, |ws, cx| {
         ws.agent_chat_view(pane.pane)
@@ -86,23 +140,14 @@ fn busy_orchestrator_gets_one_group_at_reconciled_completion(cx: &mut TestAppCon
         produce("b", cx);
     });
     cx.run_until_parked();
-    assert!(queued(cx).is_empty());
-    ws.update(cx, |ws, cx| {
-        ws.agent_chat_view(pane.pane)
-            .unwrap()
-            .update(cx, |view, _| {
-                view.set_turn_idle();
-                view.owe_completion_for_test(daruda_chat::view::TurnOutcome::Completed);
-            });
-        ws.pulse_agent_chats(cx);
-    });
-    cx.run_until_parked();
-    let prompts = queued(cx);
+    assert!(sent(cx).is_empty());
+    complete(pane, cx);
+    let prompts = sent(cx);
     assert_eq!(prompts.len(), 1);
     assert_eq!(prompts[0].lines().count(), 2);
     ws.update(cx, |ws, cx| ws.pulse_agent_chats(cx));
     cx.run_until_parked();
-    assert_eq!(queued(cx), prompts);
+    assert_eq!(sent(cx), prompts);
 }
 
 #[gpui::test]
@@ -111,26 +156,37 @@ fn no_pane_retains_events_until_creation_and_replacement(cx: &mut TestAppContext
     install(cx);
     cx.update(|cx| produce("before-pane", cx));
     cx.run_until_parked();
-    crate::test_support::register_test_orchestrator(cx);
+    let first = crate::test_support::register_test_orchestrator(cx);
     cx.run_until_parked();
-    assert_eq!(queued(cx).len(), 1);
+    assert!(
+        queued(cx).is_empty(),
+        "a pane without a session parks nothing"
+    );
+    let _first = connect(first, cx);
+    cx.run_until_parked();
+    assert_eq!(sent(cx).len(), 1, "the session becoming ready retries");
     cx.update(|cx| {
         WindowRegistry::clear_orchestrator(cx);
         produce("replacement", cx);
     });
     cx.run_until_parked();
-    crate::test_support::register_test_orchestrator(cx);
+    let second = crate::test_support::register_test_orchestrator(cx);
+    let _second = connect(second, cx);
     cx.run_until_parked();
-    let prompts = queued(cx);
+    let prompts = sent(cx);
     assert_eq!(prompts.len(), 1);
     assert!(prompts[0].contains("flow:replacement"));
-    assert!(!prompts[0].contains("flow:before-pane"));
+    assert!(
+        prompts[0].contains("flow:before-pane"),
+        "a new conversation has not heard the old pane's notice"
+    );
     cx.update(|cx| assert_eq!(RunsHost::unreported_run_events(cx).len(), 2));
 }
 
 #[gpui::test]
 fn gate_rotation_flushes_pending_but_not_accepted_notices(cx: &mut TestAppContext) {
     let pane = crate::test_support::register_test_orchestrator(cx);
+    let _probe = connect(pane, cx);
     let ws = host(cx);
     ws.update(cx, |ws, cx| {
         ws.agent_chat_view(pane.pane)
@@ -140,7 +196,7 @@ fn gate_rotation_flushes_pending_but_not_accepted_notices(cx: &mut TestAppContex
     install(cx);
     cx.update(|cx| produce("gate", cx));
     cx.run_until_parked();
-    assert!(queued(cx).is_empty());
+    assert!(sent(cx).is_empty());
     ws.update(cx, |ws, cx| {
         ws.agent_chat_view(pane.pane)
             .unwrap()
@@ -148,21 +204,23 @@ fn gate_rotation_flushes_pending_but_not_accepted_notices(cx: &mut TestAppContex
     });
     cx.update(|cx| {
         crate::orchestrator::seed_control_surface_for_test(cx);
-        assert!(crate::orchestrator::mcp_server(cx).is_some());
+        assert!(crate::orchestrator::session_tools(cx).is_some());
     });
     cx.run_until_parked();
-    assert_eq!(queued(cx).len(), 1);
+    assert_eq!(sent(cx).len(), 1);
+    complete(pane, cx);
     cx.update(|cx| {
-        crate::orchestrator::mcp_server(cx);
+        crate::orchestrator::session_tools(cx);
     });
     cx.run_until_parked();
-    assert_eq!(queued(cx).len(), 1);
+    assert_eq!(sent(cx).len(), 1, "the same session already heard it");
 }
 
 #[gpui::test]
 fn waiter_reservation_rollbacks_are_rechecked_without_a_new_event(cx: &mut TestAppContext) {
-    crate::test_support::register_test_orchestrator(cx);
+    let pane = crate::test_support::register_test_orchestrator(cx);
     install(cx);
+    let _probe = connect(pane, cx);
     let key = RunKey::Flow("waiting".into());
     let wait = cx.update(|cx| {
         RunsHost::register_run(key.clone(), cx);
@@ -171,7 +229,7 @@ fn waiter_reservation_rollbacks_are_rechecked_without_a_new_event(cx: &mut TestA
         wait
     });
     cx.run_until_parked();
-    assert!(queued(cx).is_empty(), "an active waiter covers its key");
+    assert!(sent(cx).is_empty(), "an active waiter covers its key");
     cx.update(|cx| {
         assert_eq!(
             RunsHost::poll_run_wait(wait, false, cx)
@@ -183,21 +241,19 @@ fn waiter_reservation_rollbacks_are_rechecked_without_a_new_event(cx: &mut TestA
         crate::control::notices::schedule(cx);
     });
     cx.run_until_parked();
-    assert!(
-        queued(cx).is_empty(),
-        "an in-flight receipt is still covered"
-    );
+    assert!(sent(cx).is_empty(), "an in-flight receipt is still covered");
     cx.update(|cx| {
         RunsHost::finish_run_wait(wait, false, cx);
     });
     cx.run_until_parked();
-    assert_eq!(queued(cx).len(), 1);
+    assert_eq!(sent(cx).len(), 1);
 }
 
 #[gpui::test]
 fn reported_and_foreign_events_never_become_notices(cx: &mut TestAppContext) {
-    crate::test_support::register_test_orchestrator(cx);
+    let pane = crate::test_support::register_test_orchestrator(cx);
     install(cx);
+    let _probe = connect(pane, cx);
     cx.update(|cx| {
         produce("reported", cx);
         let (wait, _) = RunsHost::open_run_wait(None, cx).unwrap();
@@ -209,12 +265,13 @@ fn reported_and_foreign_events_never_become_notices(cx: &mut TestAppContext) {
         RunsHost::finish_run_wait(foreign, false, cx);
     });
     cx.run_until_parked();
-    assert!(queued(cx).is_empty());
+    assert!(sent(cx).is_empty());
 }
 
 #[gpui::test]
 fn a_full_queue_retains_notices_for_the_next_opportunity(cx: &mut TestAppContext) {
     let pane = crate::test_support::register_test_orchestrator(cx);
+    let _probe = connect(pane, cx);
     let ws = host(cx);
     ws.update(cx, |ws, cx| {
         ws.agent_chat_view(pane.pane)
@@ -231,15 +288,21 @@ fn a_full_queue_retains_notices_for_the_next_opportunity(cx: &mut TestAppContext
             .iter()
             .any(|prompt| prompt.contains("flow:retry"))
     );
+    assert!(sent(cx).is_empty());
     ws.update(cx, |ws, cx| {
         ws.agent_chat_view(pane.pane)
             .unwrap()
             .update(cx, |view, cx| view.clear_queue(cx));
-        crate::control::notices::schedule(cx);
     });
     cx.run_until_parked();
-    assert_eq!(queued(cx).len(), 1);
-    assert!(queued(cx)[0].contains("flow:retry"));
+    assert!(queued(cx).is_empty());
+    let prompts = sent(cx);
+    assert_eq!(
+        prompts.len(),
+        1,
+        "an emptied queue retries without a new event"
+    );
+    assert!(prompts[0].contains("flow:retry"));
 }
 
 #[gpui::test]
@@ -289,16 +352,23 @@ fn read_only_or_unavailable_notices_retry_after_session_replacement(cx: &mut Tes
     });
     cx.update(|cx| {
         crate::orchestrator::seed_control_surface_for_test(cx);
-        crate::orchestrator::mcp_server(cx);
+        crate::orchestrator::session_tools(cx);
     });
     cx.run_until_parked();
-    assert_eq!(queued(cx).len(), 1);
+    assert!(
+        queued(cx).is_empty(),
+        "the replacement is not connected yet"
+    );
+    let _probe = connect(pane, cx);
+    cx.run_until_parked();
+    assert_eq!(sent(cx).len(), 1);
 }
 
 #[gpui::test]
 fn batch_limits_lines_and_sanitizes_all_agent_supplied_fields(cx: &mut TestAppContext) {
-    crate::test_support::register_test_orchestrator(cx);
+    let pane = crate::test_support::register_test_orchestrator(cx);
     install(cx);
+    let _probe = connect(pane, cx);
     cx.update(|cx| {
         for i in 0..23 {
             produce(&format!("batch-{i}"), cx);
@@ -321,14 +391,13 @@ fn batch_limits_lines_and_sanitizes_all_agent_supplied_fields(cx: &mut TestAppCo
         );
     });
     cx.run_until_parked();
-    let prompts = queued(cx);
+    let prompts = sent(cx);
     assert_eq!(prompts.len(), 1);
     assert_eq!(prompts[0].lines().count(), 21);
     assert!(prompts[0].ends_with("+4 more"));
-    cx.update(crate::control::notices::schedule);
-    cx.run_until_parked();
+    complete(pane, cx);
     assert_eq!(
-        queued(cx).len(),
+        sent(cx).len(),
         1,
         "the +more notice covers its eligible batch"
     );
@@ -351,7 +420,7 @@ fn batch_limits_lines_and_sanitizes_all_agent_supplied_fields(cx: &mut TestAppCo
         );
     });
     cx.run_until_parked();
-    let prompts = queued(cx);
+    let prompts = sent(cx);
     assert_eq!(prompts.len(), 2);
     assert_eq!(prompts[1].lines().count(), 1);
     assert!(!prompts[1].chars().any(char::is_control));
@@ -361,8 +430,9 @@ fn batch_limits_lines_and_sanitizes_all_agent_supplied_fields(cx: &mut TestAppCo
 
 #[gpui::test]
 fn closed_blocks_are_filtered_and_reopened_episodes_notify_again(cx: &mut TestAppContext) {
-    crate::test_support::register_test_orchestrator(cx);
+    let pane = crate::test_support::register_test_orchestrator(cx);
     install(cx);
+    let _probe = connect(pane, cx);
     let key = RunKey::Flow("episode".into());
     let running = |waiting_on| RunSnapshot {
         key: key.clone(),
@@ -380,19 +450,19 @@ fn closed_blocks_are_filtered_and_reopened_episodes_notify_again(cx: &mut TestAp
         RunsHost::seed_run_wait(running(None), cx);
     });
     cx.run_until_parked();
-    assert!(queued(cx).is_empty());
+    assert!(sent(cx).is_empty());
     cx.update(|cx| RunsHost::seed_run_wait(running(question()), cx));
     cx.run_until_parked();
-    assert_eq!(queued(cx).len(), 1);
+    assert_eq!(sent(cx).len(), 1);
     cx.update(|cx| {
         RunsHost::seed_run_wait(running(None), cx);
         RunsHost::seed_run_wait(running(question()), cx);
     });
-    cx.run_until_parked();
-    assert_eq!(queued(cx).len(), 2);
+    complete(pane, cx);
+    assert_eq!(sent(cx).len(), 2);
     cx.update(|cx| RunsHost::seed_run_wait(ended("episode"), cx));
-    cx.run_until_parked();
-    assert_eq!(queued(cx).len(), 3);
+    complete(pane, cx);
+    assert_eq!(sent(cx).len(), 3);
     cx.update(|cx| assert_eq!(RunsHost::unreported_run_events(cx).len(), 1));
 }
 
@@ -434,7 +504,11 @@ fn internal_notice_preserves_workspace_composer_and_queued_edit(cx: &mut TestApp
             "unfinished composer"
         );
     });
-    assert_eq!(queued(cx).len(), 2);
+    assert_eq!(
+        queued(cx),
+        vec!["original user prompt".to_string()],
+        "a notice never waits behind the person's queued prompt"
+    );
 }
 
 /// The actual Workspace start paths, flow engine, task completion and notice entrypoint.
@@ -451,6 +525,7 @@ async fn workspace_flow_and_two_tasks_return_one_pointer_group(cx: &mut TestAppC
     let orchestrator = crate::test_support::register_test_orchestrator(cx);
     let orchestrator_ws = host(cx);
     install(cx);
+    let _orchestrator_probe = connect(orchestrator, cx);
     let _probes = cx.update(crate::workspace::Workspace::fake_agent_connections_for_test);
     let _outbox = cx.update(|cx| {
         let outbox = crate::telegram::global::install_for_test(true, Some(42), cx);
@@ -545,26 +620,23 @@ async fn workspace_flow_and_two_tasks_return_one_pointer_group(cx: &mut TestAppC
             ws.fire_activity_completion(chat.pane, outcome.expect("reconciled completion"), cx);
         });
     }
-    for _ in 0..40 {
+    // A waiter's wake-up is the engine thread's signal: no polling sleep.
+    let (watching, wake) = cx
+        .update(|cx| RunsHost::open_run_wait(Some(RunsHost::run_scope(cx)), cx))
+        .unwrap();
+    loop {
         cx.run_until_parked();
         if cx.update(|cx| RunsHost::unreported_run_events(cx).len()) == 3 {
             break;
         }
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert!(wake.recv().await.is_ok(), "the flow run ends");
     }
-    assert_eq!(cx.update(|cx| RunsHost::unreported_run_events(cx).len()), 3);
-    assert!(queued(cx).is_empty(), "the orchestrator is still busy");
-    orchestrator_ws.update(cx, |ws, cx| {
-        ws.agent_chat_view(orchestrator.pane)
-            .unwrap()
-            .update(cx, |view, _| {
-                view.set_turn_idle();
-                view.owe_completion_for_test(daruda_chat::view::TurnOutcome::Completed);
-            });
-        ws.pulse_agent_chats(cx);
-    });
+    cx.update(|cx| RunsHost::finish_run_wait(watching, false, cx));
     cx.run_until_parked();
-    let prompts = queued(cx);
+    assert!(sent(cx).is_empty(), "the orchestrator is still busy");
+    complete(orchestrator, cx);
+    assert!(queued(cx).is_empty());
+    let prompts = sent(cx);
     assert_eq!(prompts.len(), 1);
     assert_eq!(prompts[0].lines().count(), 3);
     assert!(prompts[0].contains(&handle.to_string()));
@@ -587,9 +659,10 @@ fn pane_creation_recovers_events_created_before_effects_installation(cx: &mut Te
     crate::test_support::init_gpui_component(cx);
     cx.update(|cx| produce("early-carry", cx));
     install(cx);
-    crate::test_support::register_test_orchestrator(cx);
+    let pane = crate::test_support::register_test_orchestrator(cx);
+    let _probe = connect(pane, cx);
     cx.run_until_parked();
-    let prompts = queued(cx);
+    let prompts = sent(cx);
     assert_eq!(prompts.len(), 1);
     assert!(prompts[0].contains("flow:early-carry"));
 }

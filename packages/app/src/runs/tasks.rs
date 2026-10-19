@@ -10,9 +10,8 @@ use std::time::Duration;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::tasks::{
-    AfterCommit, CommitError, ExecutionRef, Lifecycle, ReconcileBlocked, TaskEvent,
-    TaskExecutionSource, TaskMachine, TaskRecord, TaskRejected, TaskStore, TaskStoreError,
-    TasksBook,
+    AfterCommit, CommitError, Lifecycle, TaskEvent, TaskMachine, TaskRecord, TaskRejected,
+    TaskStore, TaskStoreError, TasksBook,
 };
 use gpui::{App, BorrowAppContext as _, Global};
 
@@ -140,6 +139,8 @@ impl Global for RunsHost {}
 
 /// A store opened for this process, before it is installed.
 pub(crate) struct OpenedRuns {
+    /// Unfinished orchestrator starts the log carries into this process.
+    carried: Vec<super::result::RunKey>,
     host: RunsHost,
     projection: GlobalTasks,
 }
@@ -186,7 +187,7 @@ impl RunsHost {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        let access = match reconcile(&store) {
+        let access = match super::reconcile::reconcile(&store) {
             Ok(()) => Access::Writable(store.clone()),
             Err(cause) => Access::ReadOnly {
                 _store: store.clone(),
@@ -207,25 +208,15 @@ impl RunsHost {
                 return OpenedRuns::unavailable();
             }
         };
-        let mut watch = super::watch::RunWatch::default();
-        for key in carried {
-            watch.register(key);
-        }
-        for record in projection.records() {
-            for ended in &record.ended_executions {
-                if let Some(snapshot) = super::result::task_snapshot(record, &ended.exec) {
-                    watch.retain(snapshot);
-                }
-            }
-        }
         OpenedRuns {
+            carried,
             host: RunsHost {
                 access,
                 delivery: Default::default(),
                 cli: None,
                 effects: None,
                 flows: Default::default(),
-                watch,
+                watch: Default::default(),
                 tail: settled_tail(),
                 #[cfg(any(test, feature = "screenshot"))]
                 _scratch: None,
@@ -422,10 +413,14 @@ impl RunsHost {
         .detach();
     }
 
-    /// Install the opened host and its projection. Flow runs already in
-    /// flight and the windows' effects move to the new host: they belong to
-    /// the process, not to the task log being swapped.
+    /// Install the opened host and its projection. Flow runs in flight, the
+    /// windows' effects and the run ledger move to the new host: they belong
+    /// to the process, not to the task log being swapped. The new log's
+    /// carried starts and changed history join that ledger.
     pub(crate) fn install(mut opened: OpenedRuns, cx: &mut App) {
+        let previous = cx
+            .try_global::<GlobalTasks>()
+            .map(|tasks| tasks.book.clone());
         if cx.try_global::<RunsHost>().is_some() {
             let (flows, effects, watch) = cx.update_global::<RunsHost, _>(|host, _| {
                 (
@@ -438,6 +433,11 @@ impl RunsHost {
             opened.host.watch = watch;
             opened.host.effects = opened.host.effects.take().or(effects);
         }
+        opened.host.watch.adopt_log(
+            std::mem::take(&mut opened.carried),
+            previous.as_ref(),
+            &opened.projection.book,
+        );
         cx.set_global(opened.projection);
         cx.set_global(opened.host);
         Self::install_cli_tracker(cx);
@@ -537,6 +537,7 @@ impl RunsHost {
 impl OpenedRuns {
     fn unavailable() -> Self {
         Self {
+            carried: Vec::new(),
             host: RunsHost {
                 access: Access::Unavailable,
                 delivery: Default::default(),
@@ -561,132 +562,6 @@ pub(crate) fn no_hook() -> AfterCommit<TaskMachine> {
     Box::new(|_, _| {})
 }
 
-/// Settle every run the previous process left starting or running in a
-/// chat: nothing of it survived. A CLI run is its tracker's to settle.
-/// Reports how it ended; `Err` says why tasks stay read-only.
-///
-/// A failure handled here ends the pass and clears its marker: only a crash
-/// in the middle of it may leave the marker that keeps later starts from
-/// reconciling. A record the machine refuses is skipped and reported: the
-/// refusal leaves the log as it was, and the other records still need
-/// settling.
-fn reconcile(store: &TaskStore) -> Result<(), ReadOnlyCause> {
-    use crate::surface::strings::error;
-    let claim = match store.begin_reconcile() {
-        Ok(claim) => claim,
-        Err(ReconcileBlocked::Unfinished) => {
-            report_reconcile(error::tasks_read_only(), None, "tasks.reconcile.unfinished");
-            return Err(ReadOnlyCause::UnfinishedReconciliation);
-        }
-        // No marker was written, so the next start tries again.
-        Err(ReconcileBlocked::Io(e)) => {
-            report_reconcile(
-                error::tasks_settle_failed(),
-                Some(&e),
-                "tasks.reconcile.begin",
-            );
-            return Err(ReadOnlyCause::SettleFailed);
-        }
-    };
-    match settle_lost_runs(store) {
-        // The runs are settled and the log is sound, so this session writes;
-        // only the next start would open read-only on the leftover marker.
-        Ok(()) => {
-            if let Err(e) = claim.finish() {
-                report_reconcile(
-                    "Tasks will open read-only on the next start: the settling marker could not be removed".to_string(),
-                    Some(&e),
-                    "tasks.reconcile.finish",
-                );
-            }
-            Ok(())
-        }
-        Err(settle) => match claim.abandon() {
-            Ok(()) => {
-                report_reconcile(
-                    error::tasks_settle_failed(),
-                    Some(&settle),
-                    "tasks.reconcile.io",
-                );
-                Err(ReadOnlyCause::SettleFailed)
-            }
-            Err(cleared) => {
-                LogWriter::log(
-                    ErrorReport::new(error::tasks_settle_marker_stuck())
-                        .severity(ErrorSeverity::Error)
-                        .from_error(&cleared)
-                        .with_context("settle_error", settle.to_string())
-                        .at(file!(), line!())
-                        .dedup("tasks.reconcile.abandon")
-                        .build(),
-                );
-                Err(ReadOnlyCause::SettleMarkerStuck)
-            }
-        },
-    }
-}
-
-#[track_caller]
-fn report_reconcile(title: String, error: Option<&dyn std::error::Error>, dedup: &str) {
-    let location = std::panic::Location::caller();
-    let mut report = ErrorReport::new(title).severity(ErrorSeverity::Error);
-    if let Some(error) = error {
-        report = report.from_error(error);
-    }
-    LogWriter::log(
-        report
-            .at(location.file(), location.line())
-            .dedup(dedup)
-            .build(),
-    );
-}
-
-fn settle_lost_runs(store: &TaskStore) -> Result<(), ReconcileBlocked> {
-    let (_, book) = store
-        .current()
-        .map_err(|e| ReconcileBlocked::Io(std::io::Error::other(e)))?;
-    settle(store, lost_runs(&book))
-}
-
-/// The runs a previous process left that no one will ever end.
-fn lost_runs(book: &TasksBook) -> Vec<ExecutionRef> {
-    book.records()
-        .filter(|record| match &record.lifecycle {
-            Lifecycle::Preparing { .. } | Lifecycle::Dispatching { .. } => true,
-            Lifecycle::Running { .. } => !matches!(
-                record.execution.as_ref().map(|run| &run.source),
-                Some(TaskExecutionSource::ClaudeCli { .. })
-            ),
-            _ => false,
-        })
-        .filter_map(|record| record.current_exec().cloned())
-        .collect()
-}
-
-fn settle(store: &TaskStore, lost: Vec<ExecutionRef>) -> Result<(), ReconcileBlocked> {
-    let at = chrono::Utc::now();
-    for exec in lost {
-        let event = TaskEvent::Reconciled {
-            exec: exec.clone(),
-            at,
-        };
-        match smol::block_on(store.propose(event)) {
-            Ok(_) => {}
-            Err(CommitError::Rejected(rejected)) => LogWriter::log(
-                ErrorReport::new("A task the last session left running could not be settled and was left as recorded")
-                    .severity(ErrorSeverity::Warning)
-                    .from_error(&rejected)
-                    .with_context("task", exec.task_id.to_string())
-                    .at(file!(), line!())
-                    .dedup("tasks.reconcile.rejected")
-                    .build(),
-            ),
-            Err(e) => return Err(ReconcileBlocked::Io(std::io::Error::other(e))),
-        }
-    }
-    Ok(())
-}
-
 /// Replace the projection with a committed state no older than it, then let
 /// every window know.
 fn apply_projection(seq: u64, state: TasksBook, cx: &mut App) {
@@ -694,14 +569,9 @@ fn apply_projection(seq: u64, state: TasksBook, cx: &mut App) {
     if !newer {
         return;
     }
-    cx.update_global::<RunsHost, _>(|host, _| {
-        for record in state.records() {
-            for ended in &record.ended_executions {
-                if let Some(snapshot) = super::result::task_snapshot(record, &ended.exec) {
-                    host.watch.retain(snapshot);
-                }
-            }
-        }
+    cx.update_global::<RunsHost, _>(|host, cx| {
+        let previous = cx.global::<GlobalTasks>().book();
+        host.watch.sync_task_history(Some(previous), &state);
     });
     // `update_global` wakes each Workspace's `observe_global`, which
     // notifies that workspace alone.
@@ -709,45 +579,4 @@ fn apply_projection(seq: u64, state: TasksBook, cx: &mut App) {
         projection.seq = seq;
         projection.book = state;
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::runs::seed::{self, SeedEnd, SeedRun};
-    use daruda_store::project::ProjectUuid;
-
-    /// A run the log refuses to settle is skipped, not a reason to stop: the
-    /// runs after it still need settling, and the refusal changed nothing.
-    #[test]
-    fn a_refused_settle_is_skipped_and_the_rest_are_still_settled() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = TaskStore::in_directory(dir.path(), None, "test", no_hook()).unwrap();
-        let mut lost = Vec::new();
-        for name in ["refused", "lost"] {
-            let spec = seed::spec(ProjectUuid::new(), name);
-            let id = spec.id.clone();
-            let mut events = seed::created(spec);
-            events.extend(seed::run(&id, &SeedRun::chat("/lane"), SeedEnd::Preparing));
-            for event in events {
-                smol::block_on(store.propose(event)).unwrap();
-            }
-            lost.push(id);
-        }
-        let (_, book) = store.current().unwrap();
-        let execs = lost_runs(&book);
-        assert_eq!(execs.len(), 2);
-        // Settling the first run now makes the pass's own attempt a refusal.
-        settle(&store, vec![execs[0].clone()]).unwrap();
-
-        settle(&store, execs).unwrap();
-
-        let (_, book) = store.current().unwrap();
-        for id in &lost {
-            assert!(matches!(
-                book.get(id).unwrap().lifecycle,
-                Lifecycle::Undelivered { .. }
-            ));
-        }
-    }
 }

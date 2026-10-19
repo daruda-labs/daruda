@@ -235,3 +235,41 @@ fn wait_is_advertised_with_required_timeout() {
         serde_json::json!(["timeout"])
     );
 }
+
+#[test]
+fn wait_and_status_descriptions_name_the_wire_values() {
+    let description = |name: &str| {
+        table_for_test()
+            .iter()
+            .find(|t| t.name == name)
+            .expect("advertised")
+            .description
+    };
+    let wait = description("daruda_run_wait");
+    for outcome in [
+        daruda_control_types::runs::WaitOutcome::Settled,
+        daruda_control_types::runs::WaitOutcome::TimedOut,
+        daruda_control_types::runs::WaitOutcome::Nothing,
+    ] {
+        let wire = serde_json::to_value(outcome).expect("serializes");
+        let wire = wire.as_str().expect("a string");
+        assert!(wait.contains(wire), "{wire} missing from: {wait}");
+    }
+    for wire in [
+        "waiter_busy",
+        "bad_argument",
+        "requested_secs",
+        "actual_secs",
+        "clamped",
+    ] {
+        assert!(wait.contains(wire), "{wire} missing from: {wait}");
+    }
+    for stale in ["WaiterBusy", "TimedOut", "Nothing"] {
+        assert!(!wait.contains(stale), "{stale} is not a wire value: {wait}");
+        let status = description("daruda_run_status");
+        assert!(
+            !status.contains(stale),
+            "{stale} is not a wire value: {status}"
+        );
+    }
+}

@@ -91,7 +91,9 @@ match its title there and pass its `task` rather than guessing one.
 gives you what that chat said *before* — use daruda_chat_ask when you want the \
 reply to your own prompt, and check daruda_chat_list for an `activity` of idle \
 before reading one any other way.
-- daruda_run_wait TimedOut and Nothing are normal results. After repeated timeouts use daruda_run_status. Task completed means normal session ending, not work success.
+- A daruda_run_wait outcome of timed_out or nothing is a normal result. \
+After repeated timeouts use daruda_run_status. A completed Task means its \
+session ended normally, not that its work succeeded.
 - Answer in a sentence or two, as plain text. When a tool fails, say what it \
 reported rather than guessing why.";
 
@@ -138,6 +140,17 @@ mod tests {
                 "it went looking for where to implement what a tool already does: {text}"
             );
         }
+    }
+
+    /// The model matches the outcome it reads against the words it was told.
+    #[test]
+    fn wait_outcomes_are_named_as_they_arrive_on_the_wire() {
+        let text = briefing("daruda-x");
+        assert!(
+            text.contains("timed_out") && text.contains("nothing"),
+            "{text}"
+        );
+        assert!(!text.contains("TimedOut"), "{text}");
     }
 
     /// A file outlives the run that wrote it, so it must not carry that run's

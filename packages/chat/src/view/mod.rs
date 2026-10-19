@@ -624,7 +624,8 @@ mod fold_ops;
 mod prompt_types;
 use prompt_types::PhoneTurnAction;
 pub use prompt_types::{
-    EmptySubmitOutcome, EscapeOutcome, PromptDispatch, PromptId, PromptOrigin, QueuedPrompt,
+    EmptySubmitOutcome, EscapeOutcome, InternalDispatch, PromptDispatch, PromptId, PromptOrigin,
+    QueuedPrompt,
 };
 mod session_access;
 pub use pane_choices::ChatPaneChoices;

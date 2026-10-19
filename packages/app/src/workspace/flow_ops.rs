@@ -44,6 +44,17 @@ struct FlowDispatch<'a> {
     selection: &'a FlowSelection,
 }
 
+/// Why a submitted run did not start. Typed, so each caller answers in its
+/// own terms: the desktop with a toast or its stop offer, a control caller
+/// with an error it can read.
+#[derive(Debug)]
+pub(in crate::workspace) enum FlowStartRefused {
+    /// The request could not be built.
+    Submit(FlowSubmitError),
+    /// This process already holds a run in the worktree.
+    AlreadyRunning,
+}
+
 impl Workspace {
     // ---- Picker ----
 
@@ -264,11 +275,10 @@ impl Workspace {
     /// The guard still runs: a surface that names the flow does not thereby
     /// know whether the lane is free, and skipping it here would be a second
     /// answer to "is a run already going" for the lock to disagree with. The
-    /// return value is for a caller that cannot see the toast — the external
-    /// control surface answers a phone, which would otherwise be told a run
-    /// started that the lock had just refused.
-    #[must_use = "a refused run must be answered, not dropped — the caller may \
-                  be a surface with no toast to show it on"]
+    /// control surface does not come through here: it needs the typed
+    /// refusal, which `submit_flow_run` returns without showing anything.
+    #[must_use = "a refused run has already been shown on screen; bind it to \
+                  say the caller relies on that"]
     pub(in crate::workspace) fn run_flow_at(
         &mut self,
         lane: daruda_store::project::LaneRef,
@@ -350,7 +360,7 @@ impl Workspace {
         match purpose {
             FlowPurpose::Validate => self.validate_flow(lane, path, profile, window, cx),
             FlowPurpose::Run => {
-                self.submit_flow_run(
+                let started = self.submit_flow_run(
                     lane,
                     path,
                     profile,
@@ -358,6 +368,9 @@ impl Workspace {
                     daruda_flow::request::StartedBy::Desktop,
                     cx,
                 );
+                if let Err(refused) = started {
+                    self.answer_flow_start_refusal(lane, refused, cx);
+                }
             }
             // The picker's worktree is the one the graph then runs in.
             FlowPurpose::Graph => self.open_flow_graph(lane, path, window, cx),
@@ -404,6 +417,8 @@ impl Workspace {
 
     // ---- Stage 2: the run ----
 
+    /// Start `path` in `lane` for `started_by`, returning the run's id.
+    /// Says nothing on a refusal: the caller answers it in its own terms.
     pub(in crate::workspace) fn submit_flow_run(
         &mut self,
         lane: daruda_store::project::LaneRef,
@@ -412,47 +427,58 @@ impl Workspace {
         selection: &FlowSelection,
         started_by: daruda_flow::request::StartedBy,
         cx: &mut Context<Self>,
-    ) -> Option<String> {
-        match self.build_flow_request(lane, path, profile, selection, cx) {
-            Ok(mut submission) => {
-                submission.request.started_by = Some(started_by);
-                self.start_flow_thread(lane, submission, cx)
-            }
-            Err(e) => {
-                self.report_flow_refusal(e, cx);
-                None
-            }
+    ) -> Result<String, FlowStartRefused> {
+        let mut submission = self
+            .build_flow_request(lane, path, profile, selection, cx)
+            .map_err(FlowStartRefused::Submit)?;
+        submission.request.started_by = Some(started_by);
+        Self::start_flow_thread(submission, started_by, cx)
+    }
+
+    /// The desktop's answer to a start it asked for. Another window can have
+    /// started a run since the guard passed; the guard's answer then is to
+    /// offer stopping the run that is there.
+    fn answer_flow_start_refusal(
+        &mut self,
+        lane: daruda_store::project::LaneRef,
+        refused: FlowStartRefused,
+        cx: &mut Context<Self>,
+    ) {
+        match refused {
+            FlowStartRefused::Submit(e) => self.report_flow_refusal(e, cx),
+            FlowStartRefused::AlreadyRunning => self.offer_to_stop_flow_in(lane, cx),
         }
     }
 
-    /// Continue the run in `run_dir` instead of starting a new one.
-    ///
-    /// The same funnel a fresh submission goes through, on purpose: a
-    /// resumed run is watched, stopped and listed exactly like any other,
-    /// and a second launch path would be a second set of those to keep
-    /// working.
+    /// Continue the run in `run_dir` through the funnel a fresh submission
+    /// takes, so a resumed run is watched, stopped and listed like any other.
+    /// The desktop resumes it, so the desktop is owed its answer; the run's
+    /// log keeps who first started it.
     pub(in crate::workspace) fn resume_flow_run(
         &mut self,
         lane_ref: daruda_store::project::LaneRef,
         run_dir: &Path,
         cx: &mut Context<Self>,
     ) {
-        match self.build_resume_request(lane_ref, run_dir, cx) {
-            Ok(submission) => {
-                self.start_flow_thread(lane_ref, submission, cx);
-            }
-            Err(e) => self.report_flow_refusal(e, cx),
+        let started = self
+            .build_resume_request(lane_ref, run_dir, cx)
+            .map_err(FlowStartRefused::Submit)
+            .and_then(|submission| {
+                Self::start_flow_thread(submission, daruda_flow::request::StartedBy::Desktop, cx)
+            });
+        if let Err(refused) = started {
+            self.answer_flow_start_refusal(lane_ref, refused, cx);
         }
     }
 
     /// Hand the run to the process. Its thread, stop switch and pump live
     /// there, so this window closing does not take the run with it.
+    /// `submitted_by` is who this episode answers to.
     fn start_flow_thread(
-        &mut self,
-        lane: daruda_store::project::LaneRef,
         submission: FlowSubmission,
+        submitted_by: daruda_flow::request::StartedBy,
         cx: &mut Context<Self>,
-    ) -> Option<String> {
+    ) -> Result<String, FlowStartRefused> {
         let FlowSubmission {
             tree,
             request,
@@ -468,27 +494,20 @@ impl Workspace {
                 runners_for(request, node_install_dir, overage)
             })
         };
-        let run_id = request.run_dir.file_name()?.to_string_lossy().into_owned();
-        let started = crate::runs::RunsHost::start_flow(
+        crate::runs::RunsHost::start_flow(
             crate::runs::FlowStart {
                 tree,
                 request,
                 source,
                 runners,
                 overage,
+                submitted_by,
                 events,
                 asks,
             },
             cx,
-        );
-        // The guard ran when the picker opened, and another window can have
-        // started a run here since. Its answer then is the guard's: offer to
-        // stop the run that is there.
-        if let Err(crate::runs::AlreadyRunning) = started {
-            self.offer_to_stop_flow_in(lane, cx);
-            return None;
-        }
-        Some(run_id)
+        )
+        .map_err(|crate::runs::AlreadyRunning| FlowStartRefused::AlreadyRunning)
     }
 
     /// Stop the run a named lane holds. The status bar lists every run in
@@ -531,54 +550,7 @@ impl Workspace {
     }
 
     fn report_flow_refusal(&mut self, error: FlowSubmitError, cx: &mut Context<Self>) {
-        let (message, detail) = match error {
-            FlowSubmitError::NoLane => (s::flow::no_lane(), String::new()),
-            FlowSubmitError::LaneUnresolvable { path } => (
-                s::flow::lane_unresolvable(path.display().to_string()),
-                String::new(),
-            ),
-            FlowSubmitError::RemoteLane { agent } => (s::flow::remote_lane(&agent), String::new()),
-            FlowSubmitError::LockHeld { pid, lock_dir } => (
-                s::flow::lock_held(pid),
-                lock_dir.map_or_else(String::new, |dir| {
-                    s::flow::lock_held_detail(dir.join(".lock").display().to_string())
-                }),
-            ),
-            // The reason carries its own already-localized wording — the same
-            // one an agent chat pane shows for the identical refusal.
-            FlowSubmitError::AgentLaunchRefused { agent, reason } => (
-                s::flow::agent_launch_refused(&agent),
-                match reason {
-                    ConnectCommandError::NoRemotePath => s::agent_chat::no_remote_cwd(),
-                    ConnectCommandError::JsonStdioRemote => {
-                        s::agent_chat::json_stdio_remote_unsupported()
-                    }
-                    ConnectCommandError::JsonStdioEnv => {
-                        s::agent_chat::json_stdio_env_unsupported()
-                    }
-                },
-            ),
-            FlowSubmitError::UnusableSessionHost { agent, reason } => (
-                s::flow::session_host_unusable(&agent),
-                daruda_settings::labels::host_error(reason),
-            ),
-            FlowSubmitError::Read { path, message } => (
-                s::flow::read_failed_title(),
-                format!("{}: {message}", path.display()),
-            ),
-            FlowSubmitError::Load(daruda_flow::FlowError::Parse(detail)) => {
-                (s::flow::parse_failed_title(), detail)
-            }
-            FlowSubmitError::Load(daruda_flow::FlowError::Validate(issues))
-            | FlowSubmitError::Invalid(issues) => (
-                s::flow::invalid_title("", issues.len()),
-                issue_report(&issues),
-            ),
-            // The engine's own words: it is the one that decides what can be
-            // continued, and a second wording here would be a second answer
-            // to the same question.
-            FlowSubmitError::Resume(e) => (s::flow::resume_refused(), e.to_string()),
-        };
+        let (message, detail) = flow_refusal_text(error);
         self.report_error(
             ErrorReport::new(message)
                 .severity(ErrorSeverity::Warning)
@@ -588,6 +560,57 @@ impl Workspace {
                 .build(),
             cx,
         );
+    }
+}
+
+/// A refusal's headline and detail, worded once for every surface that
+/// reports one.
+pub(in crate::workspace) fn flow_refusal_text(error: FlowSubmitError) -> (String, String) {
+    match error {
+        FlowSubmitError::NoLane => (s::flow::no_lane(), String::new()),
+        FlowSubmitError::LaneUnresolvable { path } => (
+            s::flow::lane_unresolvable(path.display().to_string()),
+            String::new(),
+        ),
+        FlowSubmitError::RemoteLane { agent } => (s::flow::remote_lane(&agent), String::new()),
+        FlowSubmitError::LockHeld { pid, lock_dir } => (
+            s::flow::lock_held(pid),
+            lock_dir.map_or_else(String::new, |dir| {
+                s::flow::lock_held_detail(dir.join(".lock").display().to_string())
+            }),
+        ),
+        // The reason carries its own already-localized wording — the same
+        // one an agent chat pane shows for the identical refusal.
+        FlowSubmitError::AgentLaunchRefused { agent, reason } => (
+            s::flow::agent_launch_refused(&agent),
+            match reason {
+                ConnectCommandError::NoRemotePath => s::agent_chat::no_remote_cwd(),
+                ConnectCommandError::JsonStdioRemote => {
+                    s::agent_chat::json_stdio_remote_unsupported()
+                }
+                ConnectCommandError::JsonStdioEnv => s::agent_chat::json_stdio_env_unsupported(),
+            },
+        ),
+        FlowSubmitError::UnusableSessionHost { agent, reason } => (
+            s::flow::session_host_unusable(&agent),
+            daruda_settings::labels::host_error(reason),
+        ),
+        FlowSubmitError::Read { path, message } => (
+            s::flow::read_failed_title(),
+            format!("{}: {message}", path.display()),
+        ),
+        FlowSubmitError::Load(daruda_flow::FlowError::Parse(detail)) => {
+            (s::flow::parse_failed_title(), detail)
+        }
+        FlowSubmitError::Load(daruda_flow::FlowError::Validate(issues))
+        | FlowSubmitError::Invalid(issues) => (
+            s::flow::invalid_title("", issues.len()),
+            issue_report(&issues),
+        ),
+        // The engine's own words: it is the one that decides what can be
+        // continued, and a second wording here would be a second answer
+        // to the same question.
+        FlowSubmitError::Resume(e) => (s::flow::resume_refused(), e.to_string()),
     }
 }
 

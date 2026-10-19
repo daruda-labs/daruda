@@ -323,7 +323,17 @@ static TABLE: &[Tool] = &[
     Tool {
         id: ToolId::RunWait,
         name: "daruda_run_wait",
-        description: "Wait for the first ended or blocked flow/task execution. Omit handles for successful orchestrator starts and unfinished orchestrator Tasks carried into this process. Only one omitted-handles wait may be active (WaiterBusy). timeout is required in seconds: 0 polls, values above 110 are clamped and displayed. TimedOut and Nothing are normal results; after repeated timeouts call daruda_run_status. Completed Task means its session ended normally, not that its work succeeded. Reported results remain queryable with daruda_run_status.",
+        description: "Wait for the first ended or blocked flow/task execution. Omit handles \
+                      to wait over successful orchestrator starts and unfinished orchestrator \
+                      Tasks carried into this process; an empty handles array is refused as \
+                      bad_argument. Only one omitted-handles wait may be active; a second is a \
+                      tool error with code waiter_busy. timeout is required in seconds: 0 polls; \
+                      above 110 waits 110, and the result's timeout object reports \
+                      requested_secs, actual_secs and clamped. outcome is settled, timed_out or \
+                      nothing; timed_out and nothing are normal results, and after repeated \
+                      timeouts call daruda_run_status. A completed Task means its session ended \
+                      normally, not that its work succeeded. Reported results remain queryable \
+                      with daruda_run_status.",
         gate: Gate::Open,
         properties: run_wait_properties,
         required: &["timeout"],
@@ -536,6 +546,6 @@ fn run_status_properties() -> serde_json::Value {
 
 fn run_wait_properties() -> serde_json::Value {
     let mut properties = run_status_properties();
-    properties["timeout"] = serde_json::json!({"type":"integer", "minimum":0, "description":"Required seconds to wait; 0 polls, above 110 clamps to 110."});
+    properties["timeout"] = serde_json::json!({"type":"integer", "minimum":0, "description":"Required seconds to wait; 0 polls, above 110 waits 110 (timeout.clamped)."});
     properties
 }

@@ -174,26 +174,29 @@ async fn replacement_withdraws_pending_wait_and_failed_write_makes_it_available(
 #[gpui::test]
 async fn old_disconnect_retries_a_notice_after_the_new_gate_flushed(cx: &mut TestAppContext) {
     use crate::window_registry::WindowRegistry;
-    let pane = crate::test_support::register_test_orchestrator(cx);
+    crate::test_support::register_test_orchestrator(cx);
+    let host = cx.update(|cx| {
+        WindowRegistry::orchestrator(cx)
+            .unwrap()
+            .1
+            .upgrade()
+            .unwrap()
+    });
+    // A live idle session, so a notice is sent the moment it is eligible.
+    let _probe = host.update(cx, |ws, cx| ws.connect_orchestrator_chat_for_test(cx));
     cx.update(crate::workspace::Workspace::install_task_effects);
     cx.update(completed);
     let mut session = ConnectionSession::default();
     handshake(1, &mut session, cx);
     let rx = deliver(request(1, 0), 1, &mut session, cx);
     let old = rx.recv().await.unwrap();
+    // Notices the orchestrator received, as prompts sent to its session.
     let notices = |cx: &mut TestAppContext| {
-        cx.update(|cx| {
-            let host = WindowRegistry::orchestrator(cx)
-                .unwrap()
-                .1
-                .upgrade()
-                .unwrap();
-            host.read(cx).agent_chat_queue_depth(pane.pane, cx).unwrap()
-        })
+        host.read_with(cx, |ws, cx| ws.orchestrator_sent_prompts_for_test(cx))
     };
     cx.update(|cx| {
         crate::orchestrator::seed_control_surface_for_test(cx);
-        assert!(crate::orchestrator::mcp_server(cx).is_some());
+        assert!(crate::orchestrator::session_tools(cx).is_some());
     });
     cx.run_until_parked();
     assert_eq!(

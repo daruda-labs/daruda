@@ -1,5 +1,5 @@
 //! Reservation and acknowledgement of process-local delivery episodes.
-use super::state::{RunEvent, RunWatch};
+use super::state::{EndState, Membership, RunEvent, RunWatch};
 use crate::runs::result::{RunKey, RunSnapshot, RunState};
 use std::collections::HashSet;
 
@@ -21,9 +21,21 @@ pub(super) enum Delivery {
     InFlight(WaitId),
     Reported,
 }
+/// Which keys a waiter answers for.
+pub(super) enum WaiterScope {
+    /// Every key in the orchestrator's scope, as it grows.
+    Omitted,
+    Explicit(HashSet<RunKey>),
+}
 pub(super) struct Waiter {
-    keys: Option<HashSet<RunKey>>,
+    scope: WaiterScope,
     pub(super) wake: smol::channel::Sender<()>,
+}
+impl Waiter {
+    /// Whether the waiter named `key` itself, as opposed to covering it by scope.
+    pub(super) fn names(&self, key: &RunKey) -> bool {
+        matches!(&self.scope, WaiterScope::Explicit(keys) if keys.contains(key))
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum WaitOutcome {
@@ -45,7 +57,12 @@ impl RunWatch {
         &mut self,
         keys: Option<Vec<RunKey>>,
     ) -> Result<(WaitId, smol::channel::Receiver<()>), WaiterBusy> {
-        if keys.is_none() && self.waiters.values().any(|w| w.keys.is_none()) {
+        if keys.is_none()
+            && self
+                .waiters
+                .values()
+                .any(|w| matches!(w.scope, WaiterScope::Omitted))
+        {
             return Err(WaiterBusy);
         }
         if let Some(keys) = &keys {
@@ -59,7 +76,9 @@ impl RunWatch {
         self.waiters.insert(
             id,
             Waiter {
-                keys: keys.map(|keys| keys.into_iter().collect()),
+                scope: keys.map_or(WaiterScope::Omitted, |keys| {
+                    WaiterScope::Explicit(keys.into_iter().collect())
+                }),
                 wake,
             },
         );
@@ -69,10 +88,9 @@ impl RunWatch {
         self.waiters.contains_key(&id)
     }
     pub(crate) fn covered(&self, key: &RunKey) -> bool {
-        self.waiters.values().any(|w| {
-            w.keys
-                .as_ref()
-                .map_or_else(|| self.scope.contains(key), |keys| keys.contains(key))
+        self.waiters.values().any(|w| match &w.scope {
+            WaiterScope::Omitted => self.membership(key) == Membership::Scoped,
+            WaiterScope::Explicit(keys) => keys.contains(key),
         })
     }
     pub(crate) fn unreported(&self) -> Vec<RunEvent> {
@@ -84,9 +102,10 @@ impl RunWatch {
     }
     /// The waiter remains live while its exact event reservations await the socket receipt.
     pub(crate) fn finish_wait(&mut self, id: WaitId, delivered: bool) {
-        if self.waiters.remove(&id).is_none() {
+        let Some(waiter) = self.waiters.remove(&id) else {
             return;
-        }
+        };
+        let mut reported = Vec::new();
         for event in &mut self.events {
             if event.delivery == Delivery::InFlight(id) {
                 event.delivery = if delivered {
@@ -94,31 +113,34 @@ impl RunWatch {
                 } else {
                     Delivery::Unreported
                 };
-                if delivered
-                    && matches!(event.snapshot.state, RunState::Ended { .. })
-                    && event.sequence
-                        >= self
-                            .current_floor
-                            .get(&event.snapshot.key)
-                            .copied()
-                            .unwrap_or_default()
-                {
-                    self.terminal_reported.insert(event.snapshot.key.clone());
+                if delivered && matches!(event.snapshot.state, RunState::Ended { .. }) {
+                    reported.push((event.snapshot.key.clone(), event.sequence));
                 }
             }
         }
+        for (key, sequence) in reported {
+            if sequence >= self.floor(&key) {
+                self.entry(&key).end = EndState::Reported;
+            }
+        }
         // A closed block or a terminal supersedes only an unreported blocked episode.
+        let entries = &self.entries;
         self.events.retain(|event| {
             event.delivery != Delivery::Unreported
                 || !matches!(event.snapshot.state, RunState::Running { .. })
-                || self.blocked_sequence.get(&event.snapshot.key) == Some(&event.sequence)
+                || entries
+                    .get(&event.snapshot.key)
+                    .and_then(|entry| entry.blocked_sequence())
+                    == Some(event.sequence)
         });
-        self.prune();
-        if let Some(sender) = &self.event_sender {
-            for event in self.unreported() {
-                // SILENT-OK: a replaced app/effects receiver no longer needs availability notices.
-                let _ = sender.try_send(event);
+        if let WaiterScope::Explicit(keys) = waiter.scope {
+            for key in keys {
+                self.release_enrollment(&key);
             }
+        }
+        self.prune();
+        for event in self.unreported() {
+            self.announce(event);
         }
         self.wake();
     }
@@ -140,15 +162,18 @@ impl RunWatch {
             }
         });
         for key in keys {
-            if !self.events.iter().any(|e| e.snapshot.key == key) {
-                self.snapshots.remove(&key);
+            if !self.events.iter().any(|e| e.snapshot.key == key)
+                && let Some(entry) = self.entries.get_mut(&key)
+            {
+                entry.snapshot = None;
             }
         }
         // A disk/history query may rehydrate a previously evicted reported handle.
         let mut reported_snapshots: Vec<_> = self
-            .snapshots
-            .keys()
-            .filter_map(|key| {
+            .entries
+            .iter()
+            .filter(|(_, entry)| entry.snapshot.is_some())
+            .filter_map(|(key, entry)| {
                 let last = self
                     .events
                     .iter()
@@ -156,35 +181,36 @@ impl RunWatch {
                 let protected = self.events.iter().any(|event| {
                     &event.snapshot.key == key && event.delivery != Delivery::Reported
                 });
-                (!protected && (self.terminal_reported.contains(key) || last.is_some()))
+                (!protected && (entry.end == EndState::Reported || last.is_some()))
                     .then(|| (key.clone(), last))
             })
             .collect();
         reported_snapshots.sort_by_key(|(_, last)| *last);
         let excess = reported_snapshots.len().saturating_sub(REPORTED_MAX);
         for (key, _) in reported_snapshots.into_iter().take(excess) {
-            self.snapshots.remove(&key);
+            if let Some(entry) = self.entries.get_mut(&key) {
+                entry.snapshot = None;
+            }
         }
     }
 
     pub(crate) fn poll_wait(&mut self, id: WaitId, timed_out: bool) -> Option<WaitAnswer> {
         let waiter = self.waiters.get(&id)?;
-        let omitted = waiter.keys.is_none();
-        let keys = waiter.keys.as_ref().unwrap_or(&self.scope);
+        let omitted = matches!(waiter.scope, WaiterScope::Omitted);
+        let keys: Vec<RunKey> = match &waiter.scope {
+            WaiterScope::Omitted => self.scope(),
+            WaiterScope::Explicit(keys) => keys.iter().cloned().collect(),
+        };
+        let wanted: HashSet<&RunKey> = keys.iter().collect();
         let mut eligible: Vec<_> = self
             .events
             .iter()
             .enumerate()
             .filter(|(_, e)| {
-                keys.contains(&e.snapshot.key)
+                wanted.contains(&e.snapshot.key)
                     && e.delivery == Delivery::Unreported
                     && (omitted
-                        || (e.sequence
-                            >= self
-                                .current_floor
-                                .get(&e.snapshot.key)
-                                .copied()
-                                .unwrap_or_default())
+                        || (e.sequence >= self.floor(&e.snapshot.key))
                             && self
                                 .events
                                 .iter()
@@ -211,21 +237,31 @@ impl RunWatch {
             .map(|(i, _)| self.events[*i].snapshot.key.clone())
             .collect();
         let mut in_flight = false;
-        for key in keys {
-            let last = self.events.iter().rev().find(|e| {
-                &e.snapshot.key == key
-                    && e.sequence >= self.current_floor.get(key).copied().unwrap_or_default()
-            });
+        for key in &keys {
+            let floor = self.floor(key);
+            let last = self
+                .events
+                .iter()
+                .rev()
+                .find(|e| &e.snapshot.key == key && e.sequence >= floor);
             in_flight |= last.is_some_and(|e| matches!(e.delivery, Delivery::InFlight(_)));
+            let entry = self.entries.get(key);
+            let end = entry.map(|entry| entry.end).unwrap_or_default();
+            let snapshot = entry.and_then(|entry| entry.snapshot.as_ref());
+            if end == EndState::Held {
+                // The owner is still enriching this end; it is announced on release.
+                in_flight = true;
+                continue;
+            }
             if !omitted
-                && self.terminal_reported.contains(key)
-                && let Some(snapshot) = self.snapshots.get(key)
+                && end == EndState::Reported
+                && let Some(snapshot) = snapshot
                 && matches!(snapshot.state, RunState::Ended { .. })
             {
                 answer.already_reported.push(snapshot.clone());
                 continue;
             }
-            if let Some(snapshot) = self.snapshots.get(key) {
+            if let Some(snapshot) = snapshot {
                 match snapshot.state {
                     RunState::Running { .. } if !selected.contains(key) => {
                         answer.pending.push(snapshot.clone())
@@ -237,7 +273,7 @@ impl RunWatch {
                     }
                     _ => {}
                 }
-            } else if !self.terminal_reported.contains(key) {
+            } else if end != EndState::Reported {
                 // A registered start may be observed before its first projection.
                 in_flight = true;
             }
@@ -268,4 +304,4 @@ impl RunWatch {
     }
 }
 #[cfg(test)]
-mod tests {}
+mod tests;

@@ -19,8 +19,20 @@ impl std::fmt::Display for PromptId {
 pub enum PromptOrigin {
     InApp,
     Telegram,
-    /// Host-generated literal prompt; preserves composer edits and queue order.
+    /// Host-generated literal prompt; never queued, never an edit commit.
     Internal,
+}
+
+/// Outcome of a host notice, which goes on the wire now or not at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InternalDispatch {
+    Sent,
+    /// Not connected, a turn or a Stop's cancel acknowledgment is pending, or
+    /// user prompts are waiting. Nothing changed; the host retries later.
+    NotNow,
+    ReadOnly,
+    /// The connected session stopped accepting prompt commands.
+    Unavailable,
 }
 
 /// Whether a send put the prompt on the wire immediately or only queued it

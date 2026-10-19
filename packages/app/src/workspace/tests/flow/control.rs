@@ -160,14 +160,13 @@ async fn a_name_held_by_two_scopes_resolves_to_the_narrower_one(cx: &mut TestApp
 #[gpui::test]
 async fn an_unknown_flow_name_is_refused(cx: &mut TestAppContext) {
     let (_lane, ws, _path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
-    cx.update_window(wh.into(), |_, window, cx| {
+    cx.update_window(wh.into(), |_, _, cx| {
         ws.update(cx, |ws, cx| {
             assert_eq!(
                 ws.control_flow_run(
                     ws.active,
                     "nope",
                     daruda_flow::request::StartedBy::Phone,
-                    window,
                     cx
                 ),
                 Err(ControlError::FlowNotFound {
@@ -183,7 +182,7 @@ async fn an_unknown_flow_name_is_refused(cx: &mut TestAppContext) {
 #[gpui::test]
 async fn a_name_resolves_with_or_without_its_extension(cx: &mut TestAppContext) {
     let (_lane, ws, _path, wh) = workspace_with_a_flow(cx, ASKS_A_PERSON);
-    cx.update_window(wh.into(), |_, window, cx| {
+    cx.update_window(wh.into(), |_, _, cx| {
         ws.update(cx, |ws, cx| {
             // Both spellings reach the same file, and so hit the same refusal
             // — which is what proves resolution happened at all.
@@ -193,7 +192,6 @@ async fn a_name_resolves_with_or_without_its_extension(cx: &mut TestAppContext) 
                         ws.active,
                         name,
                         daruda_flow::request::StartedBy::Phone,
-                        window,
                         cx
                     ),
                     Err(ControlError::FlowNeedsInteraction {
@@ -210,14 +208,13 @@ async fn a_name_resolves_with_or_without_its_extension(cx: &mut TestAppContext) 
 #[gpui::test]
 async fn a_flow_that_asks_a_person_is_refused_before_it_can_hang(cx: &mut TestAppContext) {
     let (_lane, ws, _path, wh) = workspace_with_a_flow(cx, ASKS_A_PERSON);
-    cx.update_window(wh.into(), |_, window, cx| {
+    cx.update_window(wh.into(), |_, _, cx| {
         ws.update(cx, |ws, cx| {
             assert_eq!(
                 ws.control_flow_run(
                     ws.active,
                     "ship",
                     daruda_flow::request::StartedBy::Phone,
-                    window,
                     cx
                 ),
                 Err(ControlError::FlowNeedsInteraction {
@@ -234,14 +231,13 @@ async fn a_flow_that_asks_a_person_is_refused_before_it_can_hang(cx: &mut TestAp
 #[gpui::test]
 async fn a_flow_declaring_profiles_is_refused_for_the_same_reason(cx: &mut TestAppContext) {
     let (_lane, ws, _path, wh) = workspace_with_a_flow(cx, WITH_PROFILES);
-    cx.update_window(wh.into(), |_, window, cx| {
+    cx.update_window(wh.into(), |_, _, cx| {
         ws.update(cx, |ws, cx| {
             assert_eq!(
                 ws.control_flow_run(
                     ws.active,
                     "ship",
                     daruda_flow::request::StartedBy::Phone,
-                    window,
                     cx
                 ),
                 Err(ControlError::FlowNeedsInteraction {
@@ -258,14 +254,13 @@ async fn a_flow_declaring_profiles_is_refused_for_the_same_reason(cx: &mut TestA
 #[gpui::test]
 async fn a_flow_that_will_not_run_is_answered_not_reported_as_started(cx: &mut TestAppContext) {
     let (_lane, ws, _path, wh) = workspace_with_a_flow(cx, DANGLING_DEP);
-    cx.update_window(wh.into(), |_, window, cx| {
+    cx.update_window(wh.into(), |_, _, cx| {
         ws.update(cx, |ws, cx| {
             assert_eq!(
                 ws.control_flow_run(
                     ws.active,
                     "ship",
                     daruda_flow::request::StartedBy::Phone,
-                    window,
                     cx
                 ),
                 Err(ControlError::FlowRefused {
@@ -306,14 +301,13 @@ async fn a_runnable_flow_starts_and_names_the_file_that_ran(cx: &mut TestAppCont
     // the sanctioned opt-out, as in `outcome_reaches_the_phone`.
     cx.executor().allow_parking();
     let (_lane, ws, _path, wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
-    cx.update_window(wh.into(), |_, window, cx| {
+    cx.update_window(wh.into(), |_, _, cx| {
         ws.update(cx, |ws, cx| {
             let entry = ws
                 .control_flow_run(
                     ws.active,
                     "ship",
                     daruda_flow::request::StartedBy::Phone,
-                    window,
                     cx,
                 )
                 .expect("a command-only flow needs neither an agent nor a person");
@@ -337,7 +331,7 @@ async fn a_runnable_flow_starts_and_names_the_file_that_ran(cx: &mut TestAppCont
 #[gpui::test]
 async fn a_lane_already_running_a_flow_refuses_the_next(cx: &mut TestAppContext) {
     let (_lane, ws, _path, wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
-    cx.update_window(wh.into(), |_, window, cx| {
+    cx.update_window(wh.into(), |_, _, cx| {
         ws.update(cx, |ws, cx| {
             let lane_ref = ws.active_ref();
             ws.seed_flow_run_for_test(lane_ref, std::path::PathBuf::from("/tmp/seeded-run"), cx);
@@ -346,7 +340,6 @@ async fn a_lane_already_running_a_flow_refuses_the_next(cx: &mut TestAppContext)
                     ws.active,
                     "ship",
                     daruda_flow::request::StartedBy::Phone,
-                    window,
                     cx
                 ),
                 Err(ControlError::FlowLocked {
@@ -373,19 +366,13 @@ async fn a_flow_runs_in_the_named_worktree_not_the_active_one(cx: &mut TestAppCo
     let (_lane, ws, _path, wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
     let (_other_dir, other) = add_lane_with_a_flow(&ws, wh, cx, "deploy.yaml", COMMAND_ONLY);
 
-    cx.update_window(wh.into(), |_, window, cx| {
+    cx.update_window(wh.into(), |_, _, cx| {
         ws.update(cx, |ws, cx| {
             let active = ws.active;
             assert_ne!(other, active, "the fixture must give two worktrees");
             // The worktree on screen does not hold it...
             assert_eq!(
-                ws.control_flow_run(
-                    active,
-                    "deploy",
-                    daruda_flow::request::StartedBy::Phone,
-                    window,
-                    cx
-                ),
+                ws.control_flow_run(active, "deploy", daruda_flow::request::StartedBy::Phone, cx),
                 Err(ControlError::FlowNotFound {
                     name: "deploy".into()
                 }),
@@ -393,13 +380,7 @@ async fn a_flow_runs_in_the_named_worktree_not_the_active_one(cx: &mut TestAppCo
             );
             // ...and the one that does runs it, and says so.
             let entry = ws
-                .control_flow_run(
-                    other,
-                    "deploy",
-                    daruda_flow::request::StartedBy::Phone,
-                    window,
-                    cx,
-                )
+                .control_flow_run(other, "deploy", daruda_flow::request::StartedBy::Phone, cx)
                 .expect("the named worktree holds it");
             assert_eq!(entry.entry.name, "deploy.yaml");
             assert_eq!(entry.entry.lane.lane_ref(), other, "ran where it was told");
@@ -418,20 +399,14 @@ async fn a_flow_runs_in_the_named_worktree_not_the_active_one(cx: &mut TestAppCo
 #[gpui::test]
 async fn a_worktree_that_is_gone_is_not_reported_as_a_missing_flow(cx: &mut TestAppContext) {
     let (_lane, ws, _path, wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
-    cx.update_window(wh.into(), |_, window, cx| {
+    cx.update_window(wh.into(), |_, _, cx| {
         ws.update(cx, |ws, cx| {
             let gone = daruda_store::project::LaneRef {
                 project: ws.active.project,
                 lane: ws.active.lane + 9,
             };
             assert_eq!(
-                ws.control_flow_run(
-                    gone,
-                    "ship",
-                    daruda_flow::request::StartedBy::Phone,
-                    window,
-                    cx
-                ),
+                ws.control_flow_run(gone, "ship", daruda_flow::request::StartedBy::Phone, cx),
                 Err(ControlError::TargetGone)
             );
         });
@@ -447,17 +422,11 @@ async fn a_named_worktree_already_running_refuses_without_a_dialog(cx: &mut Test
     let (_lane, ws, _path, wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
     let (_other_dir, other) = add_lane_with_a_flow(&ws, wh, cx, "deploy.yaml", COMMAND_ONLY);
 
-    cx.update_window(wh.into(), |_, window, cx| {
+    cx.update_window(wh.into(), |_, _, cx| {
         ws.update(cx, |ws, cx| {
             ws.seed_flow_run_for_test(other, std::path::PathBuf::from("/tmp/seeded-elsewhere"), cx);
             assert_eq!(
-                ws.control_flow_run(
-                    other,
-                    "deploy",
-                    daruda_flow::request::StartedBy::Phone,
-                    window,
-                    cx
-                ),
+                ws.control_flow_run(other, "deploy", daruda_flow::request::StartedBy::Phone, cx),
                 Err(ControlError::FlowLocked {
                     name: "deploy.yaml".into()
                 })
@@ -846,9 +815,9 @@ async fn started_run_reports_its_outcome(
     cx.executor().allow_parking();
 
     let run_id = cx
-        .update_window(wh.into(), |_, window, cx| {
+        .update_window(wh.into(), |_, _, cx| {
             ws.update(cx, |ws, cx| {
-                ws.control_flow_run(ws.active, "ship", origin.flow_started_by(), window, cx)
+                ws.control_flow_run(ws.active, "ship", origin.flow_started_by(), cx)
                     .expect("dispatched")
                     .run_id
             })
@@ -922,13 +891,12 @@ async fn a_cancelled_phone_started_run_still_reports_back(cx: &mut TestAppContex
     // so the opt-out has to come before the run starts.
     cx.executor().allow_parking();
 
-    cx.update_window(wh.into(), |_, window, cx| {
+    cx.update_window(wh.into(), |_, _, cx| {
         ws.update(cx, |ws, cx| {
             ws.control_flow_run(
                 ws.active,
                 "ship",
                 daruda_flow::request::StartedBy::Phone,
-                window,
                 cx,
             )
             .expect("dispatched");
@@ -964,7 +932,7 @@ async fn a_phone_started_run_answers_with_no_window_open(cx: &mut TestAppContext
         let source = crate::runs::FlowSource::Resumed {
             run_dir: run_dir.clone(),
         };
-        crate::runs::RunsHost::seed_flow_run_started_by(
+        crate::runs::RunsHost::seed_flow_run_submitted_by(
             lane.path().to_path_buf(),
             crate::runs::RunView::new(run_dir.clone(), source, Vec::new()),
             daruda_flow::request::StartedBy::Phone,
@@ -1207,4 +1175,165 @@ async fn a_flow_start_response_names_the_execution_dispatched(cx: &mut TestAppCo
             .unwrap();
         assert_eq!(handle.to_string(), format!("flow:{id}"));
     });
+}
+
+/// A start that loses the race to a run this process already holds comes
+/// back typed to whoever submitted it. The desktop's "stop it?" offer is
+/// the desktop caller's answer, never raised for a control caller.
+#[gpui::test]
+async fn a_start_that_finds_a_run_held_is_refused_typed_without_a_dialog(cx: &mut TestAppContext) {
+    let (lane, ws, flow_path, _wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
+    ws.update(cx, |ws, cx| {
+        let lane_ref = ws.active_ref();
+        ws.seed_flow_run_for_test(lane_ref, lane.path().join("seeded"), cx);
+        let started = ws.submit_flow_run(
+            lane_ref,
+            &flow_path,
+            None,
+            &crate::workspace::flow_request::FlowSelection::default(),
+            daruda_flow::request::StartedBy::Phone,
+            cx,
+        );
+        assert!(
+            matches!(
+                started,
+                Err(crate::workspace::flow_ops::FlowStartRefused::AlreadyRunning)
+            ),
+            "{started:?}"
+        );
+        assert!(
+            !ws.overlays.flow_picker.is_open(),
+            "a submission answers its caller; it opens no dialog"
+        );
+        assert!(ws.error_history().is_empty(), "nor a toast");
+    });
+}
+
+/// A start refused for a reason outside the file reaches the control
+/// caller with that reason, instead of a toast only the desktop shows.
+#[gpui::test]
+async fn a_refused_start_tells_the_control_caller_why(cx: &mut TestAppContext) {
+    let (_lane, ws, _flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    ws.update(cx, |ws, cx| {
+        let target = ws.active;
+        ws.set_lane_session_host(
+            target,
+            daruda_store::project::LaneSessionHost::Ssh {
+                target: "vm -o ProxyCommand=touch /tmp/pwned".into(),
+                session_path: "/srv/app".into(),
+                registry_id: None,
+            },
+            cx,
+        );
+        let refused = ws.control_flow_run(
+            ws.active,
+            "ship",
+            daruda_flow::request::StartedBy::Phone,
+            cx,
+        );
+        match refused {
+            Err(ControlError::FlowNotStarted { name, detail }) => {
+                assert_eq!(name, "ship.yaml");
+                assert!(
+                    detail.contains(&crate::surface::strings::flow::session_host_unusable(
+                        "claude"
+                    )),
+                    "the reason is missing: {detail}"
+                );
+            }
+            other => panic!("not refused with its reason: {other:?}"),
+        }
+        assert!(
+            ws.error_history().is_empty(),
+            "the answer replaces the toast"
+        );
+        assert!(!ws.overlays.flow_picker.is_open());
+    });
+}
+
+/// The answer is owed to whoever submitted the episode. A run the phone
+/// started and the desktop resumed answers the desktop, which reads its
+/// own toast; the log still says the phone started it.
+#[gpui::test]
+async fn a_desktop_resume_of_a_phone_started_run_stays_off_the_phone(cx: &mut TestAppContext) {
+    let mut outbound =
+        cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
+    let (lane, ws, _path, _wh) = telegram_workspace_with_a_flow(cx, COMMAND_ONLY);
+    // A real run: its log thread wakes the app from outside the scheduler.
+    cx.executor().allow_parking();
+    let run_id = ws.update(cx, |ws, cx| {
+        ws.control_flow_run(
+            ws.active,
+            "ship",
+            daruda_flow::request::StartedBy::Phone,
+            cx,
+        )
+        .expect("dispatched")
+        .run_id
+    });
+    assert!(
+        outcome_reaches_the_phone(&mut outbound, cx).is_some(),
+        "the phone's own start answers the phone"
+    );
+    assert!(
+        wait_for_run(cx, |cx| !run_is_held(cx, lane.path())),
+        "the first run did not finish"
+    );
+
+    // Make it a run cut off right after it started, by a crash a minute ago.
+    let run_dir = flow_paths::runs_dir(lane.path()).join(&run_id);
+    let log = daruda_flow::run_log::log_file(&run_dir);
+    let text = std::fs::read_to_string(&log).expect("the run log");
+    let cut = text
+        .lines()
+        .position(|line| line.contains("\"run_started\""))
+        .expect("the run started");
+    let kept: String = text
+        .lines()
+        .take(cut + 1)
+        .map(|line| {
+            let mut record: serde_json::Value = serde_json::from_str(line).expect("a record");
+            let at_ms = record["at_ms"].as_u64().expect("a record's time");
+            record["at_ms"] = at_ms.saturating_sub(60_000).into();
+            format!("{record}\n")
+        })
+        .collect();
+    std::fs::write(&log, kept).expect("cut the log");
+    std::fs::remove_file(run_dir.join("DONE")).expect("the end's marker");
+    let lock_dir = ws.read_with(cx, |ws, _| {
+        flow_paths::lane_lock_dir(&ws.lock_root, lane.path()).expect("the lane resolves")
+    });
+    std::fs::create_dir_all(&lock_dir).expect("lock dir");
+    std::fs::write(
+        lock_dir.join(".lock"),
+        format!("pid: 0\nrun_id: {run_id}\nstarted_unix_secs: 1\n"),
+    )
+    .expect("lock");
+
+    let here = ws.read_with(cx, |ws, _| ws.active);
+    let before = ws.read_with(cx, |ws, _| ws.error_history().len());
+    ws.update(cx, |ws, cx| ws.resume_flow_run(here, &run_dir, cx));
+    let errors = ws.read_with(cx, |ws, _| {
+        ws.error_history()[before..]
+            .iter()
+            .map(|r| format!("{} {:?}", r.title, r.context))
+            .collect::<Vec<_>>()
+    });
+    assert!(errors.is_empty(), "the resume was refused: {errors:?}");
+    assert!(
+        wait_for_run(cx, |cx| {
+            run_dir.join("DONE").exists() && !run_is_held(cx, lane.path())
+        }),
+        "the resumed run did not finish"
+    );
+    cx.run_until_parked();
+    assert!(
+        outbound.next().now_or_never().flatten().is_none(),
+        "a desktop resume must not answer the phone"
+    );
+    assert_eq!(
+        daruda_flow::run_log::reader::read(&run_dir).started_by,
+        Some(daruda_flow::request::StartedBy::Phone),
+        "who started the run is kept"
+    );
 }

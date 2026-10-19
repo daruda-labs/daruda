@@ -477,12 +477,12 @@ pub enum ControlError {
     FlowRefused {
         name: String,
     },
-    /// The flow is valid and nothing refused it up front, but no run exists
-    /// afterwards — so something between the two said no. Deliberately does
-    /// not guess *what*: at this point the static check has passed, so naming
-    /// the file would send the caller to inspect something that is fine.
+    /// The flow is valid, but its start was refused for a reason outside
+    /// the file — the worktree, an agent's launch, its host. `detail` is the
+    /// reason the desktop would show, for a caller that sees no toast.
     FlowNotStarted {
         name: String,
+        detail: String,
     },
     /// The flow would open a desktop dialog the phone cannot answer — an
     /// agent node whose permission policy is `ask`, or a file declaring
@@ -583,7 +583,9 @@ impl std::fmt::Display for ControlError {
             Self::FlowNotFound { name } => write!(f, "no flow named {name}"),
             Self::FlowLocked { name } => write!(f, "flow already running: {name}"),
             Self::FlowRefused { name } => write!(f, "flow will not run as written: {name}"),
-            Self::FlowNotStarted { name } => write!(f, "flow did not start: {name}"),
+            Self::FlowNotStarted { name, detail } => {
+                write!(f, "flow did not start: {name}: {detail}")
+            }
             Self::FlowNeedsInteraction { name } => write!(f, "flow needs desktop input: {name}"),
             Self::RunMismatch => write!(f, "the requested run no longer owns this worktree"),
             Self::NoActiveLane => write!(f, "no active lane"),

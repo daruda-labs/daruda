@@ -632,3 +632,45 @@ async fn disconnect_withdraws_every_pending_call_but_ignores_stale_connections(
         "withdrawn approval is not answered"
     );
 }
+
+#[gpui::test]
+async fn a_reused_request_id_withdraws_the_call_it_replaces(cx: &mut TestAppContext) {
+    let mut session = ConnectionSession::handshaked_for_test(1);
+    cx.update(|cx| {
+        let pane = PaneRef {
+            workspace: daruda_store::project::WorkspaceUuid::new(),
+            pane: 1,
+        };
+        let (first, deadline, first_outcome) = crate::control::ask::wait_for(pane, cx);
+        session.track(
+            "1".into(),
+            PendingCall::Control(Pending::Waiter {
+                pane,
+                id: first,
+                deadline,
+            }),
+            cx,
+        );
+        let other = PaneRef { pane: 2, ..pane };
+        let (second, deadline, second_outcome) = crate::control::ask::wait_for(other, cx);
+        session.track(
+            "1".into(),
+            PendingCall::Control(Pending::Waiter {
+                pane: other,
+                id: second,
+                deadline,
+            }),
+            cx,
+        );
+        assert_eq!(
+            first_outcome.try_recv(),
+            Ok(None),
+            "the replaced call can no longer be cancelled, so it is withdrawn now"
+        );
+        assert!(crate::control::ask::is_waiting(other, second, cx));
+        assert!(
+            second_outcome.try_recv().is_err(),
+            "the new call still waits"
+        );
+    });
+}

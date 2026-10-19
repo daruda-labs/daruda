@@ -500,6 +500,11 @@ impl Workspace {
             &resolved.resolved_cwd,
         );
 
+        let mcp_servers = if self.offers_control_tools(pane_id, cx) {
+            crate::orchestrator::session_tools(cx).into_iter().collect()
+        } else {
+            Vec::new()
+        };
         Some(AgentChatConnectionPlan {
             agent_id,
             launch_spec,
@@ -507,46 +512,41 @@ impl Workspace {
             initial_model,
             initial_modes,
             prepared,
-            mcp_servers: self.mcp_servers_for_pane(pane_id, cx),
+            mcp_servers,
         })
     }
 
-    /// The MCP servers one pane's session may reach.
+    /// Whether this pane's session may reach the control MCP server.
     ///
-    /// Exactly one pane gets any: the orchestrator's. Decided here, at the
+    /// Exactly one pane may: the orchestrator's. Decided here, at the
     /// single place a session is planned, rather than by whoever opens a pane
     /// — a new pane path must not be able to hand out tools by omission.
-    fn mcp_servers_for_pane(
-        &self,
-        pane_id: PaneId,
-        cx: &mut Context<Self>,
-    ) -> Vec<daruda_acp::McpServer> {
+    fn offers_control_tools(&self, pane_id: PaneId, cx: &Context<Self>) -> bool {
         let Some((_, weak)) = crate::window_registry::WindowRegistry::orchestrator(cx) else {
-            return Vec::new();
+            return false;
         };
         // Identity by entity id, never by reading the registry's handle back:
         // this runs inside `prepare_agent_chat_connection`, which is already
         // inside `Workspace::update`, and the orchestrator seeding its own
         // pane *is* that workspace — so `weak.upgrade().read(cx)` would be a
         // second lease on the entity we are in (AGENTS.md pitfall 5).
-        if weak.entity_id() != cx.entity_id() {
-            return Vec::new();
-        }
-        if self.orchestrator_chat_pane().map(|p| p.pane) != Some(pane_id) {
-            return Vec::new();
-        }
-        crate::orchestrator::mcp_server(cx).into_iter().collect()
+        weak.entity_id() == cx.entity_id()
+            && self.orchestrator_chat_pane().map(|p| p.pane) == Some(pane_id)
     }
 
-    /// [`Self::mcp_servers_for_pane`], for the test that pins the threat
-    /// model: exactly one pane in the process may be offered the server.
+    /// The servers a session planned for `pane_id` would be offered, for the
+    /// test that pins the threat model: exactly one pane in the process may be
+    /// offered the server.
     #[cfg(test)]
     pub(crate) fn mcp_servers_for_pane_for_test(
         &self,
         pane_id: PaneId,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> Vec<daruda_acp::McpServer> {
-        self.mcp_servers_for_pane(pane_id, cx)
+        if !self.offers_control_tools(pane_id, cx) {
+            return Vec::new();
+        }
+        crate::orchestrator::mcp_server(cx).into_iter().collect()
     }
 
     /// Whether a resume of `pane_id` must load its exact session: a failed

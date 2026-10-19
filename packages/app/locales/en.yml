@@ -2154,10 +2154,9 @@ control:
   error_run_mismatch: "The requested run no longer owns this worktree."
   error_flow_locked: "A flow is already running in this worktree."
   error_flow_refused: "%{name} will not run as written. Validate it in daruda."
-  # Said when the flow itself is fine but no run appeared. Points at daruda
-  # rather than at the file, because the static check already cleared the file
-  # and the actual reason is in a toast only the desktop shows.
-  error_flow_not_started: "%{name} did not start. daruda has the reason."
+  # Said when the flow itself is fine but its start was refused; `detail` is
+  # the reason the desktop would show in a toast the phone never sees.
+  error_flow_not_started: "%{name} did not start: %{detail}"
   error_flow_needs_interaction: "%{name} asks a question only the desktop can answer."
   error_no_active_lane: "No active worktree."
   usage_use: "Usage: /use <number> or /use -"

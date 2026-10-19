@@ -14,6 +14,7 @@ mod effects;
 mod flows;
 mod inbox;
 mod intent;
+mod reconcile;
 pub(crate) mod result;
 pub(crate) mod result_host;
 mod result_io;

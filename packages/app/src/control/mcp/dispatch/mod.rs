@@ -89,9 +89,15 @@ impl ConnectionSession {
 
     /// Remember a call that has not been answered yet, and forget the ones
     /// whose card has since been decided.
-    fn track(&mut self, request: String, pending: PendingCall, cx: &App) {
+    ///
+    /// A client reusing a live id breaks JSON-RPC, but the earlier call must
+    /// not outlive its last handle: no cancellation could reach it anymore,
+    /// and an omitted-form wait would hold the single waiter slot until timeout.
+    fn track(&mut self, request: String, pending: PendingCall, cx: &mut App) {
         self.outstanding.retain(|_, o| o.pending.is_live(cx));
-        self.outstanding.insert(request, Outstanding { pending });
+        if let Some(replaced) = self.outstanding.insert(request, Outstanding { pending }) {
+            replaced.pending.withdraw(cx);
+        }
     }
 
     /// Take back the call `request` names, and send no reply.

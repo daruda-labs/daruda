@@ -256,7 +256,9 @@ pub(crate) fn render_error(error: &ControlError) -> String {
         ControlError::FlowNotFound { name } => s::control::error_flow_not_found(name),
         ControlError::FlowLocked { .. } => s::control::error_flow_locked(),
         ControlError::FlowRefused { name } => s::control::error_flow_refused(name),
-        ControlError::FlowNotStarted { name } => s::control::error_flow_not_started(name),
+        ControlError::FlowNotStarted { name, detail } => {
+            s::control::error_flow_not_started(name, detail)
+        }
         ControlError::FlowNeedsInteraction { name } => {
             s::control::error_flow_needs_interaction(name)
         }

@@ -40,6 +40,14 @@ impl RunsHost {
             Self::seed_run_wait(observation.snapshot, cx);
         }
     }
+    /// Announce a held flow end once its report has been read off-thread.
+    pub(crate) fn release_run_end(
+        held: super::watch::HeldEnd,
+        enriched: RunSnapshot,
+        cx: &mut App,
+    ) {
+        cx.update_global::<Self, _>(|host, _| host.watch.release_end(held, enriched));
+    }
     pub(crate) fn seed_run_wait(snapshot: RunSnapshot, cx: &mut App) {
         cx.update_global::<Self, _>(|host, _| {
             if host

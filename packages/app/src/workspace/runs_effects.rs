@@ -11,12 +11,47 @@ use crate::workspace::Workspace;
 
 impl Workspace {
     pub(crate) fn install_task_effects(cx: &mut App) {
-        RunsHost::install_effects(std::rc::Rc::new(WorkspaceEffects), cx);
+        RunsHost::install_effects(std::rc::Rc::new(WorkspaceEffects::default()), cx);
     }
 }
 
 /// The run can be in any window: the one that asked first, then the rest.
-struct WorkspaceEffects;
+#[derive(Default)]
+struct WorkspaceEffects {
+    unlocated: std::cell::RefCell<Unlocated>,
+}
+
+/// How long a run id no open lane holds is trusted to stay absent. A wait
+/// refreshes every few seconds; probing every lane's disk each time is waste.
+const UNLOCATED_RETRY: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Run ids recently probed and not found, with the open lanes they were probed in.
+#[derive(Default)]
+struct Unlocated(std::collections::HashMap<String, (u64, std::time::Instant)>);
+
+impl Unlocated {
+    /// Probe again once the open lanes change or the miss has aged out.
+    fn should_probe(&mut self, id: &str, lanes: u64, now: std::time::Instant) -> bool {
+        self.0
+            .retain(|_, (_, at)| now.saturating_duration_since(*at) < UNLOCATED_RETRY);
+        self.0.get(id).is_none_or(|(seen, _)| *seen != lanes)
+    }
+
+    fn record(&mut self, id: &str, lanes: u64, now: std::time::Instant, found: bool) {
+        if found {
+            self.0.remove(id);
+        } else {
+            self.0.insert(id.to_owned(), (lanes, now));
+        }
+    }
+}
+
+fn fingerprint(lanes: &[(std::path::PathBuf, std::path::PathBuf)]) -> u64 {
+    use std::hash::{Hash as _, Hasher as _};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    lanes.hash(&mut hasher);
+    hasher.finish()
+}
 
 impl RunsEffects for WorkspaceEffects {
     fn run_event(&self, event: crate::runs::watch::RunEvent, cx: &mut App) {
@@ -28,20 +63,31 @@ impl RunsEffects for WorkspaceEffects {
         run_id: &str,
         cx: &mut App,
     ) -> Option<crate::runs::result::FlowRunLocation> {
-        let mut found = None;
+        let mut lanes = Vec::new();
         WindowRegistry::for_each_workspace(cx, |ws, _window, _cx| {
-            if found.is_none() {
-                found = ws.projects.lanes().find_map(|(_, _, lane)| {
-                    let run_dir = super::flow_paths::runs_dir(&lane.path).join(run_id);
-                    run_dir
-                        .exists()
-                        .then(|| crate::runs::result::FlowRunLocation {
-                            run_dir,
-                            lock_dir: super::flow_paths::lane_lock_dir(&ws.lock_root, &lane.path),
-                        })
-                });
-            }
+            lanes.extend(
+                ws.projects
+                    .lanes()
+                    .map(|(_, _, lane)| (lane.path.clone(), ws.lock_root.clone())),
+            );
         });
+        let now = std::time::Instant::now();
+        let seen = fingerprint(&lanes);
+        if !self.unlocated.borrow_mut().should_probe(run_id, seen, now) {
+            return None;
+        }
+        let found = lanes.into_iter().find_map(|(path, lock_root)| {
+            let run_dir = super::flow_paths::runs_dir(&path).join(run_id);
+            run_dir
+                .exists()
+                .then(|| crate::runs::result::FlowRunLocation {
+                    run_dir,
+                    lock_dir: super::flow_paths::lane_lock_dir(&lock_root, &path),
+                })
+        });
+        self.unlocated
+            .borrow_mut()
+            .record(run_id, seen, now, found.is_some());
         found
     }
 
@@ -91,6 +137,25 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn an_unlocated_run_is_probed_again_only_after_lanes_change_or_time_passes() {
+        let mut unlocated = Unlocated::default();
+        let start = std::time::Instant::now();
+        assert!(unlocated.should_probe("run", 1, start));
+        unlocated.record("run", 1, start, false);
+        assert!(!unlocated.should_probe("run", 1, start + std::time::Duration::from_secs(2)));
+        assert!(
+            unlocated.should_probe("run", 2, start),
+            "a lane opened or closed"
+        );
+        assert!(unlocated.should_probe("other", 1, start));
+        assert!(unlocated.should_probe("run", 1, start + UNLOCATED_RETRY));
+        assert!(unlocated.0.is_empty(), "aged misses are forgotten");
+        unlocated.record("run", 1, start, false);
+        unlocated.record("run", 1, start, true);
+        assert!(unlocated.should_probe("run", 1, start));
+    }
+
     /// A flow change reaches the effects with no window open, which is
     /// the state a run can end in.
     #[gpui::test]
@@ -103,7 +168,7 @@ mod tests {
                 worktree: daruda_flow::lock::CanonicalTree::unchecked(dir),
                 what: crate::runs::FlowChanged::Repainted,
             };
-            WorkspaceEffects.flow_changed(&change, cx);
+            WorkspaceEffects::default().flow_changed(&change, cx);
         });
     }
 }

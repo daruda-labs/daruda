@@ -16,8 +16,9 @@ use crate::control::result::{
     ControlError, FlowEntry, FlowOriginKind, LaneHandle, StopDisposition,
 };
 use crate::workspace::Workspace;
+use crate::workspace::flow_ops::{FlowStartRefused, flow_refusal_text};
 use crate::workspace::flow_paths::{FlowOrigin, FoundFlow, flow_label};
-use crate::workspace::flow_request::FlowSelection;
+use crate::workspace::flow_request::{FlowSelection, FlowSubmitError};
 use daruda_store::project::LaneRef;
 
 /// A successful dispatch and the exact run it inserted.
@@ -57,20 +58,18 @@ impl Workspace {
     /// instead made the answer the first place the caller learned where it
     /// landed.
     ///
-    /// Every refusal is taken *before* dispatch, because a refusal after it
-    /// surfaces as a desktop toast the caller never sees and would leave a
-    /// phone told a run started that never did. A worktree that is gone has
-    /// nowhere to put a run; one that would open a desktop dialog (an `ask`
-    /// permission policy, or a profile question) would hang a caller that
-    /// cannot answer it; a lane runs one flow at a time, enforced by an
-    /// on-disk lock; and a flow that does not pass its own static checks would
-    /// be refused on submit.
+    /// Every refusal is the caller's answer, never a desktop toast or dialog
+    /// it cannot see. A worktree that is gone has nowhere to put a run; one
+    /// that would open a desktop dialog (an `ask` permission policy, or a
+    /// profile question) would hang a caller that cannot answer it; a lane
+    /// runs one flow at a time, enforced by an on-disk lock the engine takes
+    /// only after dispatch; and a flow that does not pass its own static
+    /// checks is refused as written.
     pub(crate) fn control_flow_run(
         &mut self,
         lane: LaneRef,
         name: &str,
         started_by: daruda_flow::request::StartedBy,
-        _window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) -> Result<FlowStarted, ControlError> {
         let Some(cwd) = self.lane_for(lane).map(|l| l.path.clone()) else {
@@ -85,30 +84,17 @@ impl Workspace {
         if needs_desktop_answer(&found.path) {
             return Err(ControlError::FlowNeedsInteraction { name: label });
         }
-        // Check both the process host and the on-disk lock without raising
-        // the desktop guard's stop dialog: this caller cannot answer it.
+        // The engine takes the on-disk lock only once the run has started, so
+        // a lane another process holds is refused here, where it is still an
+        // answer rather than a run that ends at once.
         if self.lane_holder(&cwd).is_some() || self.is_flow_running_in(lane, cx) {
             return Err(ControlError::FlowLocked { name: label });
         }
-        // Everything the run would refuse *after* dispatch surfaces on the
-        // desktop as a toast, which a phone never sees — so the static verdict
-        // is taken here, where it can still become an answer. Same check
-        // `Validate Flow…` runs: no lock, no run directory.
-        let runnable = matches!(
-            self.check_flow(lane, &found.path, None, cx),
-            Ok(issues) if issues.is_empty()
-        );
-        if !runnable {
-            return Err(ControlError::FlowRefused { name: label });
-        }
-
-        let entry = FlowEntry {
-            name: label,
-            origin: map_origin(found.origin),
-            lane: LaneHandle::new(self.uuid(), lane),
-        };
-        if self.lane_holder(&cwd).is_some() || self.is_flow_running_in(lane, cx) {
-            return Err(ControlError::FlowLocked { name: entry.name });
+        // Same check `Validate Flow…` runs: no lock, no run directory.
+        match self.check_flow(lane, &found.path, None, cx) {
+            Ok(issues) if issues.is_empty() => {}
+            Ok(_) => return Err(ControlError::FlowRefused { name: label }),
+            Err(e) => return Err(refusal_answer(label, FlowStartRefused::Submit(e))),
         }
         let run_id = self
             .submit_flow_run(
@@ -119,9 +105,12 @@ impl Workspace {
                 started_by,
                 cx,
             )
-            .ok_or_else(|| ControlError::FlowNotStarted {
-                name: entry.name.clone(),
-            })?;
+            .map_err(|refused| refusal_answer(label.clone(), refused))?;
+        let entry = FlowEntry {
+            name: label,
+            origin: map_origin(found.origin),
+            lane: LaneHandle::new(self.uuid(), lane),
+        };
         Ok(FlowStarted { entry, run_id })
     }
 
@@ -177,6 +166,31 @@ impl Workspace {
             let stem = found.path.file_stem().map(|n| n.to_string_lossy());
             file.as_deref() == Some(name) || stem.as_deref() == Some(name)
         })
+    }
+}
+
+/// A start's refusal as the control caller's answer. A problem in the file
+/// is `FlowRefused`, a held worktree `FlowLocked`; anything else carries the
+/// reason the desktop would have shown, since this caller sees no toast.
+fn refusal_answer(name: String, refused: FlowStartRefused) -> ControlError {
+    let error = match refused {
+        FlowStartRefused::AlreadyRunning => return ControlError::FlowLocked { name },
+        FlowStartRefused::Submit(error) => error,
+    };
+    match error {
+        FlowSubmitError::Load(_) | FlowSubmitError::Invalid(_) => {
+            ControlError::FlowRefused { name }
+        }
+        FlowSubmitError::LockHeld { .. } => ControlError::FlowLocked { name },
+        other => {
+            let (message, detail) = flow_refusal_text(other);
+            let detail = if detail.is_empty() {
+                message
+            } else {
+                format!("{message}\n{detail}")
+            };
+            ControlError::FlowNotStarted { name, detail }
+        }
     }
 }
 

@@ -24,4 +24,24 @@ impl CommandOrigin {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::CommandOrigin;
+
+    /// Two unrelated domain enums with the same variants: a swapped arm
+    /// would compile, so the mapping is pinned here.
+    #[test]
+    fn every_origin_maps_to_the_same_starter_at_both_boundaries() {
+        use daruda_flow::request::StartedBy as Flow;
+        use daruda_store::tasks::StartedBy as Task;
+        assert_eq!(CommandOrigin::Phone.task_started_by(), Task::Phone);
+        assert_eq!(
+            CommandOrigin::Orchestrator.task_started_by(),
+            Task::Orchestrator
+        );
+        assert_eq!(CommandOrigin::Phone.flow_started_by(), Flow::Phone);
+        assert_eq!(
+            CommandOrigin::Orchestrator.flow_started_by(),
+            Flow::Orchestrator
+        );
+    }
+}

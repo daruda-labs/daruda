@@ -2,24 +2,60 @@ use super::*;
 use crate::runs::result::{RunKey, RunSnapshot, RunState};
 
 #[test]
-fn retaining_more_than_two_hundred_results_never_evicts_unreported_work() {
+fn reported_cap_evicts_oldest_first_and_never_unreported_or_in_flight_work() {
+    use super::delivery::Delivery;
     let mut watch = RunWatch::default();
-    for n in 0..250 {
-        let key = RunKey::Flow(n.to_string());
+    let flow = |n: usize| RunKey::Flow(format!("flow-{n}"));
+    let unreported = RunKey::Flow("unreported".into());
+    let in_flight = RunKey::Flow("in-flight".into());
+    for key in [&unreported, &in_flight] {
         watch.register(key.clone());
-        watch.retain(RunSnapshot {
-            key,
-            what: n.to_string(),
-            why: None,
-            state: RunState::Gone,
-        });
+        watch.retain(ended(key.clone()));
     }
-    assert_eq!(watch.scope().len(), 250);
-    assert_eq!(watch.get(&RunKey::Flow("0".into())).unwrap().what, "0");
-    assert_eq!(watch.scope(), watch.scope());
+    let (held, _) = watch.open_wait(Some(vec![in_flight.clone()])).unwrap();
+    assert_eq!(watch.poll_wait(held, false).unwrap().ended.len(), 1);
+    for n in 0..250 {
+        let key = flow(n);
+        watch.register(key.clone());
+        watch.retain(ended(key.clone()));
+        let (id, _) = watch.open_wait(Some(vec![key])).unwrap();
+        assert_eq!(watch.poll_wait(id, false).unwrap().ended.len(), 1);
+        watch.finish_wait(id, true);
+    }
+    let reported = |watch: &RunWatch| {
+        watch
+            .events
+            .iter()
+            .filter(|event| event.delivery == Delivery::Reported)
+            .count()
+    };
+    assert_eq!(reported(&watch), 200);
+    for n in 0..50 {
+        assert!(
+            watch.get(&flow(n)).is_none(),
+            "the oldest result {n} is evicted"
+        );
+    }
+    for n in 50..250 {
+        assert!(watch.get(&flow(n)).is_some(), "the newest 200 stay");
+    }
+    assert!(watch.get(&unreported).is_some());
+    assert!(watch.get(&in_flight).is_some());
+    assert_eq!(watch.unreported().len(), 1);
+    watch.finish_wait(held, true);
+    assert_eq!(reported(&watch), 200);
+    assert!(
+        watch.get(&in_flight).is_none(),
+        "once reported, the earliest episode is the oldest"
+    );
+    assert!(watch.get(&flow(50)).is_some());
+    assert!(watch.get(&unreported).is_some());
 }
 
-fn running(key: RunKey, waiting_on: Option<crate::runs::result::WaitingOn>) -> RunSnapshot {
+pub(super) fn running(
+    key: RunKey,
+    waiting_on: Option<crate::runs::result::WaitingOn>,
+) -> RunSnapshot {
     RunSnapshot {
         key,
         what: "run".into(),
@@ -155,7 +191,7 @@ fn registering_a_cached_ended_start_creates_its_delivery_event() {
     );
 }
 
-fn ended(key: RunKey) -> RunSnapshot {
+pub(super) fn ended(key: RunKey) -> RunSnapshot {
     RunSnapshot {
         key,
         what: "ended".into(),
@@ -289,7 +325,7 @@ fn unreported_and_in_flight_results_survive_cap_and_text_enrichment_updates_even
     assert!(
         matches!(&result.ended[0].state, RunState::Ended { text: Some(t), .. } if t == "enriched")
     );
-    assert_eq!(watch.snapshots.len(), 250);
+    assert_eq!(watch.retained_count(), 250);
     assert_eq!(watch.events.len(), 250);
     watch.finish_wait(id, false);
     assert_eq!(watch.unreported().len(), 250);
@@ -299,7 +335,7 @@ fn unreported_and_in_flight_results_survive_cap_and_text_enrichment_updates_even
         watch.finish_wait(id, true);
     }
     assert_eq!(watch.events.len(), 200);
-    assert_eq!(watch.snapshots.len(), 200);
+    assert_eq!(watch.retained_count(), 200);
     assert!(watch.get(&key).is_none());
     let (empty, _) = watch.open_wait(None).unwrap();
     assert_eq!(
@@ -319,7 +355,7 @@ fn unreported_and_in_flight_results_survive_cap_and_text_enrichment_updates_even
     );
     watch.finish_wait(old, true);
     assert_eq!(
-        watch.snapshots.len(),
+        watch.retained_count(),
         200,
         "rehydrating a reported handle cannot grow the cache"
     );

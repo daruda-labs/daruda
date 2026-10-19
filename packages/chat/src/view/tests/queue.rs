@@ -381,11 +381,7 @@ fn a_drained_telegram_prompt_arms_the_watch_and_an_in_app_one_never_does(
     cx: &mut gpui::TestAppContext,
 ) {
     use crate::view::PromptOrigin;
-    for (origin, arms) in [
-        (PromptOrigin::Telegram, true),
-        (PromptOrigin::InApp, false),
-        (PromptOrigin::Internal, false),
-    ] {
+    for (origin, arms) in [(PromptOrigin::Telegram, true), (PromptOrigin::InApp, false)] {
         let window = make_test_view(cx);
         window
             .update(cx, |view, _window, cx| {
@@ -477,69 +473,125 @@ fn turn_end_resolves_telegram_watch_after_finalizing_streaming_text(cx: &mut gpu
         .unwrap();
 }
 
-#[gpui::test]
-fn internal_notice_preserves_parked_edit_and_fifo(cx: &mut gpui::TestAppContext) {
-    let window = make_test_view(cx);
-    window
-        .update(cx, |view, _window, cx| {
-            view.queue.paused_prompts.push(queued(1, "user draft"));
-            view.begin_edit(crate::view::PromptId(1), cx);
-            let dispatch = view.send_internal_prompt_text("/clear literal notice".into(), cx);
-            assert_eq!(dispatch, crate::view::PromptDispatch::Queued);
-            assert_eq!(texts(&view.queue.paused_prompts), vec!["user draft"]);
-            assert_eq!(view.queue.editing_prompt, Some(crate::view::PromptId(1)));
-            assert_eq!(
-                texts(&view.queue.pending_prompts),
-                vec!["/clear literal notice"]
-            );
-            view.resume_queue(cx);
-            assert_eq!(
-                texts(&view.queue.pending_prompts),
-                vec!["user draft", "/clear literal notice"]
-            );
-            assert!(!view.is_phone_turn_waiting());
-        })
-        .unwrap();
-}
+// Host notices, which go on the wire now or not at all.
 
-#[gpui::test]
-fn internal_notice_queues_behind_users_even_when_connected_and_idle(cx: &mut gpui::TestAppContext) {
+/// A connected view with a live handle, idle; the probe counts wire prompts.
+fn connected_view(
+    cx: &mut gpui::TestAppContext,
+) -> (
+    gpui::WindowHandle<crate::view::AgentChatView>,
+    daruda_acp::HandleProbe,
+) {
     let window = make_test_view(cx);
-    let (handle, mut probe) = daruda_acp::AcpSessionHandle::detached_for_test();
+    let (handle, probe) = daruda_acp::AcpSessionHandle::detached_for_test();
     window
-        .update(cx, |view, _window, cx| {
-            view.send_prompt_text("first user".into(), cx);
-            view.send_prompt_text("second user".into(), cx);
+        .update(cx, |view, _window, _cx| {
             view.status = crate::view::AgentSessionStatus::Connected;
             view.attach_handle(handle);
+        })
+        .unwrap();
+    (window, probe)
+}
+
+#[gpui::test]
+fn internal_notice_sends_when_connected_idle_and_empty(cx: &mut gpui::TestAppContext) {
+    let (window, mut probe) = connected_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
             assert_eq!(
-                view.send_internal_prompt_text("/clear literal notice".into(), cx),
-                crate::view::PromptDispatch::Queued
+                view.try_send_internal_prompt_text("/clear literal notice".into(), cx),
+                crate::view::InternalDispatch::Sent
             );
-            assert_eq!(
-                texts(&view.queue.pending_prompts),
-                vec!["first user", "second user", "/clear literal notice"]
-            );
-            assert_eq!(probe.drain().0, 0, "the notice cannot jump the user's FIFO");
+            assert_eq!(probe.drain().0, 1);
+            assert!(!view.turn_is_idle(), "the notice is the turn in flight");
+            assert!(matches!(
+                view.items.last(),
+                Some(daruda_acp::ChatItem::UserText(text)) if text == "/clear literal notice"
+            ));
             assert!(!view.is_phone_turn_waiting());
         })
         .unwrap();
 }
 
 #[gpui::test]
-fn internal_notice_buffers_during_stop_cancel_ack(cx: &mut gpui::TestAppContext) {
-    let window = make_test_view(cx);
+fn internal_notice_refuses_while_a_turn_is_in_flight(cx: &mut gpui::TestAppContext) {
+    let (window, mut probe) = connected_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.set_turn_in_flight();
+            assert_eq!(
+                view.try_send_internal_prompt_text("notice".into(), cx),
+                crate::view::InternalDispatch::NotNow
+            );
+            assert_eq!(view.queued_prompt_count(), 0, "a refusal never queues");
+            assert_eq!(probe.drain().0, 0);
+        })
+        .unwrap();
+}
+
+/// Parked or live user prompts keep their place: the notice refuses rather
+/// than queueing behind or jumping ahead, and the edit target survives.
+#[gpui::test]
+fn internal_notice_refuses_while_user_prompts_wait(cx: &mut gpui::TestAppContext) {
+    for parked in [false, true] {
+        let (window, mut probe) = connected_view(cx);
+        window
+            .update(cx, |view, _window, cx| {
+                let queue = if parked {
+                    &mut view.queue.paused_prompts
+                } else {
+                    &mut view.queue.pending_prompts
+                };
+                queue.push(queued(1, "user draft"));
+                view.begin_edit(crate::view::PromptId(1), cx);
+                assert_eq!(
+                    view.try_send_internal_prompt_text("notice".into(), cx),
+                    crate::view::InternalDispatch::NotNow,
+                    "parked={parked}"
+                );
+                assert_eq!(view.queued_prompt_count(), 1, "parked={parked}");
+                assert_eq!(
+                    view.queue.editing_prompt,
+                    Some(crate::view::PromptId(1)),
+                    "parked={parked}"
+                );
+                assert_eq!(probe.drain().0, 0, "parked={parked}");
+            })
+            .unwrap();
+    }
+}
+
+#[gpui::test]
+fn internal_notice_refuses_during_stop_cancel_ack(cx: &mut gpui::TestAppContext) {
+    let (window, mut probe) = connected_view(cx);
     window
         .update(cx, |view, _window, cx| {
             view.set_turn_in_flight();
             view.cancel_turn(cx);
             assert!(view.turn_awaiting_cancel_ack());
+            probe.drain();
             assert_eq!(
-                view.send_internal_prompt_text("notice".into(), cx),
-                crate::view::PromptDispatch::Queued
+                view.try_send_internal_prompt_text("notice".into(), cx),
+                crate::view::InternalDispatch::NotNow
             );
             assert!(view.turn_awaiting_cancel_ack());
-            assert_eq!(texts(&view.queue.pending_prompts), vec!["notice"]);
+            assert_eq!(view.queued_prompt_count(), 0);
+            assert_eq!(probe.drain().0, 0);
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+fn internal_notice_refuses_before_the_session_connects(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            assert_eq!(
+                view.try_send_internal_prompt_text("notice".into(), cx),
+                crate::view::InternalDispatch::NotNow
+            );
+            assert_eq!(view.queued_prompt_count(), 0);
+            assert!(view.items.is_empty());
         })
         .unwrap();
 }

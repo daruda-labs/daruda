@@ -94,9 +94,6 @@ impl<'de> Deserialize<'de> for RunHandle {
     }
 }
 
-#[cfg(test)]
-mod tests {}
-
 /// One execution's current facts. Completed means the session ended normally;
 /// it does not judge whether the requested work succeeded.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -181,4 +178,25 @@ pub struct WaitAnswer {
     pub not_running: Vec<RunResult>,
     pub pending: Vec<RunResult>,
     pub more: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::valid_id;
+
+    /// An id becomes a path component and a handle segment, so anything that
+    /// could step out of its directory or split the handle is refused.
+    #[test]
+    fn ids_that_could_escape_a_directory_or_split_a_handle_are_invalid() {
+        for id in ["", ".", "..", "a/b", "a\\b", "a:b", "a b", "a\u{7}", "a\n"] {
+            assert!(!valid_id(id), "accepted {id:?}");
+        }
+    }
+
+    #[test]
+    fn dotted_and_dashed_ids_are_valid() {
+        for id in ["1929fcd-a1-5", "execution_1", "a.b", "...", "한글"] {
+            assert!(valid_id(id), "rejected {id:?}");
+        }
+    }
 }

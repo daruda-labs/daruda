@@ -479,3 +479,14 @@ fn wait_requires_nonnegative_integer_timeout_and_keeps_raw_handles_for_item_erro
         })
     );
 }
+
+#[test]
+fn wait_refuses_an_empty_handle_list_instead_of_settling_over_nothing() {
+    assert_eq!(
+        to_command(
+            ToolId::RunWait,
+            &serde_json::json!({"timeout":30, "handles":[]})
+        ),
+        Err(ConvertError::BadArgument { name: "handles" })
+    );
+}

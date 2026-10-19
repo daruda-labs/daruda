@@ -1,11 +1,25 @@
 //! Execution results owned by the process, independent of transport types.
-use daruda_core::text::{bound_agent_text, char_prefix};
+use daruda_control_types::agent_text::bound_agent_text;
+use daruda_core::text::char_prefix;
 use daruda_store::tasks::{ExecutionRef, Lifecycle, TaskExecution, TaskRecord};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum RunKey {
     Flow(String),
     Task(ExecutionRef),
+}
+impl RunKey {
+    /// A flow run's key: its run directory's name, the run id handles carry.
+    pub(crate) fn flow_of(run_dir: &std::path::Path) -> Self {
+        Self::Flow(flow_run_id(run_dir))
+    }
+}
+pub(super) fn flow_run_id(run_dir: &std::path::Path) -> String {
+    run_dir
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned()
 }
 impl std::hash::Hash for RunKey {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {

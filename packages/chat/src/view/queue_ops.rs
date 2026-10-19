@@ -13,8 +13,8 @@ use super::super::fold::FoldKey;
 use super::super::phone_turn::PhoneTurn;
 use super::{
     AgentChatEvent, AgentChatView, AgentSessionStatus, EmptySubmitOutcome, EscapeOutcome,
-    FirstResponseOutcome, PhoneAckEffect, PromptDispatch, PromptDropReason, PromptId, PromptOrigin,
-    PromptQueue, QueuedPrompt,
+    FirstResponseOutcome, InternalDispatch, PhoneAckEffect, PromptDispatch, PromptDropReason,
+    PromptId, PromptOrigin, PromptQueue, QueuedPrompt,
 };
 
 impl PromptQueue {
@@ -103,13 +103,31 @@ impl AgentChatView {
         self.send_prompt_text_inner(text, PromptOrigin::InApp, None, cx)
     }
 
-    /// Append a literal host notice without consuming a composer's queued edit.
-    pub fn send_internal_prompt_text(
+    /// Send a literal host notice only if it can reach the wire now. It never
+    /// queues, so it cannot pass parked or queued user prompts, and a refusal
+    /// leaves the composer edit, the queue and the phone watch untouched.
+    pub fn try_send_internal_prompt_text(
         &mut self,
         text: String,
         cx: &mut Context<Self>,
-    ) -> PromptDispatch {
-        self.send_prompt_text_inner(text, PromptOrigin::Internal, None, cx)
+    ) -> InternalDispatch {
+        if self.is_read_only() {
+            return InternalDispatch::ReadOnly;
+        }
+        if !self.accepts_internal_prompt_now() {
+            return InternalDispatch::NotNow;
+        }
+        if !self.dispatch_now(text, Vec::new(), PromptOrigin::Internal, None, cx) {
+            return InternalDispatch::Unavailable;
+        }
+        cx.notify();
+        InternalDispatch::Sent
+    }
+
+    /// Whether [`Self::try_send_internal_prompt_text`] would send now rather
+    /// than refuse. A host waiting to retry observes the view against this.
+    pub fn accepts_internal_prompt_now(&self) -> bool {
+        !self.is_read_only() && self.queued_prompt_count() == 0 && self.can_dispatch_now(&[])
     }
 
     /// Send `text` on behalf of the task run `task`. Behaves as
@@ -188,31 +206,10 @@ impl AgentChatView {
             cx.notify();
             return PromptDispatch::Queued;
         }
-        let ready = matches!(self.status, AgentSessionStatus::Connected)
-            && self.live_handle().is_some()
-            && self.queue.turn.can_dispatch()
-            && (origin != PromptOrigin::Internal || self.queued_prompt_count() == 0)
-            && attachments
-                .iter()
-                .all(|attachment| attachment.supported_by(self.session_capabilities));
-        let dispatch = if ready {
-            // Connected and idle: send now, mark the turn in flight, and echo.
-            // What goes on the wire and what the transcript shows are not the
-            // same string — see [`Self::wire_text`]. Resolved before the handle
-            // is borrowed, because taking the briefing needs `&mut self`.
-            let wire = self.wire_text(&text);
-            if !self.live_handle().is_some_and(|handle| {
-                handle
-                    .try_send_prompt_with_attachments(wire, attachments.clone())
-                    .is_ok()
-            }) {
-                self.fail_prompt_handoff(task, cx);
+        let dispatch = if self.can_dispatch_now(&attachments) {
+            if !self.dispatch_now(text, attachments, origin, task, cx) {
                 return PromptDispatch::Unavailable;
             }
-            self.report_sent(task, cx);
-            self.start_dispatched_turn();
-            self.echo_attached_prompt(text, &attachments, cx);
-            self.arm_phone_turn_if(origin);
             PromptDispatch::SentNow
         } else {
             // Not connected yet (lazy connect happens on first focus), a turn is
@@ -230,6 +227,45 @@ impl AgentChatView {
         };
         cx.notify();
         dispatch
+    }
+
+    /// Whether a prompt with `attachments` may go on the wire now: connected,
+    /// no turn in flight, and no Stop's cancel acknowledgment outstanding.
+    fn can_dispatch_now(&self, attachments: &[daruda_acp::PromptAttachment]) -> bool {
+        matches!(self.status, AgentSessionStatus::Connected)
+            && self.live_handle().is_some()
+            && self.queue.turn.can_dispatch()
+            && attachments
+                .iter()
+                .all(|attachment| attachment.supported_by(self.session_capabilities))
+    }
+
+    /// Send now, mark the turn in flight, and echo. `false` when the session
+    /// refused the handoff. What goes on the wire and what the transcript
+    /// shows can differ — see [`Self::wire_text`].
+    fn dispatch_now(
+        &mut self,
+        text: String,
+        attachments: Vec<daruda_acp::PromptAttachment>,
+        origin: PromptOrigin,
+        task: Option<ExecutionRef>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        // Resolved before the handle is borrowed: taking the briefing needs `&mut self`.
+        let wire = self.wire_text(&text);
+        if !self.live_handle().is_some_and(|handle| {
+            handle
+                .try_send_prompt_with_attachments(wire, attachments.clone())
+                .is_ok()
+        }) {
+            self.fail_prompt_handoff(task, cx);
+            return false;
+        }
+        self.report_sent(task, cx);
+        self.start_dispatched_turn();
+        self.echo_attached_prompt(text, &attachments, cx);
+        self.arm_phone_turn_if(origin);
+        true
     }
 
     /// Tell the host a task's prompt was just handed to the live session.
