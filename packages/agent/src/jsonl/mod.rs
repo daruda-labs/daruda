@@ -7,6 +7,7 @@
 //!
 //! See `LICENSE-THIRD-PARTY.md` for c9watch attribution.
 
+pub mod answer;
 pub mod fsm;
 pub mod parser;
 pub mod permissions;

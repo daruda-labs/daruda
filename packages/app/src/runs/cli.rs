@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use daruda_agent::pty_tracker::{PtyBinding, PtyTracker, PtyTrackerEvent};
 use daruda_store::accounts::{AccountId, AccountRecipeId};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
@@ -338,6 +338,8 @@ impl RunsHost {
     }
 
     pub(crate) fn settle_cli_session(session: &str, reason: SessionEndReason, cx: &mut App) {
+        // The session ended now; the transcript read below must not extend it.
+        let at = Utc::now();
         let session = session.to_owned();
         Self::after_projection(
             move |cx| {
@@ -363,10 +365,10 @@ impl RunsHost {
                     .collect();
                 for (exec, path) in runs {
                     cx.update_global::<Self, _>(|host, _| {
-                        host.delivery.settling.push(exec.clone())
+                        host.delivery.settling.insert(exec.clone());
                     });
                     let Some(path) = path.filter(|_| reason != SessionEndReason::Error) else {
-                        Self::finish_cli_result(exec, reason, None, cx);
+                        Self::finish_cli_result(exec, reason, None, at, cx);
                         continue;
                     };
                     let reading = cx
@@ -377,7 +379,7 @@ impl RunsHost {
                         cx.update(|cx| {
                             Self::after_projection(
                                 move |cx| {
-                                    Self::finish_cli_result(exec, reason, result, cx);
+                                    Self::finish_cli_result(exec, reason, result, at, cx);
                                 },
                                 cx,
                             )
@@ -394,6 +396,7 @@ impl RunsHost {
         exec: ExecutionRef,
         reason: SessionEndReason,
         result: Option<String>,
+        at: DateTime<Utc>,
         cx: &mut App,
     ) {
         let current = cx.global::<GlobalTasks>().get(&exec.task_id)
@@ -406,7 +409,7 @@ impl RunsHost {
                         end_reason: reason,
                     },
                     result,
-                    at: Utc::now(),
+                    at,
                 },
                 cx,
             )
@@ -433,7 +436,7 @@ impl RunsHost {
             // `propose` resolves only after the durable event is projected.
             cx.update(|cx| {
                 cx.update_global::<Self, _>(|host, _| {
-                    host.delivery.settling.retain(|settling| settling != &exec)
+                    host.delivery.settling.remove(&exec);
                 });
                 Self::reconcile_lost_cli(exec, cx);
             });
@@ -517,7 +520,7 @@ mod tests {
             super::super::no_hook(),
         )
         .unwrap();
-        let id = cx.update(|cx| {
+        let (id, settled_by) = cx.update(|cx| {
             RunsHost::install(RunsHost::open(Ok(store.clone())), cx);
             let run = SeedRun::cli("/cli", CliProcessState::Running { pid: 42 }).session("s");
             let id = seed::task(
@@ -534,6 +537,7 @@ mod tests {
                 cx,
             );
             RunsHost::settle_cli_session("s", SessionEndReason::Stop, cx);
+            let settled_by = Utc::now();
             assert!(
                 cx.global::<RunsHost>()
                     .delivery
@@ -545,7 +549,9 @@ mod tests {
                 cx.global::<GlobalTasks>().get(&id).unwrap().lifecycle,
                 Lifecycle::Running { .. }
             ));
-            id
+            // The transcript read resolves later; its latency is not run time.
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            (id, settled_by)
         });
         cx.run_until_parked();
         cx.update(|cx| {
@@ -555,6 +561,7 @@ mod tests {
                 task.ended_executions.last().unwrap().result.as_deref(),
                 Some("completed CLI answer")
             );
+            assert!(task.ended_executions.last().unwrap().finished_at <= settled_by);
             assert!(cx.global::<RunsHost>().delivery.settling.is_empty());
             assert_eq!(store.current().unwrap().1.get(&id), Some(task));
         });

@@ -30,10 +30,21 @@ fn result_reader_ignores_sidechains_thinking_and_tool_only_messages() {
         format!("{}\nbroken JSON\n", assistant("old answer", false)),
     )
     .unwrap();
+    assert_eq!(read(&path).as_deref(), Some("old answer"));
+    std::fs::write(&path, "broken JSON\n").unwrap();
     assert_eq!(read(&path), None);
     std::fs::write(&path, b"invalid UTF-8: \xff").unwrap();
     assert_eq!(read(&path), None);
     assert_eq!(read(&dir.path().join("missing")), None);
     std::fs::write(&path, "").unwrap();
     assert_eq!(read(&path), None);
+}
+
+#[test]
+fn result_reader_bounds_the_answer_for_the_orchestrator() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("long.jsonl");
+    std::fs::write(&path, assistant(&"x".repeat(10_000), false)).unwrap();
+    let text = read(&path).unwrap();
+    assert!(text.contains("[...truncated by daruda...]"));
 }

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use daruda_store::project::WorkspaceUuid;
 use daruda_store::tasks::machine::{SettleOutcome, StartFailure, UndeliveredReason};
@@ -16,7 +16,7 @@ pub(crate) struct RunPane {
 #[derive(Default)]
 pub(super) struct Delivery {
     pub(super) bindings: HashMap<RunPane, ExecutionRef>,
-    pub(super) settling: Vec<ExecutionRef>,
+    pub(super) settling: HashSet<ExecutionRef>,
     pending_writes: Vec<(ExecutionRef, smol::channel::Receiver<()>)>,
 }
 

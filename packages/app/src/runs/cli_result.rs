@@ -1,35 +1,15 @@
-//! The final textual answer in a bounded CLI transcript tail.
+//! The final textual answer at the end of a CLI transcript.
 
 use std::path::Path;
 
-const RESULT_TAIL_LINES: usize = 400;
+/// The answer is normally the last line or close to it; the budget only has
+/// to fit that line plus a few trailing entries. It bounds the settle-time
+/// read when no answer exists in a transcript that has grown to gigabytes.
+const RESULT_TAIL_BYTES: u64 = 8 * 1024 * 1024;
 
 pub(super) fn read(path: &Path) -> Option<String> {
-    use daruda_agent::jsonl::parser::{MessageContent, SessionEntry};
-    let lines = daruda_agent::jsonl::tail::read_last_n_lines(path, RESULT_TAIL_LINES).ok()?;
-    let entries = lines
-        .iter()
-        .map(|line| serde_json::from_str::<SessionEntry>(line))
-        .collect::<Result<Vec<_>, _>>()
-        .ok()?;
-    entries.into_iter().rev().find_map(|entry| {
-        let SessionEntry::Assistant { base, message } = entry else {
-            return None;
-        };
-        if base.is_sidechain == Some(true) {
-            return None;
-        }
-        let text = message
-            .content
-            .into_iter()
-            .filter_map(|content| match content {
-                MessageContent::Text { text } => Some(text),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        daruda_core::text::bound_agent_text(&text)
-    })
+    let text = daruda_agent::jsonl::answer::last_assistant_text(path, RESULT_TAIL_BYTES).ok()??;
+    daruda_control_types::agent_text::bound_agent_text(&text)
 }
 
 #[cfg(test)]

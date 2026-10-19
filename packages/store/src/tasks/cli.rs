@@ -90,7 +90,7 @@ impl CliProcessState {
 /// One run of one task — the pair a pane holds to own it, and a snapshot
 /// holds to mirror it. A re-run task gets a new execution id, so a stale ref
 /// resolves to nothing rather than to the wrong run.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ExecutionRef {
     pub task_id: super::TaskId,
     pub execution_id: String,

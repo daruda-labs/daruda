@@ -19,6 +19,7 @@ mod hooks_installer;
 mod hooks_status_file;
 mod hooks_turn_end;
 mod http;
+mod jsonl_answer;
 mod jsonl_fsm;
 mod jsonl_parser;
 mod jsonl_permissions;
