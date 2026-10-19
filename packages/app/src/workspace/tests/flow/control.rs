@@ -23,11 +23,10 @@ fn outcome_reaches_the_phone(
     outbound: &mut crate::telegram::global::TestOutbox,
     cx: &mut TestAppContext,
 ) -> Option<crate::telegram::bridge::Outbound> {
-    // The engine runs on a thread of its own and wakes this app from it,
-    // which gpui's test scheduler otherwise reports as non-determinism. This
-    // is the sanctioned opt-out for a test that awaits real work — and the
-    // real engine is the point here: hand-settling would skip
+    // The real engine is the point here: hand-settling would skip
     // `apply_flow_event`, the only production caller of the relay under test.
+    // It wakes this app from its own thread, so the caller allowed parking
+    // before starting it; this keeps the waiting below allowed too.
     cx.executor().allow_parking();
     for _ in 0..40 {
         cx.run_until_parked();
@@ -759,6 +758,9 @@ async fn a_phone_started_run_reports_its_outcome_back(cx: &mut TestAppContext) {
     let project = daruda_store::project::Project::from_path(lane.path());
     let built = build_workspace_with(cx, &config, Some(project));
     let (wh, ws) = registered(cx, built);
+    // A real run: its log thread wakes the app from outside the scheduler,
+    // so the opt-out has to come before the run starts.
+    cx.executor().allow_parking();
 
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
@@ -826,6 +828,9 @@ async fn a_cancelled_phone_started_run_still_reports_back(cx: &mut TestAppContex
     let mut outbound =
         cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
     let (_lane, ws, _path, wh) = telegram_workspace_with_a_flow(cx, COMMAND_ONLY);
+    // A real run: its log thread wakes the app from outside the scheduler,
+    // so the opt-out has to come before the run starts.
+    cx.executor().allow_parking();
 
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
@@ -923,6 +928,9 @@ async fn closing_the_window_that_started_a_run_keeps_it_stoppable(cx: &mut TestA
         Some(daruda_store::project::Project::from_path(lane.path())),
     );
     let (_second_wh, second) = registered(cx, built);
+    // A real run: its log thread wakes the app from outside the scheduler,
+    // so the opt-out has to come before the run starts.
+    cx.executor().allow_parking();
 
     cx.update_window(first_wh.into(), |_, window, cx| {
         first.update(cx, |ws, cx| {
@@ -971,7 +979,8 @@ nodes:
 ";
     let (lane, ws, flow_path, wh) = workspace_with_a_flow(cx, RECORDS_ITS_PID);
     cx.update(crate::runs::RunsHost::install_quit_flush);
-    // A real run: its log thread wakes the app from outside the scheduler.
+    // A real run: its log thread wakes the app from outside the scheduler,
+    // so the opt-out has to come before the run starts.
     cx.executor().allow_parking();
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {

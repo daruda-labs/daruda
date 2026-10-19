@@ -1227,6 +1227,9 @@ async fn a_resumed_run_colours_carried_nodes_from_the_log(cx: &mut TestAppContex
         go.display()
     );
     let (lane, ws, flow_path, wh) = workspace_with_a_flow(cx, &flow);
+    // A real run: its log thread wakes the app from outside the scheduler,
+    // so the opt-out has to come before the run starts.
+    cx.executor().allow_parking();
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             assert!(ws.run_flow_at(

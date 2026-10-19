@@ -515,8 +515,9 @@ fn add_lane_with_a_flow(
 }
 
 /// Let a real run's thread get on with it until `done` holds, for at most a
-/// few seconds. The engine wakes the app from its own thread, so the test
-/// scheduler has to be told to allow it.
+/// few seconds. The engine wakes the app from its own thread from its first
+/// record on, so a test allows parking before it starts the run: allowing it
+/// only here is too late, and the scheduler fails the test at its end.
 fn wait_for_run(
     cx: &mut TestAppContext,
     mut done: impl FnMut(&mut TestAppContext) -> bool,
