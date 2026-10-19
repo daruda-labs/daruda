@@ -5,6 +5,7 @@
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use daruda_runlog::{
@@ -62,32 +63,46 @@ fn open_failed(dir: &Path, source: std::io::Error) -> RunOutcome {
 /// Time the run spent with a question open, read off the committed state.
 /// Feeds the run deadline, so a sibling's boundary check does not count a
 /// wait that has not settled yet as work (F15).
+///
+/// Observed by the committer's hook, so a detached commit (a drop guard
+/// closing its question) moves it as soon as it is durable.
 #[derive(Debug, Default)]
-pub(crate) struct ParkClock {
-    since: Cell<Option<Instant>>,
-    total: Cell<Duration>,
+pub(crate) struct ParkClock(Mutex<Parked>);
+
+#[derive(Debug, Default)]
+struct Parked {
+    since: Option<Instant>,
+    total: Duration,
 }
 
 impl ParkClock {
     fn observe(&self, open: bool, now: Instant) {
-        match (open, self.since.get()) {
-            (true, None) => self.since.set(Some(now)),
+        let mut parked = self.lock();
+        match (open, parked.since) {
+            (true, None) => parked.since = Some(now),
             (false, Some(start)) => {
-                self.total
-                    .set(self.total.get() + now.saturating_duration_since(start));
-                self.since.set(None);
+                parked.total += now.saturating_duration_since(start);
+                parked.since = None;
             }
             _ => {}
         }
     }
 
     pub(crate) fn parked(&self, now: Instant) -> Duration {
-        self.total.get()
-            + self
+        let parked = self.lock();
+        parked.total
+            + parked
                 .since
-                .get()
                 .map(|start| now.saturating_duration_since(start))
                 .unwrap_or_default()
+    }
+
+    /// Two plain fields, each written whole: a panic elsewhere cannot leave
+    /// them half-updated, so a poisoned lock's value is still the clock.
+    fn lock(&self) -> std::sync::MutexGuard<'_, Parked> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
@@ -145,7 +160,7 @@ struct Inner {
     starts: StartGate,
     /// The newest committed state this thread has seen, by seq.
     latest: RefCell<(u64, FlowRunState)>,
-    clock: Rc<ParkClock>,
+    clock: Arc<ParkClock>,
     dir: PathBuf,
 }
 
@@ -160,14 +175,16 @@ impl FlowRunStore {
     ) -> Result<Self, RunOutcome> {
         let dir = super::log_dir(run_dir);
         let latest = (log.last_seq(), log.state().clone());
+        let clock = Arc::new(ParkClock::default());
+        clock.observe(latest.1.has_open_asks(), Instant::now());
         let narrated_dir = run_dir.to_path_buf();
+        let observed = clock.clone();
         let hook: AfterCommit<FlowRunMachine> = Box::new(move |record, state| {
+            observed.observe(state.has_open_asks(), Instant::now());
             narrate_live(&narrated_dir, events.as_ref(), record, state);
         });
         let committer = Committer::spawn(log, "flow-run-log", hook)
             .map_err(|source| open_failed(&dir, source))?;
-        let clock = Rc::new(ParkClock::default());
-        clock.observe(latest.1.has_open_asks(), Instant::now());
         Ok(Self {
             inner: Rc::new(Inner {
                 committer,
@@ -219,9 +236,6 @@ impl FlowRunStore {
         let mut latest = self.inner.latest.borrow_mut();
         if seq > latest.0 {
             *latest = (seq, state.clone());
-            self.inner
-                .clock
-                .observe(state.has_open_asks(), Instant::now());
         }
     }
 
@@ -230,7 +244,7 @@ impl FlowRunStore {
         std::cell::Ref::map(self.inner.latest.borrow(), |(_, state)| state)
     }
 
-    pub(crate) fn clock(&self) -> Rc<ParkClock> {
+    pub(crate) fn clock(&self) -> Arc<ParkClock> {
         self.inner.clock.clone()
     }
 
@@ -313,6 +327,48 @@ mod tests {
         assert_eq!(
             clock.parked(start + Duration::from_secs(13)),
             Duration::from_secs(5)
+        );
+    }
+
+    /// A question closed by a drop guard's detached commit stops the clock
+    /// when it commits, not at whatever awaited commit comes next.
+    #[test]
+    fn the_park_clock_sees_a_detached_commit() {
+        use super::super::machine::AbandonReason;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let node = crate::NodeId::from("design");
+        let store = super::super::testing::attempt_in_flight(dir.path(), &node);
+        let owner = crate::runner::AskOwner::Node {
+            node,
+            generation: 0,
+            attempt: 1,
+        };
+        let ask = crate::run_log::line::AskLine {
+            tool: "write".to_string(),
+            detail: None,
+        };
+        let raised = smol::block_on(store.commit(FlowRunEvent::ask_raised(owner, ask)))
+            .expect("the question commits");
+        let FlowRunEvent::AskRaised { id, .. } = raised.event else {
+            panic!("{:?}", raised.event);
+        };
+        store.commit_detached(FlowRunEvent::AskAbandoned {
+            id,
+            reason: AbandonReason::Interrupted,
+        });
+        // Answered in arrival order, so the detached commit is behind it.
+        let events = store.events().expect("the log reads");
+        assert!(matches!(
+            events.last(),
+            Some(FlowRunEvent::AskAbandoned { .. })
+        ));
+
+        let clock = store.clock();
+        let now = Instant::now();
+        assert_eq!(
+            clock.parked(now),
+            clock.parked(now + Duration::from_secs(60)),
+            "the closed question still counts as open"
         );
     }
 

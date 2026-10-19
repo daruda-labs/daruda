@@ -60,8 +60,14 @@ pub(crate) fn forget_stop(run_dir: &Path) {
     let kept: Vec<&str> = text
         .lines()
         .take_while(|line| {
-            !line.contains("\"type\":\"attempt_canceled\"")
-                && !line.contains("\"type\":\"run_ended\"")
+            let record = serde_json::from_str::<daruda_runlog::Record<FlowRunEvent>>(line)
+                .expect("a whole record");
+            !matches!(
+                record.body,
+                daruda_runlog::Body::Event {
+                    event: FlowRunEvent::AttemptCanceled { .. } | FlowRunEvent::RunEnded { .. }
+                }
+            )
         })
         .collect();
     let mut body = kept.join("\n");

@@ -68,7 +68,7 @@ pub(super) fn apply(state: &mut FlowRunState, event: &E) {
                 state,
                 node,
                 AttemptState::Passed {
-                    attempt: record.attempt,
+                    attempt: Some(record.attempt),
                 },
             );
             if let Some(current) = state.nodes.get_mut(node) {
@@ -177,7 +177,7 @@ fn import(state: &mut FlowRunState, imported: &Imported) {
         imported.profile.clone(),
     );
     for id in &imported.passed {
-        passed(state, id, AttemptState::Passed { attempt: 0 });
+        passed(state, id, AttemptState::Passed { attempt: None });
     }
     for carried in &imported.carried {
         if let Some(node) = state.nodes.get_mut(&carried.node) {

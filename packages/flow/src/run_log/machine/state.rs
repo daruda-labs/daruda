@@ -101,7 +101,10 @@ pub enum AttemptState {
         process: Option<SpawnedProcess>,
     },
     Passed {
-        attempt: u32,
+        /// `None` for a pass an older build's journal recorded, which has no
+        /// attempt in this log.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attempt: Option<u32>,
     },
     Failed {
         attempt: u32,

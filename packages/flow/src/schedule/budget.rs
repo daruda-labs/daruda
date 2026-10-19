@@ -45,7 +45,7 @@ pub(super) struct Accounting {
     parked_before: Duration,
     /// Time the run has had a question open, read off the log. Covers a wait
     /// still in progress, which `parked` only learns once its call returns.
-    clock: std::rc::Rc<crate::run_log::store::ParkClock>,
+    clock: std::sync::Arc<crate::run_log::store::ParkClock>,
     /// The run's reported cost so far, in the first currency seen.
     cost: RefCell<Option<CostLimit>>,
     /// Set once a second currency appears: the total stops being a total,
@@ -83,7 +83,7 @@ impl Accounting {
     /// Read the run's open-question clock from `clock` (F15).
     pub(super) fn with_clock(
         mut self,
-        clock: std::rc::Rc<crate::run_log::store::ParkClock>,
+        clock: std::sync::Arc<crate::run_log::store::ParkClock>,
     ) -> Self {
         self.clock = clock;
         self

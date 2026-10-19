@@ -403,6 +403,32 @@ fn a_pin_counts_as_passed_and_cannot_be_lost() {
     ));
 }
 
+/// An older build's pass has no attempt in this log, and says so rather
+/// than claiming an attempt 0; it still counts and can still be lost.
+#[test]
+fn an_imported_pass_has_no_attempt() {
+    let (state, _) = run(vec![FlowRunEvent::Imported(Box::new(Imported {
+        nodes: vec![NodeStart {
+            id: id("design"),
+            produces: Produces::File,
+        }],
+        until: None,
+        pinned: Vec::new(),
+        profile: None,
+        passed: vec![id("design")],
+        next_evidence: 2,
+        spent: SpentLine::default(),
+        records: Vec::new(),
+        carried: Vec::new(),
+    }))]);
+    let design = state.node(&id("design")).expect("design");
+    assert_eq!(design.last, AttemptState::Passed { attempt: None });
+    assert!(state.finished().contains(&id("design")));
+    assert!(
+        FlowRunMachine::check(&state, &FlowRunEvent::OutputLost { node: id("design") }).is_ok()
+    );
+}
+
 /// **§5.5 step 6.** Only an agent node leaves an output a resume can find
 /// gone; a passed command has none to lose.
 #[test]
