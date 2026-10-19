@@ -616,9 +616,10 @@ fn settle(store: &TaskStore, lost: Vec<ExecutionRef>) -> Result<(), ReconcileBlo
         match smol::block_on(store.propose(event)) {
             Ok(_) => {}
             Err(CommitError::Rejected(rejected)) => LogWriter::log(
-                ErrorReport::new(crate::surface::strings::error::task_command_refused())
+                ErrorReport::new(crate::surface::strings::error::tasks_reconcile_skipped())
                     .severity(ErrorSeverity::Warning)
                     .from_error(&rejected)
+                    .with_context("task", exec.task_id.to_string())
                     .at(file!(), line!())
                     .dedup("tasks.reconcile.rejected")
                     .build(),
@@ -645,4 +646,42 @@ fn apply_projection(seq: u64, state: TasksBook, cx: &mut App) {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+    use crate::runs::seed::{self, SeedEnd, SeedRun};
+    use daruda_store::project::ProjectUuid;
+
+    /// A run the log refuses to settle is skipped, not a reason to stop: the
+    /// runs after it still need settling, and the refusal changed nothing.
+    #[test]
+    fn a_refused_settle_is_skipped_and_the_rest_are_still_settled() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = TaskStore::in_directory(dir.path(), None, "test", no_hook()).unwrap();
+        let mut lost = Vec::new();
+        for name in ["refused", "lost"] {
+            let spec = seed::spec(ProjectUuid::new(), name);
+            let id = spec.id.clone();
+            let mut events = seed::created(spec);
+            events.extend(seed::run(&id, &SeedRun::chat("/lane"), SeedEnd::Preparing));
+            for event in events {
+                smol::block_on(store.propose(event)).unwrap();
+            }
+            lost.push(id);
+        }
+        let (_, book) = store.current().unwrap();
+        let execs = lost_runs(&book);
+        assert_eq!(execs.len(), 2);
+        // Settling the first run now makes the pass's own attempt a refusal.
+        settle(&store, vec![execs[0].clone()]).unwrap();
+
+        settle(&store, execs).unwrap();
+
+        let (_, book) = store.current().unwrap();
+        for id in &lost {
+            assert!(matches!(
+                book.get(id).unwrap().lifecycle,
+                Lifecycle::Undelivered { .. }
+            ));
+        }
+    }
+}

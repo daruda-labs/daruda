@@ -1502,6 +1502,9 @@ error:
   # The runs the last session left were settled, but their marker could not
   # be removed, so the next start opens tasks read-only.
   tasks_reconcile_marker_left: "Tasks will open read-only on the next start: a settling marker could not be removed. Quit daruda and delete .reconciling in the task-log folder"
+  # The task log refused to settle one run the last session left; that run
+  # stays as recorded and the others are still settled.
+  tasks_reconcile_skipped: "A task the last session left running could not be settled and was left as recorded"
   # Quitting stopped waiting for task changes to become durable.
   tasks_quit_flush: "Task changes were still being saved at quit"
   # Quitting stopped waiting for a flow run to end the processes it started.
