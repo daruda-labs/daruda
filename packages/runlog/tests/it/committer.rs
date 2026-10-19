@@ -229,16 +229,14 @@ fn concurrent_proposals_get_distinct_assigned_numbers() {
 /// the time the proposer has its answer.
 #[test]
 fn the_after_commit_hook_runs_before_the_proposer_resumes() {
-    let entered = Arc::new(Barrier::new(2));
-    let in_hook = Arc::clone(&entered);
-    // A channel rather than a barrier: if an assertion below fails, the
-    // sender drops and the hook is let go, so the failure is not a hang.
+    // Channels rather than a barrier or an in-hook assertion: whatever fails,
+    // a sender drops and both sides are let go, so the failure is not a hang.
+    let (entered, in_hook) = std::sync::mpsc::channel::<i64>();
     let (sender, released) = std::sync::mpsc::channel::<()>();
     let committer = spawn(
         FaultBackend::new(),
         Box::new(move |_, state| {
-            assert_eq!(state.total, 3);
-            in_hook.wait();
+            entered.send(state.total).ok();
             released.recv().ok();
         }),
     );
@@ -247,7 +245,10 @@ fn the_after_commit_hook_runs_before_the_proposer_resumes() {
     let release = sender;
     let (_, live) = committer.subscribe(0).unwrap();
     let mut proposal = std::pin::pin!(committer.propose(add(3)));
-    entered.wait();
+    let total = in_hook
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the hook never ran");
+    assert_eq!(total, 3, "the hook saw the state before the commit");
     for _ in 0..5 {
         assert!(
             smol::block_on(smol::future::poll_once(proposal.as_mut())).is_none(),
@@ -333,13 +334,20 @@ impl daruda_runlog::Machine for Fuse {
     }
 }
 
-/// A panic inside the machine, before or after the record is durable,
-/// poisons the committer like a panicking hook does.
+/// A panic inside the machine poisons the committer like a panicking hook
+/// does, whether it struck before the record was written (`check`) or after
+/// it was durable (`apply`). Either way no subscriber sees the record, and
+/// only the `apply` case leaves it in the log for the next open to replay.
 #[test]
 fn a_panicking_machine_poisons_the_committer() {
-    for blow in [FuseEvent::BlowInCheck, FuseEvent::BlowInApply] {
-        let log = RunLog::<Fuse, _>::open(FaultBackend::new(), BUILD).unwrap();
+    for (blow, durable) in [
+        (FuseEvent::BlowInCheck, false),
+        (FuseEvent::BlowInApply, true),
+    ] {
+        let backend = FaultBackend::new();
+        let log = RunLog::<Fuse, _>::open(backend.clone(), BUILD).unwrap();
         let committer = Committer::spawn(log, "runlog-test", Box::new(|_, _| {})).unwrap();
+        let (_, live) = committer.subscribe(0).unwrap();
         smol::block_on(committer.propose(FuseEvent::Fine)).unwrap();
         assert!(
             matches!(
@@ -355,7 +363,29 @@ fn a_panicking_machine_poisons_the_committer() {
             ),
             "{blow:?}: a later proposal went through"
         );
-        committer.flush(Duration::from_secs(10)).unwrap();
+        let log = String::from_utf8(backend.file("log.0.jsonl").unwrap()).unwrap();
+        assert_eq!(
+            log.contains(&format!("{blow:?}")),
+            durable,
+            "{blow:?}: durability of the blown record"
+        );
+        assert_eq!(
+            log.matches("Fine").count(),
+            1,
+            "{blow:?}: only the first proposal reached the log"
+        );
+        assert!(matches!(
+            live.recv_blocking().unwrap().body,
+            Body::Event {
+                event: FuseEvent::Fine
+            }
+        ));
+        assert!(
+            live.recv_blocking().is_err(),
+            "{blow:?}: the stream must end without the blown record"
+        );
+        // A dead committer answers a flush at once instead of timing out.
+        assert!(committer.flush(Duration::from_secs(10)).is_ok(), "{blow:?}");
     }
 }
 
