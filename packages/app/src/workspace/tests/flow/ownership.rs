@@ -5,6 +5,7 @@
 use super::*;
 
 /// Long enough that only a stop ends it within a test's patience.
+#[cfg(unix)]
 const LONG_COMMAND: &str = "\
 version: 1
 nodes:
@@ -21,6 +22,7 @@ nodes:
     run: \"true\"
 ";
 
+#[cfg(unix)]
 fn allow() -> daruda_acp::PermissionDecision {
     daruda_acp::PermissionDecision::Allow {
         option_id: "once".to_string(),

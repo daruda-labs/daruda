@@ -71,6 +71,13 @@ impl Backlog {
     }
 }
 
+/// Events from a replaced or disabled connection's worker are stale.
+fn live_generation(id: &str, generation: uuid::Uuid, cx: &App) -> bool {
+    cx.global::<RemoteChannels>()
+        .live(id, cx)
+        .is_some_and(|connection| connection.generation == generation)
+}
+
 fn live_session(id: &str, generation: uuid::Uuid, bot: &Arc<BotSession>, cx: &App) -> bool {
     bot.is_live()
         && cx
@@ -189,21 +196,13 @@ fn serve_events<F: Future<Output = ClaimResult> + 'static>(
     cx.spawn(async move |cx| {
         let mut backlog = Backlog::default();
         while let Some(event) = receiver.next().await {
-            if !cx.update(|cx| {
-                cx.global::<RemoteChannels>()
-                    .live(&event.id, cx)
-                    .is_some_and(|connection| connection.generation == event.generation)
-            }) {
+            if !cx.update(|cx| live_generation(&event.id, event.generation, cx)) {
                 continue;
             }
             let mut ready = match event.payload {
                 WorkerPayload::Status(status) => {
                     cx.update(|cx| {
-                        if !cx
-                            .global::<RemoteChannels>()
-                            .live(&event.id, cx)
-                            .is_some_and(|connection| connection.generation == event.generation)
-                        {
+                        if !live_generation(&event.id, event.generation, cx) {
                             return;
                         }
                         if let Some(connection) = cx
@@ -223,11 +222,7 @@ fn serve_events<F: Future<Output = ClaimResult> + 'static>(
                 }
                 WorkerPayload::Ready(bot) => {
                     let installed = cx.update(|cx| {
-                        if !cx
-                            .global::<RemoteChannels>()
-                            .live(&event.id, cx)
-                            .is_some_and(|connection| connection.generation == event.generation)
-                        {
+                        if !live_generation(&event.id, event.generation, cx) {
                             return false;
                         }
                         cx.global_mut::<RemoteChannels>()
