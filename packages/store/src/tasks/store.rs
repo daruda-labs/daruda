@@ -59,6 +59,9 @@ impl Reconciling {
     /// The pass stopped on a failure it handled and reported. Nothing
     /// crashed, so the next start may try again rather than open the tasks
     /// read-only for good.
+    ///
+    /// The same removal as `finish`, kept separate so each call site states
+    /// how its pass ended; the marker only records that it did end.
     pub fn abandon(self) -> io::Result<()> {
         std::fs::remove_file(&self.sentinel)
     }
