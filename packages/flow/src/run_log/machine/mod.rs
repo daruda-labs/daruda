@@ -7,18 +7,19 @@ mod event;
 mod rejected;
 mod state;
 
-pub use event::{
+pub(crate) use event::{
     AbandonReason, FixOutcome, FlowRunEvent, Imported, ImportedAttempt, ImportedLast, ImportedNode,
     ImportedOutcome, NodeStart,
 };
+// Public because hosts reach them: a refused commit is named in
+// `LogRefusal::Rejected`, and a started attempt carries its process group.
 pub use rejected::FlowRunRejected;
-pub use state::{
-    AttemptState, EndKind, FlowRunState, NodeState, Produces, RunPhase, SpawnedProcess,
-};
+pub(crate) use state::Produces;
+pub use state::{AttemptState, EndKind, FlowRunState, NodeState, RunPhase, SpawnedProcess};
 
 /// The flow run [`daruda_runlog::Machine`]. It owns the attempt, evidence and
 /// question numbers, so concurrent proposers never pick the same one.
-pub struct FlowRunMachine;
+pub(crate) struct FlowRunMachine;
 
 impl daruda_runlog::Machine for FlowRunMachine {
     type State = FlowRunState;
