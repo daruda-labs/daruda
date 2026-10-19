@@ -16,7 +16,6 @@ use super::trace;
 use crate::settings_store::SettingsStore;
 use crate::surface::strings as s;
 
-mod backoff;
 mod bot;
 mod control;
 mod inbound;
@@ -36,7 +35,8 @@ const POLL_TIMEOUT_SECS: u64 = 25;
 
 /// Sleep between poll attempts while disabled, unpaired, or while another
 /// daruda holds the bot — mirrors `workspace/sync/limits.rs`'s `IDLE_RECHECK`
-/// idle-backoff idiom. A failed fetch waits [`backoff::ErrorBackoff`] instead,
+/// idle-backoff idiom. A failed fetch waits
+/// [`ErrorBackoff`](crate::remote_channel::backoff::ErrorBackoff) instead,
 /// which only grows to this.
 const IDLE_RECHECK: std::time::Duration = std::time::Duration::from_secs(30);
 

@@ -1,5 +1,6 @@
 //! Remote agent control through Telegram, Slack, and Discord.
 
+pub(crate) mod backoff;
 pub mod bridge;
 pub(crate) mod command;
 pub(crate) mod dispatch;

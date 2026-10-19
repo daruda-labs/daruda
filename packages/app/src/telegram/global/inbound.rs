@@ -9,11 +9,13 @@
 //! global and the bot token: they read different state, fail differently, and
 //! neither one's changes should conflict with the other's.
 
+use crate::remote_channel::backoff::ErrorBackoff;
 use crate::remote_channel::dispatch::{self, target::compose_edit_body};
+use daruda_store::inbox::InboxReleased;
 use futures::StreamExt as _;
 use futures::channel::mpsc::{UnboundedSender, unbounded};
 use gpui::App;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
@@ -22,7 +24,6 @@ use super::super::bridge::{CallbackEdit, InboundAction, RouteResult};
 use super::super::client;
 use super::super::keychain;
 use super::super::trace;
-use super::backoff::ErrorBackoff;
 use super::bot::{self, Ownership, ReadyBot};
 use super::control::{answer_only, log_unauthorized_inbound, send_command_reply};
 use super::{IDLE_RECHECK, POLL_TIMEOUT_SECS, TelegramBridge};
@@ -47,6 +48,8 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
     cx.spawn(async move |cx| {
         let lock_root = daruda_store::persistence::remote_lock_root();
         let mut backoff = ErrorBackoff::new();
+        // The writer a failed claim retired, until its lease is free again.
+        let mut retiring: Option<InboxReleased> = None;
         loop {
             let (enabled, chat_id) = cx.update(|cx| {
                 let cfg = SettingsStore::global(cx).user_arc();
@@ -81,7 +84,11 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
             // them with — the reply lands on whatever chat it happens to be
             // showing. Asked every iteration rather than once, so the claim is
             // picked up when the holder quits.
-            let Some(bot) = claim_bot(&lock_root, token, chat_id, cx).await else {
+            let claimed = claim_bot(&lock_root, token, chat_id, retiring.clone(), cx).await;
+            if retiring.as_ref().is_some_and(InboxReleased::is_released) {
+                retiring = None;
+            }
+            let Some(bot) = claimed else {
                 backoff.reset();
                 cx.background_executor().timer(IDLE_RECHECK).await;
                 continue;
@@ -208,7 +215,7 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
                 };
                 if let Some(answer) = answer
                     && answers
-                        .unbounded_send((bot.clone(), chat_id, answer))
+                        .unbounded_send((Arc::downgrade(&bot), chat_id, answer))
                         .is_err()
                 {
                     trace::delivery("answer.dropped", || "reason=queue_closed".to_string());
@@ -216,6 +223,7 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
             }
 
             if retry_inbox {
+                retiring = Some(bot.inbox.released());
                 drop(bot);
                 cx.background_executor().timer(backoff.delay()).await;
             } else {
@@ -246,10 +254,17 @@ enum Answer {
 
 /// One task sends every answer in arrival order, so a reply to an earlier
 /// message never lands after a later one and a backlog cannot fan out.
-fn spawn_answer_task(cx: &mut App) -> UnboundedSender<(Arc<ReadyBot>, Option<i64>, Answer)> {
-    let (sender, mut queue) = unbounded::<(Arc<ReadyBot>, Option<i64>, Answer)>();
+///
+/// Queued answers hold the bot weakly: a retired bot's answers are dropped
+/// anyway, and a strong hold would keep its inbox lease past the retry
+/// backoff, so the reopen would wait on a send it is about to discard.
+fn spawn_answer_task(cx: &mut App) -> UnboundedSender<(Weak<ReadyBot>, Option<i64>, Answer)> {
+    let (sender, mut queue) = unbounded::<(Weak<ReadyBot>, Option<i64>, Answer)>();
     cx.spawn(async move |cx| {
         while let Some((bot, chat_id, answer)) = queue.next().await {
+            let Some(bot) = bot.upgrade() else {
+                continue;
+            };
             if !cx.update(|cx| live_bot(&bot, chat_id, keychain::revision(), cx)) {
                 continue;
             }
@@ -276,11 +291,13 @@ fn spawn_answer_task(cx: &mut App) -> UnboundedSender<(Arc<ReadyBot>, Option<i64
 }
 
 /// Reuse the original writer for the same token; a changed bot must acquire
-/// its own lease before opening a writable inbox.
+/// its own lease before opening a writable inbox. `retired` is the writer this
+/// loop last gave up, whose lease is still this process's until it drains.
 async fn claim_bot(
     lock_root: &std::path::Path,
     token: keychain::TokenSnapshot,
     chat_id: Option<i64>,
+    retired: Option<InboxReleased>,
     cx: &mut gpui::AsyncApp,
 ) -> Option<Arc<ReadyBot>> {
     let existing = cx.update(|cx| {
@@ -305,11 +322,11 @@ async fn claim_bot(
         let opened = cx
             .background_executor()
             .spawn(async move {
-                bot::open(
-                    &lock_root,
-                    &daruda_store::persistence::default_data_dir(),
-                    token,
-                )
+                let data = daruda_store::persistence::default_data_dir();
+                match retired {
+                    Some(retired) => bot::reopen(&lock_root, &data, token, &retired, IDLE_RECHECK),
+                    None => bot::open(&lock_root, &data, token),
+                }
             })
             .await;
         match opened {

@@ -70,3 +70,62 @@ fn an_existing_shared_inbox_still_consumes_each_profiles_legacy_source_once() {
         modified
     );
 }
+
+/// The defect this guards: after a failed claim, an answer still queued with
+/// the retired bot kept its lease, and the reopen read this process's own
+/// lock as another daruda's and stood down for a whole idle recheck.
+#[test]
+fn a_reopen_waits_out_its_own_retired_writer_instead_of_calling_it_foreign() {
+    let locks = tempfile::tempdir().unwrap();
+    let profile = tempfile::tempdir().unwrap();
+    let Ownership::Ready(retired) = open(locks.path(), profile.path(), token("bot-a")).unwrap()
+    else {
+        panic!("bot-a is free");
+    };
+    let released = retired.inbox.released();
+    let queued_answer = retired.clone();
+    drop(retired);
+    assert!(matches!(
+        open(locks.path(), profile.path(), token("bot-a")).unwrap(),
+        Ownership::HeldElsewhere
+    ));
+
+    let sending = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        drop(queued_answer);
+    });
+    let reopened = reopen(
+        locks.path(),
+        profile.path(),
+        token("bot-a"),
+        &released,
+        std::time::Duration::from_secs(5),
+    )
+    .unwrap();
+    sending.join().unwrap();
+    assert!(matches!(reopened, Ownership::Ready(_)));
+    drop(reopened);
+    release(locks.path(), "bot-a");
+}
+
+#[test]
+fn a_retired_writer_that_outlasts_the_patience_is_asked_again_not_called_foreign() {
+    let locks = tempfile::tempdir().unwrap();
+    let profile = tempfile::tempdir().unwrap();
+    let Ownership::Ready(retired) = open(locks.path(), profile.path(), token("bot-a")).unwrap()
+    else {
+        panic!("bot-a is free");
+    };
+    let released = retired.inbox.released();
+    let reopened = reopen(
+        locks.path(),
+        profile.path(),
+        token("bot-a"),
+        &released,
+        std::time::Duration::from_millis(50),
+    )
+    .unwrap();
+    assert!(matches!(reopened, Ownership::Idle));
+    drop(retired);
+    release(locks.path(), "bot-a");
+}

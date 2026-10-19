@@ -1,37 +1,38 @@
-//! How long the poll loop waits after a failed `getUpdates`.
+//! How long a bridge waits after a failed fetch or command claim before it
+//! tries the same thing again.
 //!
-//! Short first, because the common failure is a single dropped long poll on a
-//! network that is otherwise fine, and a message the phone already sent waits
-//! out the whole delay. Doubling after that, because the other failures — a
-//! revoked token, Telegram down — are not helped by asking again at once.
+//! Short first, because the common failure is a single dropped long poll or a
+//! transient storage error, and a message the phone already sent waits out
+//! the whole delay. Doubling after that, because the other failures — a
+//! revoked token, a full disk — are not helped by asking again at once.
 
 use std::time::Duration;
 
 /// Wait after the first failure.
 const FIRST: Duration = Duration::from_secs(1);
 
-/// Ceiling, matching the bridge's idle cadence so a bot that stays broken costs
-/// no more than a bot that is switched off.
-const CEILING: Duration = super::IDLE_RECHECK;
+/// Ceiling, matching the bridges' idle and reconnect cadence so a bot that
+/// stays broken costs no more than a bot that is switched off.
+const CEILING: Duration = Duration::from_secs(30);
 
 /// Grows while fetches keep failing, back to [`FIRST`] on the next success.
-pub(super) struct ErrorBackoff {
+pub(crate) struct ErrorBackoff {
     next: Duration,
 }
 
 impl ErrorBackoff {
-    pub(super) const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self { next: FIRST }
     }
 
     /// The wait for the failure just seen, and arm the next one.
-    pub(super) fn delay(&mut self) -> Duration {
+    pub(crate) fn delay(&mut self) -> Duration {
         let delay = self.next;
         self.next = (delay * 2).min(CEILING);
         delay
     }
 
-    pub(super) fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         self.next = FIRST;
     }
 }

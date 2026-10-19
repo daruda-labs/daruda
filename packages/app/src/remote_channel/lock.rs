@@ -15,6 +15,7 @@
 //! something outside daruda that every profile shares.
 
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 /// Hex characters of the credential digest kept for the file name. Half a
 /// SHA-256 — long enough that two bots cannot collide in one user's config
@@ -49,6 +50,43 @@ pub(crate) fn claim(dir: &Path, credential: &str) -> Claim {
             unavailable(&error, "remote.lock.acquire");
             Claim::Unavailable
         }
+    }
+}
+
+/// How long a lease this process just released may still read as held: a child
+/// forked in that moment carries a copy of the lock's descriptor until it execs.
+const RELEASE_GRACE: Duration = Duration::from_secs(2);
+const RELEASE_POLL: Duration = Duration::from_millis(50);
+
+/// Claim `credential` again after this process retired its own writer for it.
+///
+/// The retired writer keeps the lease until its last clone drops and its log
+/// drains, and until then [`claim`] would answer [`Claim::Theirs`] about a
+/// lock this very process holds. So the release is waited out first, with a
+/// short grace after it. `None` when `keep_waiting` gave up before the claim
+/// could be answered truthfully.
+pub(crate) fn reclaim(
+    dir: &Path,
+    credential: &str,
+    retired: &daruda_store::inbox::InboxReleased,
+    keep_waiting: impl Fn() -> bool,
+) -> Option<Claim> {
+    while !retired.is_released() {
+        if !keep_waiting() {
+            return None;
+        }
+        std::thread::sleep(RELEASE_POLL);
+    }
+    let grace = Instant::now() + RELEASE_GRACE;
+    loop {
+        let claim = claim(dir, credential);
+        if !matches!(claim, Claim::Theirs) || Instant::now() >= grace {
+            return Some(claim);
+        }
+        if !keep_waiting() {
+            return None;
+        }
+        std::thread::sleep(RELEASE_POLL);
     }
 }
 
