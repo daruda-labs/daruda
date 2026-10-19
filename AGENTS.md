@@ -121,8 +121,9 @@ Follow these links explicitly rather than relying on tool-specific loading.
   infrastructure sites is forbidden. Sibling widget packages use
   `daruda_ui`, never `gpui_component`.
 - Workspace state discarded on lane/project teardown belongs in
-  `workspace/lane_scoped.rs::LaneScoped`; `LaneRuntime` and `FlowRuns` retain
-  their own lifecycle containers.
+  `workspace/lane_scoped.rs::LaneScoped`; `LaneRuntime` keeps its own
+  lifecycle container, and flow runs belong to the process (`RunsHost`),
+  outliving the lane and window that started them.
 - Views dispatch to named operations; Workspace and its `*_ops.rs` own model
   transitions. Mirrored state has one update site. See
   [view rules](packages/app/src/AGENTS.md#mvu-flavored-guiding-rules).
