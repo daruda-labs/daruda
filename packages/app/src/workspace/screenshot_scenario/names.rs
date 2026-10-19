@@ -70,6 +70,7 @@ const NAME_LEFT_DOCK_SESSIONS: &str = "left-dock-sessions";
 const NAME_LEFT_DOCK_GROUPS: &str = "left-dock-groups";
 const NAME_LEFT_DOCK_GROUP_STATUS: &str = "left-dock-group-status";
 const NAME_LEFT_DOCK_GROUP_HOVER: &str = "left-dock-group-hover";
+const NAME_LEFT_DOCK_PANE_HOVER: &str = "left-dock-pane-hover";
 const NAME_LEFT_DOCK_PROJECT_ALIAS: &str = "left-dock-project-alias";
 const NAME_LEFT_DOCK_WORKTREES: &str = "left-dock-worktrees";
 const NAME_LEFT_DOCK_RAIL: &str = "left-dock-rail";
@@ -201,6 +202,7 @@ impl ScreenshotScenario {
             NAME_LEFT_DOCK_GROUPS => Some(Self::LeftDockGroups),
             NAME_LEFT_DOCK_GROUP_STATUS => Some(Self::LeftDockGroupStatus),
             NAME_LEFT_DOCK_GROUP_HOVER => Some(Self::LeftDockGroupHover),
+            NAME_LEFT_DOCK_PANE_HOVER => Some(Self::LeftDockPaneHover),
             NAME_LEFT_DOCK_PROJECT_ALIAS => Some(Self::LeftDockProjectAlias),
             NAME_LEFT_DOCK_GIT => Some(Self::LeftDockGit),
             NAME_LEFT_DOCK_WORKTREES => Some(Self::LeftDockWorktrees),

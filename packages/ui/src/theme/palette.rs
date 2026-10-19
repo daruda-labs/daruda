@@ -227,7 +227,8 @@ pub const PANEL_BODY_GAP: f32 = GAP_STANDARD;
 // N*BUTTON_WIDGET_HEIGHT + (N-1)*PANEL_BODY_GAP`, one per macro row count.
 pub const DOCK_LEFT_RAIL_W: f32 = 48.0;
 pub const DOCK_RAIL_ROW_H: f32 = 36.0;
-pub const DOCK_RAIL_INITIAL_SIZE: f32 = 28.0;
+pub const DOCK_RAIL_INITIAL_SIZE: f32 = 26.0;
+pub const DOCK_RAIL_INITIAL_BORDER_ALPHA: f32 = 0.75;
 pub const DOCK_RAIL_PANE_ROW_H: f32 = 28.0;
 pub const DOCK_RAIL_GROUP_LINE_H: f32 = 2.0;
 /// Opaque project marks need more separation than hover surfaces in a compact rail.

@@ -160,6 +160,25 @@ async fn expanded_rail_selects_terminal_and_agent_panes_without_a_chooser(
         .unwrap();
     let vcx = &mut gpui::VisualTestContext::from_window(window.into(), cx);
     vcx.run_until_parked();
+    workspace.read_with(vcx, |workspace, cx| {
+        let panes = workspace.rail_chooser_panes(workspace.active, cx);
+        assert_eq!(
+            panes
+                .iter()
+                .find(|pane| pane.pane == terminal)
+                .unwrap()
+                .neutral_icon,
+            crate::ui::icons::TERMINAL
+        );
+        assert_eq!(
+            panes
+                .iter()
+                .find(|pane| pane.pane == agent)
+                .unwrap()
+                .neutral_icon,
+            crate::ui::icons::SESSION
+        );
+    });
     for pane in [terminal, agent] {
         let selector = Box::leak(format!("rail-pane-{pane}").into_boxed_str());
         let row = bounds(vcx, selector).unwrap();
@@ -241,12 +260,14 @@ fn collapsed_group_indicator_uses_only_the_focused_pane(cx: &mut gpui::TestAppCo
                 super::PaneSnapshot {
                     pane: focused,
                     title: "focused".into(),
+                    neutral_icon: crate::ui::icons::SESSION,
                     status: Some(SessionStatus::Working),
                     outcome: None,
                 },
                 super::PaneSnapshot {
                     pane: focused + 1,
                     title: "sibling".into(),
+                    neutral_icon: crate::ui::icons::SESSION,
                     status: Some(SessionStatus::Failed),
                     outcome: None,
                 },
@@ -267,6 +288,38 @@ fn collapsed_group_indicator_uses_only_the_focused_pane(cx: &mut gpui::TestAppCo
             None
         );
     });
+}
+
+#[test]
+fn pane_kind_icons_preserve_connected_idle_and_other_session_states() {
+    use daruda_agent::{AgentOutcome, SessionStatus};
+
+    for icon in [crate::ui::icons::TERMINAL, crate::ui::icons::SESSION] {
+        let mut pane = super::PaneSnapshot {
+            pane: 1,
+            title: "pane".into(),
+            neutral_icon: icon,
+            status: None,
+            outcome: None,
+        };
+        assert_eq!(pane.unconnected_icon(), Some(icon));
+        for outcome in [AgentOutcome::Completed, AgentOutcome::Errored] {
+            pane.outcome = Some(outcome);
+            assert_eq!(pane.unconnected_icon(), None);
+        }
+        pane.outcome = None;
+        for status in [
+            SessionStatus::Idle,
+            SessionStatus::Working,
+            SessionStatus::ExecutingTool,
+            SessionStatus::NeedsAttention,
+            SessionStatus::Failed,
+            SessionStatus::Connecting,
+        ] {
+            pane.status = Some(status);
+            assert_eq!(pane.unconnected_icon(), None, "{status:?}");
+        }
+    }
 }
 
 fn bounds(

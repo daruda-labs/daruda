@@ -25,7 +25,7 @@ pub(super) fn render(
         .get(&target)
         .map(Vec::as_slice)
         .unwrap_or_default();
-    let tooltip = format!("{} / {}", project.name, lane.display_name());
+    let tooltip = format!("{} · {}", project.name, lane.display_name());
     let mut block = div()
         .id(SharedString::from(format!(
             "rail-lane-{}-{}",
@@ -87,7 +87,9 @@ fn grouped_row(
         })
         .when(active, |element| element.bg(theme.lane_card_active_bg))
         .cursor_pointer()
-        .hover(|element| element.bg(theme.lane_row_hover_bg))
+        .when(!active, |element| {
+            element.hover(|element| element.bg(theme.lane_row_hover_bg))
+        })
         .child(super::lane_indicator(
             snap.agent_status_per_lane.get(&target).copied(),
             snap.agent_outcome_per_lane.get(&target).copied(),
@@ -160,15 +162,15 @@ fn pane_row(
             theme::TRANSPARENT
         })
         .when(active, |element| element.bg(theme.lane_card_active_bg))
-        .hover(|element| element.bg(theme.lane_row_hover_bg))
+        .when(!active, |element| {
+            element.hover(|element| element.bg(theme.lane_row_hover_bg))
+        })
         .cursor_pointer()
-        .child(super::lane_indicator(
-            pane.status,
-            pane.outcome,
-            snap.metrics,
-            cx,
+        .child(super::pane_indicator(pane, snap.metrics, cx))
+        .tooltip(ui::tooltip::with_description(
+            pane.title.clone(),
+            lane_label.to_owned(),
         ))
-        .tooltip(ui::tooltip::text(format!("{lane_label} / {}", pane.title)))
         .on_key_down(move |event, window, cx| {
             if let Some(workspace) = keyboard_workspace.upgrade() {
                 workspace.update(cx, |workspace, cx| {

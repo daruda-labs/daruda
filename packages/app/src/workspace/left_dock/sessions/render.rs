@@ -65,9 +65,14 @@ fn session_row(
         })
         .hover(|style| style.bg(t.lane_row_hover_bg))
         .cursor_pointer()
-        .child(
-            AgentStatusBadge::for_status(status, IndicatorSize::Leading, cx).with_metrics(metrics),
-        )
+        .child(match &target {
+            RowTarget::Pane(_, row) if row.unconnected_icon().is_some() => {
+                super::super::rail::pane_indicator(row, metrics, cx)
+            }
+            _ => AgentStatusBadge::for_status(status, IndicatorSize::Leading, cx)
+                .with_metrics(metrics)
+                .into_any_element(),
+        })
         .child(
             div()
                 .flex_1()

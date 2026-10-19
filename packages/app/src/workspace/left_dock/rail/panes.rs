@@ -4,14 +4,25 @@ use daruda_agent::{AgentOutcome, SessionStatus};
 use daruda_store::project::LaneRef;
 use gpui::{App, Context, SharedString, Window};
 
-use crate::workspace::{Workspace, main_area::tab_ops::PaneEntry};
+use crate::ui::icons;
+use crate::workspace::{
+    Workspace,
+    main_area::{pane::PaneContent, tab_ops::PaneEntry},
+};
 
 #[derive(Clone, PartialEq)]
 pub(in crate::workspace) struct PaneSnapshot {
     pub pane: u64,
     pub title: SharedString,
+    pub neutral_icon: &'static str,
     pub status: Option<SessionStatus>,
     pub outcome: Option<AgentOutcome>,
+}
+
+impl PaneSnapshot {
+    pub(in crate::workspace::left_dock) fn unconnected_icon(&self) -> Option<&'static str> {
+        (self.status.is_none() && self.outcome.is_none()).then_some(self.neutral_icon)
+    }
 }
 
 impl Workspace {
@@ -72,6 +83,11 @@ impl Workspace {
                 let ids = [pane.id];
                 PaneSnapshot {
                     pane: pane.id,
+                    neutral_icon: match &pane.content {
+                        PaneContent::Terminal(_) => icons::TERMINAL,
+                        PaneContent::AgentChat(_) => icons::SESSION,
+                        PaneContent::File(_) => icons::RADIO_OFF,
+                    },
                     title: if include_titles {
                         pane.title(cx)
                     } else {

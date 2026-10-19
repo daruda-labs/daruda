@@ -115,17 +115,26 @@ pub(in crate::workspace) fn render(
         .flex_1()
         .min_h_0()
         .overflow_y_scroll();
-    for (_, group, standalone) in roots {
+    for (index, (_, group, standalone)) in roots.into_iter().enumerate() {
         if let Some(project_snap) = standalone {
-            tree = tree.child(project(project_snap, snap, cx));
+            tree = tree.child(
+                div()
+                    .when(index > 0, |element| element.mt(px(theme::GAP_LG)))
+                    .child(project(project_snap, snap, cx)),
+            );
         }
         if let Some(id) = group {
             let g = snap.groups.iter().find(|g| g.id == id).unwrap();
             tree = tree.child(groups::header(g, snap, cx));
             if !g.is_collapsed {
-                for p in snap.projects.iter().filter(|p| p.group_id == Some(id)) {
-                    tree = tree.child(project(p, snap, cx));
-                }
+                tree = tree.child(
+                    div().flex().flex_col().gap(px(theme::GAP_LG)).children(
+                        snap.projects
+                            .iter()
+                            .filter(|project| project.group_id == Some(id))
+                            .map(|project_snap| project(project_snap, snap, cx)),
+                    ),
+                );
             }
         }
     }
@@ -182,6 +191,21 @@ pub(super) fn lane_indicator(
             cx,
         );
     }
+    neutral_indicator(ui::icons::RADIO_OFF, metrics, cx)
+}
+
+pub(in crate::workspace::left_dock) fn pane_indicator(
+    pane: &PaneSnapshot,
+    metrics: theme::UiMetrics,
+    cx: &gpui::App,
+) -> AnyElement {
+    match pane.unconnected_icon() {
+        Some(icon) => neutral_indicator(icon, metrics, cx),
+        None => lane_indicator(pane.status, pane.outcome, metrics, cx),
+    }
+}
+
+fn neutral_indicator(icon: &'static str, metrics: theme::UiMetrics, cx: &gpui::App) -> AnyElement {
     div()
         .flex_none()
         .w(px(metrics.icon(theme::STATUS_INDICATOR_CELL_WIDTH)))
@@ -189,10 +213,7 @@ pub(super) fn lane_indicator(
         .items_center()
         .justify_center()
         .text_color(theme::current(cx).text_muted)
-        .child(
-            ui::icons::icon(ui::icons::RADIO_OFF)
-                .with_size(px(metrics.icon(theme::CONTROL_ICON_SIZE))),
-        )
+        .child(ui::icons::icon(icon).with_size(px(metrics.icon(theme::CONTROL_ICON_SIZE))))
         .into_any_element()
 }
 

@@ -11,6 +11,20 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.seed_left_dock_for_shot(false, false, false, window, cx);
+        let active_tab = self.active_runtime().active_tab_index;
+        self.open_agent_chat_pane_seeded(
+            None,
+            |view, window, cx| view.seed_transcript(Vec::new(), window, cx),
+            window,
+            cx,
+        );
+        self.insert_agent_chat_pane(
+            self.open_agent_id(None),
+            self.active_lane_cwds(),
+            window,
+            cx,
+        );
+        self.activate_tab(active_tab, window, cx);
         let development = self.add_group("Development".into(), None, cx);
         let open_source = self.add_group("Open source".into(), None, cx);
         self.move_project_to_group(self.active.project, Some(development), cx);
@@ -147,6 +161,7 @@ mod tests {
             "left-dock-groups",
             "left-dock-group-status",
             "left-dock-group-hover",
+            "left-dock-pane-hover",
             "left-dock-project-alias",
             "left-dock-worktrees",
             "left-dock-sessions",

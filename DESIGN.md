@@ -408,7 +408,10 @@ border-left:  1px hairline  (RightDock)
 ```
 
 The left dock collapses to a fixed 48px rail instead of disappearing. Project
-marks are bordered 28px tiles. Their context menu edits a workspace-local
+marks are bordered 26px tiles within unchanged 48px-by-36px click targets.
+Expanded projects use a filled tile; collapsed projects retain only the
+outline and initials. Adjacent projects have an 8px gap, without adding
+space between their pane rows. Their context menu edits a workspace-local
 one- or two-grapheme display alias; an empty alias uses the project's first
 letter. Both dock layouts use the same mark, and hover retains the full name.
 Clicking a rail project only folds its children, preserving the current pane,
@@ -417,8 +420,17 @@ input draft, and keyboard focus.
 Rail worktrees show individual pane rows by default, including terminal and
 file panes. Branch and worktree names appear only in tooltips, not as separate
 rail labels. Each pane keeps the shared 16px status indicator without a number,
-so only grouped rows show a count. Its tooltip names the project, worktree, and
-pane. One click updates the input target and tab focus together, revealing the
+so only grouped rows show a count. Its tooltip shows the pane name first,
+with project and worktree context on a second, muted line. Selected pane and
+grouped rows retain their selection background and left accent on hover;
+only unselected rows receive the hover background.
+Shell and Agent Chat panes without a session or unseen outcome use terminal
+and message-square glyphs, respectively, in the same status slot, including
+in the pane chooser. Connected idle sessions, live activity, connecting,
+attention, failure, and unseen outcomes retain their existing status
+indicators. Empty lanes and ordinary file panes keep the
+neutral circle; grouped lanes retain their aggregate status.
+One click updates the input target and tab focus together, revealing the
 chosen pane if a sibling was zoomed. Empty worktrees retain a neutral entry so
 project folding never hides their only
 navigation path.

@@ -30,9 +30,11 @@ pub(super) fn project(
             .child(
                 div()
                     .rounded(px(theme::RADIUS_SM))
-                    .bg(theme.rail_project_bg)
+                    .when(!project.is_collapsed, |element| {
+                        element.bg(theme.rail_project_bg)
+                    })
                     .border_1()
-                    .border_color(theme.border)
+                    .border_color(theme.border.opacity(theme::DOCK_RAIL_INITIAL_BORDER_ALPHA))
                     .size(px(snap.metrics.row(theme::DOCK_RAIL_INITIAL_SIZE)))
                     .flex()
                     .items_center()

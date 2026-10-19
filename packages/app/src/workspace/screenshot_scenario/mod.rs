@@ -84,6 +84,7 @@ pub(crate) enum ScreenshotScenario {
     LeftDockGroups,
     LeftDockGroupStatus,
     LeftDockGroupHover,
+    LeftDockPaneHover,
     LeftDockProjectAlias,
     LeftDockWorktrees,
     LeftDockGit,
@@ -625,6 +626,7 @@ pub(crate) fn drive(
         | ScreenshotScenario::LeftDockWorktrees
         | ScreenshotScenario::LeftDockGroupStatus
         | ScreenshotScenario::LeftDockGroupHover
+        | ScreenshotScenario::LeftDockPaneHover
         | ScreenshotScenario::LeftDockProjectAlias => {
             workspace.update(cx, |ws, cx| {
                 ws.seed_left_dock_groups_for_shot(
@@ -643,8 +645,18 @@ pub(crate) fn drive(
                     ws.open_project_alias_editor(ws.active.project, window, cx);
                 }
             });
-            if scenario == ScreenshotScenario::LeftDockGroupHover {
+            if matches!(
+                scenario,
+                ScreenshotScenario::LeftDockGroupHover | ScreenshotScenario::LeftDockPaneHover
+            ) {
                 use crate::ui::theme;
+                let hover_offset = if scenario == ScreenshotScenario::LeftDockPaneHover {
+                    theme::CONTROL_TARGET_SIZE
+                        + theme::DOCK_RAIL_ROW_H
+                        + theme::DOCK_RAIL_PANE_ROW_H / 2.0
+                } else {
+                    theme::CONTROL_TARGET_SIZE / 2.0
+                };
                 window.draw(cx).clear();
                 window.dispatch_event(
                     gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
@@ -654,7 +666,7 @@ pub(crate) fn drive(
                                 + theme::PAD_XS * 2.0
                                 + theme::CONTROL_TARGET_SIZE * 5.0
                                 + theme::GAP_LG
-                                + theme::CONTROL_TARGET_SIZE / 2.0),
+                                + hover_offset),
                         ),
                         pressed_button: None,
                         modifiers: Default::default(),
