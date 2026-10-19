@@ -16,7 +16,7 @@ pub mod migrate;
 mod store;
 
 pub use lease::InboxLease;
-pub use store::{InboxStore, InboxStoreError};
+pub use store::{InboxReleased, InboxStore, InboxStoreError};
 
 pub const INBOX_RING_CAPACITY: usize = 256;
 

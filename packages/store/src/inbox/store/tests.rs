@@ -3,6 +3,20 @@ use std::sync::mpsc;
 
 const BOT: &str = "0123456789abcdef0123456789abcdef";
 
+/// Block until the writer behind `released` has let go of its lease, failing
+/// rather than hanging when it never does.
+fn wait_released(released: InboxReleased) {
+    let (freed, notified) = mpsc::channel();
+    std::thread::spawn(move || {
+        smol::block_on(released.wait());
+        // SILENT-OK: the receiver is gone only after the timeout already failed the test.
+        let _ = freed.send(());
+    });
+    notified
+        .recv_timeout(Duration::from_secs(5))
+        .expect("the writer never released its lease");
+}
+
 #[test]
 fn actual_write_failures_close_the_writer_and_replay_preserves_acknowledged_claims() {
     use daruda_runlog::testing::{Fault, FaultBackend};
@@ -28,13 +42,7 @@ fn actual_write_failures_close_the_writer_and_replay_preserves_acknowledged_clai
         .unwrap();
         let snapshot = Arc::new(RwLock::new(log.state().clone()));
         let committer = Committer::spawn(log, "failing-inbox", Box::new(|_, _| {})).unwrap();
-        let store = InboxStore {
-            owned: Some(OwnedInbox {
-                committer,
-                _lease: lease,
-            }),
-            snapshot,
-        };
+        let store = InboxStore::assemble(committer, lease, snapshot);
         assert!(matches!(
             smol::block_on(store.claim(ChannelKey::new("telegram"), InboxId::Monotonic(42))),
             Err(CommitError::Io(_))
@@ -52,15 +60,12 @@ fn actual_write_failures_close_the_writer_and_replay_preserves_acknowledged_clai
                 .unwrap()
                 .is_none()
         );
+        let released = store.released();
         drop(store);
-        let until = std::time::Instant::now() + Duration::from_secs(5);
-        let _lease = loop {
-            if let Some(lease) = InboxLease::try_acquire(directory.path(), BOT).unwrap() {
-                break lease;
-            }
-            assert!(std::time::Instant::now() < until);
-            std::thread::yield_now();
-        };
+        wait_released(released);
+        let _lease = InboxLease::try_acquire(directory.path(), BOT)
+            .unwrap()
+            .expect("a released writer frees its lease");
         let mut reopened = RunLog::<InboxMachine, _>::open(backend.restart(), "test").unwrap();
         assert!(matches!(
             reopened.commit(InboxEvent::Claimed {
@@ -103,16 +108,11 @@ fn dropping_a_canceled_waiter_keeps_the_lease_until_queued_commits_drain() {
         }),
     )
     .unwrap();
-    let store = InboxStore {
-        owned: Some(OwnedInbox {
-            committer,
-            _lease: lease,
-        }),
-        snapshot,
-    };
+    let store = InboxStore::assemble(committer, lease, snapshot);
     let waiter = store.claim(ChannelKey::new("slack"), InboxId::Opaque("pending".into()));
     inside_hook.recv_timeout(Duration::from_secs(5)).unwrap();
     drop(waiter);
+    let released = store.released();
     let (dropped, notified) = mpsc::channel();
     let dropping = std::thread::spawn(move || {
         drop(store);
@@ -124,20 +124,17 @@ fn dropping_a_canceled_waiter_keeps_the_lease_until_queued_commits_drain() {
             .unwrap()
             .is_none()
     );
+    assert!(!released.is_released());
     release.send(()).unwrap();
     dropping.join().unwrap();
     assert!(
         nonblocking,
         "dropping an inbox must not join on the foreground thread"
     );
-    let until = std::time::Instant::now() + Duration::from_secs(5);
-    let lease = loop {
-        if let Some(lease) = InboxLease::try_acquire(directory.path(), BOT).unwrap() {
-            break lease;
-        }
-        assert!(std::time::Instant::now() < until);
-        std::thread::yield_now();
-    };
+    wait_released(released);
+    let lease = InboxLease::try_acquire(directory.path(), BOT)
+        .unwrap()
+        .expect("a drained writer frees its lease");
     let reopened = InboxStore::open(lease, "test", || panic!("already initialized")).unwrap();
     assert!(matches!(
         smol::block_on(reopened.claim(ChannelKey::new("slack"), InboxId::Opaque("pending".into()))),

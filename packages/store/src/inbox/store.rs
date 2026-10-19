@@ -22,11 +22,34 @@ pub enum InboxStoreError {
     Import(#[from] CommitError<InboxRejected>),
 }
 
-/// Field order drains the writer before releasing the original bot lock.
+/// Field order drains the writer before releasing the original bot lock, and
+/// signals [`InboxReleased`] only once that lock is gone.
 #[derive(Debug)]
 struct OwnedInbox {
     committer: Committer<InboxMachine>,
     _lease: InboxLease,
+    _released: smol::channel::Sender<()>,
+}
+
+/// Resolves once a writer's bot lease has been released.
+///
+/// A retired writer can outlive its owner's handle: queued claims, in-flight
+/// sends and the asynchronous drain all keep the lease. Until this resolves,
+/// the lock reads as held to this process too, so a reopen that asks for it
+/// sooner would mistake its own lease for another daruda's.
+#[derive(Debug, Clone)]
+pub struct InboxReleased(smol::channel::Receiver<()>);
+
+impl InboxReleased {
+    pub fn is_released(&self) -> bool {
+        self.0.is_closed()
+    }
+
+    /// Wait for the release. Nothing is ever sent, so `recv` fails only once
+    /// the last sender, owned by the writer, is dropped.
+    pub async fn wait(self) {
+        while self.0.recv().await.is_ok() {}
+    }
 }
 
 /// Non-cloneable writer; share an `Arc<InboxStore>`, not its lock handle.
@@ -35,6 +58,7 @@ struct OwnedInbox {
 pub struct InboxStore {
     owned: Option<OwnedInbox>,
     snapshot: Arc<RwLock<InboxState>>,
+    released: InboxReleased,
 }
 
 impl InboxStore {
@@ -62,13 +86,24 @@ impl InboxStore {
                     .unwrap_or_else(std::sync::PoisonError::into_inner) = state.clone();
             }),
         )?;
-        Ok(Self {
+        Ok(Self::assemble(committer, lease, snapshot))
+    }
+
+    fn assemble(
+        committer: Committer<InboxMachine>,
+        lease: InboxLease,
+        snapshot: Arc<RwLock<InboxState>>,
+    ) -> Self {
+        let (sender, receiver) = smol::channel::bounded(1);
+        Self {
             owned: Some(OwnedInbox {
                 committer,
                 _lease: lease,
+                _released: sender,
             }),
             snapshot,
-        })
+            released: InboxReleased(receiver),
+        }
     }
 
     /// The latest durable state, without replay, subscriptions or disk I/O.
@@ -93,6 +128,12 @@ impl InboxStore {
             .expect("a live inbox owns its writer")
             .committer
             .propose(InboxEvent::Claimed { channel, id })
+    }
+
+    /// A handle that resolves when this writer's lease is released, however
+    /// many clones of the store are still alive when it is taken.
+    pub fn released(&self) -> InboxReleased {
+        self.released.clone()
     }
 
     pub fn flush(&self, deadline: Duration) -> Result<(), FlushTimedOut> {
