@@ -2,11 +2,9 @@ use super::*;
 
 #[cfg(unix)]
 fn runtime(directory: &Path, script: &str) {
-    use std::os::unix::fs::PermissionsExt as _;
     let node = node_binary(directory);
     std::fs::create_dir_all(node.parent().unwrap()).unwrap();
-    std::fs::write(&node, format!("#!/bin/sh\n{script}\n")).unwrap();
-    std::fs::set_permissions(node, std::fs::Permissions::from_mode(0o755)).unwrap();
+    crate::test_support::write_executable(&node, &format!("#!/bin/sh\n{script}\n"));
 }
 
 #[test]

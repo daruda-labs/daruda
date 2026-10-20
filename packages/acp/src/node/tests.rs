@@ -426,11 +426,7 @@ fn ensure_node_prefers_system_when_available() {
 // (.zip, node.exe at the root) lands; the stub becomes a .cmd then.
 #[cfg(unix)]
 fn write_fake_node_reporting(path: &Path, output: &str) {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::write(path, format!("#!/bin/sh\nprintf '%s' '{output}'\n")).unwrap();
-    let mut perms = std::fs::metadata(path).unwrap().permissions();
-    perms.set_mode(0o755);
-    std::fs::set_permissions(path, perms).unwrap();
+    crate::test_support::write_executable(path, &format!("#!/bin/sh\nprintf '%s' '{output}'\n"));
 }
 
 #[cfg(unix)]

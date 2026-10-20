@@ -39,7 +39,6 @@ fn js_adapter_requirements_do_not_change_the_legacy_runtime_floor() {
 #[cfg(unix)]
 #[test]
 fn configured_runtime_path_and_probe_environment_precede_the_host_environment() {
-    use std::os::unix::fs::PermissionsExt as _;
     let root = tempfile::tempdir().unwrap();
     let bin = root.path().join("custom bin");
     std::fs::create_dir(&bin).unwrap();
@@ -52,8 +51,7 @@ fn configured_runtime_path_and_probe_environment_precede_the_host_environment() 
          [ -z \"${{TEST_RUNTIME_STRIPPED+x}}\" ] || exit 1\nprintf '%s' {}\n",
         shell_words::quote(&identity.to_string())
     );
-    std::fs::write(&node, script).unwrap();
-    std::fs::set_permissions(&node, std::fs::Permissions::from_mode(0o755)).unwrap();
+    crate::test_support::write_executable(&node, &script);
     let env = BTreeMap::from([
         ("PATH".into(), bin.to_string_lossy().into_owned()),
         ("TEST_RUNTIME_ENV".into(), "configured".into()),

@@ -28,6 +28,8 @@ mod prepared;
 pub use prepared::{AdapterCli, PreparedAdapter};
 pub(crate) mod output_highlight;
 pub mod session;
+#[cfg(all(test, unix))]
+mod test_support;
 pub mod wire_log;
 
 pub use agent_client_protocol::schema::v1::SessionId;
