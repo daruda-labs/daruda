@@ -919,7 +919,7 @@ async fn permission_delivery_history_tracks_recipient_and_connection(
             );
         };
 
-    workspace.update(cx, |ws, cx| {
+    let view = workspace.update(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane).cloned().unwrap();
         view.update(cx, |v, cx| add_request(v, cx));
         ws.relay_outstanding_permissions(cx);
@@ -930,18 +930,24 @@ async fn permission_delivery_history_tracks_recipient_and_connection(
                 .perm_id,
             0
         );
+        view
+    });
 
-        // Ordinary reloads keep deduplication; re-pairing allows a fresh offer,
-        // including unpairing and pairing the same chat again.
-        for (recipient, should_send) in [
-            (Some(42), false),
-            (Some(84), true),
-            (None, false),
-            (Some(84), true),
-        ] {
-            config.telegram.authorized_chat_id = recipient;
+    // Ordinary reloads keep deduplication; re-pairing allows a fresh offer,
+    // including unpairing and pairing the same chat again.
+    for (recipient, should_send) in [
+        (Some(42), false),
+        (Some(84), true),
+        (None, false),
+        (Some(84), true),
+    ] {
+        config.telegram.authorized_chat_id = recipient;
+        cx.update(|cx| {
             cx.global_mut::<crate::settings_store::SettingsStore>()
                 .set_user_for_testing(config.clone());
+        });
+        cx.run_until_parked();
+        workspace.update(cx, |ws, cx| {
             ws.apply_config(&config, cx);
             ws.relay_outstanding_permissions(cx);
             assert_eq!(
@@ -951,8 +957,10 @@ async fn permission_delivery_history_tracks_recipient_and_connection(
             );
             ws.relay_outstanding_permissions(cx);
             assert!(outbound.next().now_or_never().is_none());
-        }
+        });
+    }
 
+    workspace.update(cx, |ws, cx| {
         config.telegram.only_when_away = true;
         cx.global_mut::<crate::settings_store::SettingsStore>()
             .set_user_for_testing(config.clone());

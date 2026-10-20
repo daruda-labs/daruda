@@ -415,6 +415,7 @@ pub(crate) fn install_for_test(
         bot,
         cards: RefCell::default(),
     });
+    observe_settings(cx);
     TestOutbox {
         receiver: outbound_rx,
     }
@@ -450,9 +451,16 @@ pub fn install(cx: &mut App) {
         bot: Ownership::Idle,
         cards: RefCell::default(),
     });
+    observe_settings(cx);
 
     spawn_poll_task(cx);
     spawn_send_task(outbound_rx, cx);
+}
+
+fn observe_settings(cx: &mut App) {
+    TelegramBridge::sync_card_owner(cx);
+    cx.observe_global::<SettingsStore>(|cx| TelegramBridge::sync_card_owner(cx))
+        .detach();
 }
 
 /// The plain-text fallback body for `header`/`tail`: verbatim, no escaping

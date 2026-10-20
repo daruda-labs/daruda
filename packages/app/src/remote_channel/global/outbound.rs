@@ -1,7 +1,7 @@
 use super::RemoteChannels;
 use crate::remote_channel::{
     bridge::{InlineKeyboard, MessageTail, Outbound, PaneRef},
-    cards::{CardId, SendClaim},
+    cards::{CardCompletion, CardId, SendClaim},
     runtime::BotSession,
     transport::{self, Message},
 };
@@ -260,17 +260,11 @@ pub(super) fn finish(
     }
     if let Some(card) = &pending.card {
         let receipt = (!receipt.ids.is_empty()).then_some(receipt);
-        if receipt.is_none() && connection.cards.borrow().owns(card) {
+        let completion = connection.cards.borrow_mut().complete(card, receipt);
+        if matches!(completion, CardCompletion::Unconfirmed) {
             connection.core.forget_card(&card.card);
         }
-        let delivered = receipt.is_some() && connection.cards.borrow().is_sending(card);
-        let edit_action = connection.cards.borrow_mut().complete(card, receipt);
-        if delivered && let CardId::Approval(id) = &card.card {
-            crate::control::approval::remote_card_delivered(*id, cx);
-        }
-        if let Some((receipt, label)) = edit_action {
-            edit(receipt, label, cx);
-        }
+        crate::remote_channel::apply_card_completion(&card.card, completion, edit, cx);
     }
 }
 

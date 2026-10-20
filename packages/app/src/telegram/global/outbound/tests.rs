@@ -125,6 +125,50 @@ fn a_retired_card_send_cannot_forget_the_replacements_tokens(cx: &mut gpui::Test
 }
 
 #[gpui::test]
+fn a_duplicate_send_failure_does_not_forget_delivered_card_tokens(cx: &mut gpui::TestAppContext) {
+    cx.update(|cx| {
+        let mut outgoing = install_for_test(true, Some(42), cx);
+        assert!(TelegramBridge::send_approval_card(
+            crate::control::approval::ApprovalId(77),
+            "Create worktree".into(),
+            super::super::Delivery::Explicit,
+            cx,
+        ));
+        let queued = outgoing.receiver.try_recv().unwrap();
+        let Outbound::Approval(prompt) = &queued.outbound else {
+            panic!("approval card");
+        };
+        let token = prompt.buttons[0].1.clone();
+        let prepared = prepare(queued, cx).unwrap();
+        finish(
+            &prepared.bot,
+            prepared.chat_id,
+            prepared.pane,
+            prepared.card.clone(),
+            Some(47),
+            prepared.original.clone(),
+            cx,
+        );
+        finish(
+            &prepared.bot,
+            prepared.chat_id,
+            prepared.pane,
+            prepared.card,
+            None,
+            prepared.original,
+            cx,
+        );
+        assert!(matches!(
+            cx.global_mut::<TelegramBridge>()
+                .core
+                .routing
+                .route_callback(token),
+            crate::remote_channel::bridge::InboundAction::ResolveApproval { .. }
+        ));
+    });
+}
+
+#[gpui::test]
 fn a_fresh_telegram_receipt_extends_the_deadline_but_a_duplicate_does_not(
     cx: &mut gpui::TestAppContext,
 ) {
@@ -229,6 +273,107 @@ fn an_old_telegram_owner_cannot_extend_a_replacement_attempt(cx: &mut gpui::Test
                 .unwrap()
                 .ledger
                 .is_sending(replacement.card.as_ref().unwrap())
+        );
+    });
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(11));
+    cx.run_until_parked();
+    assert_eq!(answer.try_recv(), Ok(ApprovalOutcome::TimedOut));
+}
+
+#[gpui::test]
+fn telegram_settings_changes_retire_cards_without_a_workspace(cx: &mut gpui::TestAppContext) {
+    let claim = cx.update(|cx| {
+        let mut outgoing = install_for_test(true, Some(42), cx);
+        assert!(TelegramBridge::send_approval_card(
+            crate::control::approval::ApprovalId(77),
+            "Create worktree".into(),
+            super::super::Delivery::Explicit,
+            cx,
+        ));
+        prepare(outgoing.receiver.try_recv().unwrap(), cx)
+            .unwrap()
+            .card
+            .unwrap()
+    });
+    cx.update(|cx| {
+        let mut config = SettingsStore::global(cx).user().clone();
+        config.telegram.only_when_away = !config.telegram.only_when_away;
+        cx.global_mut::<SettingsStore>()
+            .set_user_for_testing(config);
+    });
+    cx.run_until_parked();
+    cx.read(|cx| {
+        assert!(
+            cx.global::<TelegramBridge>()
+                .cards
+                .borrow()
+                .as_ref()
+                .unwrap()
+                .ledger
+                .owns(&claim)
+        );
+    });
+    for recipient in [Some(99), None, Some(42)] {
+        cx.update(|cx| {
+            let mut config = SettingsStore::global(cx).user().clone();
+            config.telegram.authorized_chat_id = recipient;
+            cx.global_mut::<SettingsStore>()
+                .set_user_for_testing(config);
+        });
+        cx.run_until_parked();
+        cx.read(|cx| {
+            assert!(
+                cx.global::<TelegramBridge>()
+                    .cards
+                    .borrow()
+                    .as_ref()
+                    .is_none_or(|cards| !cards.ledger.owns(&claim))
+            );
+        });
+    }
+}
+
+#[gpui::test]
+fn a_receipt_from_before_recipient_rotation_cannot_extend_an_approval(
+    cx: &mut gpui::TestAppContext,
+) {
+    use crate::control::approval::{self, ApprovalOutcome};
+
+    let (old, answer) = cx.update(|cx| {
+        let mut outgoing = install_for_test(true, Some(42), cx);
+        cx.set_global(crate::remote_channel::cards::tests::EditCapture::default());
+        let (_, answer) = approval::request(
+            "Create worktree".into(),
+            super::super::Delivery::Explicit,
+            cx,
+        );
+        (
+            prepare(outgoing.receiver.try_recv().unwrap(), cx).unwrap(),
+            answer,
+        )
+    });
+    cx.run_until_parked();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(290));
+    for recipient in [99, 42] {
+        cx.update(|cx| {
+            let mut config = SettingsStore::global(cx).user().clone();
+            config.telegram.authorized_chat_id = Some(recipient);
+            cx.global_mut::<SettingsStore>()
+                .set_user_for_testing(config);
+        });
+        cx.run_until_parked();
+    }
+    cx.update(|cx| {
+        finish(
+            &old.bot,
+            old.chat_id,
+            old.pane,
+            old.card,
+            Some(46),
+            old.original,
+            cx,
         );
     });
     cx.executor()

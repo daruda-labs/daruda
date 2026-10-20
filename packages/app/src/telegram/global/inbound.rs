@@ -334,6 +334,7 @@ async fn claim_bot(
             );
         }
         cx.global_mut::<TelegramBridge>().bot = ownership;
+        TelegramBridge::sync_card_owner(cx);
         result
     })
 }

@@ -1,9 +1,7 @@
 use crate::remote_channel::bridge::{FlowAskPrompt, PermissionDecision};
 use crate::remote_channel::cards::CardId;
-use crate::remote_channel::global::RemoteChannels;
 use crate::runs::{FlowAskOutcome, FlowChange, FlowChanged, RunsHost};
 use crate::surface::strings as s;
-use crate::telegram::global::TelegramBridge;
 use crate::window_registry::WindowRegistry;
 use gpui::App;
 
@@ -54,8 +52,7 @@ pub(super) fn deliver(change: &FlowChange, cx: &mut App) {
                 *submitted_by == daruda_flow::request::StartedBy::Phone || *solicited,
                 crate::app_presence::is_away(cx),
             );
-            RemoteChannels::send_flow_ask(prompt.clone(), delivery, cx);
-            TelegramBridge::send_flow_ask(prompt, delivery, cx);
+            crate::remote_channel::send_flow_ask(prompt, delivery, cx);
             notify_waiting(change, cx);
         }
         FlowChanged::AskClosed {
@@ -77,8 +74,7 @@ pub(super) fn deliver(change: &FlowChange, cx: &mut App) {
                 run_dir: run_dir.clone(),
                 ask_id: *ask_id,
             };
-            RemoteChannels::settle_card(&card, &label, cx);
-            TelegramBridge::settle_card(&card, &label, cx);
+            crate::remote_channel::settle_card(card, &label, cx);
         }
         _ => {}
     }

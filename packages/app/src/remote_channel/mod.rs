@@ -29,9 +29,36 @@ pub(crate) fn send_approval_card(
     global::RemoteChannels::send_approval(id, summary, delivery, cx) || telegram
 }
 
+pub(crate) fn send_flow_ask(
+    prompt: bridge::FlowAskPrompt,
+    delivery: global::Delivery,
+    cx: &gpui::App,
+) -> bool {
+    let telegram =
+        crate::telegram::global::TelegramBridge::send_flow_ask(prompt.clone(), delivery, cx);
+    global::RemoteChannels::send_flow_ask(prompt, delivery, cx) || telegram
+}
+
 pub(crate) fn settle_card(card: cards::CardId, label: &str, cx: &mut gpui::App) {
     crate::telegram::global::TelegramBridge::settle_card(&card, label, cx);
     global::RemoteChannels::settle_card(&card, label, cx);
+}
+
+pub(crate) fn apply_card_completion<Receipt>(
+    card: &cards::CardId,
+    completion: cards::CardCompletion<Receipt>,
+    edit: impl FnOnce(Receipt, String, &mut gpui::App),
+    cx: &mut gpui::App,
+) {
+    match completion {
+        cards::CardCompletion::Delivered => {
+            if let cards::CardId::Approval(id) = card {
+                crate::control::approval::remote_card_delivered(*id, cx);
+            }
+        }
+        cards::CardCompletion::Edit { receipt, label } => edit(receipt, label, cx),
+        cards::CardCompletion::Ignored | cards::CardCompletion::Unconfirmed => {}
+    }
 }
 
 pub(crate) fn settle_permissions(pane: bridge::PaneRef, session: u64, cx: &mut gpui::App) {
@@ -125,3 +152,6 @@ pub(crate) fn log_error(message: &str, error: &dyn std::fmt::Display, dedup: &st
             .build(),
     );
 }
+
+#[cfg(test)]
+mod tests;

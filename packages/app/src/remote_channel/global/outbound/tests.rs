@@ -229,6 +229,42 @@ fn a_retired_card_send_cannot_forget_the_replacements_tokens(cx: &mut gpui::Test
 }
 
 #[gpui::test]
+fn a_duplicate_send_failure_does_not_forget_delivered_card_tokens(cx: &mut gpui::TestAppContext) {
+    cx.update(|cx| {
+        let mut outgoing = crate::remote_channel::global::tests::setup(cx);
+        assert!(RemoteChannels::send_approval(
+            approval::ApprovalId(77),
+            "Create worktree".into(),
+            Delivery::Explicit,
+            cx,
+        ));
+        let pending = outgoing.try_recv().unwrap();
+        let prepared = prepare(&pending, cx).unwrap();
+        let Outbound::Approval(prompt) = &pending.outbound else {
+            panic!("approval card");
+        };
+        let token = prompt.buttons[0].1.clone();
+        finish(
+            &pending,
+            prepared.pane,
+            vec!["message".into()],
+            prepared.original.clone(),
+            cx,
+        );
+        finish(&pending, prepared.pane, vec![], prepared.original, cx);
+        assert!(matches!(
+            cx.global_mut::<RemoteChannels>()
+                .connections
+                .get_mut(&pending.id)
+                .unwrap()
+                .core
+                .route_callback(token),
+            crate::remote_channel::bridge::InboundAction::ResolveApproval { .. }
+        ));
+    });
+}
+
+#[gpui::test]
 fn a_fresh_remote_receipt_extends_the_deadline_but_a_duplicate_does_not(
     cx: &mut gpui::TestAppContext,
 ) {

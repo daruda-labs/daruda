@@ -8,7 +8,7 @@ use gpui::App;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 
-use crate::remote_channel::cards::{CardId, CardLedger, SendClaim};
+use crate::remote_channel::cards::{CardCompletion, CardId, CardLedger, SendClaim};
 use crate::settings_store::SettingsStore;
 use crate::telegram::bridge::{Outbound, OutboundMsg, PaneRef};
 use crate::telegram::{client, keychain, trace};
@@ -285,7 +285,7 @@ impl TelegramBridge {
         std::cell::RefMut::map(slot, |slot| &mut slot.as_mut().unwrap().ledger)
     }
 
-    pub(crate) fn sync_card_owner(cx: &App) {
+    pub(super) fn sync_card_owner(cx: &App) {
         let Some(bridge) = cx.try_global::<Self>() else {
             return;
         };
@@ -362,32 +362,17 @@ fn finish(
             message_id,
             original,
         });
-        if receipt.is_none()
-            && bridge
-                .cards
-                .borrow()
-                .as_ref()
-                .is_some_and(|cards| cards.ledger.owns(&card))
-        {
-            bridge.core.routing.forget_card(&card.card);
-        }
-        let delivered = receipt.is_some()
-            && bridge
-                .cards
-                .borrow()
-                .as_ref()
-                .is_some_and(|cards| cards.ledger.is_sending(&card));
-        let edit_action = bridge
+        let completion = bridge
             .cards
             .borrow_mut()
             .as_mut()
-            .and_then(|cards| cards.ledger.complete(&card, receipt));
-        if delivered && let CardId::Approval(id) = &card.card {
-            crate::control::approval::remote_card_delivered(*id, cx);
+            .map_or(CardCompletion::Ignored, |cards| {
+                cards.ledger.complete(&card, receipt)
+            });
+        if matches!(completion, CardCompletion::Unconfirmed) {
+            bridge.core.routing.forget_card(&card.card);
         }
-        if let Some((receipt, label)) = edit_action {
-            edit(receipt, label, cx);
-        }
+        crate::remote_channel::apply_card_completion(&card.card, completion, edit, cx);
     }
 }
 

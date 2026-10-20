@@ -149,6 +149,11 @@ the same slash-command and clear handling. A solicited chat announcement
 selects the chat and records its ping. An unsolicited announcement is a Notice,
 which changes neither selection nor reply-to/last-ping routing.
 
+The remote-channel facade fans out Flow questions and card settlement across
+Telegram, Slack and Discord. Telegram observes settings at process scope and
+reconciles card ownership when bot ownership changes; Workspace only updates
+its pane-local permission presentation.
+
 `control/approval` owns the process-wide pending decision. The orchestrator's
 host-owned card strip remains answerable without a remote channel. Desktop and
 eligible remote cards share the first answer; settlement edits remote cards
@@ -160,6 +165,11 @@ seconds. A 15-second presence pump offers each outstanding approval once to
 each owner/channel that has never queued it. Timeout means no answer, never
 consent or permission to retry or bypass the gate. Remote card ledgers retain
 settlement while a send is in flight, then edit its returned message ids.
+The ledger classifies send completion as ignored, delivered, unconfirmed or
+requiring an edit. The common coordinator extends approval deadlines only for
+a fresh delivery. Duplicate or retired completions neither extend deadlines nor
+discard current buttons. Transports keep their own receipts, token cleanup and
+message-edit implementations.
 
 `permission = ask` flows can start through control; profile selection is still
 refused. Runtime questions appear in desktop modals or inline flow rows and on

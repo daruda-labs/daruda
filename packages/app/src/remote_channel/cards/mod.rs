@@ -27,6 +27,14 @@ pub(crate) struct CardLedger<Receipt> {
     cards: HashMap<CardId, Entry<Receipt>>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum CardCompletion<Receipt> {
+    Ignored,
+    Delivered,
+    Unconfirmed,
+    Edit { receipt: Receipt, label: String },
+}
+
 struct Entry<Receipt> {
     attempt: uuid::Uuid,
     state: SendState<Receipt>,
@@ -85,6 +93,7 @@ impl<Receipt> CardLedger<Receipt> {
             .is_some_and(|entry| entry.attempt == claim.attempt)
     }
 
+    #[cfg(test)]
     pub(crate) fn is_sending(&self, claim: &SendClaim) -> bool {
         self.cards.get(&claim.card).is_some_and(|entry| {
             entry.attempt == claim.attempt && matches!(entry.state, SendState::Sending)
@@ -104,21 +113,35 @@ impl<Receipt> CardLedger<Receipt> {
         &mut self,
         claim: &SendClaim,
         receipt: Option<Receipt>,
-    ) -> Option<(Receipt, String)> {
+    ) -> CardCompletion<Receipt> {
         if !self.owns(claim) {
-            return None;
+            return CardCompletion::Ignored;
         }
-        let mut entry = self.cards.remove(&claim.card)?;
+        let Some(mut entry) = self.cards.remove(&claim.card) else {
+            return CardCompletion::Ignored;
+        };
         match entry.state {
-            SendState::Settled(label) => receipt.map(|receipt| (receipt, label)),
+            SendState::Settled(label) => match receipt {
+                Some(receipt) => CardCompletion::Edit { receipt, label },
+                None => CardCompletion::Unconfirmed,
+            },
             SendState::Sending => {
-                entry.state = receipt.map_or(SendState::Attempted, SendState::Sent);
+                let completion = match receipt {
+                    Some(receipt) => {
+                        entry.state = SendState::Sent(receipt);
+                        CardCompletion::Delivered
+                    }
+                    None => {
+                        entry.state = SendState::Attempted;
+                        CardCompletion::Unconfirmed
+                    }
+                };
                 self.cards.insert(claim.card.clone(), entry);
-                None
+                completion
             }
             _ => {
                 self.cards.insert(claim.card.clone(), entry);
-                None
+                CardCompletion::Ignored
             }
         }
     }
