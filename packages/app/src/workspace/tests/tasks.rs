@@ -560,3 +560,110 @@ fn focusing_a_task_lane_crosses_projects(cx: &mut TestAppContext) {
     })
     .unwrap();
 }
+
+/// Start an Agent-chat task as a new worktree from `started_by`, with the
+/// orchestrator's tab shown, and report the window before and after.
+fn start_new_worktree_task(
+    started_by: daruda_store::tasks::StartedBy,
+    cx: &mut TestAppContext,
+) -> Option<NewWorktreeStart> {
+    if !crate::lane::git::has_git() {
+        return None;
+    }
+    let temp = tempfile::tempdir().unwrap();
+    git_repo(temp.path());
+    let (window, ws) = super::build_workspace_with(
+        cx,
+        &daruda_config::Config::default(),
+        Some(daruda_store::project::Project::from_path(temp.path())),
+    );
+    ws.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
+    cx.run_until_parked();
+    let probes = cx.update(super::Workspace::fake_agent_connections_for_test);
+    let (task_id, before, orchestrator, rx) = cx
+        .update_window(window.into(), |_, window, cx| {
+            ws.update(cx, |ws, cx| {
+                let orchestrator = ws
+                    .seed_orchestrator_chat_pane_unrevealed_for_test(
+                        ws.mirrors.agents[0].id.clone(),
+                        std::env::temp_dir(),
+                        daruda_store::accounts::AccountSelection::SystemDefault,
+                        None,
+                        window,
+                        cx,
+                    )
+                    .unwrap();
+                assert!(ws.show_orchestrator_tab(window, cx));
+                let mut task = crate::runs::seed::spec(ws.projects[0].uuid, "Elsewhere");
+                task.agent_surface = TaskAgentSurface::AgentChat;
+                let id = crate::runs::seed::task(task, None, cx);
+                let rx = ws.begin_task_start(&id, started_by, window, cx);
+                (id, ws.active, orchestrator, rx)
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+    let started = rx.try_recv().expect("answered").expect("started");
+    let lifecycle = ws.read_with(cx, |_, cx| {
+        cx.global::<GlobalTasks>()
+            .get(&task_id)
+            .unwrap()
+            .lifecycle
+            .clone()
+    });
+    assert!(
+        matches!(lifecycle, Lifecycle::Running { .. }),
+        "{lifecycle:?}"
+    );
+    assert_eq!(probes.borrow().len(), 1, "the task's session connected");
+    Some(ws.read_with(cx, |ws, cx| {
+        let lane = ws.lane_ref_at(&started.worktree).expect("lane registered");
+        let rt = ws.main_area.runtimes.get(&lane).expect("lane runtime");
+        assert!(rt.panes.iter().any(|p| p.id == started.pane));
+        assert_eq!(
+            ws.agent_chat_view(started.pane).unwrap().read(cx).status(),
+            &daruda_chat::view::AgentSessionStatus::Connected,
+        );
+        let active = ws.active_runtime();
+        NewWorktreeStart {
+            before,
+            after: ws.active,
+            lane,
+            orchestrator_in_front: active
+                .tabs
+                .get(active.active_tab_index)
+                .is_some_and(|tab| ws.is_orchestrator_tab(tab))
+                && active.focused_pane_id == orchestrator,
+        }
+    }))
+}
+
+struct NewWorktreeStart {
+    before: daruda_store::project::LaneRef,
+    after: daruda_store::project::LaneRef,
+    lane: daruda_store::project::LaneRef,
+    orchestrator_in_front: bool,
+}
+
+/// A worktree the orchestrator started a task in is made and its chat runs,
+/// but the window stays on the orchestrator's tab the person is using.
+#[gpui::test]
+fn an_orchestrator_started_worktree_does_not_take_the_window(cx: &mut TestAppContext) {
+    let Some(start) = start_new_worktree_task(daruda_store::tasks::StartedBy::Orchestrator, cx)
+    else {
+        return;
+    };
+    assert_ne!(start.lane, start.before);
+    assert_eq!(start.after, start.before, "the active lane stays");
+    assert!(start.orchestrator_in_front);
+}
+
+/// Started from this window's Tasks page, the new worktree is brought up.
+#[gpui::test]
+fn a_desktop_started_worktree_becomes_the_active_lane(cx: &mut TestAppContext) {
+    let Some(start) = start_new_worktree_task(daruda_store::tasks::StartedBy::Desktop, cx) else {
+        return;
+    };
+    assert_eq!(start.after, start.lane);
+    assert!(!start.orchestrator_in_front);
+}

@@ -19,7 +19,7 @@ use gpui::{App, Context, Window};
 
 use crate::runs::{GlobalTasks, RunsHost, TaskCommitError};
 use crate::workspace::Workspace;
-use crate::workspace::lane_ops::CreateWorktreePlan;
+use crate::workspace::lane_ops::{CreateWorktreePlan, LaneReveal};
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_chat::view::AgentSessionStatus;
 
@@ -276,12 +276,13 @@ impl Workspace {
         if task.lifecycle != Lifecycle::Backlog {
             return Err(TaskStartError::NotBacklog);
         }
+        let reveal = reveal_for(started_by);
         // An existing lane needs no git repo, lock or checkout.
         let route = match &task.spec.run_in {
             TaskRunIn::ExistingLane { path } => {
-                StartRoute::Existing(self.prepare_existing_lane_start(path, window, cx)?)
+                StartRoute::Existing(self.prepare_existing_lane_start(path, reveal)?)
             }
-            TaskRunIn::NewWorktree => StartRoute::New(self.prepare_worktree_start(&task)?),
+            TaskRunIn::NewWorktree => StartRoute::New(self.prepare_worktree_start(&task, reveal)?),
         };
         let exec = ExecutionRef {
             task_id: task.id().to_owned(),
@@ -325,6 +326,7 @@ impl Workspace {
     fn prepare_worktree_start(
         &mut self,
         task: &TaskRecord,
+        reveal: LaneReveal,
     ) -> Result<WorktreeStart, TaskStartError> {
         let project_id = self
             .project_by_uuid(task.spec.project)
@@ -357,6 +359,7 @@ impl Workspace {
             plan,
             project_id,
             surface: spec.agent_surface,
+            reveal,
         })
     }
 
@@ -391,6 +394,7 @@ impl Workspace {
             plan,
             project_id,
             surface,
+            reveal,
         } = start;
         let me = cx.weak_entity();
         window
@@ -425,11 +429,12 @@ impl Workspace {
                         let started = result
                             .map_err(|detail| TaskStartError::GitAddFailed { detail })
                             .and_then(|()| {
-                                ws.finalize_create_lane(
+                                ws.finalize_create_lane_as(
                                     plan.clone(),
                                     project_id,
                                     surface,
                                     None,
+                                    reveal,
                                     window,
                                     cx,
                                 )
@@ -510,10 +515,8 @@ impl Workspace {
     /// turn for an Agent chat. Preparation is durable before delivery; only
     /// a successful PTY write or tagged PromptSent records Dispatched.
     ///
-    /// Takes `pane_id` rather than relying on `focused_pane_id` —
-    /// `activate_lane` does call `focus_pane` on the happy path,
-    /// but routing the command through the pane the lane spawned
-    /// is bug-resistant against any future change to focus handling.
+    /// Takes `pane_id` rather than relying on `focused_pane_id`: a start
+    /// asked for elsewhere opens its pane behind the one the window shows.
     pub(super) fn dispatch_claude_for_task(
         &mut self,
         exec: &ExecutionRef,
@@ -687,6 +690,17 @@ struct WorktreeStart {
     plan: CreateWorktreePlan,
     project_id: daruda_store::project::ProjectId,
     surface: TaskAgentSurface,
+    reveal: LaneReveal,
+}
+
+/// Only a start made at this window brings its lane forward. One the phone
+/// or the orchestrator asked for runs behind the view the person is using —
+/// often the orchestrator's own tab, which a lane switch would take down.
+fn reveal_for(started_by: StartedBy) -> LaneReveal {
+    match started_by {
+        StartedBy::Desktop => LaneReveal::Foreground,
+        StartedBy::Phone | StartedBy::Orchestrator => LaneReveal::Background,
+    }
 }
 
 /// Where a recorded start continues.

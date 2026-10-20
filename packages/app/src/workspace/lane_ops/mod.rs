@@ -36,6 +36,18 @@ pub(in crate::workspace) struct CreateWorktreePlan {
     pub session_host: Option<daruda_store::project::LaneSessionHost>,
 }
 
+/// Whether work opened in a lane is brought in front of the person at the
+/// window. Work someone asked for elsewhere — the phone, the orchestrator —
+/// must not move the view they are typing into.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::workspace) enum LaneReveal {
+    /// Activate the lane and focus the new pane.
+    Foreground,
+    /// Leave every lane's active tab and the window's focus as they are.
+    /// The new pane still runs: an Agent chat connects without a focus.
+    Background,
+}
+
 /// Counterpart to `CreateWorktreePlan` for the remove path.
 #[derive(Debug)]
 pub(in crate::workspace) struct RemoveWorktreePlan {

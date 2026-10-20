@@ -204,6 +204,30 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<PaneId, String> {
+        self.finalize_create_lane_as(
+            plan,
+            project_id,
+            surface,
+            requested_agent,
+            super::LaneReveal::Foreground,
+            window,
+            cx,
+        )
+    }
+
+    /// [`Self::finalize_create_lane`], registering the lane behind the one
+    /// the window shows when `reveal` is `Background`.
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::workspace) fn finalize_create_lane_as(
+        &mut self,
+        plan: CreateWorktreePlan,
+        project_id: ProjectId,
+        surface: TaskAgentSurface,
+        requested_agent: Option<&str>,
+        reveal: super::LaneReveal,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<PaneId, String> {
         if self.project_for(project_id).is_none() {
             return Err(crate::surface::strings::create_lane::err_no_active_project());
         }
@@ -217,9 +241,7 @@ impl Workspace {
         } = plan;
         // The initial pane mirrors the requested surface: a terminal
         // (default) or an in-app Agent chat rooted at the new checkout.
-        // The agent-chat pane parks Idle and connects lazily on first
-        // focus — the `activate_lane` below focuses it, starting the ACP
-        // session.
+        // The agent-chat pane parks Idle until it is connected below.
         let pane = match surface {
             TaskAgentSurface::Terminal => {
                 let account = self.default_account_selection_for_new_pane(None);
@@ -299,7 +321,17 @@ impl Workspace {
             focused_pane_id: pane_id,
         };
         self.main_area.runtimes.insert(new_ref, runtime);
-        self.activate_lane(new_ref, window, cx);
+        match reveal {
+            // Focusing the pane is what connects an Agent chat's session.
+            super::LaneReveal::Foreground => self.activate_lane(new_ref, window, cx),
+            super::LaneReveal::Background => {
+                if surface == TaskAgentSurface::AgentChat {
+                    self.maybe_connect_agent_chat(pane_id, cx);
+                }
+                self.mutate_durable(cx, |_, _| {});
+                cx.notify();
+            }
+        }
         self.page_details_follow_projects(window, cx);
         // New cwd → new JSONL dir to watch.
         self.refresh_jsonl_watcher(cx);

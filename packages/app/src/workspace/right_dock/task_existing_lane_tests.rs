@@ -333,3 +333,108 @@ fn retry_that_cannot_start_persists_the_backlog_state(cx: &mut TestAppContext) {
     assert_eq!(state(&id, cx), Lifecycle::Backlog);
     assert!(!daruda_store::tasks::tasks_path_in(&data_dir).exists());
 }
+
+/// The person at the window keeps what they were looking at — the active
+/// lane and its focused pane — while the started task's chat is made in its
+/// own lane and its session still connects.
+#[gpui::test]
+fn a_phone_start_runs_in_its_lane_without_taking_the_window(cx: &mut TestAppContext) {
+    let (_root, window, workspace) = project_workspace(cx);
+    let other = tempfile::tempdir().unwrap();
+    let probes = cx.update(Workspace::fake_agent_connections_for_test);
+    let (id, owner, here, focused, owner_tabs) = cx
+        .update_window(window.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let owner = ws.active;
+                let lane_path = ws.active_lane().unwrap().path.clone();
+                let owner_tabs = ws.active_runtime().tabs.len();
+                ws.add_project(other.path().to_path_buf(), window, cx);
+                let here = ws.active;
+                assert_ne!(here, owner);
+                let focused = ws.active_runtime().focused_pane_id;
+                let id = existing_lane_task(&lane_path, TaskAgentSurface::AgentChat, cx);
+                drop(ws.begin_task_start(&id, daruda_store::tasks::StartedBy::Phone, window, cx));
+                (id, owner, here, focused, owner_tabs)
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+    workspace.read_with(cx, |ws, cx| {
+        assert_eq!(ws.active, here, "the active lane stays");
+        assert_eq!(ws.active_runtime().focused_pane_id, focused);
+        let rt = ws.main_area.runtimes.get(&owner).unwrap();
+        assert_eq!(
+            rt.tabs.len(),
+            owner_tabs + 1,
+            "the task's tab is in its lane"
+        );
+        let pane = rt.tabs.last().unwrap().last_focused_pane;
+        assert_eq!(
+            ws.agent_chat_view(pane).unwrap().read(cx).status(),
+            &daruda_chat::view::AgentSessionStatus::Connected,
+            "its session connects without being shown"
+        );
+    });
+    assert_eq!(probes.borrow().len(), 1);
+    assert!(
+        running_in(&state(&id, cx)).is_some(),
+        "{:?}",
+        state(&id, cx)
+    );
+}
+
+/// Started in the lane the orchestrator's tab is shown in, the task's tab
+/// joins that lane behind it: the person keeps talking to the orchestrator.
+#[gpui::test]
+fn an_orchestrator_start_in_the_shown_lane_keeps_its_tab_in_front(cx: &mut TestAppContext) {
+    let (_root, window, workspace) = project_workspace(cx);
+    let probes = cx.update(Workspace::fake_agent_connections_for_test);
+    let (id, here, orchestrator, tabs) = cx
+        .update_window(window.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let orchestrator = ws
+                    .seed_orchestrator_chat_pane_unrevealed_for_test(
+                        ws.mirrors.agents[0].id.clone(),
+                        std::env::temp_dir(),
+                        daruda_store::accounts::AccountSelection::SystemDefault,
+                        None,
+                        window,
+                        cx,
+                    )
+                    .unwrap();
+                assert!(ws.show_orchestrator_tab(window, cx));
+                let lane_path = ws.active_lane().unwrap().path.clone();
+                let tabs = ws.active_runtime().tabs.len();
+                let id = existing_lane_task(&lane_path, TaskAgentSurface::AgentChat, cx);
+                drop(ws.begin_task_start(
+                    &id,
+                    daruda_store::tasks::StartedBy::Orchestrator,
+                    window,
+                    cx,
+                ));
+                (id, ws.active, orchestrator, tabs)
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+    workspace.read_with(cx, |ws, _| {
+        assert_eq!(ws.active, here);
+        let rt = ws.active_runtime();
+        assert_eq!(rt.tabs.len(), tabs + 1);
+        assert!(
+            ws.is_orchestrator_tab(&rt.tabs[rt.active_tab_index]),
+            "the orchestrator's tab stays in front"
+        );
+        assert_eq!(rt.focused_pane_id, orchestrator);
+    });
+    assert_eq!(
+        probes.borrow().len(),
+        1,
+        "only the task's session connected"
+    );
+    assert!(
+        running_in(&state(&id, cx)).is_some(),
+        "{:?}",
+        state(&id, cx)
+    );
+}

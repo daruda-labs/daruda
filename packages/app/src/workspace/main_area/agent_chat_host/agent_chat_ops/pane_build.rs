@@ -208,7 +208,15 @@ impl Workspace {
     pub(in crate::workspace) fn active_lane_cwds(
         &self,
     ) -> (Option<PathBuf>, Option<String>, Option<LaneSessionHost>) {
-        match self.active_lane() {
+        self.lane_cwds(self.active)
+    }
+
+    /// [`Self::active_lane_cwds`] for any lane, active or not.
+    pub(in crate::workspace) fn lane_cwds(
+        &self,
+        lane: daruda_store::project::LaneRef,
+    ) -> (Option<PathBuf>, Option<String>, Option<LaneSessionHost>) {
+        match self.lane_for(lane) {
             Some(lane) => (
                 Some(lane.path.clone()),
                 lane.remote_cwd.clone(),
