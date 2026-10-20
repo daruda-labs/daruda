@@ -1527,7 +1527,7 @@ control:
   error_lane_create_failed: "워크트리를 만들지 못했습니다. 이유는 daruda에 있습니다."
   error_lane_name_invalid: "쓸 수 없는 브랜치 이름입니다."
   error_approvals_pending: "대기 중인 승인이 너무 많습니다. 먼저 하나에 답해 주세요."
-  error_approval_unavailable: "승인을 요청할 수 없습니다 — Telegram 브리지가 꺼져 있거나 페어링되지 않았습니다."
+  error_approval_unavailable: "승인을 요청할 수 없습니다 — 연결된 원격 채널이 없습니다."
   error_lane_create_busy: "그 저장소에 이미 워크트리를 만들고 있습니다. 잠시 후 다시 시도하세요."
   error_self_target_refused: "에이전트가 자기 자신에게 프롬프트를 보내는 셈이 됩니다."
   approval_task_create: "daruda가 %{project}에 작업 %{title}을(를) 추가하려고 합니다. 허용할까요?"

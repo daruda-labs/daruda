@@ -429,7 +429,7 @@ fn host_workspace(
 }
 
 /// A phone command may create the first workspace, but must not interrupt the
-/// window the person is currently using (for example Settings or Welcome).
+/// window the person is currently using (for example Settings).
 fn orchestrator_host_window_options(config: &daruda_config::Config) -> gpui::WindowOptions {
     let mut options = crate::windows::build_window_options(config);
     options.focus = false;

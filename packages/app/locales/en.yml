@@ -2215,7 +2215,7 @@ control:
   error_lane_create_failed: "The worktree could not be created. daruda has the reason."
   error_lane_name_invalid: "That is not a usable branch name."
   error_approvals_pending: "Too many approvals are already waiting. Answer one first."
-  error_approval_unavailable: "daruda could not ask for approval — the Telegram bridge is off or unpaired."
+  error_approval_unavailable: "daruda could not ask for approval — no remote channel is connected."
   error_lane_create_busy: "A worktree is already being created in that repository. Try again in a moment."
   error_self_target_refused: "That would have the agent prompt itself."
   approval_task_create: "daruda wants to add the task %{title} to %{project}. Allow?"
