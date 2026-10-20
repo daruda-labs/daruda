@@ -105,7 +105,11 @@ impl Workspace {
                     source: view.source().clone(),
                     lane_label: self.lane_label_for(lane).into(),
                     doing: super::flow_runs::describe(view).into(),
-                    asking: view.questions().map(AskRowData::of).collect(),
+                    asking: view
+                        .questions()
+                        .filter(|ask| !ask.is_closed())
+                        .map(AskRowData::of)
+                        .collect(),
                 })
             })
             .collect();

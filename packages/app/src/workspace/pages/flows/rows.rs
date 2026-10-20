@@ -251,7 +251,7 @@ fn run_row(
             .children(
                 live.asking
                     .iter()
-                    .map(|ask| super::live::ask_block(live.lane, ask, snap, cx)),
+                    .map(|ask| super::live::ask_block(live.lane, &live.run_dir, ask, snap, cx)),
             )
             .into_any_element(),
         RunRow::Past(past) => {

@@ -31,8 +31,6 @@ fn callback(update_id: i64, chat_id: i64, callback_id: &str, data: &str) -> Upda
             chat_id,
             callback_id: callback_id.to_string(),
             data: data.to_string(),
-            message_id: update_id,
-            message_text: "prompt".to_string(),
         },
     }
 }
@@ -411,7 +409,7 @@ fn an_approval_token_from_another_process_does_not_resolve() {
     let _ = after.record_pending_approval(ApprovalId(1));
     assert_eq!(
         after.route(callback(1, 42, "cbq-1", &stale)).action.ready(),
-        InboundAction::Ignore
+        InboundAction::StaleApproval
     );
 }
 
@@ -424,7 +422,12 @@ fn the_three_token_namespaces_do_not_collide() {
     let target = pane(1, 3);
     bridge.routing.pending_permissions.insert(
         "abcdef0123456789".to_string(),
-        (target, 55, PermissionDecision::Allow("opt_yes".to_string())),
+        (
+            target,
+            1,
+            55,
+            PermissionDecision::Allow("opt_yes".to_string()),
+        ),
     );
     let (approve, _) = bridge.record_pending_approval(ApprovalId(1));
 
@@ -447,7 +450,12 @@ fn callback_with_known_token_responds_and_consumes_it() {
     let target = pane(1, 3);
     bridge.routing.pending_permissions.insert(
         "tok-a".to_string(),
-        (target, 55, PermissionDecision::Allow("opt_yes".to_string())),
+        (
+            target,
+            1,
+            55,
+            PermissionDecision::Allow("opt_yes".to_string()),
+        ),
     );
 
     let result = bridge.route(callback(1, 1, "cbq-1", "tok-a"));
@@ -455,6 +463,7 @@ fn callback_with_known_token_responds_and_consumes_it() {
         result.action.ready(),
         InboundAction::RespondPermission {
             pane: target,
+            session: 1,
             perm_id: 55,
             decision: PermissionDecision::Allow("opt_yes".to_string()),
         }
@@ -568,6 +577,7 @@ fn build_ping_permission_registers_two_distinct_tokens() {
         header: "Approve this?".to_string(),
         tail: TelegramTail::Plain(String::new()),
         permission: Some(PermissionPromptRef {
+            session: 1,
             perm_id: 7,
             buttons: vec![
                 (
@@ -595,6 +605,7 @@ fn build_ping_permission_registers_two_distinct_tokens() {
         bridge.routing.pending_permissions.get(allow_token),
         Some(&(
             pane(1, 1),
+            1,
             7,
             PermissionDecision::Allow("opt_allow".to_string())
         ))
@@ -603,6 +614,7 @@ fn build_ping_permission_registers_two_distinct_tokens() {
         bridge.routing.pending_permissions.get(reject_token),
         Some(&(
             pane(1, 1),
+            1,
             7,
             PermissionDecision::Reject("opt_reject".to_string())
         ))
@@ -622,6 +634,7 @@ fn build_ping_permission_registers_one_token_per_button_beyond_two() {
         header: "Approve this?".to_string(),
         tail: TelegramTail::Plain(String::new()),
         permission: Some(PermissionPromptRef {
+            session: 1,
             perm_id: 9,
             buttons: vec![
                 (
@@ -670,6 +683,7 @@ fn build_ping_permission_registers_one_token_per_button_beyond_two() {
         bridge.routing.pending_permissions.get(execpolicy_token),
         Some(&(
             pane(1, 1),
+            1,
             9,
             PermissionDecision::Allow("accept_execpolicy_amendment".to_string())
         ))
@@ -680,6 +694,7 @@ fn build_ping_permission_registers_one_token_per_button_beyond_two() {
 fn pending_permissions_bound_evicts_oldest_entries() {
     let mut bridge = BridgeCore::new(true, Some(1), 0);
     let prompt = || PermissionPromptRef {
+        session: 1,
         perm_id: 1,
         buttons: vec![
             (

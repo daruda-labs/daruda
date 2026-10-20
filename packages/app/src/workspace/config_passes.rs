@@ -105,6 +105,9 @@ impl Workspace {
         telegram_recipient_changed: bool,
         cx: &mut Context<Self>,
     ) {
+        if telegram_recipient_changed {
+            crate::telegram::global::TelegramBridge::sync_card_owner(cx);
+        }
         let agent_names = self
             .mirrors
             .agents

@@ -25,8 +25,8 @@ use crate::telegram::bridge::PaneRef;
 use crate::window_registry::WindowRegistry;
 
 /// Why the orchestrator cannot take a prompt. Returned rather than reported:
-/// the caller is answering a phone, and each of these needs its own wording
-/// there. The internal detail behind `OpenFailed` is also logged.
+/// phone and desktop callers choose their own presentation. The internal
+/// detail behind `OpenFailed` is also logged.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum EnsureError {
     /// `[orchestrator] enabled = false`.
@@ -326,8 +326,8 @@ const MCP_NAME_SUFFIX_LEN: usize = 8;
 ///
 /// The ACP handshake is *not* waited on: it is bounded by `daruda_acp`'s own
 /// connect timeout and its outcome arrives as a session event. The caller gets
-/// the pane immediately and the prompt queues behind the connect — which is
-/// what the phone's "accepted" reply already means.
+/// the pane immediately and the prompt queues behind the connect. A phone's
+/// "accepted" reply confirms that handoff, not a completed connection.
 pub(crate) fn ensure(cx: &mut App) -> Result<PaneRef, EnsureError> {
     let Some(prepared) = prepare(cx)? else {
         // Already up: `prepare` answers with the live pane.

@@ -1,5 +1,5 @@
 //! `/flow` from the external control surface: which flows it lists, and the
-//! three refusals that precede a run.
+//! starts and refusals that reach its caller.
 //!
 //! The refusals are what these are really about. A run started from the
 //! desktop reports a problem in a toast; a run started from a phone has no
@@ -38,7 +38,7 @@ fn outcome_reaches_the_phone(
     None
 }
 
-/// A flow that stops to ask a person — the exact shape a phone cannot answer.
+/// A command keeps the Ask agent from launching before the test stops the run.
 const ASKS_A_PERSON: &str = "\
 version: 1
 defaults:
@@ -47,14 +47,34 @@ defaults:
     mode: acceptEdits
     permission: ask
 nodes:
+  - id: wait
+    kind: command
+    run: \"sleep 30\"
   - id: design
     kind: agent
+    deps: [wait]
     output: design.md
     prompt: write a line
 ";
 
-/// A flow that needs no agent and no person: the one shape whose *successful*
-/// start a test can assert without a live ACP session.
+const ASKS_DURING_REPAIR: &str = "\
+version: 1
+defaults:
+  agent:
+    id: claude
+    mode: acceptEdits
+    permission: ask
+nodes:
+  - id: design
+    kind: command
+    run: \"sleep 30\"
+    on_fail:
+      repair:
+        fix: fix it from {{attempts}}
+        max_attempts: 2
+";
+
+/// A flow that needs no agent and no person.
 const COMMAND_ONLY: &str = "\
 version: 1
 nodes:
@@ -167,6 +187,7 @@ async fn an_unknown_flow_name_is_refused(cx: &mut TestAppContext) {
                     ws.active,
                     "nope",
                     daruda_flow::request::StartedBy::Phone,
+                    true,
                     cx
                 ),
                 Err(ControlError::FlowNotFound {
@@ -181,7 +202,7 @@ async fn an_unknown_flow_name_is_refused(cx: &mut TestAppContext) {
 /// A phone should be able to type `deploy`, not `deploy.yaml`.
 #[gpui::test]
 async fn a_name_resolves_with_or_without_its_extension(cx: &mut TestAppContext) {
-    let (_lane, ws, _path, wh) = workspace_with_a_flow(cx, ASKS_A_PERSON);
+    let (_lane, ws, _path, wh) = workspace_with_a_flow(cx, WITH_PROFILES);
     cx.update_window(wh.into(), |_, _, cx| {
         ws.update(cx, |ws, cx| {
             // Both spellings reach the same file, and so hit the same refusal
@@ -192,6 +213,7 @@ async fn a_name_resolves_with_or_without_its_extension(cx: &mut TestAppContext) 
                         ws.active,
                         name,
                         daruda_flow::request::StartedBy::Phone,
+                        true,
                         cx
                     ),
                     Err(ControlError::FlowNeedsInteraction {
@@ -206,30 +228,128 @@ async fn a_name_resolves_with_or_without_its_extension(cx: &mut TestAppContext) 
 }
 
 #[gpui::test]
-async fn a_flow_that_asks_a_person_is_refused_before_it_can_hang(cx: &mut TestAppContext) {
-    let (_lane, ws, _path, wh) = workspace_with_a_flow(cx, ASKS_A_PERSON);
-    cx.update_window(wh.into(), |_, _, cx| {
-        ws.update(cx, |ws, cx| {
-            assert_eq!(
-                ws.control_flow_run(
-                    ws.active,
-                    "ship",
-                    daruda_flow::request::StartedBy::Phone,
-                    cx
-                ),
-                Err(ControlError::FlowNeedsInteraction {
-                    name: "ship.yaml".into()
-                })
-            );
-        });
-    })
-    .expect("window is live");
+async fn an_ask_flow_starts_and_exposes_its_pending_question(cx: &mut TestAppContext) {
+    ask_flow_starts_with_a_question(
+        ASKS_A_PERSON,
+        daruda_flow::runner::AskOwner::Node {
+            node: "design".into(),
+            generation: 0,
+            attempt: 1,
+        },
+        crate::control::exec::CommandOrigin::Orchestrator,
+        cx,
+    )
+    .await;
+}
+
+#[gpui::test]
+async fn an_ask_repair_flow_starts_and_exposes_its_pending_question(cx: &mut TestAppContext) {
+    ask_flow_starts_with_a_question(
+        ASKS_DURING_REPAIR,
+        daruda_flow::runner::AskOwner::Fix {
+            gate: "design".into(),
+        },
+        crate::control::exec::CommandOrigin::Orchestrator,
+        cx,
+    )
+    .await;
+}
+
+#[gpui::test]
+async fn a_direct_phone_ask_flow_stays_outside_the_orchestrator_scope(cx: &mut TestAppContext) {
+    ask_flow_starts_with_a_question(
+        ASKS_A_PERSON,
+        daruda_flow::runner::AskOwner::Node {
+            node: "design".into(),
+            generation: 0,
+            attempt: 1,
+        },
+        crate::control::exec::CommandOrigin::Phone,
+        cx,
+    )
+    .await;
+}
+
+async fn ask_flow_starts_with_a_question(
+    flow: &str,
+    owner: daruda_flow::runner::AskOwner,
+    origin: crate::control::exec::CommandOrigin,
+    cx: &mut TestAppContext,
+) {
+    use crate::control::{
+        exec,
+        result::{ControlResult, LaneHandle, StopDisposition},
+        spec::{ResolvedCommand, ResolvedFlowCommand},
+    };
+    use crate::runs::{
+        RunsHost,
+        result::{RunKey, RunState, WaitingOn},
+    };
+
+    cx.executor().allow_parking();
+    let (lane, ws, _path, _wh) = workspace_with_a_flow(cx, flow);
+    let target = ws.read_with(cx, |ws, _| LaneHandle::new(ws.uuid(), ws.active));
+    let started = cx.update(|cx| {
+        exec::run(
+            ResolvedCommand::Flow(ResolvedFlowCommand::Run {
+                name: "ship".into(),
+                lane: target,
+            }),
+            origin,
+            cx,
+        )
+    });
+    let ControlResult::FlowStarting { handle, name, .. } = started.expect("Ask flow starts") else {
+        panic!("flow start response");
+    };
+    let daruda_control_types::runs::RunHandle::Flow { run_id } = handle else {
+        panic!("flow handle");
+    };
+    let key = RunKey::Flow(run_id.clone());
+    let run_dir = flow_paths::runs_dir(lane.path()).join(run_id);
+    let (reply, answer) = smol::channel::bounded(1);
+    let mut pending = question(1, "design", reply);
+    pending.owner = owner;
+    let (snapshot, scope) = cx.update(|cx| {
+        RunsHost::park_flow_ask(lane.path(), &run_dir, pending, cx);
+        (
+            RunsHost::run_query(key.clone(), cx).read(),
+            RunsHost::run_scope(cx),
+        )
+    });
+    let (stopped, joined) = ws.update(cx, |ws, cx| {
+        let stopped = ws.control_flow_stop(ws.active, None, cx);
+        let joined = RunsHost::wait_flows_ended(std::time::Instant::now() + RUN_PATIENCE, cx);
+        (stopped, joined)
+    });
+    assert!(
+        wait_for_run(cx, |cx| !run_is_held(cx, lane.path())).await,
+        "the Ask flow did not stop"
+    );
+
+    assert_eq!(stopped, Ok(StopDisposition::Stopped));
+    assert!(joined, "the stopped Ask flow's thread did not return");
+    assert!(answer.is_closed(), "Stop withdraws the pending question");
+    assert_eq!(name, "ship.yaml");
+    assert!(matches!(
+        snapshot.state,
+        RunState::Running {
+            waiting_on: Some(WaitingOn::Question { node }),
+            ..
+        } if node == "design"
+    ));
+    let expected_scope = match origin {
+        exec::CommandOrigin::Orchestrator => vec![key],
+        exec::CommandOrigin::Phone => Vec::new(),
+    };
+    assert_eq!(scope, expected_scope);
+    ws.read_with(cx, |ws, _| assert!(!ws.overlays.flow_picker.is_open()));
 }
 
 /// A file declaring profiles opens the picker's second question, which is a
 /// desktop dialog like any other.
 #[gpui::test]
-async fn a_flow_declaring_profiles_is_refused_for_the_same_reason(cx: &mut TestAppContext) {
+async fn a_flow_declaring_profiles_is_refused_before_desktop_selection(cx: &mut TestAppContext) {
     let (_lane, ws, _path, wh) = workspace_with_a_flow(cx, WITH_PROFILES);
     cx.update_window(wh.into(), |_, _, cx| {
         ws.update(cx, |ws, cx| {
@@ -238,6 +358,7 @@ async fn a_flow_declaring_profiles_is_refused_for_the_same_reason(cx: &mut TestA
                     ws.active,
                     "ship",
                     daruda_flow::request::StartedBy::Phone,
+                    true,
                     cx
                 ),
                 Err(ControlError::FlowNeedsInteraction {
@@ -261,6 +382,7 @@ async fn a_flow_that_will_not_run_is_answered_not_reported_as_started(cx: &mut T
                     ws.active,
                     "ship",
                     daruda_flow::request::StartedBy::Phone,
+                    true,
                     cx
                 ),
                 Err(ControlError::FlowRefused {
@@ -293,8 +415,7 @@ async fn running_a_flow_without_an_active_lane_is_refused(cx: &mut TestAppContex
 
 /// The headline path, and the one every refusal test above is the negative of:
 /// a runnable flow is dispatched, is reported under the file that resolved,
-/// and — the invariant the whole `needs_desktop_answer` / profile machinery
-/// exists for — raises no desktop dialog on the way.
+/// and raises no desktop dialog on the way.
 #[gpui::test]
 async fn a_runnable_flow_starts_and_names_the_file_that_ran(cx: &mut TestAppContext) {
     // Really starts a run, so the engine wakes the app from its own thread —
@@ -308,6 +429,7 @@ async fn a_runnable_flow_starts_and_names_the_file_that_ran(cx: &mut TestAppCont
                     ws.active,
                     "ship",
                     daruda_flow::request::StartedBy::Phone,
+                    true,
                     cx,
                 )
                 .expect("a command-only flow needs neither an agent nor a person");
@@ -340,6 +462,7 @@ async fn a_lane_already_running_a_flow_refuses_the_next(cx: &mut TestAppContext)
                     ws.active,
                     "ship",
                     daruda_flow::request::StartedBy::Phone,
+                    true,
                     cx
                 ),
                 Err(ControlError::FlowLocked {
@@ -373,7 +496,13 @@ async fn a_flow_runs_in_the_named_worktree_not_the_active_one(cx: &mut TestAppCo
             assert_ne!(other, active, "the fixture must give two worktrees");
             // The worktree on screen does not hold it...
             assert_eq!(
-                ws.control_flow_run(active, "deploy", daruda_flow::request::StartedBy::Phone, cx),
+                ws.control_flow_run(
+                    active,
+                    "deploy",
+                    daruda_flow::request::StartedBy::Phone,
+                    true,
+                    cx
+                ),
                 Err(ControlError::FlowNotFound {
                     name: "deploy".into()
                 }),
@@ -381,7 +510,13 @@ async fn a_flow_runs_in_the_named_worktree_not_the_active_one(cx: &mut TestAppCo
             );
             // ...and the one that does runs it, and says so.
             let entry = ws
-                .control_flow_run(other, "deploy", daruda_flow::request::StartedBy::Phone, cx)
+                .control_flow_run(
+                    other,
+                    "deploy",
+                    daruda_flow::request::StartedBy::Phone,
+                    true,
+                    cx,
+                )
                 .expect("the named worktree holds it");
             assert_eq!(entry.entry.name, "deploy.yaml");
             assert_eq!(entry.entry.lane.lane_ref(), other, "ran where it was told");
@@ -407,7 +542,13 @@ async fn a_worktree_that_is_gone_is_not_reported_as_a_missing_flow(cx: &mut Test
                 lane: ws.active.lane + 9,
             };
             assert_eq!(
-                ws.control_flow_run(gone, "ship", daruda_flow::request::StartedBy::Phone, cx),
+                ws.control_flow_run(
+                    gone,
+                    "ship",
+                    daruda_flow::request::StartedBy::Phone,
+                    true,
+                    cx
+                ),
                 Err(ControlError::TargetGone)
             );
         });
@@ -427,7 +568,13 @@ async fn a_named_worktree_already_running_refuses_without_a_dialog(cx: &mut Test
         ws.update(cx, |ws, cx| {
             ws.seed_flow_run_for_test(other, std::path::PathBuf::from("/tmp/seeded-elsewhere"), cx);
             assert_eq!(
-                ws.control_flow_run(other, "deploy", daruda_flow::request::StartedBy::Phone, cx),
+                ws.control_flow_run(
+                    other,
+                    "deploy",
+                    daruda_flow::request::StartedBy::Phone,
+                    true,
+                    cx
+                ),
                 Err(ControlError::FlowLocked {
                     name: "deploy.yaml".into(),
                     held_by: Some("flow:seeded-elsewhere".parse().unwrap()),
@@ -689,7 +836,10 @@ async fn the_stop_prompt_stops_the_run_it_was_raised_for(cx: &mut TestAppContext
 
             // Raised for `other`, answered with Enter.
             ws.overlays.flow_picker =
-                crate::workspace::command::flow_picker::FlowPicker::Stopping { lane: other };
+                crate::workspace::command::flow_picker::FlowPicker::Stopping {
+                    lane: other,
+                    run_dir: runs.join("run-elsewhere"),
+                };
             ws.execute_flow_picker_selection(window, cx);
 
             let canceled = stopping(ws, [active, other], cx);
@@ -789,7 +939,7 @@ async fn a_phone_started_run_reports_its_outcome_back(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-async fn an_orchestrator_started_run_records_its_origin_and_keeps_phone_notice(
+async fn an_orchestrator_started_run_records_its_origin_without_a_direct_phone_notice(
     cx: &mut TestAppContext,
 ) {
     started_run_reports_its_outcome(crate::control::exec::CommandOrigin::Orchestrator, cx).await;
@@ -819,7 +969,7 @@ async fn started_run_reports_its_outcome(
     let run_id = cx
         .update_window(wh.into(), |_, _, cx| {
             ws.update(cx, |ws, cx| {
-                ws.control_flow_run(ws.active, "ship", origin.flow_started_by(), cx)
+                ws.control_flow_run(ws.active, "ship", origin.flow_started_by(), true, cx)
                     .expect("dispatched")
                     .run_id
             })
@@ -828,13 +978,17 @@ async fn started_run_reports_its_outcome(
 
     // The *real* engine and the *real* event pump produce the outcome — the
     // flow is `run: "true"`, so it finishes on its own.
-    let sent = outcome_reaches_the_phone(&mut outbound, cx).expect("the outcome reaches the phone");
+    let sent = outcome_reaches_the_phone(&mut outbound, cx);
     let run_dir = crate::workspace::flow_paths::runs_dir(lane.path()).join(run_id);
     assert_eq!(
         daruda_flow::run_log::reader::read(&run_dir).started_by,
         Some(origin.flow_started_by())
     );
-    match sent {
+    if origin == crate::control::exec::CommandOrigin::Orchestrator {
+        assert!(sent.is_none());
+        return;
+    }
+    match sent.expect("the direct phone caller receives its outcome") {
         crate::telegram::bridge::Outbound::Notice(text) => {
             assert_eq!(
                 text,
@@ -844,6 +998,9 @@ async fn started_run_reports_its_outcome(
         // A ping would register a reply-to, so answering "flow finished" would
         // prompt whichever agent spoke last.
         crate::telegram::bridge::Outbound::Approval(prompt) => {
+            panic!("a flow outcome asks nothing: {prompt:?}")
+        }
+        crate::telegram::bridge::Outbound::FlowAsk(prompt) => {
             panic!("a flow outcome asks nothing: {prompt:?}")
         }
         crate::telegram::bridge::Outbound::Ping(ping) => {
@@ -899,6 +1056,7 @@ async fn a_cancelled_phone_started_run_still_reports_back(cx: &mut TestAppContex
                 ws.active,
                 "ship",
                 daruda_flow::request::StartedBy::Phone,
+                true,
                 cx,
             )
             .expect("dispatched");
@@ -963,6 +1121,37 @@ async fn a_phone_started_run_answers_with_no_window_open(cx: &mut TestAppContext
         outbound.next().now_or_never().flatten().is_none(),
         "the phone was answered more than once"
     );
+}
+
+#[gpui::test]
+fn an_orchestrator_flow_end_has_no_direct_phone_notice(cx: &mut TestAppContext) {
+    let mut outbound =
+        cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
+    let lane = tempfile::tempdir().unwrap();
+    let run_dir = lane.path().join("orchestrator-run");
+    cx.update(|cx| {
+        crate::runs::RunsHost::ensure_installed(cx);
+        Workspace::install_task_effects(cx);
+        crate::runs::RunsHost::seed_flow_run_submitted_by(
+            lane.path().to_path_buf(),
+            crate::runs::RunView::new(
+                run_dir.clone(),
+                crate::runs::FlowSource::Resumed { run_dir },
+                Vec::new(),
+            ),
+            daruda_flow::request::StartedBy::Orchestrator,
+            cx,
+        );
+        crate::runs::RunsHost::apply_flow_event_for_test(
+            lane.path(),
+            &daruda_flow::event::FlowEvent::RunEnded {
+                end: daruda_flow::event::RunEnd::Done,
+            },
+            cx,
+        );
+    });
+    cx.run_until_parked();
+    assert!(outbound.next().now_or_never().flatten().is_none());
 }
 
 /// Whether each of `lanes`' runs has been told to stop.
@@ -1158,6 +1347,7 @@ async fn a_worktree_held_by_another_process_names_its_run(cx: &mut TestAppContex
                 ws.active,
                 "ship",
                 daruda_flow::request::StartedBy::Phone,
+                true,
                 cx
             ),
             Err(ControlError::FlowLocked {
@@ -1189,9 +1379,15 @@ async fn a_stop_with_an_ended_runs_handle_leaves_the_next_run_to_finish(cx: &mut
     .expect("write the second flow");
     let start = |name: &'static str, ws: &gpui::Entity<Workspace>, cx: &mut TestAppContext| {
         ws.update(cx, |ws, cx| {
-            ws.control_flow_run(ws.active, name, daruda_flow::request::StartedBy::Phone, cx)
-                .expect("dispatched")
-                .run_id
+            ws.control_flow_run(
+                ws.active,
+                name,
+                daruda_flow::request::StartedBy::Phone,
+                true,
+                cx,
+            )
+            .expect("dispatched")
+            .run_id
         })
     };
 
@@ -1294,7 +1490,7 @@ async fn a_start_that_finds_a_run_held_is_refused_typed_without_a_dialog(cx: &mu
             &flow_path,
             None,
             &crate::workspace::flow_request::FlowSelection::default(),
-            daruda_flow::request::StartedBy::Phone,
+            (daruda_flow::request::StartedBy::Phone, true),
             cx,
         );
         assert!(
@@ -1332,6 +1528,7 @@ async fn a_refused_start_tells_the_control_caller_why(cx: &mut TestAppContext) {
             ws.active,
             "ship",
             daruda_flow::request::StartedBy::Phone,
+            true,
             cx,
         );
         match refused {
@@ -1370,6 +1567,7 @@ async fn a_desktop_resume_of_a_phone_started_run_stays_off_the_phone(cx: &mut Te
             ws.active,
             "ship",
             daruda_flow::request::StartedBy::Phone,
+            true,
             cx,
         )
         .expect("dispatched")

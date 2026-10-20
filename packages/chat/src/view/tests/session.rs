@@ -524,6 +524,124 @@ fn mode_state_updates_replace_and_survive_config_refresh(cx: &mut gpui::TestAppC
 // Permission requests: routing a resolution by id and draining on Stop.
 
 #[gpui::test]
+fn permission_settlements_notify_the_host_once_per_request(cx: &mut gpui::TestAppContext) {
+    use crate::view::{AgentChatEvent, PermissionOutcome};
+    use std::{cell::RefCell, rc::Rc};
+    let window = make_test_view(cx);
+    let view = window.root(cx).unwrap();
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let observed = events.clone();
+    cx.update(|cx| {
+        cx.subscribe(&view, move |_, event: &AgentChatEvent, _| {
+            if let AgentChatEvent::PermissionSettled {
+                session,
+                request_id,
+                outcome,
+            } = event
+            {
+                observed
+                    .borrow_mut()
+                    .push((*session, *request_id, *outcome));
+            }
+        })
+        .detach();
+    });
+    view.update(cx, |view, cx| {
+        view.items = vec![permission_card(1), permission_card(2), permission_card(3)];
+        view.pending_permissions.extend([1, 2, 3]);
+        view.respond_permission(
+            1,
+            "allow_once".into(),
+            daruda_acp::PermissionKindView::AllowOnce,
+            cx,
+        );
+        view.respond_permission(
+            1,
+            "reject_once".into(),
+            daruda_acp::PermissionKindView::RejectOnce,
+            cx,
+        );
+    });
+    let session = view.read_with(cx, |view, _| view.permission_session());
+    assert_eq!(*events.borrow(), [(session, 1, PermissionOutcome::Allowed)]);
+    view.update(cx, |view, cx| view.cancel_turn(cx));
+    assert_eq!(
+        events.borrow().len(),
+        3,
+        "Stop owes a settlement for every remaining request"
+    );
+    view.update(cx, |view, cx| view.cancel_turn(cx));
+    assert_eq!(events.borrow().len(), 3, "settling again emits nothing");
+    let mut cancelled: Vec<_> = events
+        .borrow()
+        .iter()
+        .filter(|(_, _, outcome)| *outcome == PermissionOutcome::Cancelled)
+        .copied()
+        .collect();
+    cancelled.sort_by_key(|(_, request, _)| *request);
+    assert_eq!(
+        cancelled,
+        [
+            (session, 2, PermissionOutcome::Cancelled),
+            (session, 3, PermissionOutcome::Cancelled)
+        ]
+    );
+}
+
+#[gpui::test]
+fn replacing_a_session_cancels_the_old_scope_before_request_ids_can_repeat(
+    cx: &mut gpui::TestAppContext,
+) {
+    use crate::view::{AgentChatEvent, PermissionOutcome};
+    use std::{cell::RefCell, rc::Rc};
+    let window = make_test_view(cx);
+    let view = window.root(cx).unwrap();
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let observed = events.clone();
+    cx.update(|cx| {
+        cx.subscribe(&view, move |_, event: &AgentChatEvent, _| {
+            if let AgentChatEvent::PermissionSettled {
+                session,
+                request_id,
+                outcome,
+            } = event
+            {
+                observed
+                    .borrow_mut()
+                    .push((*session, *request_id, *outcome));
+            }
+        })
+        .detach();
+    });
+    let old = view.update(cx, |view, cx| {
+        view.items = vec![permission_card(0)];
+        view.pending_permissions.insert(0);
+        let old = view.permission_session();
+        view.reset_for_new_session(cx);
+        old
+    });
+    let new = view.update(cx, |view, cx| {
+        view.items = vec![permission_card(0)];
+        view.pending_permissions.insert(0);
+        view.respond_permission(
+            0,
+            "reject_once".into(),
+            daruda_acp::PermissionKindView::RejectOnce,
+            cx,
+        );
+        view.permission_session()
+    });
+    assert_ne!(old, new);
+    assert_eq!(
+        *events.borrow(),
+        [
+            (old, 0, PermissionOutcome::Cancelled),
+            (new, 0, PermissionOutcome::Rejected)
+        ]
+    );
+}
+
+#[gpui::test]
 fn permission_resolution_routes_by_id_reprojects_and_cancel_drains(cx: &mut gpui::TestAppContext) {
     use daruda_acp::{ChatItem, PermissionKindView, PermissionResolution, ToolStatusView};
 

@@ -23,6 +23,26 @@ fn produce(id: &str, cx: &mut gpui::App) {
     RunsHost::seed_run_wait(snapshot, cx);
 }
 
+#[gpui::test]
+fn a_batch_is_solicited_if_any_eligible_episode_was_solicited(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        RunsHost::ensure_installed(cx);
+        produce("desktop", cx);
+        let snapshot = ended("phone");
+        RunsHost::register_run_solicited(snapshot.key.clone(), true, cx);
+        RunsHost::seed_run_wait(snapshot, cx);
+        let mixed = batch(audience(1, None), cx).unwrap();
+        assert!(mixed.solicited);
+        assert_eq!(mixed.episodes.len(), 2);
+        let (wait, _) =
+            RunsHost::open_run_wait(Some(vec![RunKey::Flow("phone".into())]), cx).unwrap();
+        let desktop = batch(audience(1, None), cx).unwrap();
+        assert!(!desktop.solicited);
+        assert_eq!(desktop.episodes.len(), 1);
+        RunsHost::finish_run_wait(wait, false, cx);
+    });
+}
+
 fn blocked(id: &str, waiting_on: WaitingOn) -> RunSnapshot {
     RunSnapshot {
         key: RunKey::Flow(id.into()),

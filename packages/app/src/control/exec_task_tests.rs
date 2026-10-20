@@ -8,19 +8,20 @@ use daruda_store::tasks::{Lifecycle, TaskRunIn};
 use gpui::BorrowAppContext as _;
 
 /// A bridge that can deliver an approval card, so a gated command waits.
-fn pair_bridge(cx: &mut gpui::App) {
+fn pair_bridge(cx: &mut gpui::App) -> crate::telegram::global::TestOutbox {
     crate::settings_store::SettingsStore::init(cx);
-    crate::telegram::global::install_for_test(true, Some(42), cx);
+    let outbound = crate::telegram::global::install_for_test(true, Some(42), cx);
     cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
         store.set_user_for_testing(daruda_config::Config {
             telegram: daruda_config::TelegramConfig {
                 enabled: true,
                 authorized_chat_id: Some(42),
-                ..Default::default()
+                only_when_away: false,
             },
             ..daruda_config::Config::default()
         });
     });
+    outbound
 }
 
 fn project_of(
@@ -66,8 +67,8 @@ async fn the_listing_groups_by_project_and_ends_with_closed_ones(cx: &mut gpui::
 async fn an_empty_title_refuses_before_the_card(cx: &mut gpui::TestAppContext) {
     let fixture = workspace_with_agent_chat(cx);
     let (_, project) = project_of(&fixture, cx);
+    let _outbound = cx.update(pair_bridge);
     cx.update(|cx| {
-        pair_bridge(cx);
         let outcome = ready(run_gated(
             GatedCommand::TaskCreate {
                 workspace: project.workspace,
@@ -89,8 +90,8 @@ async fn an_empty_title_refuses_before_the_card(cx: &mut gpui::TestAppContext) {
 async fn an_approved_create_adds_a_backlog_task_to_that_project(cx: &mut gpui::TestAppContext) {
     let fixture = workspace_with_agent_chat(cx);
     let (uuid, project) = project_of(&fixture, cx);
+    let _outbound = cx.update(pair_bridge);
     let dispatch = cx.update(|cx| {
-        pair_bridge(cx);
         run_gated(
             GatedCommand::TaskCreate {
                 workspace: project.workspace,
@@ -126,8 +127,8 @@ async fn an_approved_create_adds_a_backlog_task_to_that_project(cx: &mut gpui::T
 async fn a_start_in_a_closed_project_refuses_before_the_card(cx: &mut gpui::TestAppContext) {
     let _fixture = workspace_with_agent_chat(cx);
     let task = add_task(ProjectUuid::new(), "closed", cx);
+    let _outbound = cx.update(pair_bridge);
     cx.update(|cx| {
-        pair_bridge(cx);
         let outcome = ready(run_gated(
             GatedCommand::TaskStart { task },
             crate::control::exec::CommandOrigin::Orchestrator,
@@ -145,8 +146,8 @@ async fn a_refused_start_runs_nothing(cx: &mut gpui::TestAppContext) {
     let fixture = workspace_with_agent_chat(cx);
     let (uuid, _) = project_of(&fixture, cx);
     let task = add_task(uuid, "t", cx);
+    let _outbound = cx.update(pair_bridge);
     let dispatch = cx.update(|cx| {
-        pair_bridge(cx);
         run_gated(
             GatedCommand::TaskStart { task: task.clone() },
             crate::control::exec::CommandOrigin::Orchestrator,
@@ -250,8 +251,8 @@ async fn an_approved_start_answers_with_its_worktree_and_chat(cx: &mut gpui::Tes
     });
     cx.run_until_parked();
     let task = created.await.expect("recorded");
+    let _outbound = cx.update(pair_bridge);
     let dispatch = cx.update(|cx| {
-        pair_bridge(cx);
         run_gated(
             GatedCommand::TaskStart { task: task.clone() },
             crate::control::exec::CommandOrigin::Orchestrator,
@@ -318,8 +319,9 @@ async fn a_phone_task_start_records_phone_provenance(cx: &mut gpui::TestAppConte
     });
     cx.run_until_parked();
     let task = created.await.unwrap();
-    let pending =
-        cx.update(|cx| super::begin_task_start(task.clone(), CommandOrigin::Phone, cx).unwrap());
+    let pending = cx.update(|cx| {
+        super::begin_task_start(task.clone(), CommandOrigin::Phone, true, cx).unwrap()
+    });
     cx.run_until_parked();
     assert!(cx.update(|cx| pending.try_finish(cx)).unwrap().is_ok());
     cx.update(|cx| {

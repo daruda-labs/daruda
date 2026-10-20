@@ -669,3 +669,9 @@ fn pane_creation_recovers_events_created_before_effects_installation(cx: &mut Te
 
 #[path = "run_notices/regressions.rs"]
 mod regressions;
+
+#[path = "run_notices/solicited.rs"]
+mod solicited;
+
+#[path = "run_notices/task_completion.rs"]
+mod task_completion;

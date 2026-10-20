@@ -155,7 +155,7 @@ fn resolve_new_pane_cwd_core(
 /// suppressed only when the app is foreground AND the firing pane is on
 /// screen (the user is already looking at it). Mirrors the hook-notification
 /// gate.
-fn should_notify_agent_event(
+pub(in crate::workspace) fn should_notify_agent_event(
     enabled: bool,
     skip_pane_in_view: bool,
     app_active: bool,

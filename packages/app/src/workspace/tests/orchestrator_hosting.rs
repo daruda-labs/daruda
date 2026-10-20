@@ -19,6 +19,68 @@ fn seed(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) ->
 }
 
 #[gpui::test]
+fn an_orchestrator_stop_withdraws_all_pending_approvals(cx: &mut TestAppContext) {
+    use crate::control::approval::{self, ApprovalChoice, ApprovalOutcome};
+    use gpui::BorrowAppContext as _;
+
+    let fixture = crate::test_support::workspace_with_agent_chat(cx);
+    let orchestrator = cx
+        .update_window(fixture.window.into(), |_, window, cx| {
+            fixture.workspace.update(cx, |ws, cx| seed(ws, window, cx))
+        })
+        .expect("live window");
+    let _outbound = cx.update(|cx| {
+        cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            let mut config = (*store.user()).clone();
+            config.telegram.enabled = true;
+            config.telegram.authorized_chat_id = Some(42);
+            store.set_user_for_testing(config);
+        });
+        crate::telegram::global::install_for_test(true, Some(42), cx)
+    });
+    let requests = cx.update(|cx| {
+        [
+            approval::request(
+                "first request".into(),
+                crate::remote_channel::global::Delivery::Explicit,
+                cx,
+            ),
+            approval::request(
+                "second request".into(),
+                crate::remote_channel::global::Delivery::Explicit,
+                cx,
+            ),
+        ]
+    });
+    for pane in [fixture.pane(), orchestrator] {
+        fixture.workspace.update(cx, |ws, cx| {
+            ws.agent_chat_view(pane).unwrap().update(cx, |view, cx| {
+                view.set_turn_in_flight();
+                view.tick_activity(std::time::Instant::now(), cx);
+            });
+            ws.cancel_agent_turn(pane, cx);
+        });
+        cx.update(|cx| {
+            if pane == fixture.pane() {
+                assert_eq!(approval::waiting_count_for_test(cx), 2);
+                assert!(requests.iter().all(|(_, answer)| answer.is_empty()));
+            } else {
+                assert_eq!(approval::waiting_count_for_test(cx), 0);
+                assert_eq!(
+                    crate::telegram::global::pending_approval_tokens_for_test(cx),
+                    0
+                );
+                for (id, answer) in &requests {
+                    assert_eq!(answer.try_recv(), Ok(ApprovalOutcome::Withdrawn));
+                    assert!(!approval::resolve(*id, ApprovalChoice::Approved, cx));
+                    assert!(answer.is_empty());
+                }
+            }
+        });
+    }
+}
+
+#[gpui::test]
 fn orchestrator_tab_toggle_retains_view_and_restores_user_focus(cx: &mut TestAppContext) {
     let (window, workspace) = build_workspace(cx);
     cx.update_window(window.into(), |_, window, cx| {

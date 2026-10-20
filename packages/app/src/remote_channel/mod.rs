@@ -2,7 +2,9 @@
 
 pub(crate) mod backoff;
 pub mod bridge;
+pub(crate) mod cards;
 pub(crate) mod command;
+pub(crate) mod delivery;
 pub(crate) mod dispatch;
 pub mod global;
 pub mod keychain;
@@ -15,41 +17,60 @@ pub(crate) mod transport;
 pub(crate) fn send_approval_card(
     id: crate::control::approval::ApprovalId,
     summary: String,
+    delivery: global::Delivery,
     cx: &mut gpui::App,
 ) -> bool {
-    let telegram =
-        crate::telegram::global::TelegramBridge::send_approval_card(id, summary.clone(), cx);
-    global::RemoteChannels::send_approval(id, summary, cx) || telegram
+    let telegram = crate::telegram::global::TelegramBridge::send_approval_card(
+        id,
+        summary.clone(),
+        delivery,
+        cx,
+    );
+    global::RemoteChannels::send_approval(id, summary, delivery, cx) || telegram
 }
 
-pub(crate) fn forget_approval(id: crate::control::approval::ApprovalId, cx: &mut gpui::App) {
-    crate::telegram::global::TelegramBridge::forget_approval(id, cx);
-    global::RemoteChannels::forget_approval(id, cx);
+pub(crate) fn settle_card(card: cards::CardId, label: &str, cx: &mut gpui::App) {
+    crate::telegram::global::TelegramBridge::settle_card(&card, label, cx);
+    global::RemoteChannels::settle_card(&card, label, cx);
 }
 
-/// Introduce a chat the phone approved opening, on every channel that can
-/// hear it, and make it their target. Best effort by design: the request has
+pub(crate) fn settle_permissions(pane: bridge::PaneRef, session: u64, cx: &mut gpui::App) {
+    let label = crate::surface::strings::notification::telegram_permission_cancelled();
+    crate::telegram::global::TelegramBridge::settle_permissions(pane, session, &label, cx);
+    global::RemoteChannels::settle_permissions(pane, session, &label, cx);
+}
+
+/// Introduce a chat on eligible channels. Explicit, solicited delivery selects
+/// the chat and records its ping; presence-based delivery is only a Notice,
+/// preserving selection and reply routing. Best effort by design: the request has
 /// already succeeded, so a channel that went away between the tap and now
 /// costs a log line, not an outcome.
 pub(crate) fn announce_chat_created(
     pane: bridge::PaneRef,
     header: String,
     agent: &str,
+    delivery: global::Delivery,
     cx: &mut gpui::App,
 ) {
     use daruda_store::observability::{
         error_report::{ErrorReport, ErrorSeverity},
         log_writer::LogWriter,
     };
-    let tail = crate::surface::strings::control::chat_announced(agent);
+    let tail = match delivery {
+        global::Delivery::Explicit => crate::surface::strings::control::chat_announced(agent),
+        global::Delivery::Presence { .. } => {
+            crate::surface::strings::control::chat_announced_only(agent)
+        }
+    };
     let telegram = crate::telegram::global::TelegramBridge::announce_chat(
         pane,
         header.clone(),
         tail.clone(),
+        delivery,
         cx,
     );
-    let remote = global::RemoteChannels::announce_chat(pane, header, tail, cx);
-    if !telegram && !remote {
+    let remote = global::RemoteChannels::announce_chat(pane, header, tail, delivery, cx);
+    if !telegram && !remote && matches!(delivery, global::Delivery::Explicit) {
         LogWriter::log(
             ErrorReport::new("Chat announcement not sent: no remote channel can deliver it")
                 .severity(ErrorSeverity::Warning)

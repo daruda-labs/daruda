@@ -85,6 +85,7 @@ pub(crate) struct Batch {
     audience: Audience,
     episodes: Vec<Episode>,
     pub(crate) prompt: String,
+    pub(crate) solicited: bool,
 }
 
 /// Fresh filtering also recovers events created before effects installation.
@@ -120,6 +121,7 @@ pub(crate) fn batch(audience: Audience, cx: &mut App) -> Option<Batch> {
     Some(Batch {
         audience,
         prompt: protocol::prompt(&events),
+        solicited: events.iter().any(|event| event.solicited),
         episodes: events
             .into_iter()
             .map(|event| (event.snapshot.key, event.sequence))

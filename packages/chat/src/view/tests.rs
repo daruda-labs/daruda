@@ -7,6 +7,7 @@ mod attachments;
 mod card_folding;
 mod compaction;
 mod diff_layout;
+mod host_cards;
 mod output_layout;
 mod overage;
 mod pane_choices;

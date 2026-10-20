@@ -1084,7 +1084,10 @@ async fn the_stop_prompt_stops_the_run_on_enter_and_leaves_it_on_escape(cx: &mut
 
             // Escape: the prompt goes away and the run keeps going.
             ws.overlays.flow_picker =
-                crate::workspace::command::flow_picker::FlowPicker::Stopping { lane: ws.active };
+                crate::workspace::command::flow_picker::FlowPicker::Stopping {
+                    lane: ws.active,
+                    run_dir: runs.join("0000000000000001-00000001-0001"),
+                };
             ws.on_flow_picker_key(&key("escape"), window, cx);
             assert!(
                 !ws.overlays.flow_picker.is_open(),
@@ -1094,7 +1097,10 @@ async fn the_stop_prompt_stops_the_run_on_enter_and_leaves_it_on_escape(cx: &mut
 
             // Enter: the stop. Nothing else in the prompt can reach it.
             ws.overlays.flow_picker =
-                crate::workspace::command::flow_picker::FlowPicker::Stopping { lane: ws.active };
+                crate::workspace::command::flow_picker::FlowPicker::Stopping {
+                    lane: ws.active,
+                    run_dir: runs.join("0000000000000001-00000001-0001"),
+                };
             ws.on_flow_picker_key(&key("enter"), window, cx);
             assert!(
                 !ws.overlays.flow_picker.is_open(),
@@ -1130,7 +1136,10 @@ async fn a_list_key_in_the_stop_prompt_changes_nothing(cx: &mut TestAppContext) 
             let lane_ref = ws.active_ref();
             ws.seed_flow_run_for_test(lane_ref, runs.join("0000000000000001-00000001-0001"), cx);
             ws.overlays.flow_picker =
-                crate::workspace::command::flow_picker::FlowPicker::Stopping { lane: ws.active };
+                crate::workspace::command::flow_picker::FlowPicker::Stopping {
+                    lane: ws.active,
+                    run_dir: runs.join("0000000000000001-00000001-0001"),
+                };
 
             for (k, ch) in [
                 ("up", None),

@@ -5,7 +5,7 @@
 //! mode/config, and misc accessors) since the queue is its own cohesive
 //! concern with a shared shape (one prompt in flight at a time).
 
-use gpui::{Context, Window};
+use gpui::{Context, Entity, Window};
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::tasks::ExecutionRef;
@@ -15,7 +15,7 @@ use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_chat::slash_dispatch::{LocalSlashCommand, SlashDispatch, classify_slash};
 use daruda_chat::view::{
-    EmptySubmitOutcome, EscapeOutcome, PhoneAckEffect, PromptDispatch, PromptId,
+    AgentChatView, EmptySubmitOutcome, EscapeOutcome, PhoneAckEffect, PromptDispatch, PromptId,
 };
 
 /// Who typed a prompt sent through the slash-aware funnel below: the
@@ -26,6 +26,7 @@ use daruda_chat::view::{
 enum UserPromptOrigin {
     InApp,
     Telegram,
+    Orchestrator,
 }
 
 impl Workspace {
@@ -56,13 +57,19 @@ impl Workspace {
         task: Option<ExecutionRef>,
         cx: &mut Context<Self>,
     ) -> Option<PromptDispatch> {
-        let dispatch = self.send_agent_prompt_text_with_origin(
-            pane_id,
-            text,
-            UserPromptOrigin::InApp,
-            task.clone(),
-            cx,
-        );
+        self.send_agent_user_prompt_text(pane_id, text, UserPromptOrigin::InApp, task, cx)
+    }
+
+    fn send_agent_user_prompt_text(
+        &mut self,
+        pane_id: PaneId,
+        text: String,
+        origin: UserPromptOrigin,
+        task: Option<ExecutionRef>,
+        cx: &mut Context<Self>,
+    ) -> Option<PromptDispatch> {
+        let dispatch =
+            self.send_agent_prompt_text_with_origin(pane_id, text, origin, task.clone(), cx);
         if dispatch == Some(PromptDispatch::QueueFull) {
             self.report_error(
                 ErrorReport::new(s::agent_chat::queue_full())
@@ -125,6 +132,15 @@ impl Workspace {
         self.send_agent_prompt_text_with_origin(pane_id, text, UserPromptOrigin::Telegram, None, cx)
     }
 
+    pub(in crate::workspace) fn send_agent_prompt_text_from_orchestrator(
+        &mut self,
+        pane_id: PaneId,
+        text: String,
+        cx: &mut Context<Self>,
+    ) -> Option<PromptDispatch> {
+        self.send_agent_user_prompt_text(pane_id, text, UserPromptOrigin::Orchestrator, None, cx)
+    }
+
     fn send_agent_prompt_text_with_origin(
         &mut self,
         pane_id: PaneId,
@@ -159,6 +175,9 @@ impl Workspace {
                 let prompt_dispatch = match (origin, task) {
                     (UserPromptOrigin::Telegram, _) => {
                         view.update(cx, |v, cx| v.send_prompt_text_for_telegram(text, cx))
+                    }
+                    (UserPromptOrigin::Orchestrator, _) => {
+                        view.update(cx, |v, cx| v.send_external_prompt_text(text, cx))
                     }
                     (UserPromptOrigin::InApp, Some(task)) => {
                         view.update(cx, |v, cx| v.send_task_prompt_text(text, task, cx))
@@ -344,14 +363,7 @@ impl Workspace {
     ) {
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
             view.update(cx, |v, cx| v.cancel_turn(cx));
-            // `cancel_turn` settles the turn locally, so this reconcile hits the
-            // busy→idle edge and fires the stashed outcome (a live-turn Stop's
-            // `Stopped`, or a trailing-subagent Stop's preserved completion) via
-            // the single completion firing point.
-            let edge = view.update(cx, |v, cx| v.tick_activity(std::time::Instant::now(), cx));
-            if let Some(outcome) = edge {
-                self.fire_activity_completion(pane_id, outcome, cx);
-            }
+            self.finish_agent_cancellation(pane_id, &view, cx);
         }
     }
 
@@ -373,11 +385,7 @@ impl Workspace {
         // parked queue (Esc twice), cancel a trailing subagent, or do nothing.
         match view.update(cx, |v, cx| v.handle_escape(cx)) {
             EscapeOutcome::Cancelled => {
-                // Same settle-edge firing as `cancel_agent_turn`.
-                let edge = view.update(cx, |v, cx| v.tick_activity(std::time::Instant::now(), cx));
-                if let Some(outcome) = edge {
-                    self.fire_activity_completion(pane_id, outcome, cx);
-                }
+                self.finish_agent_cancellation(pane_id, &view, cx);
                 true
             }
             // Clearing a parked queue has no turn to complete; still handled, so
@@ -385,6 +393,23 @@ impl Workspace {
             EscapeOutcome::ClearedQueue => true,
             // Nothing to act on — report not-handled so Escape keeps propagating.
             EscapeOutcome::Ignored => false,
+        }
+    }
+
+    fn finish_agent_cancellation(
+        &mut self,
+        pane_id: PaneId,
+        view: &Entity<AgentChatView>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.is_orchestrator_pane(pane_id) {
+            crate::control::approval::withdraw_all(cx);
+        }
+        let edge = view.update(cx, |view, cx| {
+            view.tick_activity(std::time::Instant::now(), cx)
+        });
+        if let Some(outcome) = edge {
+            self.fire_activity_completion(pane_id, outcome, cx);
         }
     }
 }

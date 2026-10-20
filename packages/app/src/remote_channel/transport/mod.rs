@@ -29,8 +29,6 @@ pub enum IncomingKind {
     },
     Callback {
         data: String,
-        message_id: String,
-        original: String,
     },
 }
 

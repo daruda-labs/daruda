@@ -44,6 +44,9 @@ impl Workspace {
     ) -> Option<super::status_bar::orchestrator_chip::OrchestratorChipState> {
         use super::status_bar::orchestrator_chip::OrchestratorChipState;
 
+        if crate::control::approval::has_waiting(cx) || crate::runs::RunsHost::has_flow_asks(cx) {
+            return Some(OrchestratorChipState::AwaitingPermission);
+        }
         if let Some(chat) = self.orchestrator.chat.as_ref() {
             let view = chat.view.read(cx);
             return Some(OrchestratorChipState::from_activity(
@@ -398,3 +401,7 @@ impl Workspace {
 #[cfg(test)]
 #[path = "tests/orchestrator_hosting.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/orchestrator_approvals.rs"]
+mod approval_tests;

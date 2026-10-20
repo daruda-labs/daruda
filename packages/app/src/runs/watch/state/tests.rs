@@ -10,6 +10,41 @@ fn end_with_text(key: &RunKey, content: Option<&str>) -> RunSnapshot {
 }
 
 #[test]
+fn solicited_registration_stamps_a_fast_cached_task_completion_before_announcement() {
+    let mut watch = RunWatch::default();
+    let key = RunKey::Task(daruda_store::tasks::ExecutionRef {
+        task_id: "task".into(),
+        execution_id: "fast".into(),
+    });
+    watch.retain(ended(key.clone()));
+    assert!(watch.unreported().is_empty());
+    let (sender, receiver) = smol::channel::unbounded();
+    watch.event_sender = Some(sender);
+    watch.register_solicited(key.clone(), true);
+    assert!(watch.pending(&key).unwrap().solicited);
+    assert!(receiver.try_recv().unwrap().solicited);
+}
+
+#[test]
+fn a_desktop_resume_preserves_the_solicitation_of_the_previous_held_end() {
+    let mut watch = RunWatch::default();
+    let key = RunKey::Flow("resumed-phone-run".into());
+    watch.register_solicited(key.clone(), true);
+    let held = watch.hold_end(end_with_text(&key, None));
+    watch.begin_solicited(&key, false);
+    watch.register_solicited(key.clone(), false);
+    watch.release_end(held, end_with_text(&key, Some("phone report")));
+    watch.retain(end_with_text(&key, Some("desktop report")));
+    let events = watch.unreported();
+    assert_eq!(events.len(), 2);
+    assert!(events[0].solicited);
+    assert!(!events[1].solicited);
+    assert!(
+        matches!(&events[0].snapshot.state, RunState::Ended { text: Some(text), .. } if text == "phone report")
+    );
+}
+
+#[test]
 fn retaining_an_identical_end_bumps_no_revision_and_wakes_no_waiter() {
     let mut watch = RunWatch::default();
     let key = RunKey::Flow("same".into());

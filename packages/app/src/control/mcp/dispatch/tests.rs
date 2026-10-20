@@ -47,7 +47,7 @@ fn answer_on(
 
 /// The payload the model reads, out of the one text block.
 /// A configuration and a bridge that can actually deliver a card.
-fn reachable_phone(cx: &mut App) {
+fn reachable_phone(cx: &mut App) -> crate::telegram::global::TestOutbox {
     use gpui::BorrowAppContext as _;
 
     crate::settings_store::SettingsStore::init(cx);
@@ -55,9 +55,10 @@ fn reachable_phone(cx: &mut App) {
         let mut cfg = (*store.user()).clone();
         cfg.telegram.enabled = true;
         cfg.telegram.authorized_chat_id = Some(42);
+        cfg.telegram.only_when_away = false;
         store.set_user_for_testing(cfg);
     });
-    let _outbound = crate::telegram::global::install_for_test(true, Some(42), cx);
+    crate::telegram::global::install_for_test(true, Some(42), cx)
 }
 
 fn cancellation(request_id: i64) -> String {
@@ -222,7 +223,7 @@ async fn cancelling_a_waiting_call_withdraws_it_unanswered(cx: &mut TestAppConte
     // undeliverable before the cancellation arrives. Both halves matter:
     // the *config* is what `send_approval_card` reads, and the bridge
     // global is what holds the card's tokens.
-    cx.update(reachable_phone);
+    let _outbound = cx.update(reachable_phone);
 
     let mut session = ConnectionSession::handshaked_for_test(1);
     let reply = deliver(
@@ -266,7 +267,7 @@ async fn cancelling_something_unknown_leaves_the_waiting_call_alone(cx: &mut Tes
     let (workspace, project) = fixture
         .workspace
         .read_with(cx, |ws, _| (ws.uuid(), ws.control_active_lane().project));
-    cx.update(reachable_phone);
+    let _outbound = cx.update(reachable_phone);
 
     let mut session = ConnectionSession::handshaked_for_test(1);
     let _reply = deliver(
@@ -585,7 +586,7 @@ async fn disconnect_withdraws_every_pending_call_but_ignores_stale_connections(
     let (workspace, project) = fixture
         .workspace
         .read_with(cx, |ws, _| (ws.uuid(), ws.control_active_lane().project));
-    cx.update(reachable_phone);
+    let _outbound = cx.update(reachable_phone);
     let mut session = ConnectionSession::handshaked_for_test(2);
     let approval = deliver(
         &call(

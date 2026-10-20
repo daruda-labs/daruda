@@ -105,7 +105,7 @@ impl Effect {
 #[derive(PartialEq, Eq)]
 pub enum Edit {
     KeepButtons,
-    ConsumeButtons,
+    ManagedCard,
 }
 
 #[cfg(test)]
@@ -162,16 +162,18 @@ pub(crate) fn handle_in_app(aimed: Aimed, target: &Target, cx: &mut App) -> Effe
         }
         InboundAction::RespondPermission {
             pane,
+            session,
             perm_id,
             decision,
         } => {
             let mut outcome = BotPermissionOutcome::Gone;
             dispatch_to_workspace(cx, pane.workspace, |ws, cx| {
-                outcome = ws.respond_bot_permission(pane.pane, perm_id, decision.clone(), cx);
+                outcome =
+                    ws.respond_bot_permission(pane.pane, session, perm_id, decision.clone(), cx);
             });
             Effect::Feedback {
                 label: permission_feedback(&decision, outcome),
-                edit: Edit::ConsumeButtons,
+                edit: Edit::ManagedCard,
             }
         }
         InboundAction::SelectTarget { pane } => {
@@ -195,9 +197,39 @@ pub(crate) fn handle_in_app(aimed: Aimed, target: &Target, cx: &mut App) -> Effe
             };
             Effect::Feedback {
                 label,
-                edit: Edit::KeepButtons,
+                edit: Edit::ManagedCard,
             }
         }
+        InboundAction::ResolveFlowAsk {
+            worktree,
+            run_dir,
+            ask_id,
+            decision,
+        } => {
+            let decision = match decision {
+                super::bridge::PermissionDecision::Allow(option_id) => {
+                    daruda_acp::PermissionDecision::Allow { option_id }
+                }
+                super::bridge::PermissionDecision::Reject(option_id) => {
+                    daruda_acp::PermissionDecision::Reject { option_id }
+                }
+            };
+            let applied =
+                crate::runs::RunsHost::answer_flow_ask(&worktree, &run_dir, ask_id, decision, cx)
+                    .is_ok();
+            Effect::Feedback {
+                label: if applied {
+                    s::flow::ask_answered()
+                } else {
+                    s::flow::ask_closed()
+                },
+                edit: Edit::ManagedCard,
+            }
+        }
+        InboundAction::StaleApproval => Effect::Feedback {
+            label: s::control::approval_already_answered(),
+            edit: Edit::KeepButtons,
+        },
         InboundAction::StaleListing => Effect::Feedback {
             label: s::control::listing_stale(),
             edit: Edit::KeepButtons,

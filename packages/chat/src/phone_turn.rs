@@ -14,6 +14,13 @@
 
 use daruda_acp::ChatItem;
 
+/// Which responses this phone-solicited turn owes its sender.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhoneTurnMode {
+    FirstResponse,
+    CompletionOnly,
+}
+
 /// What a chat item appended since a [`PhoneTurn`] was armed resolves to, if
 /// anything.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +57,9 @@ impl FirstResponseOutcome {
 /// reachable from outside.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum State {
+    CompletionOnly {
+        items_len_at_start: usize,
+    },
     /// Nothing has gone out yet. `items_len_at_start` is where in `items` to
     /// resume scanning (the length when this turn's prompt was echoed, so the
     /// echoed `UserText` is never mistaken for a response); `started_at`
@@ -94,9 +104,22 @@ pub struct PhoneTurn(State);
 impl PhoneTurn {
     /// Arm a turn anchored at `now`, scanning `items` from `items_len` onward.
     pub(crate) fn start(now: std::time::Instant, items_len: usize) -> Self {
-        Self(State::Waiting {
-            started_at: now,
-            items_len_at_start: items_len,
+        Self::with_mode(PhoneTurnMode::FirstResponse, now, items_len)
+    }
+
+    pub(crate) fn with_mode(
+        mode: PhoneTurnMode,
+        now: std::time::Instant,
+        items_len: usize,
+    ) -> Self {
+        Self(match mode {
+            PhoneTurnMode::FirstResponse => State::Waiting {
+                started_at: now,
+                items_len_at_start: items_len,
+            },
+            PhoneTurnMode::CompletionOnly => State::CompletionOnly {
+                items_len_at_start: items_len,
+            },
         })
     }
 
@@ -113,7 +136,7 @@ impl PhoneTurn {
             State::Waiting { started_at, .. } => {
                 now.saturating_duration_since(*started_at).as_secs() >= timeout_secs
             }
-            State::Answered { .. } => false,
+            State::Answered { .. } | State::CompletionOnly { .. } => false,
         }
     }
 
@@ -205,7 +228,8 @@ impl PhoneTurn {
     /// earlier turn's answer as if it were this one's.
     pub fn items_anchor(&self) -> usize {
         match &self.0 {
-            State::Waiting {
+            State::CompletionOnly { items_len_at_start }
+            | State::Waiting {
                 items_len_at_start, ..
             }
             | State::Answered {
@@ -278,6 +302,21 @@ mod tests {
             streaming: false,
             message_id: None,
         }
+    }
+
+    #[test]
+    fn completion_only_never_resolves_a_first_response_or_fallback() {
+        let started = std::time::Instant::now();
+        let mut turn = PhoneTurn::with_mode(PhoneTurnMode::CompletionOnly, started, 1);
+        assert!(!turn.is_waiting());
+        assert!(!turn.is_overdue(started + std::time::Duration::from_secs(120), 60));
+        assert_eq!(
+            turn.take_first_response(&[tool_call("tool"), assistant_text("reply", false)]),
+            None
+        );
+        assert!(!turn.answer(None));
+        assert_eq!(turn.items_anchor(), 1);
+        assert!(!turn.already_sent(Some("answer")));
     }
 
     #[test]

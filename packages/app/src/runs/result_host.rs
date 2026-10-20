@@ -46,6 +46,15 @@ impl RunsHost {
         Self::ensure_installed(cx);
         cx.update_global::<Self, _>(|host, _| host.watch.register(key));
     }
+
+    pub(crate) fn register_run_solicited(key: RunKey, solicited: bool, cx: &mut App) {
+        if !solicited {
+            Self::register_run(key, cx);
+            return;
+        }
+        Self::ensure_installed(cx);
+        cx.update_global::<Self, _>(|host, _| host.watch.register_solicited(key, solicited));
+    }
     pub(crate) fn run_scope(cx: &App) -> Vec<RunKey> {
         cx.try_global::<Self>()
             .map(|host| host.watch.scope())

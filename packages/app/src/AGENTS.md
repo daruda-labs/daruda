@@ -98,11 +98,12 @@ agent/ → lane/
   control converts run-owned types at the MCP boundary and owns orchestrator
   notices. Workspace reads the task projection; only RunsHost writes it.
   `tasks.json` is read-only migration input.
-- Control entry points carry `control::exec::CommandOrigin`: phone commands
-  use `Phone`, MCP commands use `Orchestrator`. Convert it to each domain's
-  own `StartedBy` before dispatch; desktop starts pass `StartedBy::Desktop`
-  directly. Persist provenance with the start request, not with a later UI
-  annotation or an inference from the active session. Resume preserves it.
+- Control entries carry `control::exec::CommandOrigin`: Phone or Orchestrator
+  names the caller, not the person's location. Convert to domain `StartedBy`
+  before dispatch; desktop uses `StartedBy::Desktop`. Persist at start, never
+  infer later; resume preserves it. Capture solicitation from Phone or an open
+  orchestrator `PhoneTurn` before approval/async work. Follow the
+  [delivery and settlement contract](REFERENCE.md#human-delivery-approvals-and-questions).
 - The Settings view is `daruda_settings` (`packages/settings/`); its host is
   `workspace/settings_ops.rs`, and the boundary between them is in
   `packages/settings/AGENTS.md`.

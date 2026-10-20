@@ -224,6 +224,7 @@ pub(in crate::workspace) enum FlowPicker {
     /// whichever one is on screen when Enter lands.
     Stopping {
         lane: daruda_store::project::LaneRef,
+        run_dir: PathBuf,
     },
 }
 
@@ -752,7 +753,10 @@ mod tests {
     /// repainting for a keystroke that changed nothing.
     #[test]
     fn the_stop_prompt_answers_escape_and_enter_and_refuses_the_list_keys() {
-        let mut picker = FlowPicker::Stopping { lane: LANE };
+        let mut picker = FlowPicker::Stopping {
+            lane: LANE,
+            run_dir: "run".into(),
+        };
         assert_eq!(picker.on_key("escape", None), PickerKey::Dismiss);
         assert_eq!(picker.on_key("enter", None), PickerKey::Confirm);
         for (key, ch) in [

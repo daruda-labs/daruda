@@ -14,6 +14,9 @@ pub(super) fn expect_ping(
     outbound: crate::telegram::bridge::Outbound,
 ) -> crate::telegram::bridge::BridgePing {
     match outbound {
+        crate::telegram::bridge::Outbound::FlowAsk(prompt) => {
+            panic!("expected a chat ping, got flow question {prompt:?}")
+        }
         crate::telegram::bridge::Outbound::Ping(ping) => ping,
         crate::telegram::bridge::Outbound::Notice(text) => {
             panic!("an agent relay must be a ping, not a standalone notice: {text}")
@@ -1061,8 +1064,14 @@ async fn respond_bot_permission_routes_by_id_under_concurrency(cx: &mut gpui::Te
 
     // Phone-tap the button for id 100, then a stale re-tap for 100.
     workspace.update(cx, |ws, cx| {
+        let session = ws
+            .agent_chat_view(pane)
+            .unwrap()
+            .read(cx)
+            .permission_session();
         ws.respond_bot_permission(
             pane,
+            session,
             100,
             PermissionDecision::Allow("allow_once".into()),
             cx,
@@ -1070,6 +1079,7 @@ async fn respond_bot_permission_routes_by_id_under_concurrency(cx: &mut gpui::Te
         // Already answered → is_permission_outstanding(100) is false → no-op.
         ws.respond_bot_permission(
             pane,
+            session,
             100,
             PermissionDecision::Reject("reject_once".into()),
             cx,
@@ -1098,8 +1108,14 @@ async fn respond_bot_permission_routes_by_id_under_concurrency(cx: &mut gpui::Te
 
     // Phone-tap id 200 → the pane drains fully.
     workspace.update(cx, |ws, cx| {
+        let session = ws
+            .agent_chat_view(pane)
+            .unwrap()
+            .read(cx)
+            .permission_session();
         ws.respond_bot_permission(
             pane,
+            session,
             200,
             PermissionDecision::Reject("reject_once".into()),
             cx,

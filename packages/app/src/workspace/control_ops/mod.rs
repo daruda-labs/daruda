@@ -7,6 +7,7 @@
 
 use gpui::{App, Context};
 
+use crate::control::exec::CommandOrigin;
 use crate::control::result::{
     Activity, ChatSummary, ControlError, Health, LaneEntry, LaneHandle, SendDisposition,
     StopDisposition,
@@ -433,9 +434,8 @@ impl Workspace {
         view.update(cx, |v, _| v.fill_queue_for_test(depth));
     }
 
-    /// Send a prompt to one pane. Delegates to the existing Telegram-origin
-    /// prompt path so slash classification stays on its single funnel; only
-    /// the disposition is surfaced instead of relayed.
+    /// Send a prompt through the shared slash-aware funnel, preserving
+    /// whether the phone or orchestrator authored it.
     ///
     /// The `None` arm is not a connection failure. Having already excluded a
     /// missing pane, the only way that funnel declines to dispatch is a local
@@ -446,12 +446,19 @@ impl Workspace {
         &mut self,
         pane: PaneId,
         text: String,
+        origin: CommandOrigin,
         cx: &mut Context<Self>,
     ) -> Result<SendDisposition, ControlError> {
         if self.agent_chat_view(pane).is_none() {
             return Err(ControlError::TargetGone);
         }
-        match self.send_agent_prompt_text_from_telegram(pane, text, cx) {
+        let dispatch = match origin {
+            CommandOrigin::Phone => self.send_agent_prompt_text_from_telegram(pane, text, cx),
+            CommandOrigin::Orchestrator => {
+                self.send_agent_prompt_text_from_orchestrator(pane, text, cx)
+            }
+        };
+        match dispatch {
             Some(PromptDispatch::SentNow) => Ok(SendDisposition::Delivered),
             Some(PromptDispatch::Queued) => Ok(SendDisposition::Queued),
             Some(PromptDispatch::QueueFull) => Err(ControlError::QueueFull),

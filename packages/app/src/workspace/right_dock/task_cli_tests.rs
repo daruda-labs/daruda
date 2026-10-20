@@ -783,7 +783,12 @@ fn cli_snapshot_refuses_every_input_path(cx: &mut TestAppContext) {
                 Some(PromptDispatch::ReadOnly)
             ));
             assert!(matches!(
-                ws.control_say(id, "orchestrator".into(), cx),
+                ws.control_say(
+                    id,
+                    "orchestrator".into(),
+                    crate::control::exec::CommandOrigin::Orchestrator,
+                    cx,
+                ),
                 Err(ControlError::TargetReadOnly)
             ));
             assert!(!ws.deliver_text_to_pane(

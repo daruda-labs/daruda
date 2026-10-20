@@ -45,6 +45,7 @@ pub(crate) struct FlowRun {
     /// Who submitted this episode, start or resume: the one owed its
     /// answer. The run's first starter is provenance, kept in its log.
     submitted_by: daruda_flow::request::StartedBy,
+    solicited: bool,
     /// Disconnects when the run's thread returns, so a quit can block on
     /// it with a deadline. Seeded runs have no engine behind them.
     finished: Option<std::sync::mpsc::Receiver<std::convert::Infallible>>,
@@ -215,6 +216,7 @@ pub(crate) struct FlowStart {
     pub overage: OverageStop,
     /// Who submitted this episode; see [`FlowRun::submitted_by`].
     pub submitted_by: daruda_flow::request::StartedBy,
+    pub solicited: bool,
     pub events: smol::channel::Receiver<RunNotice>,
     pub asks: smol::channel::Receiver<PendingAsk>,
 }
@@ -234,9 +236,26 @@ pub(crate) enum FlowChanged {
     Progressed { left_setup: bool },
     /// A question arrived. `alone` when none of the run's was open, which is
     /// when one is brought forward.
-    Asked { ask_id: u64, alone: bool },
+    Asked {
+        run_dir: PathBuf,
+        ask_id: u64,
+        alone: bool,
+        submitted_by: daruda_flow::request::StartedBy,
+        solicited: bool,
+    },
+    AskClosed {
+        run_dir: PathBuf,
+        ask_id: u64,
+        outcome: FlowAskOutcome,
+    },
     /// It ended and is no longer held.
     Ended(Box<FlowEnded>),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum FlowAskOutcome {
+    Answered(daruda_acp::PermissionDecision),
+    Withdrawn,
 }
 
 /// A run that ended, with what its windows say about it.

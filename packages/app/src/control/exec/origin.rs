@@ -8,6 +8,20 @@ pub(crate) enum CommandOrigin {
 }
 
 impl CommandOrigin {
+    pub(crate) fn is_solicited(self, cx: &gpui::App) -> bool {
+        match self {
+            Self::Phone => true,
+            Self::Orchestrator => crate::window_registry::WindowRegistry::orchestrator(cx)
+                .and_then(|(_, workspace)| workspace.upgrade())
+                .is_some_and(|workspace| {
+                    let workspace = workspace.read(cx);
+                    workspace
+                        .orchestrator_chat_pane()
+                        .is_some_and(|pane| workspace.phone_turn_open(pane.pane, cx))
+                }),
+        }
+    }
+
     pub(crate) fn task_started_by(self) -> daruda_store::tasks::StartedBy {
         match self {
             Self::Phone => daruda_store::tasks::StartedBy::Phone,

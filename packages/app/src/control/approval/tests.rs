@@ -45,7 +45,7 @@ fn setup_bridge(
 }
 
 fn request_one(cx: &mut TestAppContext) -> (ApprovalId, Receiver<ApprovalOutcome>) {
-    let (_id, rx) = cx.update(|cx| request("create worktree x".into(), cx));
+    let (_id, rx) = cx.update(|cx| request("create worktree x".into(), Delivery::Explicit, cx));
     // One request, so it is the only id waiting.
     let id = cx.update(|cx| {
         *cx.global::<Approvals>()
@@ -63,7 +63,13 @@ async fn an_approved_request_resolves_with_approved(cx: &mut TestAppContext) {
     let (id, rx) = request_one(cx);
     assert!(cx.update(|cx| resolve(id, ApprovalChoice::Approved, cx)));
     assert_eq!(rx.recv().await, Ok(ApprovalOutcome::Approved));
-    cx.update(|cx| assert_eq!(waiting_count_for_test(cx), 0));
+    cx.update(|cx| {
+        assert_eq!(waiting_count_for_test(cx), 0);
+        assert!(!withdraw(id, cx));
+    });
+    cx.executor()
+        .advance_clock(APPROVAL_TIMEOUT + Duration::from_secs(1));
+    assert!(rx.is_empty());
 }
 
 #[gpui::test]
@@ -72,6 +78,10 @@ async fn a_refused_request_resolves_with_refused(cx: &mut TestAppContext) {
     let (id, rx) = request_one(cx);
     assert!(cx.update(|cx| resolve(id, ApprovalChoice::Refused, cx)));
     assert_eq!(rx.recv().await, Ok(ApprovalOutcome::Refused));
+    assert!(!cx.update(|cx| resolve(id, ApprovalChoice::Approved, cx)));
+    cx.executor()
+        .advance_clock(APPROVAL_TIMEOUT + Duration::from_secs(1));
+    assert!(rx.is_empty());
 }
 
 #[gpui::test]
@@ -119,8 +129,8 @@ async fn a_second_tap_is_a_no_op(cx: &mut TestAppContext) {
 #[gpui::test]
 async fn each_request_gets_its_own_answer(cx: &mut TestAppContext) {
     let _outbound = setup(cx);
-    let (_first_id, first) = cx.update(|cx| request("first".into(), cx));
-    let (_second_id, second) = cx.update(|cx| request("second".into(), cx));
+    let (_first_id, first) = cx.update(|cx| request("first".into(), Delivery::Explicit, cx));
+    let (_second_id, second) = cx.update(|cx| request("second".into(), Delivery::Explicit, cx));
     let ids: Vec<ApprovalId> = cx.update(|cx| {
         let mut ids: Vec<_> = cx.global::<Approvals>().waiting.keys().copied().collect();
         ids.sort_by_key(|i| i.0);
@@ -132,6 +142,67 @@ async fn each_request_gets_its_own_answer(cx: &mut TestAppContext) {
     assert!(first.is_empty(), "the other request is still waiting");
 }
 
+#[gpui::test]
+async fn a_withdrawn_request_settles_once_and_forgets_its_tokens(cx: &mut TestAppContext) {
+    let _outbound = setup(cx);
+    let (id, answer) = request_one(cx);
+    cx.update(|cx| {
+        assert!(withdraw(id, cx));
+        assert!(!withdraw(id, cx));
+        assert!(!resolve(id, ApprovalChoice::Approved, cx));
+        assert_eq!(waiting_count_for_test(cx), 0);
+        assert_eq!(
+            crate::telegram::global::pending_approval_tokens_for_test(cx),
+            0
+        );
+    });
+    assert_eq!(answer.recv().await, Ok(ApprovalOutcome::Withdrawn));
+    cx.executor()
+        .advance_clock(APPROVAL_TIMEOUT + Duration::from_secs(1));
+    assert!(answer.is_empty());
+}
+
+#[gpui::test]
+async fn each_request_keeps_its_own_deadline(cx: &mut TestAppContext) {
+    let _outbound = setup(cx);
+    let (first_id, first) = cx.update(|cx| request("first".into(), Delivery::Explicit, cx));
+    cx.executor().advance_clock(Duration::from_secs(100));
+    let (second_id, second) = cx.update(|cx| request("second".into(), Delivery::Explicit, cx));
+    cx.executor().advance_clock(Duration::from_secs(201));
+    assert_eq!(first.recv().await, Ok(ApprovalOutcome::TimedOut));
+    assert!(second.is_empty());
+    cx.update(|cx| {
+        assert!(!is_waiting(first_id, cx));
+        assert!(is_waiting(second_id, cx));
+    });
+    cx.executor().advance_clock(Duration::from_secs(100));
+    assert_eq!(second.recv().await, Ok(ApprovalOutcome::TimedOut));
+}
+
+#[gpui::test]
+async fn an_extended_deadline_is_reread_before_timeout(cx: &mut TestAppContext) {
+    let _outbound = setup(cx);
+    let (extended_id, extended) =
+        cx.update(|cx| request("extended".into(), Delivery::Explicit, cx));
+    let (_other_id, other) = cx.update(|cx| request("other".into(), Delivery::Explicit, cx));
+    cx.executor().advance_clock(Duration::from_secs(100));
+    cx.update(|cx| {
+        let deadline = cx.background_executor().now() + APPROVAL_TIMEOUT;
+        cx.global_mut::<Approvals>()
+            .waiting
+            .get_mut(&extended_id)
+            .unwrap()
+            .deadline = deadline;
+    });
+    cx.executor().advance_clock(Duration::from_secs(201));
+    assert_eq!(other.recv().await, Ok(ApprovalOutcome::TimedOut));
+    assert!(extended.is_empty());
+    cx.update(|cx| assert!(is_waiting(extended_id, cx)));
+    cx.executor().advance_clock(Duration::from_secs(100));
+    assert_eq!(extended.recv().await, Ok(ApprovalOutcome::TimedOut));
+    assert!(extended.is_empty());
+}
+
 /// The card actually reaches the send queue, with one token per button.
 /// Without this, a send path that silently dropped every card would look
 /// identical to a working one from the store's side — which is exactly
@@ -139,7 +210,7 @@ async fn each_request_gets_its_own_answer(cx: &mut TestAppContext) {
 #[gpui::test]
 async fn a_deliverable_request_queues_one_card_with_two_tokens(cx: &mut TestAppContext) {
     let outbound = setup(cx);
-    let (_id, _rx) = cx.update(|cx| request("create worktree x".into(), cx));
+    let (_id, _rx) = cx.update(|cx| request("create worktree x".into(), Delivery::Explicit, cx));
     cx.run_until_parked();
     let sent = outbound.recv().await.expect("a card was queued");
     let crate::telegram::bridge::Outbound::Approval(prompt) = sent else {
@@ -162,7 +233,8 @@ async fn an_undeliverable_request_settles_instead_of_waiting(cx: &mut TestAppCon
     for (enabled, chat_id) in [(false, Some(42)), (true, None), (false, None)] {
         let mut app = TestAppContext::single();
         let _outbound = setup_bridge(&mut app, enabled, chat_id);
-        let (_id, rx) = app.update(|cx| request("create worktree x".into(), cx));
+        let (_id, rx) =
+            app.update(|cx| request("create worktree x".into(), Delivery::Explicit, cx));
         assert_eq!(
             rx.recv().await,
             Ok(ApprovalOutcome::Undeliverable),
@@ -200,11 +272,14 @@ async fn too_many_waiting_cards_refuses_rather_than_queueing(cx: &mut TestAppCon
     let _outbound = setup(cx);
     let mut held = Vec::new();
     for _ in 0..APPROVALS_IN_FLIGHT_MAX {
-        held.push(cx.update(|cx| request("create worktree x".into(), cx)).1);
+        held.push(
+            cx.update(|cx| request("create worktree x".into(), Delivery::Explicit, cx))
+                .1,
+        );
     }
     cx.update(|cx| assert_eq!(waiting_count_for_test(cx), APPROVALS_IN_FLIGHT_MAX));
 
-    let (_over_id, over) = cx.update(|cx| request("one too many".into(), cx));
+    let (_over_id, over) = cx.update(|cx| request("one too many".into(), Delivery::Explicit, cx));
     assert_eq!(over.recv().await, Ok(ApprovalOutcome::TooManyPending));
     cx.update(|cx| {
         assert_eq!(
@@ -223,4 +298,58 @@ async fn resolving_an_unknown_id_does_nothing(cx: &mut TestAppContext) {
     let _outbound = setup(cx);
     assert!(!cx.update(|cx| resolve(ApprovalId(9_999), ApprovalChoice::Approved, cx)));
     cx.update(|cx| assert_eq!(waiting_count_for_test(cx), 0));
+}
+
+#[gpui::test]
+fn remote_delivery_keeps_a_later_deadline_and_never_resurrects_a_settled_request(
+    cx: &mut TestAppContext,
+) {
+    let _outbound = setup(cx);
+    let (id, answer) = request_one(cx);
+    cx.executor().advance_clock(Duration::from_secs(10));
+    cx.update(|cx| {
+        let deadline = cx.global::<Approvals>().waiting[&id].deadline;
+        remote_card_delivered(id, cx);
+        assert_eq!(cx.global::<Approvals>().waiting[&id].deadline, deadline);
+        assert!(withdraw(id, cx));
+        remote_card_delivered(id, cx);
+        relay_outstanding(cx);
+        assert!(!is_waiting(id, cx));
+        assert_eq!(answer.try_recv(), Ok(ApprovalOutcome::Withdrawn));
+        assert!(answer.is_empty());
+    });
+}
+
+#[gpui::test]
+fn a_rejected_retry_queue_does_not_extend_the_deadline(cx: &mut TestAppContext) {
+    let mut outgoing = cx.update(crate::remote_channel::global::tests::setup);
+    let (id, answer) = cx.update(|cx| {
+        request(
+            "Create worktree".into(),
+            Delivery::Presence { away: false },
+            cx,
+        )
+    });
+    assert_eq!(outgoing.try_recv().unwrap().id, "personal");
+    outgoing.close();
+    cx.run_until_parked();
+    cx.executor().advance_clock(Duration::from_secs(299));
+    cx.update(|cx| {
+        crate::app_presence::seed_for_test(
+            crate::platform::presence::AwaySignal::HERE.observe(
+                false,
+                Some(Duration::from_secs(300)),
+                Instant::now() - Duration::from_secs(120),
+            ),
+            false,
+            Some(Duration::from_secs(300)),
+            cx,
+        );
+        let deadline = cx.global::<Approvals>().waiting[&id].deadline;
+        relay_outstanding(cx);
+        assert_eq!(cx.global::<Approvals>().waiting[&id].deadline, deadline);
+    });
+    cx.executor().advance_clock(Duration::from_secs(2));
+    cx.run_until_parked();
+    assert_eq!(answer.try_recv(), Ok(ApprovalOutcome::TimedOut));
 }

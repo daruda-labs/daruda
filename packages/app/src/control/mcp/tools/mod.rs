@@ -50,7 +50,7 @@ pub(crate) enum ToolId {
 pub(crate) enum Gate {
     /// Reads, or acts on something that already exists.
     Open,
-    /// Brings something new into being. Asks the phone first.
+    /// Requires the person's approval on the desktop or phone.
     NeedsApproval,
 }
 
@@ -227,7 +227,7 @@ fn lane_create_properties() -> serde_json::Value {
 
 /// The `agent` argument, resolved against the catalog this daruda is running.
 /// Both halves are stated — the id is what the call takes, the name is what
-/// the person on the phone says — so a request for "codex" maps to the id
+/// the person says — so a request for "codex" maps to the id
 /// without a guess.
 fn agent_property(agents: &[daruda_config::AgentDefinition]) -> serde_json::Value {
     let listed = agents
@@ -434,8 +434,9 @@ static TABLE: &[Tool] = &[
         description: "Create a worktree on a new branch and open its first chat. To add a \
                       tab to a worktree that already exists — including the one a project \
                       is currently on — use daruda_chat_new instead. Needs the user's \
-                      approval: the call waits for them to tap, and fails if they refuse or \
-                      do not answer.",
+                      approval on the desktop or phone: the first answer wins. The call \
+                      fails on refusal or timeout. Silence is not consent; do not retry \
+                      or bypass approval.",
         gate: Gate::NeedsApproval,
         properties: lane_create_properties,
         required: &["workspace", "project", "name"],
@@ -445,8 +446,9 @@ static TABLE: &[Tool] = &[
         name: "daruda_chat_new",
         description: "Open one more agent chat — a new tab — in a worktree that already \
                       exists, from daruda_worktree_list. Any number can share one \
-                      worktree. Needs the user's approval: the call waits for them to tap, \
-                      and fails if they refuse or do not answer.",
+                      worktree. Needs the user's approval on the desktop or phone: the \
+                      first answer wins. Refusal or timeout fails the call; silence is \
+                      not consent. Do not retry or bypass approval.",
         gate: Gate::NeedsApproval,
         properties: chat_new_properties,
         required: &["worktree"],
@@ -467,7 +469,10 @@ static TABLE: &[Tool] = &[
         description: "Start a flow by name in one worktree. Take the `worktree` from the \
                       matching daruda_flow_list row — a flow belongs to the worktree it \
                       was listed under, and the same name in two of them is two \
-                      different flows. Reports that it started, not that it finished. \
+                      different flows. Flows with permission = ask are supported: questions \
+                      can be answered on the desktop or phone, and the first answer wins. \
+                      Flows requiring profile selection are still refused. Reports that \
+                      it started, not that it finished. \
                       End your turn after it: a notice with the outcome arrives on its \
                       own when the run ends or is blocked. Do not follow it with \
                       daruda_run_wait unless the person asked you to wait.",
@@ -503,8 +508,9 @@ static TABLE: &[Tool] = &[
         name: "daruda_task_create",
         description: "Add a task to a project's backlog; it does not start it. Take \
                       `workspace` and `project` from a daruda_worktree_list row. Needs the \
-                      user's approval: the call waits for them to tap, and fails if they \
-                      refuse or do not answer.",
+                      user's approval on the desktop or phone: the first answer wins. \
+                      Refusal or timeout fails the call; silence is not consent. Do not \
+                      retry or bypass approval.",
         gate: Gate::NeedsApproval,
         properties: task_create_properties,
         required: &["workspace", "project", "title", "prompt"],
@@ -515,7 +521,9 @@ static TABLE: &[Tool] = &[
         description: "Start a backlog task: it opens its worktree and hands the task's \
                       prompt to an agent there. Answers once it is running, with the \
                       worktree and — when it runs as a chat — the chat's `target`. Needs \
-                      the user's approval, like daruda_worktree_create. End your turn \
+                      the user's approval on the desktop or phone; the first answer wins. \
+                      Refusal or timeout fails the call; do not retry or bypass approval. \
+                      End your turn \
                       after it: a notice arrives on its own when the run ends or is \
                       blocked. Do not follow it with daruda_run_wait unless the person \
                       asked you to wait.",
@@ -538,7 +546,8 @@ static TABLE: &[Tool] = &[
         description: "Open the chat a task's run belongs to, reloading its conversation \
                       when no tab shows it, and answer with that chat's `target` — so a \
                       finished task can be continued with daruda_chat_send. Needs the \
-                      user's approval, like daruda_chat_new.",
+                      user's approval on the desktop or phone; the first answer wins. \
+                      Refusal or timeout fails the call; do not retry or bypass approval.",
         gate: Gate::NeedsApproval,
         properties: task_properties,
         required: &["task"],

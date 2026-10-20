@@ -2,6 +2,44 @@ use super::*;
 use crate::test_support::workspace_with_agent_chat;
 use gpui::AppContext as _;
 
+#[gpui::test]
+fn orchestrator_say_does_not_start_a_phone_turn(cx: &mut gpui::TestAppContext) {
+    let fixture = workspace_with_agent_chat(cx);
+    let target = fixture.pane_ref(cx);
+    let (handle, _probe) = daruda_acp::AcpSessionHandle::detached_for_test();
+    fixture.workspace.update(cx, |ws, cx| {
+        ws.agent_chat_view(target.pane)
+            .unwrap()
+            .update(cx, |view, _| {
+                view.attach_handle(handle);
+                view.set_status_for_test(AgentSessionStatus::Connected);
+            });
+    });
+    cx.update(|cx| {
+        assert!(
+            crate::control::exec::run(
+                crate::control::spec::ResolvedCommand::Say {
+                    target,
+                    text: "check the diff".into(),
+                },
+                CommandOrigin::Orchestrator,
+                cx,
+            )
+            .is_ok()
+        );
+    });
+    fixture.workspace.read_with(cx, |ws, cx| {
+        assert!(
+            ws.agent_chat_view(target.pane)
+                .unwrap()
+                .read(cx)
+                .phone_turn()
+                .is_none(),
+            "an MCP prompt must not claim a phone conversation"
+        );
+    });
+}
+
 #[test]
 fn health_separates_a_dead_session_from_one_that_never_started() {
     assert_eq!(
@@ -286,10 +324,76 @@ async fn say_on_a_pane_with_no_live_session_reports_queued(cx: &mut gpui::TestAp
     let fixture = workspace_with_agent_chat(cx);
     fixture.workspace.update(cx, |ws, cx| {
         assert_eq!(
-            ws.control_say(fixture.pane(), "hello".into(), cx),
+            ws.control_say(fixture.pane(), "hello".into(), CommandOrigin::Phone, cx,),
             Ok(SendDisposition::Queued)
         );
     });
+}
+
+#[gpui::test]
+fn orchestrator_say_preserves_a_queued_or_parked_composer_edit(cx: &mut gpui::TestAppContext) {
+    for parked in [false, true] {
+        let fixture = workspace_with_agent_chat(cx);
+        let edited_id = fixture.workspace.update(cx, |ws, cx| {
+            ws.send_agent_prompt_text(fixture.pane(), "local draft".into(), cx);
+            let view = ws.agent_chat_view(fixture.pane()).unwrap().clone();
+            if parked {
+                view.update(cx, |view, cx| {
+                    view.set_turn_in_flight();
+                    view.cancel_turn(cx);
+                });
+            }
+            view.read(cx).queue().last_prompt_id().expect("local draft")
+        });
+        cx.update_window(fixture.window.into(), |_, window, cx| {
+            fixture.workspace.update(cx, |ws, cx| {
+                ws.begin_edit_queued_prompt(fixture.pane(), edited_id, window, cx);
+                assert_eq!(
+                    ws.control_say(
+                        fixture.pane(),
+                        "orchestrator request".into(),
+                        CommandOrigin::Orchestrator,
+                        cx,
+                    ),
+                    Ok(SendDisposition::Queued)
+                );
+                let view = ws.agent_chat_view(fixture.pane()).unwrap().read(cx);
+                let prompts: Vec<_> = view
+                    .queue()
+                    .in_strip_order()
+                    .map(|(prompt, is_parked)| (prompt.text().to_owned(), is_parked))
+                    .collect();
+                assert_eq!(
+                    prompts,
+                    vec![
+                        ("local draft".into(), parked),
+                        ("orchestrator request".into(), false),
+                    ]
+                );
+                assert_eq!(view.queue().editing(), Some(edited_id));
+                assert!(view.phone_turn().is_none());
+                assert_eq!(ws.input_dock.input.read(cx).value().as_str(), "local draft");
+            });
+        })
+        .expect("window is live");
+        fixture.workspace.update(cx, |ws, cx| {
+            ws.send_agent_prompt_text(fixture.pane(), "revised local".into(), cx);
+            let view = ws.agent_chat_view(fixture.pane()).unwrap().read(cx);
+            let prompts: Vec<_> = view
+                .queue()
+                .in_strip_order()
+                .map(|(prompt, is_parked)| (prompt.text().to_owned(), is_parked))
+                .collect();
+            assert_eq!(
+                prompts,
+                vec![
+                    ("revised local".into(), parked),
+                    ("orchestrator request".into(), false),
+                ]
+            );
+            assert_eq!(view.queue().editing(), None);
+        });
+    }
 }
 
 #[gpui::test]
@@ -297,10 +401,92 @@ async fn say_on_a_missing_pane_is_target_gone(cx: &mut gpui::TestAppContext) {
     let fixture = workspace_with_agent_chat(cx);
     fixture.workspace.update(cx, |ws, cx| {
         assert_eq!(
-            ws.control_say(9_999, "hello".into(), cx),
+            ws.control_say(9_999, "hello".into(), CommandOrigin::Phone, cx),
             Err(ControlError::TargetGone)
         );
     });
+}
+
+#[gpui::test]
+fn phone_say_starts_a_phone_turn_and_both_origins_handle_clear(cx: &mut gpui::TestAppContext) {
+    for origin in [CommandOrigin::Phone, CommandOrigin::Orchestrator] {
+        let fixture = workspace_with_agent_chat(cx);
+        let (handle, _probe) = daruda_acp::AcpSessionHandle::detached_for_test();
+        fixture.workspace.update(cx, |ws, cx| {
+            let view = ws.agent_chat_view(fixture.pane()).unwrap().clone();
+            view.update(cx, |view, _| {
+                view.attach_handle(handle);
+                view.set_status_for_test(AgentSessionStatus::Connected);
+                view.set_session_id_for_test(Some("original".into()));
+            });
+            assert_eq!(
+                ws.control_say(fixture.pane(), "hello".into(), origin, cx),
+                Ok(SendDisposition::Delivered)
+            );
+            assert_eq!(
+                ws.phone_turn_open(fixture.pane(), cx),
+                origin == CommandOrigin::Phone
+            );
+            assert_eq!(
+                ws.control_say(fixture.pane(), "/clear".into(), origin, cx),
+                Ok(SendDisposition::HandledLocally)
+            );
+            assert!(view.read(cx).session_id().is_none());
+            assert!(view.read(cx).items().is_empty());
+            assert!(!ws.phone_turn_open(fixture.pane(), cx));
+        });
+    }
+}
+
+#[gpui::test]
+fn command_origin_uses_only_the_registered_orchestrators_phone_turn(cx: &mut gpui::TestAppContext) {
+    cx.update(|cx| {
+        assert!(CommandOrigin::Phone.is_solicited(cx));
+        assert!(!CommandOrigin::Orchestrator.is_solicited(cx));
+    });
+    let fixture = workspace_with_agent_chat(cx);
+    let orchestrator = cx
+        .update_window(fixture.window.into(), |_, window, cx| {
+            fixture.workspace.update(cx, |ws, cx| {
+                ws.agent_chat_view(fixture.pane())
+                    .unwrap()
+                    .update(cx, |view, _| {
+                        view.start_phone_turn_for_test(std::time::Instant::now());
+                    });
+                ws.seed_orchestrator_chat_pane_unrevealed_for_test(
+                    daruda_config::AgentDefinition::claude_default().id,
+                    fixture.root().to_owned(),
+                    daruda_store::accounts::AccountSelection::SystemDefault,
+                    None,
+                    window,
+                    cx,
+                )
+                .unwrap()
+            })
+        })
+        .unwrap();
+    cx.update(|cx| {
+        crate::window_registry::WindowRegistry::register_orchestrator(
+            fixture.window.into(),
+            fixture.workspace.downgrade(),
+            cx,
+        );
+        assert!(!CommandOrigin::Orchestrator.is_solicited(cx));
+    });
+    fixture.workspace.update(cx, |ws, cx| {
+        ws.agent_chat_view(orchestrator)
+            .unwrap()
+            .update(cx, |view, _| {
+                view.start_phone_turn_for_test(std::time::Instant::now());
+            });
+    });
+    cx.update(|cx| assert!(CommandOrigin::Orchestrator.is_solicited(cx)));
+    fixture.workspace.update(cx, |ws, cx| {
+        ws.agent_chat_view(orchestrator)
+            .unwrap()
+            .update(cx, |view, _| view.end_phone_turn());
+    });
+    cx.update(|cx| assert!(!CommandOrigin::Orchestrator.is_solicited(cx)));
 }
 
 #[gpui::test]

@@ -73,6 +73,7 @@ pub(crate) enum ScreenshotScenario {
     TaskEditor(TaskEditorShot),
     OrchestratorChip,
     OrchestratorTab,
+    OrchestratorApproval,
     /// One tab per status dot — working, waiting, failed, and the two unseen
     /// outcomes — behind a resting tab. Colour is all that tells them apart,
     /// which only a capture can judge.
@@ -618,6 +619,40 @@ pub(crate) fn drive(
         }
         ScreenshotScenario::OrchestratorTab => {
             workspace.update(cx, |ws, cx| ws.seed_orchestrator_for_shot(true, window, cx));
+        }
+        ScreenshotScenario::OrchestratorApproval => {
+            use crate::control::approval;
+            use crate::remote_channel::global::Delivery;
+            workspace.update(cx, |ws, cx| {
+                ws.seed_orchestrator_for_shot(true, window, cx);
+                let pane = ws.orchestrator_chat_pane().unwrap();
+                ws.agent_chat_view(pane.pane)
+                    .unwrap()
+                    .update(cx, |view, cx| {
+                        view.seed_transcript(Vec::new(), window, cx);
+                    });
+            });
+            crate::window_registry::WindowRegistry::register_orchestrator(
+                window.window_handle(),
+                workspace.downgrade(),
+                cx,
+            );
+            let (settled, _) = approval::request(
+                crate::surface::strings::control::approval_task_start("Review changes"),
+                Delivery::Presence { away: false },
+                cx,
+            );
+            let _ = approval::request(
+                crate::surface::strings::control::approval_task_create(
+                    "Add desktop approvals",
+                    "Daruda",
+                ),
+                Delivery::Presence { away: false },
+                cx,
+            );
+            cx.defer(move |cx| {
+                approval::resolve_desktop(settled.0, "approve", cx);
+            });
         }
         ScreenshotScenario::LeftDockGit => {
             workspace.update(cx, |ws, cx| ws.seed_left_dock_git_for_shot(window, cx));

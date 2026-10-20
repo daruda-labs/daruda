@@ -56,10 +56,13 @@ impl AgentChatView {
             // `maybe_connect_agent_chat`, not here.
             replay: Replay::Live,
             items: Vec::new(),
+            host_cards: crate::host_cards::HostCards::default(),
+            host_cards_scroll: ScrollHandle::new(),
             queue: PromptQueue::default(),
             briefing: None,
             _event_pump: None,
             pending_permissions: HashSet::new(),
+            permission_session: super::session_access::new_permission_session(),
             permissions_told_to_phone: HashSet::new(),
             phone_turn_state: None,
             activity: ActivityTracker::default(),
@@ -197,6 +200,9 @@ impl AgentChatView {
     /// naming the other. Distinct from [`Self::set_connecting`], which only
     /// downgrades the status banner and must leave a live replay alone.
     pub fn begin_connect(&mut self, resume: Option<String>, cx: &mut Context<Self>) {
+        super::super::agent_chat_helpers::cancel_pending_permission(self, cx);
+        self.permission_session = super::session_access::new_permission_session();
+        self.permissions_told_to_phone.clear();
         self.replay = Replay::for_connect(resume);
         self.status = AgentSessionStatus::Connecting;
         cx.notify();

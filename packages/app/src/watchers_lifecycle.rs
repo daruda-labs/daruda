@@ -106,6 +106,7 @@ fn spawn_presence_and_telegram_pump(cx: &mut App) {
             // per-window activation edges, which a foreground change raised by
             // another process does not always reach.
             crate::app_presence::observe(cx);
+            crate::control::approval::relay_outstanding(cx);
             WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
                 ws.flush_telegram_first_response_fallbacks(cx);
                 ws.relay_outstanding_permissions(cx);
@@ -167,3 +168,6 @@ fn spawn_panels_reload(cx: &mut App) {
         cx,
     );
 }
+
+#[cfg(test)]
+mod tests;

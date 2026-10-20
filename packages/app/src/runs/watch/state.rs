@@ -38,6 +38,7 @@ pub(super) struct Block {
 #[derive(Default)]
 pub(super) struct RunEntry {
     pub(super) membership: Membership,
+    solicited: bool,
     pub(super) snapshot: Option<RunSnapshot>,
     pub(super) end: EndState,
     pub(super) block: Option<Block>,
@@ -93,6 +94,7 @@ pub(crate) struct RunWatch {
 #[derive(Clone, Debug)]
 pub(crate) struct RunEvent {
     pub(crate) sequence: u64,
+    pub(crate) solicited: bool,
     episode: u64,
     pub(crate) snapshot: RunSnapshot,
     pub(super) delivery: Delivery,
@@ -102,6 +104,7 @@ impl RunEvent {
     pub(crate) fn for_test(sequence: u64, snapshot: RunSnapshot) -> Self {
         Self {
             sequence,
+            solicited: false,
             episode: 0,
             snapshot,
             delivery: Delivery::Unreported,
@@ -143,6 +146,10 @@ impl RunWatch {
     /// Open a new episode. An end still held for enrichment is announced first,
     /// as the closing episode's, so a resume during the report read cannot lose it.
     pub(crate) fn begin(&mut self, key: &RunKey) {
+        self.begin_solicited(key, false);
+    }
+
+    pub(crate) fn begin_solicited(&mut self, key: &RunKey, solicited: bool) {
         let entry = self.entry(key);
         if entry.end == EndState::Held
             && let Some(held) = entry.snapshot.clone()
@@ -151,6 +158,7 @@ impl RunWatch {
             self.push_event(held);
         }
         let entry = self.changed(key);
+        entry.solicited = solicited;
         entry.disk_episode = None;
         entry.local_sequence = None;
         entry.episode = entry.revision;
@@ -202,6 +210,7 @@ impl RunWatch {
         }
         let event = RunEvent {
             sequence,
+            solicited: entry.solicited,
             episode: entry.episode,
             snapshot,
             delivery: Delivery::Unreported,
@@ -263,8 +272,14 @@ impl RunWatch {
         self.locations.get(id)
     }
     pub(crate) fn register(&mut self, key: RunKey) {
+        self.register_solicited(key, false);
+    }
+
+    pub(crate) fn register_solicited(&mut self, key: RunKey, solicited: bool) {
         let was = self.membership(&key);
-        self.entry(&key).membership = Membership::Scoped;
+        let entry = self.entry(&key);
+        entry.membership = Membership::Scoped;
+        entry.solicited = solicited;
         if was == Membership::Outside {
             self.announce_cached(&key);
         }

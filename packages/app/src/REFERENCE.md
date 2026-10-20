@@ -97,13 +97,21 @@ that run results share with live chat replies. Workspace installs
 and `RunsEffects::run_event`, receiving the run-owned `RunEvent`.
 
 Phone and MCP starts carry `control::exec::CommandOrigin::{Phone, Orchestrator}`
-into each domain's own `StartedBy`. Desktop starts pass `StartedBy::Desktop`
+into each domain's own `StartedBy`. `Orchestrator` names the tool caller,
+not the person's location. Desktop starts pass `StartedBy::Desktop`
 directly. Flow `RunStarted` and Task `DispatchRequested` persist this provenance;
 resume and Task reopen preserve it. Start responses construct handles from the
 actual returned run id or `ExecutionRef`: `flow:<run-id>` or
 `task:<task-id>/<execution-id>`. `task:<task-id>` resolves the latest execution
 once per result call. An optional `daruda_flow_stop.run` rejects a mismatched
 current run instead of stopping a replacement in the same worktree.
+
+Solicitation is separate, process-local metadata captured when a request enters,
+before approval or asynchronous preparation. An orchestrator command is solicited
+while its phone turn is open; direct phone commands are always solicited. Flow
+submissions keep it beside the episode's submitter, while task registration
+installs it before replaying a fast cached completion. Every `RunEvent` stamps
+its own solicitation so a desktop resume cannot relabel an earlier held end.
 
 `RunsHost::run_query` stages foreground facts; `RunQuery::read` performs disk
 reads and report enrichment off-thread. Flow state comes from the live run
@@ -128,6 +136,42 @@ leading and 2,000 trailing characters around a truncation marker. Every terminal
 path records execution identity, provenance, end state and pointers in the
 Task's five-entry history; reopen retains that history. `Completed` describes
 normal Task session termination, so work success must be judged from the result.
+
+### Human delivery, approvals and questions
+
+`remote_channel::delivery::remote_delivery(solicited, away)` maps solicited
+work to `Delivery::Explicit`; other work uses `Delivery::Presence { away }`
+and each channel's `only_when_away`. Telegram honors the same delivery policy
+as Slack and Discord. Solicitation is captured before approval or asynchronous
+work; presence is read when the message is actually offered. `control_say`
+opens a `PhoneTurn` only for Phone input; Orchestrator input uses InApp with
+the same slash-command and clear handling. A solicited chat announcement
+selects the chat and records its ping. An unsolicited announcement is a Notice,
+which changes neither selection nor reply-to/last-ping routing.
+
+`control/approval` owns the process-wide pending decision. The orchestrator's
+host-owned card strip remains answerable without a remote channel. Desktop and
+eligible remote cards share the first answer; settlement edits remote cards
+and defers the desktop update, notifying cached views and all window chips.
+Stop, MCP cancellation and disconnect withdraw outstanding approvals. The
+initial deadline is 300 seconds; a freshly queued or delivered phone card
+extends it to the later of the current deadline and that moment plus 120
+seconds. A 15-second presence pump offers each outstanding approval once to
+each owner/channel that has never queued it. Timeout means no answer, never
+consent or permission to retry or bypass the gate. Remote card ledgers retain
+settlement while a send is in flight, then edit its returned message ids.
+
+`permission = ask` flows can start through control; profile selection is still
+refused. Runtime questions appear in desktop modals or inline flow rows and on
+eligible remote channels with every original choice. Tokens identify the full
+`run_dir` and `ask_id`; a fresh directory can restart ids, while resume in the
+same directory retains the durable monotonic counter. The first answer wins,
+and `FlowChanged::AskClosed` settles remote cards and closes stale desktop
+questions. Modal Stop also checks that its original question is still open.
+Process-owned dispatch can deliver and answer questions without a window.
+Waiting state updates chips in all windows; native waiting notifications obey
+preferences and visibility without stealing focus. Removing settled OS alerts,
+app-exit card cleanup and restart durability remain outside this contract.
 
 ### Result queries, waits and delivery
 
@@ -226,9 +270,22 @@ An explicit `daruda_run_wait` call is unaffected.
 The host reconciles any owed completion before dispatch and reconciles the new
 activity afterward, routing both edges through `fire_activity_completion`.
 It does not interpret slash commands or arm a phone first-response watch.
-Phone relay behavior is unchanged: Phone and Orchestrator flow starts retain
-their direct result relay, and orchestrator answer relay follows the existing
-presence rules.
+A batch is solicited if any eligible episode is solicited. After accepted
+dispatch, such a notice arms `PhoneTurnMode::CompletionOnly`: no received ACK,
+first-response relay or fallback, and one explicit completion or failure even
+while the user is present. Refusals preserve the previous phone state. Desktop
+notices retain each channel's presence policy. Only direct Phone flow submissions
+keep the direct flow outcome notice; Orchestrator flows answer through their
+notice turn. Phone starts do not join the omitted-handles scope.
+
+An active Orchestrator-started Task's matching child chat suppresses its own
+completion/error relay, even before run-scope registration: TaskRecord
+provenance and the active execution establish ownership. Native completion
+notifications and permission requests are unchanged. An actual open child
+`PhoneTurn`, direct Phone/Desktop Tasks and manual continuation after a Task
+is terminal retain their relay. This prevents the child final answer and the
+orchestrator summary from both reaching the phone. Direct `/task` does not gain
+an omitted-scope result or a new completion-delivery guarantee.
 
 ## `surface/`
 

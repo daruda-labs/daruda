@@ -10,6 +10,7 @@ use gpui::{IntoElement, SharedString, div, prelude::*, px};
 /// running together ask independently — so each says who is asking.
 pub(super) fn ask_block(
     lane: daruda_store::project::LaneRef,
+    run_dir: &std::path::Path,
     ask: &crate::workspace::flow_rows::AskRowData,
     snap: &FlowPageSnapshot,
     cx: &gpui::App,
@@ -38,7 +39,7 @@ pub(super) fn ask_block(
                     ask.options
                         .iter()
                         .enumerate()
-                        .map(|(ix, choice)| answer_button(lane, ask_id, ix, choice, snap)),
+                        .map(|(ix, choice)| answer_button(lane, run_dir, ask_id, ix, choice, snap)),
                 ),
         )
 }
@@ -48,6 +49,7 @@ pub(super) fn ask_block(
 /// person sees the same shape in both places.
 fn answer_button(
     lane: daruda_store::project::LaneRef,
+    run_dir: &std::path::Path,
     ask_id: u64,
     ix: usize,
     choice: &daruda_acp::PermissionChoice,
@@ -57,6 +59,7 @@ fn answer_button(
     let label = SharedString::from(choice.name.clone());
     let option_id = choice.option_id.clone();
     let workspace = snap.workspace.clone();
+    let run_dir = run_dir.to_path_buf();
     let button = match choice.kind {
         daruda_acp::PermissionKindView::AllowOnce | daruda_acp::PermissionKindView::AllowAlways => {
             crate::ui::button_primary(id, label)
@@ -78,7 +81,9 @@ fn answer_button(
                 option_id: option_id.clone(),
             }
         };
-        match workspace.update(cx, |ws, cx| ws.answer_flow_ask(lane, ask_id, decision, cx)) {
+        match workspace.update(cx, |ws, cx| {
+            ws.answer_flow_ask(lane, &run_dir, ask_id, decision, cx)
+        }) {
             Ok(()) => {}
             Err(e) => daruda_store::observability::log_writer::LogWriter::log(
                 daruda_store::observability::error_report::ErrorReport::new(
@@ -97,6 +102,7 @@ fn answer_button(
 pub(super) fn stop_button(run: &FlowRunRow, snap: &FlowPageSnapshot) -> impl IntoElement + use<> {
     let workspace = snap.workspace.clone();
     let lane = run.lane;
+    let run_dir = run.run_dir.clone();
     crate::ui::button(
         SharedString::from(format!("flow-panel-stop-{}-{}", lane.project, lane.lane)),
         strings::flow::panel_stop(),
@@ -104,7 +110,7 @@ pub(super) fn stop_button(run: &FlowRunRow, snap: &FlowPageSnapshot) -> impl Int
     .tab_stop(true)
     .on_click(move |_, _, cx| {
         if let Some(ws) = workspace.upgrade() {
-            ws.update(cx, |ws, cx| ws.stop_flow_run_in(lane, cx));
+            ws.update(cx, |ws, cx| ws.stop_flow_run_at(lane, &run_dir, cx));
         }
     })
 }

@@ -2,7 +2,7 @@ use super::*;
 use daruda_config::remote::{ChannelKind, RemoteRecipient};
 use futures::{FutureExt, StreamExt};
 
-fn ready_bot() -> Arc<BotSession> {
+pub(super) fn ready_bot() -> Arc<BotSession> {
     let root = tempfile::tempdir().unwrap().keep();
     let lease = daruda_store::inbox::InboxLease::try_acquire(
         &root,
@@ -22,7 +22,7 @@ fn ready_bot() -> Arc<BotSession> {
     ))
 }
 
-fn setup(cx: &mut App) -> futures::channel::mpsc::UnboundedReceiver<Pending> {
+pub(crate) fn setup(cx: &mut App) -> futures::channel::mpsc::UnboundedReceiver<Pending> {
     SettingsStore::init(cx);
     let mut config = daruda_config::Config::default();
     for (id, kind, only_when_away) in [
@@ -295,7 +295,9 @@ async fn a_shared_approval_settles_once_and_invalidates_every_channels_buttons(
     cx: &mut gpui::TestAppContext,
 ) {
     let mut receiver = cx.update(setup);
-    let (id, answer) = cx.update(|cx| crate::control::approval::request("create lane".into(), cx));
+    let (id, answer) = cx.update(|cx| {
+        crate::control::approval::request("create lane".into(), Delivery::Explicit, cx)
+    });
     let first = receiver.next().await.unwrap();
     let second = receiver.next().await.unwrap();
     assert_ne!(first.id, second.id);
@@ -321,6 +323,61 @@ async fn a_shared_approval_settles_once_and_invalidates_every_channels_buttons(
         answer.recv().await.unwrap(),
         crate::control::approval::ApprovalOutcome::Approved
     );
+}
+
+#[gpui::test]
+fn approval_cards_respect_each_connections_presence_policy(cx: &mut gpui::TestAppContext) {
+    cx.update(|cx| {
+        let mut receiver = setup(cx);
+        for (delivery, expected) in [
+            (Delivery::Presence { away: false }, vec!["personal"]),
+            (Delivery::Presence { away: true }, vec!["personal", "work"]),
+            (Delivery::Explicit, vec!["personal", "work"]),
+        ] {
+            let id = crate::control::approval::ApprovalId(7);
+            assert!(RemoteChannels::send_approval(
+                id,
+                "Create a task".into(),
+                delivery,
+                cx
+            ));
+            let mut delivered = Vec::new();
+            while let Some(Some(pending)) = receiver.next().now_or_never() {
+                assert!(matches!(pending.outbound, Outbound::Approval(_)));
+                delivered.push(pending.id);
+            }
+            delivered.sort();
+            assert_eq!(delivered, expected);
+            for (key, connection) in &cx.global::<RemoteChannels>().connections {
+                assert_eq!(
+                    connection.core.pending_approval_token_count(),
+                    if expected.contains(&key.as_str()) {
+                        2
+                    } else {
+                        0
+                    }
+                );
+            }
+            RemoteChannels::settle_card(
+                &crate::remote_channel::cards::CardId::Approval(id),
+                "Cancelled",
+                cx,
+            );
+        }
+        drop(receiver);
+        assert!(!RemoteChannels::send_approval(
+            crate::control::approval::ApprovalId(9),
+            "Create a task".into(),
+            Delivery::Explicit,
+            cx
+        ));
+        assert!(
+            cx.global::<RemoteChannels>()
+                .connections
+                .values()
+                .all(|connection| connection.core.pending_approval_token_count() == 0)
+        );
+    });
 }
 
 #[gpui::test]
@@ -376,6 +433,7 @@ fn announcing_a_chat_selects_it_on_every_connection_and_pings_all(cx: &mut gpui:
             pane,
             "daruda/main".into(),
             "new tab".into(),
+            Delivery::Explicit,
             cx
         ));
         let bridge = cx.global_mut::<RemoteChannels>();
@@ -402,5 +460,45 @@ fn announcing_a_chat_selects_it_on_every_connection_and_pings_all(cx: &mut gpui:
         }
         pinged.sort();
         assert_eq!(pinged, ["personal", "work"]);
+    });
+}
+
+#[gpui::test]
+fn presence_announcements_preserve_targets_and_use_each_connections_presence_setting(
+    cx: &mut gpui::TestAppContext,
+) {
+    cx.update(|cx| {
+        let mut receiver = setup(cx);
+        let selected = ping().pane;
+        let announced = PaneRef {
+            pane: 2,
+            ..selected
+        };
+        for connection in cx.global_mut::<RemoteChannels>().connections.values_mut() {
+            connection.core.command_state_mut().select(Some(selected));
+        }
+        assert!(RemoteChannels::announce_chat(
+            announced,
+            "header".into(),
+            "announcement".into(),
+            Delivery::Presence { away: false },
+            cx,
+        ));
+        let pending = receiver
+            .next()
+            .now_or_never()
+            .flatten()
+            .expect("personal accepts while present");
+        assert_eq!(pending.id, "personal");
+        assert!(
+            matches!(pending.outbound, Outbound::Notice(text) if text == "header\nannouncement")
+        );
+        assert!(receiver.next().now_or_never().is_none());
+        for connection in cx.global_mut::<RemoteChannels>().connections.values_mut() {
+            assert_eq!(
+                connection.core.command_state_mut().selected(),
+                Some(selected)
+            );
+        }
     });
 }

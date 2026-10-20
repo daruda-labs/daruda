@@ -109,7 +109,7 @@ impl AgentChatView {
                 self.overage_stop_markers.insert(self.items.len() - 1);
             }
         }
-        self.settle_turn();
+        self.settle_turn(cx);
         // Stop can be the only terminal transition a live resource link gets;
         // the agent is allowed to never acknowledge the cooperative cancel.
         self.reconcile_tool_images(&ReconcileScope::All, cx);
@@ -181,12 +181,12 @@ impl AgentChatView {
         }
     }
 
-    /// End the current turn locally and settle every still-live item. Model-only
-    /// (no rows/notify) so the three call paths (Stop, `TurnEnded`, `Error`)
-    /// share one settle sequence and can't drift. Idempotent.
-    pub(super) fn settle_turn(&mut self) {
+    /// End the current turn locally and settle every still-live item without
+    /// projecting rows. Stop, `TurnEnded`, and `Error` share this sequence and
+    /// its host settlement events. Idempotent.
+    pub(super) fn settle_turn(&mut self, cx: &mut Context<Self>) {
         self.queue.turn.finish();
-        self.settle_run_state();
+        self.settle_run_state(cx);
     }
 
     /// Settle everything this run left flagged live — the transcript *and* the
@@ -199,10 +199,10 @@ impl AgentChatView {
     /// flagged live reads as running forever, while the pulse pump only repaints
     /// panes `is_busy()` calls working — so the glyph gets a blink nothing
     /// drives. One site, so a new store is added here rather than at each exit.
-    pub(super) fn settle_run_state(&mut self) {
+    pub(super) fn settle_run_state(&mut self, cx: &mut Context<Self>) {
         finalize_streaming(&mut self.items);
         cancel_pending_tools(&mut self.items);
-        cancel_pending_permission(self);
+        cancel_pending_permission(self, cx);
         cancel_pending_plan_entries(&mut self.plan);
     }
 
@@ -236,6 +236,18 @@ impl AgentChatView {
         if let Some(handle) = self.live_handle() {
             handle.respond_permission(request_id, decision);
         }
+        cx.emit(super::AgentChatEvent::PermissionSettled {
+            session: self.permission_session,
+            request_id,
+            outcome: match kind {
+                PermissionKindView::AllowOnce | PermissionKindView::AllowAlways => {
+                    super::PermissionOutcome::Allowed
+                }
+                PermissionKindView::RejectOnce | PermissionKindView::RejectAlways => {
+                    super::PermissionOutcome::Rejected
+                }
+            },
+        });
         // The card is now resolved, so it no longer force-stays-visible under a
         // collapsed response: reproject so it folds back into the process
         // immediately. It also renders shorter (buttons → outcome line), so
@@ -372,7 +384,7 @@ impl AgentChatView {
     /// cache. Does NOT touch `session_id`/`replay`/`status` — the two
     /// callers differ there (fresh conversation vs. resume via `session/load`).
     fn teardown_transient_session_state(&mut self, cx: &mut Context<Self>) {
-        cancel_pending_permission(self);
+        cancel_pending_permission(self, cx);
         self.detach_handle();
         self._event_pump = None;
         self.items.clear();

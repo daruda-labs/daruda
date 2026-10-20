@@ -23,6 +23,7 @@ pub(crate) const PENDING_PERMISSIONS_CAP: usize = 64;
 /// prefix and from a permission token (bare `Uuid::simple`, no `:`), so the
 /// three namespaces cannot collide structurally.
 pub(crate) const APPROVAL_TOKEN_PREFIX: &str = "apv";
+const FLOW_ASK_TOKEN_PREFIX: &str = "faq";
 
 /// Approval tokens kept before the oldest is evicted. Two per card, and a
 /// card the user never answers times out on the app side — so this only
@@ -34,7 +35,7 @@ pub struct RoutingCore<M = i64> {
     pub(crate) last_pinged: Option<PaneRef>,
     pub(crate) sent_pings: HashMap<M, PaneRef>,
     pub(crate) sent_pings_order: VecDeque<M>,
-    pub(crate) pending_permissions: HashMap<String, (PaneRef, u64, PermissionDecision)>,
+    pub(crate) pending_permissions: HashMap<String, (PaneRef, u64, u64, PermissionDecision)>,
     pub(crate) pending_permissions_order: VecDeque<String>,
     /// Approval tokens. Deliberately *not* consumed on a tap, unlike
     /// `pending_permissions`: the card stays on screen, and tapping the same
@@ -48,6 +49,15 @@ pub struct RoutingCore<M = i64> {
         ),
     >,
     pending_approvals_order: VecDeque<String>,
+    pending_flow_asks: HashMap<
+        String,
+        (
+            std::path::PathBuf,
+            std::path::PathBuf,
+            u64,
+            PermissionDecision,
+        ),
+    >,
     command_state: crate::remote_channel::command::CommandState,
 }
 
@@ -61,6 +71,7 @@ impl<M: Eq + std::hash::Hash + Clone> Default for RoutingCore<M> {
             pending_permissions_order: VecDeque::new(),
             pending_approvals: HashMap::new(),
             pending_approvals_order: VecDeque::new(),
+            pending_flow_asks: HashMap::new(),
             command_state: crate::remote_channel::command::CommandState::default(),
         }
     }
@@ -139,6 +150,14 @@ impl<M: Eq + std::hash::Hash + Clone> RoutingCore<M> {
     }
 
     pub fn route_callback(&mut self, data: String) -> InboundAction {
+        if let Some((worktree, run_dir, ask_id, decision)) = self.pending_flow_asks.get(&data) {
+            return InboundAction::ResolveFlowAsk {
+                worktree: worktree.clone(),
+                run_dir: run_dir.clone(),
+                ask_id: *ask_id,
+                decision: decision.clone(),
+            };
+        }
         // Listing tokens are tried first and are never consumed — tapping the
         // same row twice is ordinary use. Permission tokens below are.
         if data.starts_with(crate::remote_channel::command::LISTING_TOKEN_PREFIX) {
@@ -154,13 +173,14 @@ impl<M: Eq + std::hash::Hash + Clone> RoutingCore<M> {
                     id: *id,
                     choice: *choice,
                 },
-                None => InboundAction::Ignore,
+                None => InboundAction::StaleApproval,
             };
         }
 
         match self.pending_permissions.remove(&data) {
-            Some((pane, perm_id, decision)) => InboundAction::RespondPermission {
+            Some((pane, session, perm_id, decision)) => InboundAction::RespondPermission {
                 pane,
+                session,
                 perm_id,
                 decision,
             },
@@ -225,7 +245,7 @@ impl<M: Eq + std::hash::Hash + Clone> RoutingCore<M> {
                     let token = Uuid::new_v4().simple().to_string();
                     self.insert_pending_permission(
                         token.clone(),
-                        (ping.pane, prompt.perm_id, decision),
+                        (ping.pane, prompt.session, prompt.perm_id, decision),
                     );
                     (label, token)
                 })
@@ -241,6 +261,31 @@ impl<M: Eq + std::hash::Hash + Clone> RoutingCore<M> {
         }
     }
 
+    pub(crate) fn build_flow_ask(&mut self, prompt: super::FlowAskPrompt) -> PreparedPing {
+        let buttons = prompt
+            .buttons
+            .into_iter()
+            .map(|(label, decision)| {
+                let token = format!("{FLOW_ASK_TOKEN_PREFIX}:{}", Uuid::new_v4().simple());
+                self.pending_flow_asks.insert(
+                    token.clone(),
+                    (
+                        prompt.worktree.clone(),
+                        prompt.run_dir.clone(),
+                        prompt.ask_id,
+                        decision,
+                    ),
+                );
+                (label, token)
+            })
+            .collect();
+        PreparedPing {
+            header: String::new(),
+            tail: super::MessageTail::Plain(prompt.summary),
+            keyboard: Some(InlineKeyboard::single_row(buttons)),
+        }
+    }
+
     /// Registers one permission-callback token, enforcing the
     /// `PENDING_PERMISSIONS_CAP` bound by evicting the oldest token
     /// (from both the map and its companion order queue) once
@@ -250,7 +295,7 @@ impl<M: Eq + std::hash::Hash + Clone> RoutingCore<M> {
     fn insert_pending_permission(
         &mut self,
         token: String,
-        value: (PaneRef, u64, PermissionDecision),
+        value: (PaneRef, u64, u64, PermissionDecision),
     ) {
         self.pending_permissions.insert(token.clone(), value);
         self.pending_permissions_order.push_back(token);
@@ -259,6 +304,28 @@ impl<M: Eq + std::hash::Hash + Clone> RoutingCore<M> {
             && let Some(oldest) = self.pending_permissions_order.pop_front()
         {
             self.pending_permissions.remove(&oldest);
+        }
+    }
+
+    pub(crate) fn forget_card(&mut self, card: &crate::remote_channel::cards::CardId) {
+        use crate::remote_channel::cards::CardId;
+        match card {
+            CardId::Approval(id) => self.forget_pending_approval(*id),
+            CardId::FlowAsk { run_dir, ask_id } => {
+                self.pending_flow_asks
+                    .retain(|_, (_, held, id, _)| held != run_dir || id != ask_id);
+            }
+            CardId::Permission {
+                pane,
+                session,
+                request,
+            } => {
+                self.pending_permissions.retain(|_, (held, scope, id, _)| {
+                    (*held, *scope, *id) != (*pane, *session, *request)
+                });
+                self.pending_permissions_order
+                    .retain(|token| self.pending_permissions.contains_key(token));
+            }
         }
     }
 

@@ -58,6 +58,7 @@ impl Workspace {
     pub(crate) fn respond_bot_permission(
         &mut self,
         pane_id: PaneId,
+        session: u64,
         perm_id: u64,
         decision: crate::telegram::bridge::PermissionDecision,
         cx: &mut Context<Self>,
@@ -65,7 +66,9 @@ impl Workspace {
         let Some(view) = self.agent_chat_view(pane_id).cloned() else {
             return BotPermissionOutcome::Gone;
         };
-        if !view.read(cx).is_permission_outstanding(perm_id) {
+        if view.read(cx).permission_session() != session
+            || !view.read(cx).is_permission_outstanding(perm_id)
+        {
             return BotPermissionOutcome::Stale;
         }
         let (option_id, kind) = match decision {

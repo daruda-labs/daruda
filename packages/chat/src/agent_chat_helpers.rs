@@ -446,7 +446,10 @@ pub(super) fn permission_card_mut(
 /// ACP requires the client to resolve a pending permission with a cancelled
 /// outcome on `session/cancel`; this also runs when a turn ends or errors before
 /// the user decided, so no card is left stuck with live buttons.
-pub(super) fn cancel_pending_permission(view: &mut AgentChatView) {
+pub(super) fn cancel_pending_permission(
+    view: &mut AgentChatView,
+    cx: &mut gpui::Context<AgentChatView>,
+) {
     if view.pending_permissions.is_empty() {
         return;
     }
@@ -454,6 +457,11 @@ pub(super) fn cancel_pending_permission(view: &mut AgentChatView) {
         if let Some(handle) = view.any_handle() {
             handle.respond_permission(id, daruda_acp::PermissionDecision::Cancelled);
         }
+        cx.emit(crate::view::AgentChatEvent::PermissionSettled {
+            session: view.permission_session,
+            request_id: id,
+            outcome: crate::view::PermissionOutcome::Cancelled,
+        });
     }
     // Mark *every* unresolved card cancelled — a UI safety net that intentionally
     // does not key off the set. Under the invariant the two are equal, but the

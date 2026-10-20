@@ -1,8 +1,9 @@
-//! Running a flow from outside the app.
+//! Running a flow through the phone or orchestrator control surface.
 //!
 //! A flow answers to different rules than a chat: it is addressed by worktree
-//! rather than by pane, only one may run in a worktree at a time, and one that
-//! would stop to ask a question has nowhere to ask it from a phone.
+//! rather than by pane, only one may run in a worktree at a time, and profile
+//! selection still requires the desktop picker. Runtime permission questions
+//! are supported on desktop and eligible remote channels; the first answer wins.
 //!
 //! Listing is the exception that takes no target — every open window
 //! contributes its active worktree's set and each row says which, so there is
@@ -59,10 +60,10 @@ impl Workspace {
     /// instead made the answer the first place the caller learned where it
     /// landed.
     ///
-    /// Every refusal is the caller's answer, never a desktop toast or dialog
-    /// it cannot see. A worktree that is gone has nowhere to put a run; one
-    /// that would open a desktop dialog (an `ask` permission policy, or a
-    /// profile question) would hang a caller that cannot answer it; a lane
+    /// Every start refusal is returned to the caller. Runtime permission
+    /// questions use the shared desktop/remote answer path. A worktree that
+    /// is gone has nowhere to put a run; profile selection needs the picker,
+    /// which this control surface does not expose; a lane
     /// runs one flow at a time, enforced by an on-disk lock the engine takes
     /// only after dispatch; and a flow that does not pass its own static
     /// checks is refused as written.
@@ -71,6 +72,7 @@ impl Workspace {
         lane: LaneRef,
         name: &str,
         started_by: daruda_flow::request::StartedBy,
+        solicited: bool,
         cx: &mut Context<Self>,
     ) -> Result<FlowStarted, ControlError> {
         let Some(cwd) = self.lane_for(lane).map(|l| l.path.clone()) else {
@@ -108,7 +110,7 @@ impl Workspace {
             &found.path,
             None,
             &FlowSelection::default(),
-            started_by,
+            (started_by, solicited),
             cx,
         );
         let run_id = match submitted {
@@ -241,33 +243,14 @@ fn map_origin(origin: FlowOrigin) -> FlowOriginKind {
     }
 }
 
-/// Would running this flow put a dialog on the desktop that only a person at
-/// the machine can answer? Two shapes do: an agent node (or the repair agent)
-/// whose permission policy is `ask`, and a file declaring profiles, which
-/// makes the picker ask which one to run.
+/// A file declaring profiles makes the desktop picker ask which one to run.
 ///
 /// A file that cannot be read or parsed answers `false`: the run that follows
 /// fails on the same read and names it properly, and refusing here would
 /// report a parse error as an interaction problem.
 fn needs_desktop_answer(path: &Path) -> bool {
-    use daruda_flow::model::{NodeKind, PermissionPolicy};
-
     let Ok(text) = std::fs::read_to_string(path) else {
         return false;
     };
-    if daruda_flow::load::profiles(&text).is_ok_and(|p| !p.is_empty()) {
-        return true;
-    }
-    let Ok(inspected) = daruda_flow::inspect(&text, None) else {
-        return false;
-    };
-    let flow = inspected.loaded.flow();
-    let node_asks = flow.nodes.iter().any(|node| {
-        matches!(&node.kind, NodeKind::Agent(body) if body.agent.permission == PermissionPolicy::Ask)
-    });
-    let repair_asks = flow
-        .default_agent
-        .as_ref()
-        .is_some_and(|agent| agent.permission == PermissionPolicy::Ask);
-    node_asks || repair_asks
+    daruda_flow::load::profiles(&text).is_ok_and(|profiles| !profiles.is_empty())
 }

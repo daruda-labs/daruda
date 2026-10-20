@@ -1,4 +1,4 @@
-//! Deliver literal run pointers without touching composer state or phone routing.
+//! Deliver literal run pointers and preserve phone-solicited completion routing.
 use super::Workspace;
 use crate::control::notices;
 use daruda_chat::view::{ActivityState, AgentChatView, InternalDispatch};
@@ -20,7 +20,13 @@ impl Workspace {
             return;
         };
         let dispatch = view.update(cx, |view, cx| {
-            view.try_send_internal_prompt_text(batch.prompt.clone(), cx)
+            view.try_send_internal_prompt_text_with_phone_mode(
+                batch.prompt.clone(),
+                batch
+                    .solicited
+                    .then_some(daruda_chat::phone_turn::PhoneTurnMode::CompletionOnly),
+                cx,
+            )
         });
         match dispatch {
             InternalDispatch::Sent => {

@@ -2,13 +2,32 @@
 //! side effects, including answering a waiting ask.
 
 use super::should_notify_agent_event;
+use crate::runs::GlobalTasks;
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_chat::view::TurnOutcome;
+use daruda_store::tasks::{Lifecycle, StartedBy};
 use gpui::Context;
 
 impl Workspace {
+    pub(crate) fn show_approval_card(
+        &self,
+        card: daruda_chat::view::HostCard,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::WeakEntity<daruda_chat::view::AgentChatView>> {
+        let pane = self.orchestrator_chat_pane()?;
+        let view = self.agent_chat_view(pane.pane)?.clone();
+        view.update(cx, |view, cx| view.push_host_card(card, cx));
+        self.notify_agent_pane(
+            pane.pane,
+            self.mirrors.notifications.agent_waiting_enabled,
+            s::notification::agent_waiting(),
+            cx,
+        );
+        Some(view.downgrade())
+    }
+
     /// Show a desktop notification `body` for `pane_id`, gated by `enabled`
     /// and the shared in-view rule. A parked-lane pane is never on screen, so
     /// its completion/wait always fires.
@@ -91,6 +110,27 @@ impl Workspace {
         );
     }
 
+    fn orchestrator_owns_task_completion(&self, pane_id: PaneId, cx: &Context<Self>) -> bool {
+        if self.phone_turn_open(pane_id, cx) {
+            return false;
+        }
+        let Some(exec) = self.task_chat_execution(pane_id, cx) else {
+            return false;
+        };
+        cx.global::<GlobalTasks>()
+            .get(&exec.task_id)
+            .is_some_and(|task| {
+                task.started_by == Some(StartedBy::Orchestrator)
+                    && matches!(
+                        &task.lifecycle,
+                        Lifecycle::Preparing { exec: active, .. }
+                            | Lifecycle::Dispatching { exec: active, .. }
+                            | Lifecycle::Running { exec: active, .. }
+                            if active == &exec
+                    )
+            })
+    }
+
     /// Fire the completion signals once a pane's activity span settles: the
     /// "completed" notification (only for `Completed`) and the backing task's
     /// terminal reconcile. The single completion firing point.
@@ -100,18 +140,24 @@ impl Workspace {
         outcome: TurnOutcome,
         cx: &mut Context<Self>,
     ) {
+        if matches!(outcome, TurnOutcome::Stopped) && self.is_orchestrator_pane(pane_id) {
+            crate::control::approval::withdraw_all(cx);
+        }
         if let Some(news) = super::super::lane_status::agent_outcome(&outcome) {
             self.record_agent_outcome(pane_id, news, cx);
         }
+        let relay_completion = !self.orchestrator_owns_task_completion(pane_id, cx);
         if matches!(outcome, TurnOutcome::Completed) {
             self.maybe_notify_agent_completed(pane_id, cx);
             // `None` = the phone already has this turn's answer; the
             // first-response relay sent the very message this would report.
-            if let Some((header, tail)) = self.telegram_completion_parts(pane_id, cx) {
+            if relay_completion
+                && let Some((header, tail)) = self.telegram_completion_parts(pane_id, cx)
+            {
                 self.relay_when_presence_allows(pane_id, header, tail, None, cx);
             }
         }
-        if matches!(outcome, TurnOutcome::Errored) {
+        if relay_completion && matches!(outcome, TurnOutcome::Errored) {
             let (header, tail) = self.telegram_failure_parts(pane_id, cx);
             self.relay_when_presence_allows(pane_id, header, tail, None, cx);
         }

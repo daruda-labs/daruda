@@ -23,6 +23,10 @@ impl AgentChatView {
         self.session_id.as_deref()
     }
 
+    pub fn permission_session(&self) -> u64 {
+        self.permission_session
+    }
+
     pub fn session_title(&self) -> Option<&str> {
         self.session_title.as_deref()
     }

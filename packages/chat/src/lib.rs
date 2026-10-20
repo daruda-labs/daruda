@@ -21,6 +21,7 @@ pub mod agent_chat_helpers;
 pub(crate) mod autoscroll_ops;
 /// Which rows a pane has folded, and the mode those defaults come from.
 pub mod fold;
+pub(crate) mod host_cards;
 pub mod labels;
 mod localized;
 pub(crate) mod output_editor;

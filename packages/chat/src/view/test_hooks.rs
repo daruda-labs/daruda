@@ -17,6 +17,14 @@ use super::{ActivitySpan, AgentChatView, AgentSessionStatus, TurnOutcome};
 // Restated here so a per-file scan sees the impl is test-only.
 #[cfg(any(test, feature = "test-support"))]
 impl AgentChatView {
+    pub fn host_cards_for_test(&self) -> Vec<(u64, Option<String>)> {
+        self.host_cards
+            .entries()
+            .iter()
+            .map(|entry| (entry.card.id, entry.status.label().map(str::to_owned)))
+            .collect()
+    }
+
     /// How many times the view has rendered — what a cache-scoping test
     /// counts to tell a targeted notify from a missed one.
     pub fn render_count_for_test(&self) -> u32 {

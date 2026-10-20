@@ -99,7 +99,9 @@ async fn windows_spelling_one_worktree_two_ways_share_its_run(cx: &mut TestAppCo
         ws.park_flow_ask_for_test(here, &run_dir, pending, cx)
     });
     let there = second.read_with(cx, |ws, _| ws.active);
-    second.update(cx, |ws, cx| ws.answer_flow_ask(there, 1, allow(), cx));
+    second.update(cx, |ws, cx| {
+        ws.answer_flow_ask(there, &run_dir, 1, allow(), cx)
+    });
     assert!(
         matches!(
             answered.try_recv(),

@@ -104,9 +104,8 @@ impl Workspace {
         if asking {
             // Through the real parking path: the modal is raised there, and
             // a capture that skipped it would show only the panel.
-            // The receiver goes at once: nothing in a capture answers, and
-            // no event follows to find the question abandoned.
-            let (reply, _) = smol::channel::bounded(1);
+            let (reply, receiver) = smol::channel::bounded(1);
+            cx.spawn(async move |_, _| receiver.recv().await).detach();
             RunsHost::park_flow_ask(
                 &worktree,
                 &run_dir,

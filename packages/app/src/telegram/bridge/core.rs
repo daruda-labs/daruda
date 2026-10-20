@@ -8,7 +8,7 @@
 
 use uuid::Uuid;
 
-use super::{BridgePing, CallbackEdit, InboundAction, OutboundMsg, PaneRef, RouteResult, Routed};
+use super::{BridgePing, InboundAction, OutboundMsg, PaneRef, RouteResult, Routed};
 use crate::remote_channel::bridge::RoutingCore;
 #[cfg(test)]
 use crate::remote_channel::bridge::core::APPROVAL_TOKEN_PREFIX;
@@ -151,32 +151,17 @@ impl BridgeCore {
             return RouteResult {
                 action: Routed::Ready(InboundAction::Unsupported),
                 answer_callback_id: None,
-                callback_edit: None,
             };
         }
 
         if !self.enabled {
-            let (answer_callback_id, callback_edit) = match &update.kind {
-                UpdateKind::Callback {
-                    callback_id,
-                    chat_id,
-                    message_id,
-                    message_text,
-                    ..
-                } => (
-                    Some(callback_id.clone()),
-                    Some(CallbackEdit {
-                        chat_id: *chat_id,
-                        message_id: *message_id,
-                        original_text: message_text.clone(),
-                    }),
-                ),
-                UpdateKind::Message { .. } | UpdateKind::Unsupported => (None, None),
+            let answer_callback_id = match &update.kind {
+                UpdateKind::Callback { callback_id, .. } => Some(callback_id.clone()),
+                UpdateKind::Message { .. } | UpdateKind::Unsupported => None,
             };
             return RouteResult {
                 action: Routed::Ready(InboundAction::Ignore),
                 answer_callback_id,
-                callback_edit,
             };
         }
 
@@ -190,7 +175,6 @@ impl BridgeCore {
                 RouteResult {
                     action,
                     answer_callback_id: None,
-                    callback_edit: None,
                 }
             }
             // Answered above; the match is exhaustive without a wildcard so a
@@ -198,14 +182,11 @@ impl BridgeCore {
             UpdateKind::Unsupported => RouteResult {
                 action: Routed::Ready(InboundAction::Unsupported),
                 answer_callback_id: None,
-                callback_edit: None,
             },
             UpdateKind::Callback {
                 chat_id,
                 callback_id,
                 data,
-                message_id,
-                message_text,
             } => {
                 // A callback names its pane through the token it carries, so
                 // it never reaches the target question.
@@ -213,11 +194,6 @@ impl BridgeCore {
                 RouteResult {
                     action,
                     answer_callback_id: Some(callback_id),
-                    callback_edit: Some(CallbackEdit {
-                        chat_id,
-                        message_id,
-                        original_text: message_text,
-                    }),
                 }
             }
         }

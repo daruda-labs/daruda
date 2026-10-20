@@ -88,7 +88,9 @@ pub(crate) fn run_command(
                 cx.update(|cx| render_reply(&outcome, None, &target, cx))
             }));
         }
-        command::Resolution::OpenTask(task) => (crate::control::exec::open_task(task, cx), None),
+        command::Resolution::OpenTask(task) => {
+            (crate::control::exec::open_task(task, true, cx), None)
+        }
         command::Resolution::Run(resolved, addressed) => (
             crate::control::exec::run(resolved, crate::control::exec::CommandOrigin::Phone, cx),
             addressed,
@@ -115,6 +117,7 @@ fn start_task(task: String, cx: &mut App) -> ControlOutcome {
     let pending = crate::control::exec::begin_task_start(
         task,
         crate::control::exec::CommandOrigin::Phone,
+        true,
         cx,
     )?;
     if let Some(outcome) = pending.try_finish(cx) {

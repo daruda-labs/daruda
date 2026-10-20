@@ -310,8 +310,14 @@ fn flow_answer_and_closed_reply_clear_the_waiting_level(cx: &mut TestAppContext)
                 }
             ));
             if id == 1 {
-                RunsHost::answer_flow_ask(&tree, id, daruda_acp::PermissionDecision::Cancelled, cx)
-                    .unwrap();
+                RunsHost::answer_flow_ask(
+                    &tree,
+                    &run_dir,
+                    id,
+                    daruda_acp::PermissionDecision::Cancelled,
+                    cx,
+                )
+                .unwrap();
             } else {
                 drop(rx);
                 RunsHost::apply_flow_event_for_test(

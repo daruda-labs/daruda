@@ -18,6 +18,13 @@ pub enum AgentChatEvent {
     RetryConnect,
     /// "Sign in again": the session's account needs a fresh login.
     Reauthenticate,
+    /// The first valid choice on a host-owned card; the host settles its result.
+    HostCardChosen { card_id: u64, action_id: String },
+    PermissionSettled {
+        session: u64,
+        request_id: u64,
+        outcome: PermissionOutcome,
+    },
     /// A link or tool resource was clicked, already classified against this
     /// pane's session — the host only has to open it.
     OpenLink(LinkTarget),
@@ -45,6 +52,13 @@ pub enum AgentChatEvent {
         tasks: Vec<ExecutionRef>,
         reason: PromptDropReason,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PermissionOutcome {
+    Allowed,
+    Rejected,
+    Cancelled,
 }
 
 /// Why queued prompts were discarded unsent. Parking on Stop is not a drop:

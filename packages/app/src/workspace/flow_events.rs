@@ -29,6 +29,7 @@ use crate::window_registry::WindowRegistry;
 /// showing that worktree, else the first that holds it, else — for a run
 /// whose window closed — any window, so the end is still said somewhere.
 pub(in crate::workspace) fn deliver_flow_change(change: &FlowChange, cx: &mut App) {
+    super::flow_ask_delivery::deliver(change, cx);
     let lead = match &change.what {
         FlowChanged::Ended(ended) => {
             if ended.owes_remote_answer {
@@ -87,6 +88,12 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.close_stale_flow_question(window, cx);
+        if matches!(
+            change.what,
+            FlowChanged::Asked { .. } | FlowChanged::AskClosed { .. }
+        ) {
+            cx.notify();
+        }
         let lanes = self.lanes_at(&change.worktree, cx);
         let lane = lanes.first().copied();
         match (&change.what, lane) {
@@ -100,7 +107,7 @@ impl Workspace {
                 self.on_flow_run_ended(lane, change.worktree.as_path(), ended, lead, cx);
             }
             (_, None) => {}
-            (FlowChanged::Repainted, Some(_)) => cx.notify(),
+            (FlowChanged::Repainted | FlowChanged::AskClosed { .. }, Some(_)) => cx.notify(),
             (FlowChanged::Progressed { left_setup }, Some(_)) => {
                 let colouring = RunsHost::flow_run(change.worktree.as_path(), cx)
                     .and_then(|run| run.view().colouring());
@@ -115,13 +122,21 @@ impl Workspace {
                 }
                 cx.notify();
             }
-            (FlowChanged::Asked { ask_id, alone }, Some(lane)) => {
+            (
+                FlowChanged::Asked {
+                    run_dir,
+                    ask_id,
+                    alone,
+                    ..
+                },
+                Some(lane),
+            ) => {
                 cx.notify();
                 // Only a question that is alone comes forward: a dialog
                 // stacked over one being answered would take the click.
                 if *alone {
                     let worktree = change.worktree.as_path();
-                    self.raise_flow_question(lane, worktree, *ask_id, window, cx);
+                    self.raise_flow_question(lane, worktree, run_dir, *ask_id, window, cx);
                 }
             }
         }
@@ -131,12 +146,15 @@ impl Workspace {
         &mut self,
         lane: LaneRef,
         worktree: &Path,
+        run_dir: &Path,
         ask_id: u64,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(row) = RunsHost::flow_run(worktree, cx)
+            .filter(|run| run.view().run_dir() == run_dir)
             .and_then(|run| run.view().question(ask_id))
+            .filter(|ask| !ask.is_closed())
             .map(super::flow_rows::AskRowData::of)
         else {
             return;
@@ -145,6 +163,7 @@ impl Workspace {
             cx.weak_entity(),
             self.active,
             lane,
+            run_dir.to_path_buf(),
             row,
             window,
             cx,
@@ -162,10 +181,14 @@ impl Workspace {
             self.flows.ask_modal = None;
             return;
         };
-        let (lane, ask_id) = modal.read(cx).question();
-        let open = self
-            .flow_run_in(lane, cx)
-            .is_some_and(|run| run.view().question(ask_id).is_some());
+        let (lane, run_dir, ask_id) = modal.read(cx).question();
+        let open = self.flow_run_in(lane, cx).is_some_and(|run| {
+            run.view().run_dir() == run_dir
+                && run
+                    .view()
+                    .question(ask_id)
+                    .is_some_and(|ask| !ask.is_closed())
+        });
         if open {
             return;
         }
@@ -185,6 +208,7 @@ impl Workspace {
     pub(in crate::workspace) fn answer_flow_ask(
         &mut self,
         lane: LaneRef,
+        run_dir: &Path,
         ask_id: u64,
         decision: daruda_acp::PermissionDecision,
         cx: &mut Context<Self>,
@@ -192,7 +216,7 @@ impl Workspace {
         let Some(worktree) = self.lane_for(lane).map(|lane| lane.path.clone()) else {
             return;
         };
-        match RunsHost::answer_flow_ask(&worktree, ask_id, decision, cx) {
+        match RunsHost::answer_flow_ask(&worktree, run_dir, ask_id, decision, cx) {
             Ok(()) | Err(AnswerRefused::NotOpen) => {}
             Err(AnswerRefused::Closed) => self.report_error(
                 ErrorReport::new(s::flow::ask_closed())
@@ -293,7 +317,7 @@ impl Workspace {
 
     /// Whether the Flows page is showing `lane`'s runs — its list or graph
     /// already says how a run there ended.
-    fn shows_flows_of(&self, lane: LaneRef) -> bool {
+    pub(super) fn shows_flows_of(&self, lane: LaneRef) -> bool {
         self.active_page() == Some(super::pages::Page::Flows)
             && match &self.pages.flows.detail {
                 Some(detail) => detail.lane == lane,

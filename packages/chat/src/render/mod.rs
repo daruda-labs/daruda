@@ -17,6 +17,7 @@ pub(crate) mod embed;
 mod filter;
 mod fold_header;
 mod fold_mode;
+mod host_cards;
 /// Reachable from `workspace::screenshot_scenario` so the
 /// `mermaid-lightbox` capture scenario can drive it directly.
 pub mod image_lightbox;
@@ -316,6 +317,7 @@ pub(super) fn render(view: &AgentChatView, cx: &mut Context<AgentChatView>) -> i
         .children(overage_banner)
         .child(bar)
         .child(body)
+        .children(host_cards::host_card_strip(content, cx))
         // The plan region is a flex-none sibling below the `flex_1` body, so it
         // claims its own space and the conversation shrinks to fit. `None` when
         // the agent has published no plan, costing no vertical space.

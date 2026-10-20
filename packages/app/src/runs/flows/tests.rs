@@ -3,6 +3,77 @@ use std::path::PathBuf;
 use super::*;
 use crate::runs::RunsHost;
 
+#[gpui::test]
+async fn closing_the_asks_channel_emits_question_withdrawal_after_the_mutation(
+    cx: &mut gpui::TestAppContext,
+) {
+    struct Effects(std::rc::Rc<std::cell::RefCell<Vec<FlowChange>>>);
+    impl crate::runs::RunsEffects for Effects {
+        fn stop_execution(&self, _: &daruda_store::tasks::ExecutionRef, _: &mut gpui::App) {}
+        fn flow_changed(&self, change: &FlowChange, cx: &mut gpui::App) {
+            if let FlowChanged::AskClosed { ask_id, .. } = change.what {
+                assert!(
+                    RunsHost::flow_run(change.worktree.as_path(), cx)
+                        .is_none_or(|run| run.view().question(ask_id).is_none())
+                );
+            }
+            self.0.borrow_mut().push(change.clone());
+        }
+    }
+    cx.executor().allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let run_dir = dir.path().join("run");
+    let changes = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let (events_tx, events) = smol::channel::unbounded();
+    let (asks_tx, asks) = smol::channel::unbounded();
+    let (reply, receiver) = smol::channel::bounded(1);
+    let pumped = cx.update(|cx| {
+        RunsHost::ensure_installed(cx);
+        RunsHost::install_effects(std::rc::Rc::new(Effects(changes.clone())), cx);
+        RunsHost::seed_flow_run(
+            dir.path().to_path_buf(),
+            RunView::new(
+                run_dir.clone(),
+                FlowSource::Resumed {
+                    run_dir: run_dir.clone(),
+                },
+                vec![],
+            ),
+            cx,
+        );
+        RunsHost::park_flow_ask(
+            dir.path(),
+            &run_dir,
+            PendingAsk {
+                owner: daruda_flow::runner::AskOwner::Node {
+                    node: "asker".into(),
+                    generation: 0,
+                    attempt: 1,
+                },
+                ask_id: 1,
+                request: daruda_flow::runner::AskRequest {
+                    tool: "Tool".into(),
+                    detail: None,
+                    options: vec![],
+                },
+                reply,
+            },
+            cx,
+        );
+        let worktree = tree(dir.path());
+        let pumped = run_dir.clone();
+        cx.spawn(async move |cx| pump(worktree, pumped, events, asks, cx).await)
+    });
+    drop(asks_tx);
+    cx.run_until_parked();
+    assert!(receiver.is_closed());
+    assert!(changes.borrow().iter().any(|change| matches!(&change.what, FlowChanged::AskClosed { run_dir: held, ask_id: 1, outcome: FlowAskOutcome::Withdrawn } if held == &run_dir)));
+    events_tx
+        .try_send(RunNotice::Unrecorded(RunEnd::Done))
+        .unwrap();
+    pumped.await;
+}
+
 fn run_in(run_dir: &str) -> FlowRun {
     let run_dir = PathBuf::from(run_dir);
     let (snapshot, pointers) = flow_metadata(
@@ -20,6 +91,7 @@ fn run_in(run_dir: &str) -> FlowRun {
         cancel: CancelToken::default(),
         overage: OverageStop::default(),
         submitted_by: daruda_flow::request::StartedBy::Desktop,
+        solicited: false,
         finished: None,
     }
 }
@@ -152,6 +224,7 @@ async fn a_waiter_open_when_a_flow_ends_receives_its_report(cx: &mut gpui::TestA
                 }),
                 overage: OverageStop::default(),
                 submitted_by: StartedBy::Orchestrator,
+                solicited: false,
                 events,
                 asks,
             },

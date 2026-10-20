@@ -7,9 +7,36 @@ use gpui::{Context, Task};
 
 use super::super::transcript_defaults::TranscriptDefaults;
 use super::list_sync::ListSync;
-use super::{AgentChatView, AgentIdentity};
+use super::{AgentChatEvent, AgentChatView, AgentIdentity, HostCard};
 
 impl AgentChatView {
+    /// Show a host-owned request below the conversation. Duplicate ids leave
+    /// the existing request and its decision untouched.
+    pub fn push_host_card(&mut self, card: HostCard, cx: &mut Context<Self>) {
+        self.host_cards.push(card);
+        cx.notify();
+    }
+
+    /// Replace a card's choices with the host's result. Open requests stay;
+    /// only the most recently settled card remains in the strip.
+    pub fn settle_host_card(&mut self, id: u64, result_label: String, cx: &mut Context<Self>) {
+        self.host_cards.settle(id, result_label);
+        cx.notify();
+    }
+
+    pub(crate) fn choose_host_card(
+        &mut self,
+        card_id: u64,
+        action_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        cx.stop_propagation();
+        if self.host_cards.choose(card_id, &action_id) {
+            cx.notify();
+            cx.emit(AgentChatEvent::HostCardChosen { card_id, action_id });
+        }
+    }
+
     /// Rename the pane after the catalog renamed its agent.
     pub fn set_agent_name(&mut self, name: String, cx: &mut Context<Self>) {
         if self.agent_name != name {

@@ -42,6 +42,7 @@ fn channel_instances_do_not_share_targets_or_permission_tokens() {
         header: "permission".into(),
         tail: super::super::MessageTail::Plain("write".into()),
         permission: Some(super::super::PermissionPromptRef {
+            session: 1,
             perm_id: 7,
             buttons: vec![("Allow".into(), PermissionDecision::Allow("once".into()))],
         }),

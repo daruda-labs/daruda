@@ -63,6 +63,7 @@ pub enum InboundAction {
     },
     RespondPermission {
         pane: PaneRef,
+        session: u64,
         perm_id: u64,
         decision: PermissionDecision,
     },
@@ -120,6 +121,13 @@ pub enum InboundAction {
     ResolveApproval {
         id: crate::control::approval::ApprovalId,
         choice: crate::control::approval::ApprovalChoice,
+    },
+    StaleApproval,
+    ResolveFlowAsk {
+        worktree: std::path::PathBuf,
+        run_dir: std::path::PathBuf,
+        ask_id: u64,
+        decision: PermissionDecision,
     },
     /// A listing button was tapped — make that pane the current target.
     SelectTarget {
@@ -206,21 +214,6 @@ impl Routed {
 pub struct RouteResult {
     pub action: Routed,
     pub answer_callback_id: Option<String>,
-    /// For a `Callback` update, the coordinates + current text of the
-    /// tapped message so the caller can rewrite it (drop buttons +
-    /// append outcome). `None` for a `Message`. Independent of `action`
-    /// because even an `Ignore` callback should still edit the message.
-    pub callback_edit: Option<CallbackEdit>,
-}
-
-/// Where and what to rewrite after a callback button is tapped.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CallbackEdit {
-    pub chat_id: i64,
-    pub message_id: i64,
-    /// The message's current display text, so the rewrite can preserve
-    /// the original prompt and append an outcome line.
-    pub original_text: String,
 }
 
 /// One row of inline buttons for a permission-wait ping: every option
@@ -231,6 +224,7 @@ pub struct CallbackEdit {
 /// i18n); `BridgeCore` uses them only to route a later tap.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PermissionPromptRef {
+    pub session: u64,
     pub perm_id: u64,
     pub buttons: Vec<(String, PermissionDecision)>,
 }
@@ -265,10 +259,30 @@ pub enum Outbound {
     /// Belongs to no pane, so it is not a [`BridgePing`]: nothing here should
     /// become the next plain message's destination.
     Approval(ApprovalPrompt),
+    FlowAsk(FlowAskPrompt),
     /// Already-localized, already-plain text. Never markdown-parsed: it is
     /// composed from daruda's own strings and can carry a flow file name whose
     /// punctuation a markdown pass would misread.
     Notice(String),
+}
+
+impl Outbound {
+    pub(crate) fn card_id(&self) -> Option<crate::remote_channel::cards::CardId> {
+        use crate::remote_channel::cards::CardId;
+        match self {
+            Self::Approval(prompt) => Some(CardId::Approval(prompt.id)),
+            Self::FlowAsk(prompt) => Some(CardId::FlowAsk {
+                run_dir: prompt.run_dir.clone(),
+                ask_id: prompt.ask_id,
+            }),
+            Self::Ping(ping) => ping.permission.as_ref().map(|prompt| CardId::Permission {
+                pane: ping.pane,
+                session: prompt.session,
+                request: prompt.perm_id,
+            }),
+            Self::Notice(_) => None,
+        }
+    }
 }
 
 /// A ping to relay to the phone. `header` and `tail` are pre-formatted,
@@ -288,12 +302,22 @@ pub struct BridgePing {
 /// with [`BridgeCore`], so a tap on either resolves without a second lookup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApprovalPrompt {
+    pub id: crate::control::approval::ApprovalId,
     /// One line naming what is being allowed.
     pub summary: String,
     /// `(label, callback token)` — allow first, so the thumb order matches
     /// every other card daruda sends. Exactly two, in the type: a card with
     /// one button or five is not a thing this asks.
     pub buttons: [(String, String); 2],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlowAskPrompt {
+    pub worktree: std::path::PathBuf,
+    pub run_dir: std::path::PathBuf,
+    pub ask_id: u64,
+    pub summary: String,
+    pub buttons: Vec<(String, PermissionDecision)>,
 }
 
 /// Unaddressed content prepared by the shared routing core.

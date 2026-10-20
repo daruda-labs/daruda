@@ -42,6 +42,7 @@ mod dock_badge_ops;
 mod dock_refresh;
 mod durable;
 pub(in crate::workspace) mod error;
+mod flow_ask_delivery;
 pub(in crate::workspace) mod flow_ask_modal;
 mod flow_browser;
 pub(in crate::workspace) mod flow_cache;

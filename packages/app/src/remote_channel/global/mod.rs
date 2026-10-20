@@ -2,6 +2,7 @@
 
 use super::backoff::ErrorBackoff;
 use super::bridge::{ApprovalPrompt, BridgePing, MessageTail, Outbound, PaneRef, RoutingCore};
+use super::cards::CardLedger;
 use super::pairing::Pairing;
 use super::runtime::{self, BotSession, Status, Worker, WorkerEvent};
 use crate::settings_store::SettingsStore;
@@ -9,6 +10,7 @@ use crate::surface::strings as s;
 use daruda_config::remote::ChannelConfig;
 use futures::channel::mpsc::{UnboundedSender, unbounded};
 use gpui::{App, Global};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -20,6 +22,7 @@ pub struct Connection {
     pub config: ChannelConfig,
     pub generation: uuid::Uuid,
     pub core: RoutingCore<String>,
+    cards: RefCell<CardLedger<outbound::Receipt>>,
     pub status: Status,
     pub bot: Option<Arc<BotSession>>,
     pairing: Option<Pairing>,
@@ -44,6 +47,7 @@ pub struct RemoteChannels {
 
 impl Global for RemoteChannels {}
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Delivery {
     Explicit,
     Presence { away: bool },
@@ -128,11 +132,18 @@ impl RemoteChannels {
         queued
     }
 
-    /// Introduce a chat the phone approved opening on every live connection,
-    /// and make it each one's target — see `TelegramBridge::announce_chat`
-    /// for why a selection and not just a ping. The ping is `Explicit`: the
-    /// user approved this a moment ago, so presence does not decide it.
-    pub fn announce_chat(pane: PaneRef, header: String, tail: String, cx: &mut App) -> bool {
+    /// Introduce a chat on every live connection. Solicited announcements
+    /// also select it as the connection's target.
+    pub fn announce_chat(
+        pane: PaneRef,
+        header: String,
+        tail: String,
+        delivery: Delivery,
+        cx: &mut App,
+    ) -> bool {
+        if matches!(delivery, Delivery::Presence { .. }) {
+            return Self::send_notice_with_delivery(format!("{header}\n{tail}"), delivery, cx);
+        }
         if !cx.has_global::<Self>() {
             return false;
         }
@@ -160,13 +171,35 @@ impl RemoteChannels {
                 tail: MessageTail::Plain(tail),
                 permission: None,
             },
-            Delivery::Explicit,
+            delivery,
             cx,
         )
     }
 
     pub fn send_notice(text: String, cx: &App) {
         Self::send_notice_with_delivery(text, Delivery::Explicit, cx);
+    }
+
+    pub(crate) fn send_flow_ask(
+        prompt: super::bridge::FlowAskPrompt,
+        delivery: Delivery,
+        cx: &App,
+    ) -> bool {
+        let Some(bridge) = cx.try_global::<Self>() else {
+            return false;
+        };
+        let mut queued = false;
+        for id in bridge.connections.keys() {
+            if let Some(connection) = bridge.live(id, cx) {
+                if matches!(delivery, Delivery::Presence { away: false })
+                    && connection.config.only_when_away
+                {
+                    continue;
+                }
+                queued |= bridge.enqueue(connection, Outbound::FlowAsk(prompt.clone()));
+            }
+        }
+        queued
     }
 
     /// Send a pane-less notice under the same explicit/presence policy pings
@@ -202,14 +235,25 @@ impl RemoteChannels {
         else {
             return false;
         };
+        let card = match outbound.card_id() {
+            Some(id) => match connection.cards.borrow_mut().claim(id) {
+                Some(claim) => Some(claim),
+                None => return false,
+            },
+            None => None,
+        };
         let result = self.outbound.unbounded_send(Pending {
             id: connection.config.id.clone(),
             generation: connection.generation,
             bot,
             recipient,
             outbound,
+            card: card.clone(),
         });
         if let Err(error) = &result {
+            if let Some(claim) = card {
+                connection.cards.borrow_mut().release(&claim);
+            }
             super::log_error(
                 "Remote outgoing queue closed",
                 error,
@@ -222,6 +266,7 @@ impl RemoteChannels {
     pub fn send_approval(
         id: crate::control::approval::ApprovalId,
         summary: String,
+        delivery: Delivery,
         cx: &mut App,
     ) -> bool {
         let Some(bridge) = cx.try_global::<Self>() else {
@@ -230,7 +275,13 @@ impl RemoteChannels {
         let ids: Vec<_> = bridge
             .connections
             .keys()
-            .filter(|key| bridge.live(key, cx).is_some_and(Connection::can_send))
+            .filter(|key| {
+                bridge.live(key, cx).is_some_and(|connection| {
+                    connection.can_send()
+                        && (!matches!(delivery, Delivery::Presence { away: false })
+                            || !connection.config.only_when_away)
+                })
+            })
             .cloned()
             .collect();
         let bridge = cx.global_mut::<Self>();
@@ -246,38 +297,45 @@ impl RemoteChannels {
             else {
                 continue;
             };
+            let Some(card) = connection
+                .cards
+                .borrow_mut()
+                .claim(super::cards::CardId::Approval(id))
+            else {
+                continue;
+            };
             let (allow, refuse) = connection.core.record_pending_approval(id);
             let pending = Pending {
-                id: key,
+                id: key.clone(),
                 generation: connection.generation,
                 bot,
                 recipient,
                 outbound: Outbound::Approval(ApprovalPrompt {
+                    id,
                     summary: summary.clone(),
                     buttons: [
                         (s::control::approval_allow(), allow),
                         (s::control::approval_refuse(), refuse),
                     ],
                 }),
+                card: Some(card.clone()),
             };
             match bridge.outbound.unbounded_send(pending) {
                 Ok(()) => queued = true,
-                Err(error) => super::log_error(
-                    "Remote approval queue closed",
-                    &error,
-                    "remote.queue.approval",
-                ),
+                Err(error) => {
+                    if let Some(connection) = bridge.connections.get_mut(&key) {
+                        connection.core.forget_pending_approval(id);
+                        connection.cards.borrow_mut().release(&card);
+                    }
+                    super::log_error(
+                        "Remote approval queue closed",
+                        &error,
+                        "remote.queue.approval",
+                    );
+                }
             }
         }
         queued
-    }
-
-    pub fn forget_approval(id: crate::control::approval::ApprovalId, cx: &mut App) {
-        if cx.has_global::<Self>() {
-            for connection in cx.global_mut::<Self>().connections.values_mut() {
-                connection.core.forget_pending_approval(id);
-            }
-        }
     }
 
     pub fn generate_pair_code(id: &str, cx: &mut App) -> Option<String> {
@@ -331,6 +389,7 @@ impl RemoteChannels {
             return;
         }
         connection.bot = None;
+        connection.cards = RefCell::default();
         connection.status = Status::Failed;
         let delay = connection.claim_backoff.delay();
         let id = id.to_owned();
@@ -373,6 +432,7 @@ impl RemoteChannels {
                 config: config.clone(),
                 generation: uuid::Uuid::new_v4(),
                 core: RoutingCore::default(),
+                cards: RefCell::default(),
                 status: Status::Connecting,
                 bot: None,
                 pairing: None,
@@ -380,6 +440,7 @@ impl RemoteChannels {
                 claim_backoff: ErrorBackoff::new(),
             });
         connection.generation = uuid::Uuid::new_v4();
+        connection.cards = RefCell::default();
         connection.config = config;
         if let Some(bot) = connection.bot.take() {
             bot.revoke();
@@ -472,6 +533,7 @@ pub(crate) fn reconcile(cx: &mut App) {
                 config: config.clone(),
                 generation,
                 core: RoutingCore::default(),
+                cards: RefCell::default(),
                 status,
                 bot: None,
                 pairing: None,
@@ -504,4 +566,4 @@ fn start_worker(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

@@ -127,7 +127,7 @@ impl AgentChatView {
                 // A replay closes with this reply, not a `TurnEnded`, so its tail
                 // is still flagged live and nothing more is coming for it.
                 if finished_restore {
-                    self.settle_run_state();
+                    self.settle_run_state(cx);
                 }
                 // Record the live session id so it persists — and so a later
                 // launch resumes this session instead of starting fresh.
@@ -278,7 +278,7 @@ impl AgentChatView {
                 // block (the previous was already finalized), so without this the
                 // stopped run keeps reading `Rollup::Running`. Then the marker
                 // Stop pushed can take its final position.
-                self.settle_run_state();
+                self.settle_run_state(cx);
                 self.settle_stop_marker();
                 // Two effects the tail owes that settle: revisit the calls it
                 // just made terminal, and remeasure the rows whose streaming
@@ -305,7 +305,7 @@ impl AgentChatView {
                 // Settle the turn: finalize streaming, cancel any tool the agent
                 // left non-terminal (e.g. a `Cancelled` stop reason), and drain a
                 // still-pending permission so no card keeps live buttons.
-                self.settle_turn();
+                self.settle_turn(cx);
                 turn_settled = true;
                 phone_turn_action = PhoneTurnAction::Finish;
                 // Capture the outcome; it fires only when the pane settles
@@ -379,7 +379,7 @@ impl AgentChatView {
                 self.items.push(ChatItem::Failure(failure));
                 // (A `TurnFailed` while `cancel_in_flight` is handled by the
                 // guarded arm above; here the turn was not being cancelled.)
-                self.settle_turn();
+                self.settle_turn(cx);
                 turn_settled = true;
                 phone_turn_action = PhoneTurnAction::Finish;
                 // Capture the errored outcome; it fires (notification +
@@ -423,7 +423,7 @@ impl AgentChatView {
                 // `InProgress` tool stays live, so the rollup glyph blinks
                 // forever and the response bar reads `Running` after the session
                 // is already dead.
-                self.settle_turn();
+                self.settle_turn(cx);
                 turn_settled = true;
                 phone_turn_action = PhoneTurnAction::Finish;
                 // Capture the failure outcome; it fires on the busy→idle settle
@@ -578,7 +578,7 @@ impl AgentChatView {
             // Same settle the `Connected` exit owes (see there), and the same
             // revisit: no event follows a closed stream, so a call this settle
             // just made terminal would otherwise wait for a fold toggle.
-            self.settle_run_state();
+            self.settle_run_state(cx);
             self.reconcile_tool_images(&ReconcileScope::All, cx);
             self.rebuild_rows();
             self.apply_list_sync(ListSync::EveryRow, "stream-eof");

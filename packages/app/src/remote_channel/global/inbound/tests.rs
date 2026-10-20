@@ -401,40 +401,31 @@ async fn worker_revocation_while_a_claim_waits_prevents_effects_before_status_is
 fn callback() -> IncomingKind {
     IncomingKind::Callback {
         data: "token".into(),
-        message_id: "12.34".into(),
-        original: "Allow write?".into(),
     }
 }
 
-/// The defect this guards: a tap whose token is unknown or already consumed
-/// used to get a fresh message, leaving the dead buttons on screen for the
-/// user to keep tapping.
 #[test]
-fn a_dead_tap_is_answered_in_place_and_loses_its_buttons() {
-    let Feedback::Edit {
-        message_id,
-        original,
-        label,
-    } = feedback_for(Effect::None, callback())
-    else {
-        panic!("a tapped button must be answered in place");
+fn a_dead_tap_reports_staleness_without_overwriting_the_settled_result() {
+    let Feedback::Send(message) = feedback_for(Effect::None, callback()) else {
+        panic!("a stale tap must receive feedback");
     };
-    assert_eq!(message_id, "12.34");
-    assert_eq!(original, "Allow write?");
-    assert!(!label.is_empty());
+    assert_eq!(
+        message,
+        Message::plain(s::remote_channel::stale_callback(), None)
+    );
 }
 
 #[test]
-fn a_settled_decision_consumes_its_buttons_and_a_selection_keeps_them() {
+fn a_managed_card_leaves_editing_to_the_ledger_and_a_selection_keeps_its_buttons() {
     assert!(matches!(
         feedback_for(
             Effect::Feedback {
                 label: "Allowed".into(),
-                edit: Edit::ConsumeButtons,
+                edit: Edit::ManagedCard,
             },
             callback(),
         ),
-        Feedback::Edit { .. }
+        Feedback::Nothing
     ));
     // A listing row stays tappable — picking another row is ordinary use.
     assert_eq!(

@@ -64,12 +64,6 @@ pub enum UpdateKind {
         chat_id: i64,
         callback_id: String,
         data: String,
-        /// The tapped message's id, for `edit_message_text` (strip the
-        /// buttons + append the outcome so the phone shows the decision took).
-        message_id: i64,
-        /// The tapped message's current text, so the edit can preserve the
-        /// original prompt and append the outcome rather than replacing it.
-        message_text: String,
     },
     /// Carries nothing but its `update_id`, which is the point: the offset has
     /// to move past it.
@@ -401,9 +395,6 @@ struct RawCallbackQuery {
 #[derive(Debug, Deserialize)]
 struct RawCallbackMessage {
     chat: RawChat,
-    message_id: i64,
-    #[serde(default)]
-    text: Option<String>,
 }
 
 /// Decode a `getUpdates` response body. Separate from [`get_updates`] so
@@ -457,8 +448,6 @@ fn update_kind(raw: RawUpdate) -> UpdateKind {
         chat_id: message.chat.id,
         callback_id: cq.id,
         data: cq.data.unwrap_or_default(),
-        message_id: message.message_id,
-        message_text: message.text.unwrap_or_default(),
     }
 }
 

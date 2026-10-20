@@ -10,9 +10,11 @@
 
 use futures::channel::mpsc::{UnboundedSender, unbounded};
 use gpui::{App, Global};
+use std::cell::RefCell;
 
 use super::bridge::{BridgeCore, BridgePing, Outbound, PaneRef, TelegramTail};
 use super::trace;
+use crate::remote_channel::global::Delivery;
 use crate::settings_store::SettingsStore;
 use crate::surface::strings as s;
 
@@ -47,6 +49,7 @@ pub struct TelegramBridge {
     // `cx.try_global::<TelegramBridge>()`.
     outbound_tx: UnboundedSender<QueuedOutbound>,
     bot: Ownership,
+    cards: RefCell<Option<outbound::OwnedCards>>,
 }
 
 impl Global for TelegramBridge {}
@@ -81,12 +84,23 @@ impl TelegramBridge {
                 .is_some_and(|bridge| bridge.bot.serves())
     }
 
-    /// Introduce a chat the phone approved opening, and make it the phone's
-    /// target. A selection and not just a ping, so it also becomes what a bare
-    /// `/stop` means; the orchestrator's report that follows is a bystander.
+    /// Introduce a chat, selecting it as the phone's target when solicited.
     /// `false` when nothing can be sent, so the caller can record the drop.
-    pub(crate) fn announce_chat(pane: PaneRef, header: String, tail: String, cx: &mut App) -> bool {
-        if !Self::deliverable(cx) || cx.try_global::<TelegramBridge>().is_none() {
+    pub(crate) fn announce_chat(
+        pane: PaneRef,
+        header: String,
+        tail: String,
+        delivery: Delivery,
+        cx: &mut App,
+    ) -> bool {
+        if matches!(delivery, Delivery::Presence { .. }) {
+            return Self::notify_with_delivery(
+                plain_body(&header, &TelegramTail::Plain(tail)),
+                delivery,
+                cx,
+            );
+        }
+        if !Self::deliverable(cx) {
             return false;
         }
         cx.global_mut::<TelegramBridge>()
@@ -105,7 +119,11 @@ impl TelegramBridge {
     }
     /// Queue a notice that answers the phone. `false` when nothing can send.
     pub(crate) fn notify(text: String, cx: &App) -> bool {
-        if !Self::deliverable(cx) {
+        Self::notify_with_delivery(text, Delivery::Explicit, cx)
+    }
+
+    pub(crate) fn notify_with_delivery(text: String, delivery: Delivery, cx: &App) -> bool {
+        if !Self::allows_delivery(delivery, cx) || !Self::deliverable(cx) {
             return false;
         }
         let Some(bridge) = cx.try_global::<TelegramBridge>() else {
@@ -113,6 +131,15 @@ impl TelegramBridge {
         };
         bridge.send_notice(text, cx);
         true
+    }
+
+    fn allows_delivery(delivery: Delivery, cx: &App) -> bool {
+        match delivery {
+            Delivery::Explicit => true,
+            Delivery::Presence { away } => {
+                away || !SettingsStore::global(cx).user().telegram.only_when_away
+            }
+        }
     }
 
     /// Queue a pane-attributed ping for the outbound send loop.
@@ -170,13 +197,37 @@ impl TelegramBridge {
             .then_some(config.telegram.authorized_chat_id)
             .flatten()
             .ok_or(())?;
-        self.outbound_tx
+        let card = match outbound.card_id() {
+            Some(id) => Some(self.cards_for(bot, chat_id).claim(id).ok_or(())?),
+            None => None,
+        };
+        let result = self
+            .outbound_tx
             .unbounded_send(QueuedOutbound {
                 bot: bot.clone(),
                 chat_id,
                 outbound,
+                card: card.clone(),
             })
-            .map_err(|_| ())
+            .map_err(|_| ());
+        if result.is_err()
+            && let Some(claim) = card
+        {
+            self.cards_for(bot, chat_id).release(&claim);
+        }
+        result
+    }
+
+    pub(crate) fn send_flow_ask(
+        prompt: crate::remote_channel::bridge::FlowAskPrompt,
+        delivery: Delivery,
+        cx: &App,
+    ) -> bool {
+        if !Self::deliverable(cx) || !Self::allows_delivery(delivery, cx) {
+            return false;
+        }
+        cx.try_global::<Self>()
+            .is_some_and(|bridge| bridge.enqueue(Outbound::FlowAsk(prompt), cx).is_ok())
     }
 
     /// Mint an approval card's callback tokens, build it, and queue it.
@@ -188,6 +239,7 @@ impl TelegramBridge {
     pub(crate) fn send_approval_card(
         id: crate::control::approval::ApprovalId,
         summary: String,
+        delivery: Delivery,
         cx: &mut App,
     ) -> bool {
         // All three conditions, before minting anything. `install` runs
@@ -198,15 +250,27 @@ impl TelegramBridge {
         // never saw. Same three conditions `Workspace::telegram_bridge`
         // asks, for the same reason: they must not disagree.
         let deliverable = Self::deliverable(cx);
-        if !deliverable || cx.try_global::<TelegramBridge>().is_none() {
+        if !deliverable
+            || !Self::allows_delivery(delivery, cx)
+            || cx.try_global::<TelegramBridge>().is_none()
+        {
             trace::delivery("queue.approval.refused", || {
                 format!("id={id:?} deliverable={deliverable}")
             });
             return false;
         }
+        Self::sync_card_owner(cx);
         let bridge = cx.global_mut::<TelegramBridge>();
+        if bridge.cards.borrow().as_ref().is_some_and(|cards| {
+            cards
+                .ledger
+                .contains(&crate::remote_channel::cards::CardId::Approval(id))
+        }) {
+            return false;
+        }
         let (approve, refuse) = bridge.core.record_pending_approval(id);
         let prompt = crate::telegram::bridge::ApprovalPrompt {
+            id,
             summary,
             buttons: [
                 (s::control::approval_allow(), approve),
@@ -219,16 +283,26 @@ impl TelegramBridge {
             .global::<TelegramBridge>()
             .enqueue(Outbound::Approval(prompt), cx)
         {
-            Ok(()) => trace::delivery("queue.approval", || {
-                format!(
-                    "{} id={id:?} text={}",
-                    trace::enqueue_slot(),
-                    trace::opt(digest)
-                )
-            }),
-            Err(_) => trace::delivery("queue.closed", || format!("kind=approval id={id:?}")),
+            Ok(()) => {
+                trace::delivery("queue.approval", || {
+                    format!(
+                        "{} id={id:?} text={}",
+                        trace::enqueue_slot(),
+                        trace::opt(digest)
+                    )
+                });
+                true
+            }
+            Err(()) => {
+                Self::forget_approval(id, cx);
+                crate::remote_channel::log_error(
+                    "Telegram approval queue closed",
+                    &"outgoing queue closed",
+                    "telegram.queue.approval",
+                );
+                false
+            }
         }
-        true
     }
 
     /// Take or renew this daruda's claim on the bot `token` names, answering
@@ -272,6 +346,7 @@ impl TelegramBridge {
             trace::state("bot.claim", || "state=released".to_string());
         }
         self.bot = Ownership::Idle;
+        self.cards = RefCell::default();
     }
 
     /// Drop an approval's callback tokens once it has been decided.
@@ -338,6 +413,7 @@ pub(crate) fn install_for_test(
         core,
         outbound_tx,
         bot,
+        cards: RefCell::default(),
     });
     TestOutbox {
         receiver: outbound_rx,
@@ -372,6 +448,7 @@ pub fn install(cx: &mut App) {
         core,
         outbound_tx,
         bot: Ownership::Idle,
+        cards: RefCell::default(),
     });
 
     spawn_poll_task(cx);
@@ -504,6 +581,7 @@ mod tests {
                 pane,
                 "daruda/main".into(),
                 "new tab".into(),
+                Delivery::Explicit,
                 cx
             ));
             assert_eq!(
@@ -535,6 +613,7 @@ mod tests {
                 pane,
                 "h".into(),
                 "t".into(),
+                Delivery::Explicit,
                 cx
             ));
             assert_eq!(
@@ -544,6 +623,47 @@ mod tests {
                 None
             );
             assert!(outbound.next().now_or_never().is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn presence_announcements_keep_the_existing_target(cx: &mut TestAppContext) {
+        use futures::{FutureExt as _, StreamExt as _};
+        cx.update(|cx| {
+            let mut outbound = install_for_test(true, Some(42), cx);
+            let selected = PaneRef { workspace: Default::default(), pane: 1 };
+            let announced = PaneRef { pane: 2, ..selected };
+            cx.global_mut::<TelegramBridge>().command_state_mut().select(Some(selected));
+            assert!(!TelegramBridge::announce_chat(
+                announced, "h".into(), "t".into(), Delivery::Presence { away: false }, cx
+            ));
+            assert!(outbound.next().now_or_never().is_none());
+            assert!(TelegramBridge::announce_chat(
+                announced, "h".into(), "t".into(), Delivery::Presence { away: true }, cx
+            ));
+            assert!(matches!(outbound.next().now_or_never().flatten(), Some(Outbound::Notice(text)) if text == "h\nt"));
+            assert_eq!(cx.global_mut::<TelegramBridge>().command_state_mut().selected(), Some(selected));
+        });
+    }
+
+    #[gpui::test]
+    fn notice_delivery_reads_the_live_telegram_presence_setting(cx: &mut TestAppContext) {
+        use futures::{FutureExt as _, StreamExt as _};
+        cx.update(|cx| {
+            let mut outbound = install_for_test(true, Some(42), cx);
+            for (delivery, expected) in [
+                (Delivery::Presence { away: false }, false),
+                (Delivery::Presence { away: true }, true),
+                (Delivery::Explicit, true),
+            ] {
+                assert_eq!(TelegramBridge::notify_with_delivery("notice".into(), delivery, cx), expected);
+                assert_eq!(outbound.next().now_or_never().flatten().is_some(), expected);
+            }
+            let mut config = SettingsStore::global(cx).user().clone();
+            config.telegram.only_when_away = false;
+            cx.global_mut::<SettingsStore>().set_user_for_testing(config);
+            assert!(TelegramBridge::notify_with_delivery("always".into(), Delivery::Presence { away: false }, cx));
+            assert!(matches!(outbound.next().now_or_never().flatten(), Some(Outbound::Notice(text)) if text == "always"));
         });
     }
 

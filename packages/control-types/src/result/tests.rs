@@ -1,6 +1,13 @@
 use super::*;
 use daruda_store::project::WorkspaceUuid;
 
+#[test]
+fn approval_timeout_requires_explicit_consent_without_retry_or_bypass() {
+    let message = ControlError::ApprovalTimedOut.to_string();
+    assert!(message.contains("not consent"), "{message}");
+    assert!(message.contains("Do not retry or bypass"), "{message}");
+}
+
 fn sample_lane() -> LaneEntry {
     LaneEntry {
         target: LaneHandle {

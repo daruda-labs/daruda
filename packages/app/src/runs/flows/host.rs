@@ -19,8 +19,8 @@ use super::pump::pump;
 use super::pump::{held_end, reconciles_with_log, states_in_log};
 use super::view::{Advanced, Parked};
 use super::{
-    AlreadyRunning, AnswerRefused, FlowChange, FlowChanged, FlowEnded, FlowRun, FlowStart,
-    NodeRunStates, ParkedAsk, RunView, metadata,
+    AlreadyRunning, AnswerRefused, FlowAskOutcome, FlowChange, FlowChanged, FlowEnded, FlowRun,
+    FlowStart, NodeRunStates, ParkedAsk, RunView, metadata,
 };
 use crate::runs::RunsHost;
 
@@ -29,6 +29,15 @@ impl RunsHost {
     /// one.
     pub(crate) fn flow_run<'a>(worktree: &Path, cx: &'a App) -> Option<&'a FlowRun> {
         cx.try_global::<RunsHost>()?.flows.get(worktree)
+    }
+
+    pub(crate) fn has_flow_asks(cx: &App) -> bool {
+        cx.try_global::<RunsHost>().is_some_and(|host| {
+            host.flows
+                .runs
+                .values()
+                .any(|run| run.view.questions().any(|ask| !ask.is_closed()))
+        })
     }
 
     /// Whether `spelling` names `tree`, the key a run's changes are told by.
@@ -61,6 +70,7 @@ impl RunsHost {
             runners,
             overage,
             submitted_by,
+            solicited,
             events,
             asks,
         } = start;
@@ -107,10 +117,11 @@ impl RunsHost {
             cancel,
             overage,
             submitted_by,
+            solicited,
             finished: Some(finished),
         };
         cx.update_global::<RunsHost, _>(|host, _| {
-            host.watch.begin(&run.snapshot.key);
+            host.watch.begin_solicited(&run.snapshot.key, run.solicited);
             host.flows.insert(tree.clone(), run)?;
             host.watch.locate(location);
             Ok(())
@@ -141,13 +152,16 @@ impl RunsHost {
         let stopped = cx.update_global::<RunsHost, _>(|host, _| {
             let key = host.flows.key_for(worktree)?;
             let run = host.flows.runs.get_mut(&key)?;
+            let run_dir = run.view.run_dir().to_path_buf();
+            let questions = run.view.questions().map(ParkedAsk::ask_id).collect();
             run.cancel.cancel();
             run.view.withdraw_questions();
             host.watch.observe_waiting(run.result());
-            Some(key)
+            Some((key, run_dir, questions))
         });
         match stopped {
-            Some(key) => {
+            Some((key, run_dir, questions)) => {
+                Self::close_flow_asks(&key, &run_dir, questions, cx);
                 Self::tell_windows(key, FlowChanged::Repainted, cx);
                 true
             }
@@ -159,6 +173,7 @@ impl RunsHost {
     /// once, so the buttons do not stay up while the agent works.
     pub(crate) fn answer_flow_ask(
         worktree: &Path,
+        run_dir: &Path,
         ask_id: u64,
         decision: daruda_acp::PermissionDecision,
         cx: &mut App,
@@ -168,18 +183,30 @@ impl RunsHost {
                 return (None, Err(AnswerRefused::NotOpen));
             };
             match host.flows.runs.get_mut(&key) {
-                Some(run) => {
-                    let answer = run.view.answer(ask_id, decision);
+                Some(run) if run.view.run_dir() == run_dir => {
+                    let answer = run.view.answer(ask_id, decision.clone());
                     host.watch.observe_waiting(run.result());
                     (Some(key), answer)
                 }
-                None => (None, Err(AnswerRefused::NotOpen)),
+                _ => (None, Err(AnswerRefused::NotOpen)),
             }
         });
         if let (Some(key), answer) = &answered
             && *answer != Err(AnswerRefused::NotOpen)
         {
-            Self::tell_windows(key.clone(), FlowChanged::Repainted, cx);
+            Self::tell_windows(
+                key.clone(),
+                FlowChanged::AskClosed {
+                    run_dir: run_dir.to_path_buf(),
+                    ask_id,
+                    outcome: if answer.is_ok() {
+                        FlowAskOutcome::Answered(decision)
+                    } else {
+                        FlowAskOutcome::Withdrawn
+                    },
+                },
+                cx,
+            );
         }
         answered.1
     }
@@ -206,14 +233,23 @@ impl RunsHost {
                 .filter(|run| run.view.run_dir() == run_dir && !run.cancel.is_canceled())?;
             // A closed question followed immediately by a new ask is a new episode.
             host.watch.observe_waiting(run.result());
+            let before: Vec<_> = run.view.questions().map(ParkedAsk::ask_id).collect();
             let parked = run.view.park(ParkedAsk::new(pending));
+            let closed = before
+                .into_iter()
+                .filter(|id| run.view.question(*id).is_none())
+                .collect();
             host.watch.observe_waiting(run.result());
-            Some((key, parked))
+            Some((key, parked, closed, run.submitted_by, run.solicited))
         });
-        if let Some((key, parked)) = parked {
+        if let Some((key, parked, closed, submitted_by, solicited)) = parked {
+            Self::close_flow_asks(&key, run_dir, closed, cx);
             let what = FlowChanged::Asked {
+                run_dir: run_dir.to_path_buf(),
                 ask_id,
                 alone: parked == Parked::Alone,
+                submitted_by,
+                solicited,
             };
             Self::tell_windows(key, what, cx);
         }
@@ -227,11 +263,13 @@ impl RunsHost {
                 .runs
                 .get_mut(&key)
                 .filter(|run| run.view.run_dir() == run_dir)?;
+            let questions = run.view.questions().map(ParkedAsk::ask_id).collect();
             run.view.withdraw_questions();
             host.watch.observe_waiting(run.result());
-            Some(key)
+            Some((key, questions))
         });
-        if let Some(key) = changed {
+        if let Some((key, questions)) = changed {
+            Self::close_flow_asks(&key, run_dir, questions, cx);
             Self::tell_windows(key, FlowChanged::Repainted, cx);
         }
     }
@@ -252,6 +290,7 @@ impl RunsHost {
             }
             if let FlowEvent::RunEnded { end } = event {
                 let mut run = host.flows.remove(key.as_path())?;
+                let closed = run.view.questions().map(ParkedAsk::ask_id).collect();
                 run.view.advance(event);
                 if let Some(states) = from_log {
                     run.view.reconcile(states);
@@ -274,25 +313,51 @@ impl RunsHost {
                     owes_remote_answer: matches!(
                         run.submitted_by,
                         daruda_flow::request::StartedBy::Phone
-                            | daruda_flow::request::StartedBy::Orchestrator
                     ),
                     colouring: run.view.colouring(),
                 }));
-                return Some((key, ended));
+                return Some((key, closed, Some(ended)));
             }
             let run = host.flows.runs.get_mut(&key)?;
+            let before: Vec<_> = run.view.questions().map(ParkedAsk::ask_id).collect();
             let advanced = run.view.advance(event);
+            let closed = before
+                .into_iter()
+                .filter(|id| run.view.question(*id).is_none())
+                .collect();
             let reconciled = from_log.is_some_and(|states| run.view.reconcile(states));
             host.watch.observe_waiting(run.result());
             let what = match (advanced, reconciled) {
-                (Advanced::Moved { left_setup }, _) => FlowChanged::Progressed { left_setup },
-                (Advanced::Nothing, true) => FlowChanged::Progressed { left_setup: false },
-                (Advanced::Nothing, false) => return None,
+                (Advanced::Moved { left_setup }, _) => Some(FlowChanged::Progressed { left_setup }),
+                (Advanced::Nothing, true) => Some(FlowChanged::Progressed { left_setup: false }),
+                (Advanced::Nothing, false) => None,
             };
-            Some((key, what))
+            Some((key, closed, what))
         });
-        if let Some((key, what)) = what {
-            Self::tell_windows(key, what, cx);
+        if let Some((key, closed, what)) = what {
+            Self::close_flow_asks(&key, run_dir, closed, cx);
+            if let Some(what) = what {
+                Self::tell_windows(key, what, cx);
+            }
+        }
+    }
+
+    fn close_flow_asks(
+        worktree: &CanonicalTree,
+        run_dir: &Path,
+        questions: Vec<u64>,
+        cx: &mut App,
+    ) {
+        for ask_id in questions {
+            Self::tell_windows(
+                worktree.clone(),
+                FlowChanged::AskClosed {
+                    run_dir: run_dir.to_path_buf(),
+                    ask_id,
+                    outcome: FlowAskOutcome::Withdrawn,
+                },
+                cx,
+            );
         }
     }
 
@@ -352,6 +417,7 @@ impl RunsHost {
             cancel: CancelToken::default(),
             overage: OverageStop::default(),
             submitted_by,
+            solicited: submitted_by == daruda_flow::request::StartedBy::Phone,
             finished: None,
         };
         // A seed lands on whatever a test left there: it stands in for

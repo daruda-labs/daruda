@@ -196,6 +196,7 @@ pub(crate) fn outbound_kind(outbound: &Outbound) -> &'static str {
     match outbound {
         Outbound::Ping(_) => "ping",
         Outbound::Approval(_) => "approval",
+        Outbound::FlowAsk(_) => "flow_ask",
         Outbound::Notice(_) => "notice",
     }
 }
@@ -275,11 +276,13 @@ pub(crate) fn action_name(routed: &Routed) -> &'static str {
         InboundAction::Paired { .. } => "paired",
         InboundAction::InjectPrompt { .. } => "inject_prompt",
         InboundAction::RespondPermission { .. } => "respond_permission",
+        InboundAction::StaleApproval => "stale_approval",
         InboundAction::RunCommand { .. } => "run_command",
         InboundAction::ReportParseError { .. } => "report_parse_error",
         InboundAction::UnknownSlash { .. } => "unknown_slash",
         InboundAction::UnclaimedSlash { .. } => "unclaimed_slash",
         InboundAction::ResolveApproval { .. } => "resolve_approval",
+        InboundAction::ResolveFlowAsk { .. } => "resolve_flow_ask",
         InboundAction::SelectTarget { .. } => "select_target",
         InboundAction::StaleListing => "stale_listing",
         InboundAction::NoTarget => "no_target",
@@ -448,13 +451,11 @@ mod tests {
     }
 
     #[test]
-    fn an_inbound_callback_traces_its_token_rather_than_the_message_text() {
+    fn an_inbound_callback_traces_its_opaque_token() {
         let kind = UpdateKind::Callback {
             chat_id: 42,
             callback_id: "cb".to_string(),
             data: "perm:9:allow".to_string(),
-            message_id: 5,
-            message_text: "Allow this?".to_string(),
         };
         assert_eq!(update_kind_name(&kind), "callback");
         assert_eq!(update_chat_id(&kind), Some(42));

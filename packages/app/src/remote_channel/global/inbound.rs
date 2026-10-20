@@ -215,6 +215,7 @@ fn serve_events<F: Future<Output = ClaimResult> + 'static>(
                                 && let Some(bot) = connection.bot.take()
                             {
                                 bot.revoke();
+                                connection.cards = Default::default();
                             }
                         }
                     });
@@ -228,7 +229,19 @@ fn serve_events<F: Future<Output = ClaimResult> + 'static>(
                         cx.global_mut::<RemoteChannels>()
                             .connections
                             .get_mut(&event.id)
-                            .map(|connection| connection.bot = Some(bot))
+                            .map(|connection| {
+                                if !connection
+                                    .bot
+                                    .as_ref()
+                                    .is_some_and(|current| Arc::ptr_eq(current, &bot))
+                                {
+                                    connection.cards = Default::default();
+                                    if let Some(previous) = connection.bot.take() {
+                                        previous.revoke();
+                                    }
+                                }
+                                connection.bot = Some(bot);
+                            })
                             .is_some()
                     });
                     if !installed {
@@ -380,18 +393,6 @@ async fn serve<F: Future<Output = ClaimResult>>(
                 Feedback::Send(message) => {
                     transport::send(kind, &bot.credentials, &recipient, message).map(|_| ())
                 }
-                Feedback::Edit {
-                    message_id,
-                    original,
-                    label,
-                } => transport::edit(
-                    kind,
-                    &bot.credentials,
-                    &recipient,
-                    &message_id,
-                    &original,
-                    &label,
-                ),
             }
         })
         .await;
@@ -410,47 +411,26 @@ async fn serve<F: Future<Output = ClaimResult>>(
 enum Feedback {
     Nothing,
     Send(Message),
-    Edit {
-        message_id: String,
-        original: String,
-        label: String,
-    },
 }
 
-/// Split from the send so the edit-vs-new-message choice is decidable without
-/// a transport. A tapped button is always answered in place: leaving a
-/// consumed keyboard on screen invites a decision that can no longer land.
+/// Managed cards settle through their shared ledger; feedback never rewrites
+/// the tapped card with a competing result.
 fn feedback_for(effect: Effect, kind: IncomingKind) -> Feedback {
-    let tapped = match kind {
-        IncomingKind::Callback {
-            message_id,
-            original,
-            ..
-        } => Some((message_id, original)),
-        IncomingKind::Message { .. } => None,
-    };
+    let tapped = matches!(kind, IncomingKind::Callback { .. });
     match (effect, tapped) {
         (Effect::Reply(reply), _) => Feedback::Send(Message::plain(reply.text, reply.keyboard)),
         (
             Effect::Feedback {
-                label,
-                edit: Edit::ConsumeButtons,
+                edit: Edit::ManagedCard,
+                ..
             },
-            Some((message_id, original)),
-        ) => Feedback::Edit {
-            message_id,
-            original,
-            label,
-        },
+            _,
+        ) => Feedback::Nothing,
         (Effect::Feedback { label, .. }, _) => Feedback::Send(Message::plain(label, None)),
-        // An unknown or already-consumed token: the tap still gets an answer,
-        // and the dead buttons still come off.
-        (Effect::None, Some((message_id, original))) => Feedback::Edit {
-            message_id,
-            original,
-            label: s::remote_channel::stale_callback(),
-        },
-        (Effect::None, None) => Feedback::Nothing,
+        (Effect::None, true) => {
+            Feedback::Send(Message::plain(s::remote_channel::stale_callback(), None))
+        }
+        (Effect::None, false) => Feedback::Nothing,
         // The loop settles an effect before asking what it is owed; one that
         // is still waiting has nothing to send yet.
         (Effect::Later(_), _) => Feedback::Nothing,

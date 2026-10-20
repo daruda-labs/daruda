@@ -73,10 +73,7 @@ async fn telegram_redelivery_and_claimed_before_crash_have_no_second_effect_or_r
             == ClaimOutcome::Committed
         {
             let effect = app.update(|cx| dispatch_update(&first, Some(42), update(42), cx));
-            assert!(matches!(
-                effect,
-                Some((dispatch::Effect::Reply(_), None, None))
-            ));
+            assert!(matches!(effect, Some((dispatch::Effect::Reply(_), None))));
             replies += 1;
         }
     }
@@ -185,7 +182,7 @@ async fn a_failed_pair_cannot_authorize_later_commands_in_the_same_unpaired_batc
             effect
         });
         assert!(
-            matches!(effect, Some((dispatch::Effect::None, None, None))),
+            matches!(effect, Some((dispatch::Effect::None, None))),
             "update {id} must not gain authority from a failed pairing"
         );
     }

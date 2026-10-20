@@ -18,13 +18,18 @@ impl Workspace {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        App::subscribe(cx, view, |_, event: &AgentChatEvent, cx| {
-            record_task_delivery(event, cx)
+        let pane_ref = crate::remote_channel::bridge::PaneRef {
+            workspace: self.uuid(),
+            pane: pane_id,
+        };
+        App::subscribe(cx, view, move |_, event: &AgentChatEvent, cx| {
+            on_app_chat_event(pane_ref, event, cx)
         })
         .detach();
         let pane = self.run_pane(pane_id);
         view.update(cx, |_, cx| {
-            cx.on_release(move |_, cx| {
+            cx.on_release(move |view, cx| {
+                crate::remote_channel::settle_permissions(pane_ref, view.permission_session(), cx);
                 crate::runs::RunsHost::release_execution(
                     pane,
                     daruda_store::tasks::machine::UndeliveredReason::PaneClosed,
@@ -73,13 +78,45 @@ impl Workspace {
                 uri: uri.clone(),
                 mime: mime.clone(),
             }),
-            AgentChatEvent::PromptSent { .. } | AgentChatEvent::PromptsDropped { .. } => {}
+            AgentChatEvent::HostCardChosen { .. }
+            | AgentChatEvent::PermissionSettled { .. }
+            | AgentChatEvent::PromptSent { .. }
+            | AgentChatEvent::PromptsDropped { .. } => {}
         }
     }
 }
 
-fn record_task_delivery(event: &AgentChatEvent, cx: &mut App) {
+fn on_app_chat_event(
+    pane: crate::remote_channel::bridge::PaneRef,
+    event: &AgentChatEvent,
+    cx: &mut App,
+) {
     match event {
+        AgentChatEvent::HostCardChosen { card_id, action_id } => {
+            crate::control::approval::resolve_desktop(*card_id, action_id, cx);
+        }
+        AgentChatEvent::PermissionSettled {
+            session,
+            request_id,
+            outcome,
+        } => {
+            use crate::surface::strings as s;
+            use daruda_chat::view::PermissionOutcome;
+            let label = match outcome {
+                PermissionOutcome::Allowed => s::notification::telegram_permission_allowed(),
+                PermissionOutcome::Rejected => s::notification::telegram_permission_rejected(),
+                PermissionOutcome::Cancelled => s::notification::telegram_permission_cancelled(),
+            };
+            crate::remote_channel::settle_card(
+                crate::remote_channel::cards::CardId::Permission {
+                    pane,
+                    session: *session,
+                    request: *request_id,
+                },
+                &label,
+                cx,
+            );
+        }
         AgentChatEvent::PromptSent { task, session_id } => {
             crate::runs::RunsHost::prompt_sent(task.clone(), session_id.clone(), cx)
         }
@@ -100,3 +137,6 @@ fn record_task_delivery(event: &AgentChatEvent, cx: &mut App) {
         _ => {}
     }
 }
+
+#[cfg(test)]
+mod tests;

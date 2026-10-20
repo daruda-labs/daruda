@@ -36,7 +36,7 @@ pub(crate) fn run(cmd: ResolvedCommand, origin: CommandOrigin, cx: &mut App) -> 
         ResolvedCommand::List => Ok(ControlResult::Listing(listing(cx))),
         ResolvedCommand::Brief => Ok(ControlResult::Brief(brief(cx))),
         ResolvedCommand::Say { target, text } => in_pane_window(target, cx, |ws, _window, cx| {
-            ws.control_say(target.pane, text.clone(), cx)
+            ws.control_say(target.pane, text.clone(), origin, cx)
         })
         .map(|disposition| ControlResult::Sent {
             target,
@@ -81,16 +81,24 @@ pub(crate) fn run(cmd: ResolvedCommand, origin: CommandOrigin, cx: &mut App) -> 
         // to search and nothing that could start in a place it did not ask
         // for.
         ResolvedCommand::Flow(ResolvedFlowCommand::Run { name, lane }) => {
+            let solicited = origin.is_solicited(cx);
             in_lane_window(lane, cx, |ws, _window, cx| {
-                ws.control_flow_run(lane.lane_ref(), &name, origin.flow_started_by(), cx)
+                ws.control_flow_run(
+                    lane.lane_ref(),
+                    &name,
+                    origin.flow_started_by(),
+                    solicited,
+                    cx,
+                )
             })
             // Named by the file that resolved, not by what the caller typed —
             // `ship` may pick `ship.yaml` or `ship.yml`, and the answer has to
             // say which.
             .map(|started| {
                 if matches!(origin, CommandOrigin::Orchestrator) {
-                    crate::runs::RunsHost::register_run(
+                    crate::runs::RunsHost::register_run_solicited(
                         crate::runs::result::RunKey::Flow(started.run_id.clone()),
+                        solicited,
                         cx,
                     );
                 }
@@ -127,7 +135,7 @@ pub(crate) fn run(cmd: ResolvedCommand, origin: CommandOrigin, cx: &mut App) -> 
             text,
             destination,
             connecting,
-        } => ask_orchestrator(text, destination, connecting, cx),
+        } => ask_orchestrator(text, destination, connecting, origin, cx),
         // Handled by `run_waiting`, which can hand back a channel. Reaching
         // here would mean an adapter called the wrong entry point, and
         // answering "still working" about a prompt never sent would be a lie.
@@ -230,7 +238,7 @@ pub(crate) fn run_waiting(cmd: ResolvedCommand, origin: CommandOrigin, cx: &mut 
         return Dispatch::Ready(run(cmd, origin, cx));
     };
     let sent = in_pane_window(target, cx, |ws, _window, cx| {
-        ws.control_say(target.pane, text.clone(), cx)
+        ws.control_say(target.pane, text.clone(), origin, cx)
     });
     let answered = |answer| Dispatch::Ready(Ok(ControlResult::Answer { target, answer }));
     match sent {
@@ -330,12 +338,13 @@ fn ask_orchestrator(
     text: String,
     destination: PaneRef,
     connecting: bool,
+    origin: CommandOrigin,
     cx: &mut App,
 ) -> ControlOutcome {
     // `/list` never names the orchestrator, so fold a missing pane into its
     // own error.
     let send = in_pane_window(destination, cx, |ws, _window, cx| {
-        ws.control_say(destination.pane, text.clone(), cx)
+        ws.control_say(destination.pane, text.clone(), origin, cx)
     })
     .map_err(|_| ControlError::OrchestratorUnavailable)?;
     Ok(ControlResult::Accepted {

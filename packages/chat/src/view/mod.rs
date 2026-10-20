@@ -418,6 +418,8 @@ pub struct AgentChatView {
     // append-only. Removing/reordering items would require clearing
     // `FoldState` and would break markdown selection identity.
     pub(super) items: Vec<ChatItem>,
+    pub(super) host_cards: crate::host_cards::HostCards,
+    pub(super) host_cards_scroll: ScrollHandle,
     /// The buffered/parked queue of prompts not yet on the wire, plus the
     /// in-flight-turn sequencing that gates draining it — see [`PromptQueue`].
     pub(super) queue: PromptQueue,
@@ -438,6 +440,7 @@ pub struct AgentChatView {
     /// (`PermissionRequested` / `respond_permission` / teardown); holds every
     /// outstanding id since permission requests can run in parallel.
     pub(super) pending_permissions: HashSet<u64>,
+    pub(super) permission_session: u64,
     /// Permission ids relayed to the current phone for this connection.
     /// Cleared on recipient change or session teardown; the periodic sweep
     /// prunes resolved requests and relays outstanding ids absent here.
@@ -612,7 +615,8 @@ pub struct AgentChatView {
     pub(super) render_count: std::cell::Cell<u32>,
 }
 
-pub use event::{AgentChatEvent, PromptDropReason};
+pub use crate::host_cards::{HostCard, HostCardAction};
+pub use event::{AgentChatEvent, PermissionOutcome, PromptDropReason};
 mod activity_types;
 pub(crate) use activity_types::{ActivitySpan, ToolSummaryStyle, TurnRecord};
 pub use activity_types::{ActivityState, ChatContentWidth, TurnOutcome};

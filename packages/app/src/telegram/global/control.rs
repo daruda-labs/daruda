@@ -94,7 +94,7 @@ pub(super) async fn send_command_reply(
 }
 
 /// Acknowledge a tapped button with a toast and leave the message alone.
-/// Unlike [`answer_and_edit`], a listing button is not consumed by the tap —
+/// A listing button is not consumed by the tap —
 /// rewriting the message would strip the rows the user still wants.
 pub(super) async fn answer_only(
     cx: &mut gpui::AsyncApp,

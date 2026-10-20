@@ -10,12 +10,18 @@ use gpui::Context;
 
 use super::super::agent_chat_helpers::fold_context;
 use super::super::fold::FoldKey;
-use super::super::phone_turn::PhoneTurn;
+use super::super::phone_turn::{PhoneTurn, PhoneTurnMode};
 use super::{
     AgentChatEvent, AgentChatView, AgentSessionStatus, EmptySubmitOutcome, EscapeOutcome,
     FirstResponseOutcome, InternalDispatch, PhoneAckEffect, PromptDispatch, PromptDropReason,
     PromptId, PromptOrigin, PromptQueue, QueuedPrompt,
 };
+
+#[derive(Clone, Copy)]
+pub(super) enum EditSource {
+    Composer,
+    External,
+}
 
 impl PromptQueue {
     /// Empty the live and parked queues together with the edit/resume state
@@ -100,7 +106,17 @@ impl AgentChatView {
     /// full queue refuses the prompt, and a caller that discarded that would
     /// tell the user it was sent.
     pub fn send_prompt_text(&mut self, text: String, cx: &mut Context<Self>) -> PromptDispatch {
-        self.send_prompt_text_inner(text, PromptOrigin::InApp, None, cx)
+        self.send_prompt_text_inner(text, PromptOrigin::InApp, None, EditSource::Composer, cx)
+    }
+
+    /// Submit a host-supplied, non-phone prompt without committing a draft
+    /// currently being edited in the local composer.
+    pub fn send_external_prompt_text(
+        &mut self,
+        text: String,
+        cx: &mut Context<Self>,
+    ) -> PromptDispatch {
+        self.send_prompt_text_inner(text, PromptOrigin::InApp, None, EditSource::External, cx)
     }
 
     /// Send a literal host notice only if it can reach the wire now. It never
@@ -114,6 +130,16 @@ impl AgentChatView {
         text: String,
         cx: &mut Context<Self>,
     ) -> InternalDispatch {
+        self.try_send_internal_prompt_text_with_phone_mode(text, None, cx)
+    }
+
+    /// Install phone routing only after the literal prompt reaches the wire.
+    pub fn try_send_internal_prompt_text_with_phone_mode(
+        &mut self,
+        text: String,
+        phone_mode: Option<PhoneTurnMode>,
+        cx: &mut Context<Self>,
+    ) -> InternalDispatch {
         if self.is_read_only() {
             return InternalDispatch::ReadOnly;
         }
@@ -122,6 +148,13 @@ impl AgentChatView {
         }
         if !self.dispatch_now(text, Vec::new(), PromptOrigin::Internal, None, cx) {
             return InternalDispatch::Unavailable;
+        }
+        if let Some(mode) = phone_mode {
+            self.phone_turn_state = Some(PhoneTurn::with_mode(
+                mode,
+                std::time::Instant::now(),
+                self.items.len(),
+            ));
         }
         cx.notify();
         InternalDispatch::Sent
@@ -148,7 +181,13 @@ impl AgentChatView {
         task: ExecutionRef,
         cx: &mut Context<Self>,
     ) -> PromptDispatch {
-        self.send_prompt_text_inner(text, PromptOrigin::InApp, Some(task), cx)
+        self.send_prompt_text_inner(
+            text,
+            PromptOrigin::InApp,
+            Some(task),
+            EditSource::External,
+            cx,
+        )
     }
 
     /// Send `text` relayed from a phone-tapped Telegram reply. Sugar over
@@ -160,7 +199,7 @@ impl AgentChatView {
         text: String,
         cx: &mut Context<Self>,
     ) -> PromptDispatch {
-        self.send_prompt_text_inner(text, PromptOrigin::Telegram, None, cx)
+        self.send_prompt_text_inner(text, PromptOrigin::Telegram, None, EditSource::External, cx)
     }
 
     /// Send `text`. When connected and idle, echo it and forward it over the
@@ -173,9 +212,10 @@ impl AgentChatView {
         text: String,
         origin: PromptOrigin,
         task: Option<ExecutionRef>,
+        edit_source: EditSource,
         cx: &mut Context<Self>,
     ) -> PromptDispatch {
-        self.send_prompt_content(text, Vec::new(), origin, task, cx)
+        self.send_prompt_content(text, Vec::new(), origin, task, edit_source, cx)
     }
 
     pub(super) fn send_prompt_content(
@@ -184,6 +224,7 @@ impl AgentChatView {
         attachments: Vec<daruda_acp::PromptAttachment>,
         origin: PromptOrigin,
         task: Option<ExecutionRef>,
+        edit_source: EditSource,
         cx: &mut Context<Self>,
     ) -> PromptDispatch {
         if self.is_read_only() {
@@ -194,10 +235,9 @@ impl AgentChatView {
         // entry. `.take()` clears the editing flag whether or not the target is
         // still queued; if it drained onto the wire while the user was editing,
         // the second `let` fails and we fall through to handle `text` as a
-        // brand-new prompt so nothing typed is lost. A task's prompt is never
-        // the composer's edit, so it must not overwrite the slot being edited.
-        if origin == PromptOrigin::InApp
-            && task.is_none()
+        // brand-new prompt so nothing typed is lost. External submissions
+        // never commit an edit in the local composer.
+        if matches!(edit_source, EditSource::Composer)
             && let Some(id) = self.queue.editing_prompt.take()
             && let Some(qp) = self
                 .queue

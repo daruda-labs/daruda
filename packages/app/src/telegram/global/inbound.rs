@@ -10,7 +10,7 @@
 //! neither one's changes should conflict with the other's.
 
 use crate::remote_channel::backoff::ErrorBackoff;
-use crate::remote_channel::dispatch::{self, target::compose_edit_body};
+use crate::remote_channel::dispatch;
 use daruda_store::inbox::InboxReleased;
 use futures::StreamExt as _;
 use futures::channel::mpsc::{UnboundedSender, unbounded};
@@ -20,7 +20,7 @@ use std::sync::{Arc, Weak};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 
-use super::super::bridge::{CallbackEdit, InboundAction, RouteResult};
+use super::super::bridge::{InboundAction, RouteResult};
 use super::super::client;
 use super::super::keychain;
 use super::super::trace;
@@ -180,7 +180,7 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
                     )
                 });
                 let dispatched = cx.update(|cx| dispatch_update(&bot, chat_id, update, cx));
-                let Some((effect, answer_callback_id, callback_edit)) = dispatched else {
+                let Some((effect, answer_callback_id)) = dispatched else {
                     continue;
                 };
                 let effect = effect.settled().await;
@@ -188,26 +188,11 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
                 // for the next message, and one queue keeps the answers in
                 // the order the messages came.
                 let answer = match (answer_callback_id, effect) {
-                    (
-                        Some(callback_id),
-                        dispatch::Effect::Feedback {
-                            label,
-                            edit: dispatch::Edit::ConsumeButtons,
-                        },
-                    ) => Some(Answer::AckAndEdit {
-                        callback_id,
-                        edit: callback_edit,
-                        label,
-                    }),
                     (Some(callback_id), dispatch::Effect::Feedback { label, .. }) => {
                         Some(Answer::Ack { callback_id, label })
                     }
-                    // An unknown or already-consumed token. Answered *and*
-                    // edited: leaving the buttons on invites the user to keep
-                    // tapping a decision that can no longer land.
-                    (Some(callback_id), _) => Some(Answer::AckAndEdit {
+                    (Some(callback_id), _) => Some(Answer::Ack {
                         callback_id,
-                        edit: callback_edit,
                         label: s::notification::telegram_permission_stale(),
                     }),
                     (None, dispatch::Effect::Reply(reply)) => Some(Answer::Reply(reply)),
@@ -241,15 +226,7 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
 /// What the phone is owed for one routed update, sent by [`spawn_answer_task`].
 enum Answer {
     Reply(crate::remote_channel::command::RenderedReply),
-    Ack {
-        callback_id: String,
-        label: String,
-    },
-    AckAndEdit {
-        callback_id: String,
-        edit: Option<CallbackEdit>,
-        label: String,
-    },
+    Ack { callback_id: String, label: String },
 }
 
 /// One task sends every answer in arrival order, so a reply to an earlier
@@ -278,11 +255,6 @@ fn spawn_answer_task(cx: &mut App) -> UnboundedSender<(Weak<ReadyBot>, Option<i6
                 Answer::Ack { callback_id, label } => {
                     answer_only(cx, token, callback_id, &label).await
                 }
-                Answer::AckAndEdit {
-                    callback_id,
-                    edit,
-                    label,
-                } => answer_and_edit(cx, token, callback_id, edit, &label).await,
             }
         }
     })
@@ -385,7 +357,7 @@ fn dispatch_update(
     chat_id: Option<i64>,
     update: client::Update,
     cx: &mut App,
-) -> Option<(dispatch::Effect, Option<String>, Option<CallbackEdit>)> {
+) -> Option<(dispatch::Effect, Option<String>)> {
     if !live_bot(bot, chat_id, keychain::revision(), cx) {
         return None;
     }
@@ -397,7 +369,6 @@ fn dispatch_update(
     let RouteResult {
         action,
         answer_callback_id,
-        callback_edit,
     } = core.route(update);
     trace::delivery("routed", || {
         format!(
@@ -425,7 +396,7 @@ fn dispatch_update(
         }
         dispatch::handle_in_app(aimed, &dispatch::Target::Telegram, cx)
     };
-    Some((effect, answer_callback_id, callback_edit))
+    Some((effect, answer_callback_id))
 }
 
 async fn claim_update(
@@ -493,73 +464,6 @@ async fn finish_claim_update(
 
 fn release_bot(cx: &mut gpui::AsyncApp) {
     cx.update(|cx| cx.global_mut::<TelegramBridge>().release_claim());
-}
-
-/// Answer a tapped callback with a toast, then rewrite the tapped message to
-/// drop its now-consumed buttons and append the outcome. Both are best-effort
-/// (logged on failure, never surfaced) — the decision itself was already applied
-/// by the caller. `label` is the localized outcome; the message keeps its
-/// original prompt text with the outcome appended.
-async fn answer_and_edit(
-    cx: &mut gpui::AsyncApp,
-    token: &str,
-    callback_id: String,
-    callback_edit: Option<CallbackEdit>,
-    label: &str,
-) {
-    let ack_token = token.to_string();
-    let toast = label.to_string();
-    let answered = cx
-        .background_executor()
-        .spawn(async move { client::answer_callback(&ack_token, &callback_id, Some(&toast)) })
-        .await;
-    trace::delivery("answer_callback", || {
-        format!(
-            "ok={} edits={} label={}",
-            answered.is_ok(),
-            callback_edit.is_some(),
-            trace::preview(label)
-        )
-    });
-    if let Err(e) = answered {
-        LogWriter::log(
-            ErrorReport::new("Telegram answerCallbackQuery failed")
-                .severity(ErrorSeverity::Info)
-                .from_error(&e)
-                .at(file!(), line!())
-                .dedup("telegram.answer_callback")
-                .build(),
-        );
-    }
-
-    let Some(edit) = callback_edit else {
-        return;
-    };
-    let (edit_chat_id, edit_message_id) = (edit.chat_id, edit.message_id);
-    let body = compose_edit_body(&edit.original_text, label);
-    let edit_token = token.to_string();
-    let edited = cx
-        .background_executor()
-        .spawn(async move {
-            client::edit_message_text(&edit_token, edit.chat_id, edit.message_id, &body)
-        })
-        .await;
-    trace::delivery("edit_message", || {
-        format!(
-            "chat_id={edit_chat_id} message_id={edit_message_id} ok={}",
-            edited.is_ok()
-        )
-    });
-    if let Err(e) = edited {
-        LogWriter::log(
-            ErrorReport::new("Telegram editMessageText failed")
-                .severity(ErrorSeverity::Info)
-                .from_error(&e)
-                .at(file!(), line!())
-                .dedup("telegram.edit_message")
-                .build(),
-        );
-    }
 }
 
 #[cfg(test)]

@@ -154,7 +154,13 @@ impl Workspace {
         lane: daruda_store::project::LaneRef,
         cx: &mut Context<Self>,
     ) {
-        self.overlays.flow_picker = FlowPicker::Stopping { lane };
+        let Some(run_dir) = self
+            .flow_run_in(lane, cx)
+            .map(|run| run.view().run_dir().to_path_buf())
+        else {
+            return;
+        };
+        self.overlays.flow_picker = FlowPicker::Stopping { lane, run_dir };
         cx.notify();
     }
 
@@ -223,8 +229,8 @@ impl Workspace {
         // The worktree the prompt was raised for, not whichever is on screen
         // now: the picker can have been opened for a parked one, and a stop
         // must end the run it offered to stop.
-        let stopping = match self.overlays.flow_picker {
-            FlowPicker::Stopping { lane } => Some(lane),
+        let stopping = match &self.overlays.flow_picker {
+            FlowPicker::Stopping { lane, run_dir } => Some((*lane, run_dir.clone())),
             _ => None,
         };
 
@@ -262,8 +268,8 @@ impl Workspace {
             None => {
                 self.overlays.flow_picker.close();
                 cx.notify();
-                if let Some(lane) = stopping {
-                    self.stop_flow_run_in(lane, cx);
+                if let Some((lane, run_dir)) = stopping {
+                    self.stop_flow_run_at(lane, &run_dir, cx);
                 }
             }
         }
@@ -365,7 +371,7 @@ impl Workspace {
                     path,
                     profile,
                     selection,
-                    daruda_flow::request::StartedBy::Desktop,
+                    (daruda_flow::request::StartedBy::Desktop, false),
                     cx,
                 );
                 if let Err(refused) = started {
@@ -425,14 +431,14 @@ impl Workspace {
         path: &Path,
         profile: Option<&str>,
         selection: &FlowSelection,
-        started_by: daruda_flow::request::StartedBy,
+        submitter: (daruda_flow::request::StartedBy, bool),
         cx: &mut Context<Self>,
     ) -> Result<String, FlowStartRefused> {
         let mut submission = self
             .build_flow_request(lane, path, profile, selection, cx)
             .map_err(FlowStartRefused::Submit)?;
-        submission.request.started_by = Some(started_by);
-        Self::start_flow_thread(submission, started_by, cx)
+        submission.request.started_by = Some(submitter.0);
+        Self::start_flow_thread(submission, submitter, cx)
     }
 
     /// The desktop's answer to a start it asked for. Another window can have
@@ -464,7 +470,11 @@ impl Workspace {
             .build_resume_request(lane_ref, run_dir, cx)
             .map_err(FlowStartRefused::Submit)
             .and_then(|submission| {
-                Self::start_flow_thread(submission, daruda_flow::request::StartedBy::Desktop, cx)
+                Self::start_flow_thread(
+                    submission,
+                    (daruda_flow::request::StartedBy::Desktop, false),
+                    cx,
+                )
             });
         if let Err(refused) = started {
             self.answer_flow_start_refusal(lane_ref, refused, cx);
@@ -476,9 +486,10 @@ impl Workspace {
     /// `submitted_by` is who this episode answers to.
     fn start_flow_thread(
         submission: FlowSubmission,
-        submitted_by: daruda_flow::request::StartedBy,
+        submitter: (daruda_flow::request::StartedBy, bool),
         cx: &mut Context<Self>,
     ) -> Result<String, FlowStartRefused> {
+        let (submitted_by, solicited) = submitter;
         let FlowSubmission {
             tree,
             request,
@@ -502,6 +513,7 @@ impl Workspace {
                 runners,
                 overage,
                 submitted_by,
+                solicited,
                 events,
                 asks,
             },
@@ -510,9 +522,21 @@ impl Workspace {
         .map_err(|crate::runs::AlreadyRunning| FlowStartRefused::AlreadyRunning)
     }
 
-    /// Stop the run a named lane holds. The status bar lists every run in
-    /// this window's lanes, including ones that are not active, so it needs
-    /// to say which — the active lane is not the answer there.
+    pub(in crate::workspace) fn stop_flow_run_at(
+        &mut self,
+        lane: daruda_store::project::LaneRef,
+        expected_run_dir: &Path,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .flow_run_in(lane, cx)
+            .is_some_and(|run| run.view().run_dir() == expected_run_dir)
+        {
+            self.stop_flow_run_in(lane, cx);
+        }
+    }
+
+    /// Stop whichever run the named lane currently holds.
     pub(in crate::workspace) fn stop_flow_run_in(
         &mut self,
         lane: daruda_store::project::LaneRef,
@@ -522,6 +546,24 @@ impl Workspace {
         // adapter `Cancelled`.
         if let Some(worktree) = self.lane_for(lane).map(|lane| lane.path.clone()) {
             crate::runs::RunsHost::stop_flow(&worktree, cx);
+        }
+    }
+
+    pub(in crate::workspace) fn stop_flow_ask(
+        &mut self,
+        lane: daruda_store::project::LaneRef,
+        run_dir: &std::path::Path,
+        ask_id: u64,
+        cx: &mut Context<Self>,
+    ) {
+        if self.flow_run_in(lane, cx).is_some_and(|run| {
+            run.view().run_dir() == run_dir
+                && run
+                    .view()
+                    .question(ask_id)
+                    .is_some_and(|ask| !ask.is_closed())
+        }) {
+            self.stop_flow_run_in(lane, cx);
         }
     }
 

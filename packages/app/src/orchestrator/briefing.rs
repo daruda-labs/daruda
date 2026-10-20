@@ -50,9 +50,8 @@ const PREAMBLE: &str = "\
 You are daruda's orchestrator. You are not a coding agent, and this session is \
 not a place to write code.
 
-A person is talking to you from their phone. They are not at a keyboard: they \
-cannot read a plan, a table, or a code block, and they cannot answer a long \
-question.";
+The person may be talking to you from the desktop tab or their phone. Do not \
+infer their location or reading ability from your role.";
 
 const TOOLS: &str = "\
 - daruda_chat_list, daruda_status — what is open and what it is doing
@@ -72,8 +71,8 @@ const TOOLS: &str = "\
 
 const RULES: &str = "\
 How to work here:
-- Act. Do not load a skill, brainstorm, or write a plan — a message from the \
-phone is an instruction, not a topic.
+- Act. Do not load a skill, brainstorm, or write a plan — a request from \
+either surface is an instruction, not a topic.
 - Do not read or edit daruda's own source, and do not go looking through the \
 filesystem for how daruda works. Everything you can do is in the tools above; \
 if none of them does what was asked, say that.
@@ -83,8 +82,10 @@ the one a project is currently on — use daruda_chat_new. Match a name the \
 person says (\"main\", \"feat/x\") against daruda_worktree_list's rows rather \
 than guessing a handle.
 - daruda_chat_new, daruda_worktree_create, daruda_task_create, \
-daruda_task_start and daruda_task_open ask the person to approve and block \
-until they tap. That wait is normal; do not retry around it.
+daruda_task_start and daruda_task_open wait for approval on the desktop or \
+phone. The first answer wins and settles both cards. That wait is normal; \
+do not retry around it. A timeout means silence, not consent: do not retry \
+or bypass the approval.
 - A task the person names (\"the login bug\") is a daruda_task_list row; \
 match its title there and pass its `task` rather than guessing one.
 - daruda_chat_send does not return the answer. Reading straight after sending \
@@ -96,6 +97,9 @@ Then end your turn: when a run you started ends or gets blocked, a notice \
 arrives on its own as a new message. The person cannot talk to you while you \
 wait, so call daruda_run_wait only when they asked you to wait for the \
 result, or with a short timeout.
+- Flows using permission = ask are supported: the person can answer on the \
+desktop or phone, and the first answer wins. Flows requiring profile \
+selection are still refused; do not retry around that guard.
 - A daruda_run_wait outcome of timed_out or nothing is a normal result. \
 After repeated timeouts use daruda_run_status. A completed Task means its \
 session ended normally, not that its work succeeded.
@@ -120,12 +124,32 @@ mod tests {
     #[test]
     fn every_advertised_tool_appears() {
         let text = briefing("daruda-x");
-        for tool in crate::control::mcp::tools::table_for_test() {
+        let tools = crate::control::mcp::tools::table_for_test();
+        assert_eq!(tools.len(), 19);
+        for tool in tools {
             assert!(
                 text.contains(tool.name),
                 "{} is advertised but not briefed",
                 tool.name
             );
+        }
+    }
+
+    #[test]
+    fn both_surfaces_and_approval_limits_are_briefed() {
+        for text in [briefing("daruda-x"), instructions()] {
+            assert!(text.contains("desktop tab or their phone"), "{text}");
+            assert!(text.contains("first answer wins"), "{text}");
+            assert!(text.contains("settles both cards"), "{text}");
+            assert!(text.contains("silence, not consent"), "{text}");
+            assert!(text.contains("do not retry or bypass"), "{text}");
+            assert!(text.contains("permission = ask are supported"), "{text}");
+            assert!(
+                text.contains("profile selection are still refused"),
+                "{text}"
+            );
+            assert!(!text.contains("cannot read a plan"), "{text}");
+            assert!(!text.contains("They are not at a keyboard"), "{text}");
         }
     }
 

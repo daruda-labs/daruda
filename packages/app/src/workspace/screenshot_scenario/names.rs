@@ -65,6 +65,7 @@ const NAME_AGENT_CHAT_COMPACTION: &str = "agent-chat-compaction";
 const NAME_AGENT_CHAT_ATTACHMENTS: &str = "agent-chat-attachments";
 const NAME_ORCHESTRATOR_CHIP: &str = "orchestrator-chip";
 const NAME_ORCHESTRATOR_TAB: &str = "orchestrator-tab";
+const NAME_ORCHESTRATOR_APPROVAL: &str = "orchestrator-approval";
 const NAME_LEFT_DOCK_SESSIONS_SIX: &str = "left-dock-sessions-six";
 const NAME_LEFT_DOCK_SESSIONS: &str = "left-dock-sessions";
 const NAME_LEFT_DOCK_GROUPS: &str = "left-dock-groups";
@@ -197,6 +198,7 @@ impl ScreenshotScenario {
             "task-editor-disk-copy" => Some(Self::TaskEditor(TaskEditorShot::DiskCopy)),
             NAME_ORCHESTRATOR_CHIP => Some(Self::OrchestratorChip),
             NAME_ORCHESTRATOR_TAB => Some(Self::OrchestratorTab),
+            NAME_ORCHESTRATOR_APPROVAL => Some(Self::OrchestratorApproval),
             NAME_LEFT_DOCK_SESSIONS_SIX => Some(Self::LeftDockSessionsSix),
             NAME_LEFT_DOCK_SESSIONS => Some(Self::LeftDockSessions),
             NAME_LEFT_DOCK_GROUPS => Some(Self::LeftDockGroups),

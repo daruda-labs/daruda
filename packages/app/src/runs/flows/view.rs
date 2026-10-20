@@ -90,7 +90,7 @@ impl ParkedAsk {
     }
 
     /// The engine stopped waiting: the call that asked ended first.
-    fn is_closed(&self) -> bool {
+    pub(crate) fn is_closed(&self) -> bool {
         self.pending.reply.is_closed()
     }
 }

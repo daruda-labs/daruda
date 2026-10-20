@@ -8,7 +8,7 @@
 
 use std::time::Instant;
 
-use gpui::Context;
+use gpui::{App, Context};
 
 use crate::surface::strings as s;
 use crate::telegram::bridge::TelegramTail;
@@ -321,6 +321,10 @@ impl Workspace {
             .unwrap_or_else(|| permission_wait_tail(prompt, &[]));
         let header = self.telegram_header(pane_id, cx);
         let permission = Some(crate::telegram::bridge::PermissionPromptRef {
+            session: self
+                .agent_chat_view(pane_id)
+                .map(|view| view.read(cx).permission_session())
+                .unwrap_or_default(),
             perm_id: prompt.id,
             buttons,
         });
@@ -409,7 +413,12 @@ impl Workspace {
         // The ledger closes at the completion tee, after the completion relay
         // has run — so a completion and a second permission wait both land
         // here with it still open.
-        if self.phone_turn_open(pane_id, cx) {
+        let away = crate::app_presence::is_away(cx);
+        let delivery = crate::remote_channel::delivery::remote_delivery(
+            self.phone_turn_open(pane_id, cx),
+            away,
+        );
+        if matches!(delivery, crate::remote_channel::global::Delivery::Explicit) {
             trace::delivery("relay.solicited", || {
                 format!("pane={pane_id} text={}", trace::tail_digest(&tail))
             });
@@ -419,10 +428,9 @@ impl Workspace {
         // `relay_to_telegram` asks this too, but asking here first keeps a
         // disabled/unpaired bridge out of the presence trace below, where it
         // would read as a presence decision it never was.
-        let away = crate::app_presence::is_away(cx);
         let remote_sent = crate::remote_channel::global::RemoteChannels::send_ping(
             self.remote_ping(pane_id, header.clone(), tail.clone(), permission.clone()),
-            crate::remote_channel::global::Delivery::Presence { away },
+            delivery,
             cx,
         );
         if self.telegram_bridge(cx).is_none() {
@@ -472,7 +480,7 @@ impl Workspace {
     /// long as the activity span the phone started, so a desk prompt queued
     /// behind it shares that span and its delivery — the span settles once,
     /// and the phone hears how it ended.
-    pub(super) fn phone_turn_open(&self, pane_id: PaneId, cx: &Context<Self>) -> bool {
+    pub(crate) fn phone_turn_open(&self, pane_id: PaneId, cx: &App) -> bool {
         self.agent_chat_view(pane_id)
             .is_some_and(|view| view.read(cx).phone_turn().is_some())
     }

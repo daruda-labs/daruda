@@ -102,24 +102,28 @@ async fn a_window_with_no_chat_pane_contributes_no_rows(cx: &mut gpui::TestAppCo
 /// Run a gated `ChatNew` with a bridge that can actually deliver the card.
 /// Enabled *and* paired, because `send_approval_card` refuses otherwise —
 /// an undeliverable card settles the request instead of waiting.
-fn paired_bridge_run_gated(lane: LaneHandle, cx: &mut gpui::App) -> Dispatch {
+fn paired_bridge_run_gated(
+    lane: LaneHandle,
+    cx: &mut gpui::App,
+) -> (Dispatch, crate::telegram::global::TestOutbox) {
     crate::settings_store::SettingsStore::init(cx);
-    crate::telegram::global::install_for_test(true, Some(42), cx);
+    let outbound = crate::telegram::global::install_for_test(true, Some(42), cx);
     cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
         store.set_user_for_testing(daruda_config::Config {
             telegram: daruda_config::TelegramConfig {
                 enabled: true,
                 authorized_chat_id: Some(42),
-                ..Default::default()
+                only_when_away: false,
             },
             ..daruda_config::Config::default()
         });
     });
-    run_gated(
+    let dispatch = run_gated(
         GatedCommand::ChatNew { lane, agent: None },
         crate::control::exec::CommandOrigin::Orchestrator,
         cx,
-    )
+    );
+    (dispatch, outbound)
 }
 
 /// A name git will reject cannot become a worktree however the user
@@ -236,7 +240,7 @@ async fn an_allowed_command_asks_and_waits(cx: &mut gpui::TestAppContext) {
     let lane = fixture.workspace.read_with(cx, |ws, _| {
         LaneHandle::new(ws.uuid(), ws.control_active_lane())
     });
-    let dispatch = cx.update(|cx| paired_bridge_run_gated(lane, cx));
+    let (dispatch, _outbound) = cx.update(|cx| paired_bridge_run_gated(lane, cx));
     let rx = match dispatch {
         Dispatch::Deferred { outcome, .. } => outcome,
         Dispatch::Ready(outcome) => panic!("expected a wait, got {outcome:?}"),
@@ -259,7 +263,7 @@ async fn a_refused_command_reports_the_refusal(cx: &mut gpui::TestAppContext) {
     let lane = fixture.workspace.read_with(cx, |ws, _| {
         LaneHandle::new(ws.uuid(), ws.control_active_lane())
     });
-    let dispatch = cx.update(|cx| paired_bridge_run_gated(lane, cx));
+    let (dispatch, _outbound) = cx.update(|cx| paired_bridge_run_gated(lane, cx));
     let Dispatch::Deferred { outcome: rx, .. } = dispatch else {
         panic!("expected a wait");
     };

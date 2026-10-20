@@ -434,6 +434,43 @@ fn telegram_prompt_does_not_replace_in_app_queue_edit(cx: &mut gpui::TestAppCont
 }
 
 #[gpui::test]
+fn external_in_app_prompt_keeps_the_composer_edit_and_origin(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            let id = view
+                .enqueue_prompt("local draft".to_string(), crate::view::PromptOrigin::InApp)
+                .expect("room in the queue");
+            view.begin_edit(id, cx);
+
+            assert_eq!(
+                view.send_external_prompt_text("from host".to_string(), cx),
+                crate::view::PromptDispatch::Queued
+            );
+            assert_eq!(
+                texts(&view.queue.pending_prompts),
+                vec!["local draft".to_string(), "from host".to_string()]
+            );
+            assert_eq!(
+                view.queue.pending_prompts[1].origin,
+                crate::view::PromptOrigin::InApp
+            );
+            assert_eq!(view.queue.editing_prompt, Some(id));
+
+            assert_eq!(
+                view.send_prompt_text("revised local".to_string(), cx),
+                crate::view::PromptDispatch::Queued
+            );
+            assert_eq!(
+                texts(&view.queue.pending_prompts),
+                vec!["revised local".to_string(), "from host".to_string()]
+            );
+            assert_eq!(view.queue.editing_prompt, None);
+        })
+        .unwrap();
+}
+
+#[gpui::test]
 fn turn_end_resolves_telegram_watch_after_finalizing_streaming_text(cx: &mut gpui::TestAppContext) {
     let window = make_test_view(cx);
     window
@@ -511,6 +548,82 @@ fn internal_notice_sends_when_connected_idle_and_empty(cx: &mut gpui::TestAppCon
             assert!(!view.is_phone_turn_waiting());
         })
         .unwrap();
+}
+
+#[gpui::test]
+fn solicited_internal_notice_arms_completion_only_after_dispatch(cx: &mut gpui::TestAppContext) {
+    let (window, mut probe) = connected_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            assert_eq!(
+                view.try_send_internal_prompt_text_with_phone_mode(
+                    "/clear literal notice".into(),
+                    Some(crate::phone_turn::PhoneTurnMode::CompletionOnly),
+                    cx,
+                ),
+                crate::view::InternalDispatch::Sent
+            );
+            assert_eq!(probe.drain().0, 1);
+            assert!(view.phone_turn().is_some());
+            assert!(!view.is_phone_turn_waiting());
+            assert!(!view.take_phone_fallback_if_overdue(
+                std::time::Instant::now() + std::time::Duration::from_secs(120),
+                60
+            ));
+            view.items.push(daruda_acp::ChatItem::AssistantText {
+                text: "final answer".into(),
+                streaming: false,
+                message_id: Some("answer".into()),
+                phase: Default::default(),
+            });
+            assert!(view.take_phone_first_response().is_none());
+            assert_eq!(view.finish_phone_turn(), crate::view::PhoneAckEffect::None);
+            assert!(!view.phone_turn().unwrap().already_sent(Some("answer")));
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+fn refused_solicited_internal_notice_preserves_the_previous_phone_turn(
+    cx: &mut gpui::TestAppContext,
+) {
+    for refusal in [
+        crate::view::InternalDispatch::NotNow,
+        crate::view::InternalDispatch::ReadOnly,
+        crate::view::InternalDispatch::Unavailable,
+    ] {
+        let (window, probe) = connected_view(cx);
+        if refusal == crate::view::InternalDispatch::Unavailable {
+            drop(probe);
+        }
+        window
+            .update(cx, |view, _window, cx| {
+                view.start_phone_turn_for_test(std::time::Instant::now());
+                let previous = view.phone_turn().cloned();
+                match refusal {
+                    crate::view::InternalDispatch::NotNow => view.set_turn_in_flight(),
+                    crate::view::InternalDispatch::ReadOnly => {
+                        view.set_access(daruda_store::tasks::AgentChatAccess::CliSnapshot(
+                            daruda_store::tasks::ExecutionRef {
+                                task_id: "task".into(),
+                                execution_id: "execution".into(),
+                            },
+                        ))
+                    }
+                    _ => {}
+                }
+                assert_eq!(
+                    view.try_send_internal_prompt_text_with_phone_mode(
+                        "notice".into(),
+                        Some(crate::phone_turn::PhoneTurnMode::CompletionOnly),
+                        cx
+                    ),
+                    refusal
+                );
+                assert_eq!(view.phone_turn(), previous.as_ref());
+            })
+            .unwrap();
+    }
 }
 
 #[gpui::test]

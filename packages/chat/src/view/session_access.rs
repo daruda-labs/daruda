@@ -5,6 +5,11 @@ use daruda_acp::AcpSessionHandle;
 
 use super::{AgentChatView, Turn};
 
+pub(super) fn new_permission_session() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 /// What the pane holds of its ACP session and what it may do with it. The
 /// handle is `None` until connect resolves or after a terminal error; dropping
 /// it closes the command channel. A `Mirror` shows a CLI task run read-only:

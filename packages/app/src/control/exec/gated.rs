@@ -23,7 +23,10 @@ pub(crate) fn run_gated(cmd: GatedCommand, origin: super::CommandOrigin, cx: &mu
         return Dispatch::Ready(Err(refusal));
     }
     let summary = approval_summary(&cmd, cx);
-    let (approval, answer) = crate::control::approval::request(summary, cx);
+    let solicited = origin.is_solicited(cx);
+    let away = crate::app_presence::is_away(cx);
+    let delivery = crate::remote_channel::delivery::remote_delivery(solicited, away);
+    let (approval, answer) = crate::control::approval::request(summary, delivery, cx);
     let (tx, rx) = smol::channel::bounded(1);
     cx.spawn(async move |cx| {
         let outcome: Option<ControlOutcome> = match answer.recv().await {
@@ -31,7 +34,7 @@ pub(crate) fn run_gated(cmd: GatedCommand, origin: super::CommandOrigin, cx: &mu
             // before *this* request waited, so N cards opened together would
             // all have passed a budget that only one of them can spend.
             Ok(ApprovalOutcome::Approved) => Some(match cx.update(|cx| guard_gated(&cmd, cx)) {
-                Ok(()) => perform_gated(cmd, origin, cx).await,
+                Ok(()) => perform_gated(cmd, origin, solicited, cx).await,
                 Err(refusal) => Err(refusal),
             }),
             // Not a refusal: the user never said no, and the caller has freed
@@ -155,6 +158,7 @@ fn approval_summary(cmd: &GatedCommand, cx: &mut App) -> String {
 async fn perform_gated(
     cmd: GatedCommand,
     origin: super::CommandOrigin,
+    solicited: bool,
     cx: &mut gpui::AsyncApp,
 ) -> ControlOutcome {
     let created = match cmd {
@@ -182,8 +186,8 @@ async fn perform_gated(
                 .await
                 .map(|task| ControlResult::TaskCreated { task });
         }
-        GatedCommand::TaskStart { task } => return start_task(task, origin, cx).await,
-        GatedCommand::TaskOpen { task } => return cx.update(|cx| open_task(task, cx)),
+        GatedCommand::TaskStart { task } => return start_task(task, origin, solicited, cx).await,
+        GatedCommand::TaskOpen { task } => return cx.update(|cx| open_task(task, solicited, cx)),
         GatedCommand::ChatNew { lane, agent } => cx
             .update(|cx| {
                 in_lane_window(lane, cx, |ws, window, cx| {
@@ -198,17 +202,23 @@ async fn perform_gated(
             base_ref,
             agent,
             prompt,
-        } => create_lane(workspace, project, name, base_ref, agent, prompt, cx)
-            .await
-            .map(|(target, chat)| (chat, Some(target))),
+        } => create_lane(
+            (workspace, project),
+            name,
+            base_ref,
+            agent,
+            prompt,
+            origin,
+            cx,
+        )
+        .await
+        .map(|(target, chat)| (chat, Some(target))),
     };
     let (chat, lane) = created?;
     // Read back rather than echo the request: an agent id the catalog does
     // not hold resolves to the default, so what opened is the only honest
-    // answer. Also what the phone is told — the user approved this a moment
-    // ago, and without the ping reaching the new chat takes a `/list` and a
-    // `/use`.
-    let label = cx.update(|cx| announce_chat(chat, cx));
+    // answer. The announcement keeps the command's delivery provenance.
+    let label = cx.update(|cx| announce_chat(chat, solicited, cx));
     let agent = label.map_or_else(String::new, |l| l.agent);
     Ok(match lane {
         Some(target) => ControlResult::LaneCreated {
@@ -227,6 +237,7 @@ async fn perform_gated(
 async fn start_task(
     task: String,
     origin: super::CommandOrigin,
+    solicited: bool,
     cx: &mut gpui::AsyncApp,
 ) -> ControlOutcome {
     let creates_lane = cx.update(|cx| {
@@ -235,25 +246,9 @@ async fn start_task(
             .is_some_and(task_creates_lane)
     });
     let outcome = cx
-        .update(|cx| begin_task_start(task, origin, cx))?
+        .update(|cx| begin_task_start(task, origin, solicited, cx))?
         .finish(cx)
         .await;
-    if matches!(origin, super::CommandOrigin::Orchestrator)
-        && let Ok(ControlResult::TaskStarted {
-            handle:
-                daruda_control_types::runs::RunHandle::Task {
-                    task_id,
-                    execution_id,
-                },
-            ..
-        }) = &outcome
-    {
-        let key = crate::runs::result::RunKey::Task(daruda_store::tasks::ExecutionRef {
-            task_id: task_id.clone(),
-            execution_id: execution_id.clone(),
-        });
-        cx.update(|cx| crate::runs::RunsHost::register_run(key, cx));
-    }
     if creates_lane && outcome.is_ok() {
         // Spent only now: a refused or failed start costs the agent nothing.
         cx.update(crate::control::guards::note_agent_created_lane);
@@ -265,6 +260,8 @@ async fn start_task(
 pub(crate) struct PendingTaskStart {
     pub(crate) task: String,
     pub(crate) title: String,
+    origin: super::CommandOrigin,
+    solicited: bool,
     workspace: daruda_store::project::WorkspaceUuid,
     answer: smol::channel::Receiver<crate::workspace::ControlTaskStart>,
 }
@@ -274,6 +271,7 @@ pub(crate) struct PendingTaskStart {
 pub(crate) fn begin_task_start(
     task: String,
     origin: super::CommandOrigin,
+    solicited: bool,
     cx: &mut App,
 ) -> Result<PendingTaskStart, ControlError> {
     let title = task_title(&task, cx);
@@ -286,6 +284,8 @@ pub(crate) fn begin_task_start(
     Ok(PendingTaskStart {
         task,
         title,
+        origin,
+        solicited,
         workspace,
         answer,
     })
@@ -308,15 +308,22 @@ impl PendingTaskStart {
         cx.update(|cx| self.started(outcome, cx))
     }
 
-    /// Name a started task's chat for the phone, which then talks to it.
+    /// Announce a started task's chat with the start request's provenance.
     fn started(&self, outcome: crate::workspace::ControlTaskStart, cx: &mut App) -> ControlOutcome {
         let (exec, lane, pane) = outcome?;
+        if matches!(self.origin, super::CommandOrigin::Orchestrator) {
+            crate::runs::RunsHost::register_run_solicited(
+                crate::runs::result::RunKey::Task(exec.clone()),
+                self.solicited,
+                cx,
+            );
+        }
         let chat = pane.map(|pane| PaneRef {
             workspace: self.workspace,
             pane,
         });
         if let Some(chat) = chat {
-            announce_chat(chat, cx);
+            announce_chat(chat, self.solicited, cx);
         }
         Ok(ControlResult::TaskStarted {
             handle: daruda_control_types::runs::RunHandle::Task {
@@ -330,8 +337,8 @@ impl PendingTaskStart {
     }
 }
 
-/// Bring up the chat `task` ran in and make it the phone's target.
-pub(crate) fn open_task(task: String, cx: &mut App) -> ControlOutcome {
+/// Bring up the chat `task` ran in and announce it to remote channels.
+pub(crate) fn open_task(task: String, solicited: bool, cx: &mut App) -> ControlOutcome {
     let chat = in_task_window(&task, cx, |ws, window, cx| {
         let pane = ws.control_task_open(&task, window, cx)?;
         Ok(PaneRef {
@@ -339,21 +346,33 @@ pub(crate) fn open_task(task: String, cx: &mut App) -> ControlOutcome {
             pane,
         })
     })?;
-    announce_chat(chat, cx);
+    announce_chat(chat, solicited, cx);
     Ok(ControlResult::TaskOpened { task, chat })
 }
 
-/// Name the new chat for the phone and point the phone at it, handing the
-/// label back for the tool result. Announcing is best effort — see
+/// Name the new chat for remote channels, handing the label back for the
+/// tool result. Announcing is best effort — see
 /// `remote_channel::announce_chat_created` — and a pane that vanished in the
 /// same tick has no label, so there is nothing to announce or report.
-fn announce_chat(pane: PaneRef, cx: &mut App) -> Option<crate::workspace::ChatLabel> {
+fn announce_chat(
+    pane: PaneRef,
+    solicited: bool,
+    cx: &mut App,
+) -> Option<crate::workspace::ChatLabel> {
+    let away = crate::app_presence::is_away(cx);
+    let delivery = crate::remote_channel::delivery::remote_delivery(solicited, away);
     let label = in_pane_window(pane, cx, |ws, _window, cx| {
         ws.control_chat_label(pane.pane, cx)
             .ok_or(ControlError::TargetGone)
     })
     .ok()?;
-    crate::remote_channel::announce_chat_created(pane, label.path.clone(), &label.agent_name, cx);
+    crate::remote_channel::announce_chat_created(
+        pane,
+        label.path.clone(),
+        &label.agent_name,
+        delivery,
+        cx,
+    );
     Some(label)
 }
 
@@ -363,14 +382,18 @@ fn announce_chat(pane: PaneRef, cx: &mut App) -> Option<crate::workspace::ChatLa
 /// `workspace::control_lane_ops` so its `CreateWorktreePlan` never leaves
 /// `crate::workspace`; this only picks the window and waits.
 async fn create_lane(
-    workspace: daruda_store::project::WorkspaceUuid,
-    project: daruda_store::project::ProjectId,
+    project: (
+        daruda_store::project::WorkspaceUuid,
+        daruda_store::project::ProjectId,
+    ),
     name: String,
     base_ref: Option<String>,
     agent: Option<String>,
     prompt: Option<String>,
+    origin: super::CommandOrigin,
     cx: &mut gpui::AsyncApp,
 ) -> Result<(LaneHandle, PaneRef), ControlError> {
+    let (workspace, project) = project;
     let rx = cx.update(|cx| {
         in_project_window(workspace, project, cx, |ws, window, cx| {
             Ok(ws.control_create_lane(
@@ -394,7 +417,7 @@ async fn create_lane(
         // way, and the caller can send the prompt again.
         cx.update(|cx| {
             let _ = in_pane_window(chat, cx, |ws, _window, cx| {
-                ws.control_say(chat.pane, prompt.clone(), cx)
+                ws.control_say(chat.pane, prompt.clone(), origin, cx)
             });
         });
     }

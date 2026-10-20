@@ -1547,6 +1547,7 @@ notification:
   telegram_permission_allowed: "✅ Allowed"
   # Feedback for a phone-tapped Reject.
   telegram_permission_rejected: "🚫 Rejected"
+  telegram_permission_cancelled: "Cancelled"
   # Feedback when the tapped request was already answered in-app or cancelled.
   telegram_permission_stale: "Already handled in the app"
   # Feedback when the target pane/session is gone (closed since the prompt sent).
@@ -1717,6 +1718,8 @@ flow:
   # An answer the run could not take: the question had already closed —
   # its node was stopped or timed out — so nothing acted on the click.
   ask_closed: "The flow had stopped waiting for that answer, so it was not used"
+  ask_answered: "The flow question was answered."
+  ask_withdrawn: "The flow question is no longer waiting for an answer."
   # The modal's way out that is not an answer. Names the object because
   # "Stop" alone, beside three answer buttons, reads as stopping the tool
   # call rather than the run.
@@ -2183,6 +2186,12 @@ control:
   approval_lane_create: "daruda wants to create the worktree %{name}. Allow?"
   approval_chat_new: "daruda wants to open another chat in %{path}. Allow?"
   approval_allow: "Allow"
+  approval_approved_desktop: "Approved on desktop"
+  approval_approved_phone: "Approved on phone"
+  approval_refused_desktop: "Refused on desktop"
+  approval_refused_phone: "Refused on phone"
+  approval_cancelled: "Cancelled"
+  approval_timed_out: "Timed out"
   approval_refuse: "Refuse"
   approval_already_answered: "Already answered"
   approval_allowed: "Allowed"
@@ -2194,6 +2203,7 @@ control:
   # The ping that introduces a chat the phone approved opening; `agent` is
   # the display name of the agent running it.
   chat_announced: "A new %{agent} tab is open. Messages you send now go to it. /use - to go back to the orchestrator."
+  chat_announced_only: "A new %{agent} tab is open."
   # Told to a sender whose message named no chat and whose bridge remembered
   # none, so the app's own focused lane took it: which chat that was, and how
   # to pick another. `name` is the lane's path, `agent` the display name of
@@ -2209,13 +2219,13 @@ control:
   answer_still_working: "Still working. I'll have the answer once it finishes."
   flow_stop_already_idle: "No flow was running there."
   error_approval_refused: "Refused."
-  error_approval_timed_out: "That went unanswered, so nothing was created."
+  error_approval_timed_out: "That went unanswered, so nothing was created. No answer is not consent. Do not retry or bypass the approval."
   error_agent_limit_reached: "The agent has created as many worktrees as it may this run."
   error_queue_full: "That chat already has too many prompts waiting."
   error_lane_create_failed: "The worktree could not be created. daruda has the reason."
   error_lane_name_invalid: "That is not a usable branch name."
   error_approvals_pending: "Too many approvals are already waiting. Answer one first."
-  error_approval_unavailable: "daruda could not ask for approval — no remote channel is connected."
+  error_approval_unavailable: "daruda could not ask for approval — no desktop or remote channel is available."
   error_lane_create_busy: "A worktree is already being created in that repository. Try again in a moment."
   error_self_target_refused: "That would have the agent prompt itself."
   approval_task_create: "daruda wants to add the task %{title} to %{project}. Allow?"

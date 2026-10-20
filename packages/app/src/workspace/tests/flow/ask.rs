@@ -16,6 +16,118 @@ fn asking_ids(row: &crate::workspace::flow_rows::FlowRunRow) -> Vec<u64> {
     row.asking.iter().map(|ask| ask.ask_id).collect()
 }
 
+#[gpui::test]
+async fn a_pending_flow_question_marks_the_orchestrator_chip(cx: &mut TestAppContext) {
+    let (lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let unrelated = crate::test_support::workspace_for_control(cx);
+    let mut cx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    let here = ws.update(&mut cx, |ws, _| ws.active);
+    let run_dir = lane.path().join("run");
+    seed_run(&ws, &mut cx, here, &run_dir);
+    let reply = park_question(&ws, &mut cx, here, &run_dir, 1);
+    ws.update(&mut cx, |ws, cx| {
+        assert_eq!(
+            ws.orchestrator_chip_state(cx),
+            Some(crate::workspace::status_bar::orchestrator_chip::OrchestratorChipState::AwaitingPermission)
+        );
+    });
+    unrelated.workspace.update(&mut cx, |ws, cx| {
+        assert_eq!(
+            ws.orchestrator_chip_state(cx),
+            Some(crate::workspace::status_bar::orchestrator_chip::OrchestratorChipState::AwaitingPermission)
+        );
+    });
+    drop(reply);
+    ws.update(&mut cx, |ws, cx| {
+        assert_ne!(
+            ws.orchestrator_chip_state(cx),
+            Some(crate::workspace::status_bar::orchestrator_chip::OrchestratorChipState::AwaitingPermission)
+        );
+    });
+}
+
+#[gpui::test]
+async fn stale_desktop_answers_and_modal_stop_do_not_touch_a_replacement_run(
+    cx: &mut TestAppContext,
+) {
+    let (lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let mut cx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    let here = ws.read_with(&cx, |ws, _| ws.active);
+    let old_run = lane.path().join("old");
+    seed_run(&ws, &mut cx, here, &old_run);
+    let _old = park_question(&ws, &mut cx, here, &old_run, 1);
+    let stale_modal = ws.read_with(&cx, |ws, _| {
+        ws.flows.ask_modal.as_ref().unwrap().upgrade().unwrap()
+    });
+    let new_run = lane.path().join("new");
+    seed_run(&ws, &mut cx, here, &new_run);
+    let answer = park_question(&ws, &mut cx, here, &new_run, 1);
+    let (modal_lane, modal_run, ask_id) = stale_modal.read_with(&cx, |modal, _| {
+        let (lane, run_dir, ask_id) = modal.question();
+        (lane, run_dir.to_path_buf(), ask_id)
+    });
+    ws.update(&mut cx, |ws, cx| {
+        ws.answer_flow_ask(modal_lane, &modal_run, ask_id, allow(), cx);
+        ws.answer_flow_ask(here, &old_run, 1, allow(), cx);
+        ws.stop_flow_ask(modal_lane, &modal_run, ask_id, cx);
+        assert!(!ws.flow_run_in(here, cx).unwrap().is_stopping());
+    });
+    assert!(answer.is_empty());
+    assert!(
+        row_of(&ws, &mut cx, here)
+            .unwrap()
+            .asking
+            .iter()
+            .any(|ask| ask.ask_id == 1)
+    );
+    seed_run(&ws, &mut cx, here, &old_run);
+    let resumed = park_question(&ws, &mut cx, here, &old_run, 2);
+    ws.update(&mut cx, |ws, cx| {
+        ws.stop_flow_ask(modal_lane, &modal_run, ask_id, cx);
+        assert!(!ws.flow_run_in(here, cx).unwrap().is_stopping());
+    });
+    assert!(resumed.is_empty());
+}
+
+#[gpui::test]
+async fn a_stale_stop_prompt_does_not_cancel_a_replacement_run(cx: &mut TestAppContext) {
+    let (lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let here = ws.read_with(cx, |ws, _| ws.active);
+    let old_run = lane.path().join("old");
+    let new_run = lane.path().join("new");
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.seed_flow_run_for_test(here, old_run, cx);
+            ws.open_flow_picker(
+                here,
+                crate::workspace::command::flow_picker::FlowPurpose::Run,
+                cx,
+            );
+            assert!(matches!(
+                ws.overlays.flow_picker,
+                crate::workspace::command::flow_picker::FlowPicker::Stopping { .. }
+            ));
+            ws.seed_flow_run_for_test(here, new_run.clone(), cx);
+            ws.execute_flow_picker_selection(window, cx);
+            let run = ws.flow_run_in(here, cx).unwrap();
+            assert_eq!(run.view().run_dir(), new_run);
+            assert!(
+                !run.is_stopping(),
+                "a stale stop prompt canceled the replacement"
+            );
+            assert!(!ws.overlays.flow_picker.is_open());
+            ws.open_flow_picker(
+                here,
+                crate::workspace::command::flow_picker::FlowPurpose::Run,
+                cx,
+            );
+            ws.execute_flow_picker_selection(window, cx);
+            assert!(ws.flow_run_in(here, cx).unwrap().is_stopping());
+        });
+    })
+    .expect("the test window is live");
+}
+
 /// A question has to survive being painted more than once, and an answer
 /// has to name the question it is answering: a surface can still be showing
 /// a resolved question, and that click must do nothing rather than answer
@@ -36,13 +148,17 @@ async fn an_answer_only_lands_on_the_question_it_names(cx: &mut TestAppContext) 
     assert_eq!(row.asking[0].tool.as_ref(), "Bash");
 
     // A stale click — right lane, wrong question.
-    ws.update(&mut cx, |ws, cx| ws.answer_flow_ask(here, 6, allow(), cx));
+    ws.update(&mut cx, |ws, cx| {
+        ws.answer_flow_ask(here, &run_dir, 6, allow(), cx)
+    });
     assert!(
         reply.try_recv().is_err(),
         "a click on a resolved question answered the live one"
     );
 
-    ws.update(&mut cx, |ws, cx| ws.answer_flow_ask(here, 7, allow(), cx));
+    ws.update(&mut cx, |ws, cx| {
+        ws.answer_flow_ask(here, &run_dir, 7, allow(), cx)
+    });
     assert!(
         matches!(
             reply.try_recv(),
@@ -216,7 +332,9 @@ async fn answering_one_question_leaves_the_others_up(cx: &mut TestAppContext) {
     let _first = park_question(&ws, &mut cx, here, &run_dir, 1);
     let _second = park_question(&ws, &mut cx, here, &run_dir, 2);
 
-    ws.update(&mut cx, |ws, cx| ws.answer_flow_ask(here, 1, allow(), cx));
+    ws.update(&mut cx, |ws, cx| {
+        ws.answer_flow_ask(here, &run_dir, 1, allow(), cx)
+    });
     let row = row_of(&ws, &mut cx, here).expect("the run is listed");
     assert_eq!(
         asking_ids(&row),
@@ -253,7 +371,9 @@ async fn a_sibling_event_never_drops_an_open_question(cx: &mut TestAppContext) {
 
     let row = row_of(&ws, &mut cx, here).expect("the run is listed");
     assert_eq!(asking_ids(&row), [1], "a sibling's progress took it down");
-    ws.update(&mut cx, |ws, cx| ws.answer_flow_ask(here, 1, allow(), cx));
+    ws.update(&mut cx, |ws, cx| {
+        ws.answer_flow_ask(here, &run_dir, 1, allow(), cx)
+    });
     assert!(
         reply.try_recv().is_ok(),
         "the question could not be answered"
@@ -274,7 +394,9 @@ async fn answering_an_abandoned_question_reports_failure(cx: &mut TestAppContext
     // The engine dropping its end is what abandoning a question is.
     drop(reply);
 
-    ws.update(&mut cx, |ws, cx| ws.answer_flow_ask(here, 5, allow(), cx));
+    ws.update(&mut cx, |ws, cx| {
+        ws.answer_flow_ask(here, &run_dir, 5, allow(), cx)
+    });
 
     let told = ws.read_with(&cx, |ws, _| {
         ws.error_history()
@@ -303,7 +425,9 @@ async fn a_question_arriving_after_the_last_was_answered_still_raises_the_modal(
         has_dialog(&mut cx),
         "the first question did not reach the front"
     );
-    ws.update(&mut cx, |ws, cx| ws.answer_flow_ask(here, 1, allow(), cx));
+    ws.update(&mut cx, |ws, cx| {
+        ws.answer_flow_ask(here, &run_dir, 1, allow(), cx)
+    });
     cx.update(crate::ui::WindowExt::close_dialog);
 
     let _second = park_question(&ws, &mut cx, here, &run_dir, 2);
@@ -393,8 +517,9 @@ fn dialog_up(cx: &mut TestAppContext, wh: gpui::WindowHandle<gpui_component::Roo
 async fn a_question_answered_in_one_window_closes_in_the_other(cx: &mut TestAppContext) {
     let w = two_windows_asked(cx);
     let here = w.first.read_with(cx, |ws, _| ws.active);
-    w.first
-        .update(cx, |ws, cx| ws.answer_flow_ask(here, 1, allow(), cx));
+    w.first.update(cx, |ws, cx| {
+        ws.answer_flow_ask(here, &w._lane.path().join("run"), 1, allow(), cx)
+    });
     cx.run_until_parked();
     assert!(
         !dialog_up(cx, w.second_wh),

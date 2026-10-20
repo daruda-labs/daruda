@@ -529,9 +529,7 @@ pub enum ControlError {
         name: String,
         reason: FlowNotStartedReason,
     },
-    /// The flow would open a desktop dialog the phone cannot answer — an
-    /// agent node whose permission policy is `ask`, or a file declaring
-    /// profiles, which asks which one to run.
+    /// The flow declares profiles, requiring selection in a desktop dialog.
     FlowNeedsInteraction {
         name: String,
     },
@@ -549,8 +547,8 @@ pub enum ControlError {
     OrchestratorUnavailable,
     /// The user said no to a tool that creates something.
     ApprovalRefused,
-    /// The card went unanswered. Distinct from a refusal: nobody decided, so
-    /// asking again later is reasonable where retrying a refusal is not.
+    /// The card went unanswered. Silence is not consent; retrying or bypassing
+    /// the approval is not permitted.
     ApprovalTimedOut,
     /// The agent has created as many worktrees as it may. Refused before the
     /// card, since there is nothing to ask about.
@@ -645,7 +643,10 @@ impl std::fmt::Display for ControlError {
             Self::OrchestratorUnresolvable => write!(f, "orchestrator names no runnable agent"),
             Self::OrchestratorUnavailable => write!(f, "orchestrator would not start"),
             Self::ApprovalRefused => write!(f, "the user refused"),
-            Self::ApprovalTimedOut => write!(f, "the approval went unanswered"),
+            Self::ApprovalTimedOut => write!(
+                f,
+                "the approval went unanswered; silence is not consent. Do not retry or bypass the approval"
+            ),
             Self::AgentLimitReached => write!(f, "agent worktree budget spent"),
             Self::QueueFull => write!(f, "prompt queue full"),
             Self::TargetReadOnly => write!(f, "chat is read-only"),

@@ -21,6 +21,7 @@ use crate::workspace::flow_rows::AskRowData;
 
 pub(in crate::workspace) struct FlowAskModal {
     lane: daruda_store::project::LaneRef,
+    run_dir: std::path::PathBuf,
     ask: AskRowData,
     workspace: gpui::WeakEntity<Workspace>,
     panel_focus_handle: FocusHandle,
@@ -92,6 +93,7 @@ impl FlowAskModal {
         workspace: gpui::WeakEntity<Workspace>,
         active: daruda_store::project::LaneRef,
         lane: daruda_store::project::LaneRef,
+        run_dir: std::path::PathBuf,
         ask: AskRowData,
         window: &mut Window,
         cx: &mut gpui::App,
@@ -105,6 +107,7 @@ impl FlowAskModal {
             None,
             move |_window, cx_modal| FlowAskModal {
                 lane,
+                run_dir,
                 ask,
                 workspace: weak,
                 panel_focus_handle: cx_modal.focus_handle(),
@@ -116,8 +119,10 @@ impl FlowAskModal {
     }
 
     /// The lane and question this modal answers.
-    pub(in crate::workspace) fn question(&self) -> (daruda_store::project::LaneRef, u64) {
-        (self.lane, self.ask.ask_id)
+    pub(in crate::workspace) fn question(
+        &self,
+    ) -> (daruda_store::project::LaneRef, &std::path::Path, u64) {
+        (self.lane, &self.run_dir, self.ask.ask_id)
     }
 
     /// Whether this modal is the window's front dialog. A dialog only closes
@@ -132,12 +137,14 @@ impl FlowAskModal {
     fn stop_button(&self) -> impl IntoElement + use<> {
         let workspace = self.workspace.clone();
         let lane = self.lane;
+        let run_dir = self.run_dir.clone();
+        let ask_id = self.ask.ask_id;
         crate::ui::button(
             SharedString::from(format!("flow-ask-modal-stop-{}", self.ask.ask_id)),
             SharedString::from(crate::surface::strings::flow::ask_modal_stop()),
         )
         .on_click(move |_, window, cx| {
-            match workspace.update(cx, |ws, cx| ws.stop_flow_run_in(lane, cx)) {
+            match workspace.update(cx, |ws, cx| ws.stop_flow_ask(lane, &run_dir, ask_id, cx)) {
                 Ok(()) => {}
                 Err(e) => daruda_store::observability::log_writer::LogWriter::log(
                     daruda_store::observability::error_report::ErrorReport::new(
@@ -177,6 +184,7 @@ impl FlowAskModal {
         let option_id = choice.option_id.clone();
         let workspace = self.workspace.clone();
         let (lane, ask_id) = (self.lane, self.ask.ask_id);
+        let run_dir = self.run_dir.clone();
         button.on_click(move |_, window, cx| {
             let decision = if allow {
                 daruda_acp::PermissionDecision::Allow {
@@ -187,7 +195,9 @@ impl FlowAskModal {
                     option_id: option_id.clone(),
                 }
             };
-            match workspace.update(cx, |ws, cx| ws.answer_flow_ask(lane, ask_id, decision, cx)) {
+            match workspace.update(cx, |ws, cx| {
+                ws.answer_flow_ask(lane, &run_dir, ask_id, decision, cx)
+            }) {
                 Ok(()) => {}
                 Err(e) => daruda_store::observability::log_writer::LogWriter::log(
                     daruda_store::observability::error_report::ErrorReport::new(

@@ -204,8 +204,6 @@ fn parses_callback_query() {
             chat_id: 999,
             callback_id: "abc123-callback-id".to_string(),
             data: "token_a".to_string(),
-            message_id: 43,
-            message_text: "perm prompt".to_string(),
         }
     );
 }
