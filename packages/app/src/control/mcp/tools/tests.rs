@@ -273,3 +273,23 @@ fn wait_and_status_descriptions_name_the_wire_values() {
         );
     }
 }
+
+/// Starting long work and then waiting in the same turn blocks the person's
+/// conversation; the start tools and the wait say so where the model reads.
+#[test]
+fn start_and_wait_descriptions_steer_away_from_blocking_waits() {
+    let description = |name: &str| {
+        table_for_test()
+            .iter()
+            .find(|t| t.name == name)
+            .expect("advertised")
+            .description
+    };
+    for start in ["daruda_flow_run", "daruda_task_start"] {
+        let text = description(start);
+        assert!(text.contains("notice"), "{start}: {text}");
+        assert!(text.contains("daruda_run_wait"), "{start}: {text}");
+    }
+    let wait = description("daruda_run_wait");
+    assert!(wait.contains("cannot talk to you"), "{wait}");
+}

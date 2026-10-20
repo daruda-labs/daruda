@@ -91,6 +91,11 @@ match its title there and pass its `task` rather than guessing one.
 gives you what that chat said *before* — use daruda_chat_ask when you want the \
 reply to your own prompt, and check daruda_chat_list for an `activity` of idle \
 before reading one any other way.
+- daruda_flow_run and daruda_task_start answer once the work has started. \
+Then end your turn: when a run you started ends or gets blocked, a notice \
+arrives on its own as a new message. The person cannot talk to you while you \
+wait, so call daruda_run_wait only when they asked you to wait for the \
+result, or with a short timeout.
 - A daruda_run_wait outcome of timed_out or nothing is a normal result. \
 After repeated timeouts use daruda_run_status. A completed Task means its \
 session ended normally, not that its work succeeded.
@@ -151,6 +156,22 @@ mod tests {
             "{text}"
         );
         assert!(!text.contains("TimedOut"), "{text}");
+    }
+
+    /// Observed in E2E: it called daruda_run_wait right after every
+    /// daruda_flow_run, and what the person typed meanwhile queued until the
+    /// run ended. Waiting must not be the default after starting long work.
+    #[test]
+    fn starting_long_work_ends_the_turn_instead_of_waiting() {
+        for text in [briefing("daruda-x"), instructions()] {
+            let lower = text.to_lowercase();
+            assert!(lower.contains("end your turn"), "{text}");
+            assert!(lower.contains("arrives on its own"), "{text}");
+            assert!(
+                lower.contains("cannot talk to you while you wait"),
+                "{text}"
+            );
+        }
     }
 
     /// A file outlives the run that wrote it, so it must not carry that run's

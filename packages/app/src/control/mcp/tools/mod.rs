@@ -333,7 +333,10 @@ static TABLE: &[Tool] = &[
                       nothing; timed_out and nothing are normal results, and after repeated \
                       timeouts call daruda_run_status. A completed Task means its session ended \
                       normally, not that its work succeeded. Reported results remain queryable \
-                      with daruda_run_status.",
+                      with daruda_run_status. The person cannot talk to you while you wait: \
+                      after starting work, end your turn instead, since a notice arrives on \
+                      its own when a run you started ends or is blocked. Wait only when the \
+                      person asked you to, or with a short timeout.",
         gate: Gate::Open,
         properties: run_wait_properties,
         required: &["timeout"],
@@ -464,8 +467,10 @@ static TABLE: &[Tool] = &[
         description: "Start a flow by name in one worktree. Take the `worktree` from the \
                       matching daruda_flow_list row — a flow belongs to the worktree it \
                       was listed under, and the same name in two of them is two \
-                      different flows. Reports that it started, not that it finished; \
-                      the outcome arrives when the run ends.",
+                      different flows. Reports that it started, not that it finished. \
+                      End your turn after it: a notice with the outcome arrives on its \
+                      own when the run ends or is blocked. Do not follow it with \
+                      daruda_run_wait unless the person asked you to wait.",
         gate: Gate::Open,
         properties: flow_run_properties,
         required: &["name", "worktree"],
@@ -510,7 +515,10 @@ static TABLE: &[Tool] = &[
         description: "Start a backlog task: it opens its worktree and hands the task's \
                       prompt to an agent there. Answers once it is running, with the \
                       worktree and — when it runs as a chat — the chat's `target`. Needs \
-                      the user's approval, like daruda_worktree_create.",
+                      the user's approval, like daruda_worktree_create. End your turn \
+                      after it: a notice arrives on its own when the run ends or is \
+                      blocked. Do not follow it with daruda_run_wait unless the person \
+                      asked you to wait.",
         gate: Gate::NeedsApproval,
         properties: task_properties,
         required: &["task"],
