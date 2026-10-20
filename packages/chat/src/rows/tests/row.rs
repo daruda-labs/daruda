@@ -149,17 +149,15 @@ fn a_cyclic_parent_link_does_not_hang_the_index() {
 
 /// Guard against per-key rescans by checking growth when one turn grows.
 ///
-/// Eight times, not twice: the linear-to-quadratic gap widens with the size
-/// ratio (8 against 64, not 2 against 4), and a shared runner moves a
-/// measurement by more than the narrow gap holds. Under a concurrent suite,
-/// doubling read 2.02 against a 2.6 bar; eight-fold read 8.97 against 22.
+/// One sample projects the large turn once and the other projects the small
+/// turn `GROWTH` times, so linear work reads 1× and quadratic `GROWTH`×.
+/// Samples of equal length see the same preemption, and medians ignore the
+/// rare uninterrupted one: on an oversubscribed runner a 3ms sample often ran
+/// whole while a 24ms one never did, so the minima read 32× for linear code.
 #[test]
 fn a_long_single_turn_of_cycles_stays_linear() {
     const N: usize = 250;
     const GROWTH: usize = 8;
-    /// Geometric mean of linear (`GROWTH`) and quadratic (`GROWTH²`), so the
-    /// bar sits as far from a passing measurement as from a failing one.
-    const RATIO_BAR: f64 = 22.0;
 
     let small = one_turn_of_cycles(N);
     let large = one_turn_of_cycles(N * GROWTH);
@@ -174,22 +172,32 @@ fn a_long_single_turn_of_cycles_stays_linear() {
         "the fixture must actually build tool groups"
     );
 
-    let sample = |items: &[ChatItem]| {
+    let sample = |items: &[ChatItem], times: usize| {
         let started = std::time::Instant::now();
-        std::hint::black_box(project_all(items));
+        for _ in 0..times {
+            std::hint::black_box(project_all(items));
+        }
         started.elapsed()
     };
-    // Interleave sizes and keep minima to reduce scheduler-noise sensitivity.
-    let (mut t1, mut t2) = (std::time::Duration::MAX, std::time::Duration::MAX);
-    for _ in 0..10 {
-        t1 = t1.min(sample(&small));
-        t2 = t2.min(sample(&large));
+    // Interleaved so a load that comes and goes reaches both sizes alike.
+    let (mut repeated, mut grown) = (Vec::new(), Vec::new());
+    for _ in 0..11 {
+        repeated.push(sample(&small, GROWTH));
+        grown.push(sample(&large, 1));
     }
-    let ratio = t2.as_secs_f64() / t1.as_secs_f64();
+    let median = |mut samples: Vec<std::time::Duration>| {
+        samples.sort();
+        samples[samples.len() / 2]
+    };
+    let (repeated, grown) = (median(repeated), median(grown));
+    let ratio = grown.as_secs_f64() / repeated.as_secs_f64();
+    // Geometric mean of linear (1) and quadratic (`GROWTH`), so the bar sits
+    // as far from a passing measurement as from a failing one.
+    let bar = (GROWTH as f64).sqrt();
     assert!(
-        ratio < RATIO_BAR,
-        "growing a single turn {GROWTH}-fold cost {ratio:.2}× ({t1:?} -> {t2:?}) \
-         — the per-key rescan is back"
+        ratio < bar,
+        "one {GROWTH}× turn cost {ratio:.2}× its size in small turns \
+         ({repeated:?} -> {grown:?}) — the per-key rescan is back"
     );
 }
 
