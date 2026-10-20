@@ -201,6 +201,9 @@ The complete API table, exceptions, and enforcement are in
 test uses (imports, constants, helpers) needs the same gate, or other OSes
 fail on unused items. Recheck this whenever tests move between modules.
 
+**Path embedding:** use argv, shared shell quoting, and serializers, including in
+tests. See [Core](packages/core/AGENTS.md#paths-in-commands-and-structured-data).
+
 ### Errors and Environment
 
 - Daruda-owned environment names are registered in

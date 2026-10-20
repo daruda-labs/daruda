@@ -49,6 +49,14 @@ instead go through `file_url` with an explicit `PathStyle`, keeping
 "is this a file URL?" separate from its local interpretation.
 Use `join_paths` for PATH construction, never a hardcoded separator.
 
+### Paths in Commands and Structured Data
+
+- Never insert raw paths into shell or YAML/JSON source, including test fixtures.
+- Prefer argv; otherwise use `shell::quote::{quote_path, quote_str}` for the
+  actual shell and serializers for YAML/JSON. Handle each nested layer separately.
+- Test spaces, quotes, `$`, backticks, and supported Windows paths; verify the
+  intended file is accessed.
+
 ### Allowed Regions and Exceptions
 
 - Core gates: `host`, `process`, `path`, `shell`, and the pure `file_url`.
