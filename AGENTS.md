@@ -70,8 +70,7 @@ package names. See [project structure](CONTRIBUTING.md#project-structure),
   Types: `feat`, `fix`, `refactor`, `perf`, `test`, `chore`, `ci`, `docs`.
   Body only for a non-obvious reason; no Phase/Step/ticket numbers,
   diff inventories, or future-work notes.
-- Run the full [pre-commit checks](CONTRIBUTING.md#local-checks) before committing.
-  Fix failures; never bypass hooks with `--no-verify`,
+- Never bypass hooks with `--no-verify`,
   `-c commit.gpgsign=false`, or similar unless explicitly requested.
 
 ### Language and Documentation
@@ -330,16 +329,20 @@ Do not use a standalone clone of a different revision.
 
 ### Choosing Verification
 
-Review mode follows the execution restriction above. During implementation,
-use focused checks for the changed behavior; before a requested commit, run
-the complete [local checklist](CONTRIBUTING.md#local-checks). Its Cargo gates
-delegate package coverage to `scripts/ci-cargo.sh`; do not copy package lists.
+Verify intended behavior and guard against regressions. Select checks by impact
+and risk, including affected consumers; broaden coverage when uncertain and
+follow subsystem requirements. Reuse passing results only while relevant code,
+dependencies, configuration, and environment remain unchanged. Report unverified
+behavior. See [Local Checks](CONTRIBUTING.md#local-checks) for check selection;
+review mode retains its execution restriction. Cargo gates delegate package
+coverage to `scripts/ci-cargo.sh`; do not copy package lists.
 
 The full checklist includes source lints and their listed self-tests, default
 Clippy/tests, all-feature app Clippy, doc links, the offline ACP preset drift
 gate, and screenshot-feature tests. CI runs a subset of local source checks;
 a green CI run does not replace checks that are still local-only.
-Skipping `workspace::tests` is an iteration shortcut only, never a commit gate.
+When workspace behavior is affected or the full suite is required, skipping
+`workspace::tests` is an iteration shortcut, not completed verification.
 
 Do not clean up vendored upstream code as part of a general lint/refactor pass.
 Explicit vendor checks still apply, including mouse-button guards,

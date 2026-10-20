@@ -224,7 +224,7 @@ across packages. See
   ancestor files does not bypass the combined budget.
 - Around 200 lines is a useful editing target for a scoped instruction file,
   not a reason to delete required constraints. Check bytes as well as lines.
-- Keep the shared pre-commit checklist in [Local Checks](#local-checks), and package
+- Keep the shared verification checklist in [Local Checks](#local-checks), and package
   coverage in `scripts/ci-cargo.sh`. Mechanical enforcement belongs in the
   existing tests/lints, not repeated prose.
 
@@ -347,7 +347,16 @@ instead of invoking an installed editor. This applies on every OS, without
 requiring a default file association or an editor on `PATH`. Keep native launch
 verification in an explicit manual smoke check with a persistent file.
 
-Before committing, run the complete checklist below and fix every failure.
+Checks establish that changes behave as intended without breaking existing
+behavior. Select checks by impact and risk, including affected consumers,
+and follow subsystem requirements. Broaden coverage when uncertain; run the
+full checklist when impact cannot be isolated or it is explicitly requested.
+File type or diff size alone does not determine risk.
+
+Reuse passing results only while relevant code, dependencies, configuration,
+and environment remain unchanged. Fix failures in applicable checks and report
+what ran and what remains unverified, including pending platform CI. Do not
+present focused verification as a full-suite pass.
 During code review, the [review-mode rule](AGENTS.md#review-mode) takes precedence:
 only execute build, test, lint, or compile commands when the user explicitly
 requests them in that review request.
@@ -373,7 +382,7 @@ bash scripts/check-packaging-changes.sh --self-test
 ```
 
 The lint checklist includes CI checks and additional local checks.
-Every script must exit zero:
+Each selected script must exit zero:
 
 ```bash
 ./scripts/lint-inline-literals.sh
@@ -414,7 +423,8 @@ This does not apply to GUI screenshot launches, which need a visible window.
 
 During iteration, `cargo test -p daruda -- --skip workspace::tests` avoids
 the expensive real-Workspace tests, which create tabs and spawn shells.
-It is an iteration shortcut, not a replacement for the full pre-commit suite.
+It is an iteration shortcut, not a replacement when workspace behavior is
+affected or the full suite is required.
 
 The ACP preset drift gate is offline. It regenerates the generated block in
 `packages/config/src/agent/preset.rs` from
@@ -428,8 +438,8 @@ registry snapshot.
 
 [ci.yml](.github/workflows/ci.yml) defines current job coverage. It runs
 macOS, Linux, and Windows build/test jobs plus one source-only Lint job.
-The Lint job runs format and selected lint scripts; the full local checklist
-above remains required even for checks not yet wired into CI.
+The Lint job runs format and selected lint scripts. Apply the scope-based
+local checks above, including relevant checks not yet wired into CI.
 
 [scripts/ci-cargo.sh](scripts/ci-cargo.sh) owns the shared package coverage
 for `clippy`, `app-features`, `test`, and `doc`; extra Cargo options follow
