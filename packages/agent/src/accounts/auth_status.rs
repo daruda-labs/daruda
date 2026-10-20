@@ -261,10 +261,13 @@ mod tests {
     #[test]
     fn a_real_probe_reads_what_the_command_printed() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("status.json");
+        let path = dir.path().join("status ' $USER `echo expanded`.json");
         std::fs::write(&path, SUBSCRIPTION).expect("fixture");
         let status = read_auth_status(
-            &from_line(&format!("/bin/cat {}", path.display())),
+            &from_line(&format!(
+                "/bin/cat {}",
+                daruda_core::shell::quote::quote_path(&path, daruda_core::shell::Shell::Posix)
+            )),
             AuthStatusFormat::Json,
             std::time::Duration::from_secs(10),
         )

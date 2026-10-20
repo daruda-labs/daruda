@@ -6,6 +6,7 @@ use super::*;
 use crate::model::PermissionPolicy;
 use crate::runner::{CancelToken, OutputContract};
 use daruda_acp::{CostView, UsageView};
+use daruda_core::shell::{Shell, quote::quote_path};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -84,9 +85,9 @@ const NEW_SESSION: &str = r#"*'"method":"session/new"'*)
 /// `session/cancel` arrives — empty for one that ignores the cancel.
 /// Either way it records that the cancel reached the wire.
 fn parking_adapter(cancel_seen: &Path, on_cancel: &str) -> String {
-    let seen = cancel_seen.display();
+    let seen = quote_path(cancel_seen, Shell::Posix);
     let ready = cancel_seen.with_extension("ready");
-    let ready = ready.display();
+    let ready = quote_path(&ready, Shell::Posix);
     format!(
         r#"while IFS= read -r line; do
   id=${{line#*\"id\":\"}}; id=${{id%%\"*}}
@@ -95,9 +96,9 @@ fn parking_adapter(cancel_seen: &Path, on_cancel: &str) -> String {
 {NEW_SESSION}
 *'"method":"session/prompt"'*)
   prompt_id="$id"
-  : > "{ready}" ;;
+  : > {ready} ;;
 *'"method":"session/cancel"'*)
-  : > "{seen}"
+  : > {seen}
   {on_cancel} ;;
   esac
 done
@@ -114,7 +115,7 @@ const ANSWERS_THE_CANCEL: &str =
 /// records the client's answer verbatim, which is the only place the
 /// chosen option is observable.
 fn permission_adapter(options: &str, answer_file: &Path) -> String {
-    let answer = answer_file.display();
+    let answer = quote_path(answer_file, Shell::Posix);
     format!(
         r#"while IFS= read -r line; do
   id=${{line#*\"id\":\"}}; id=${{id%%\"*}}
@@ -125,7 +126,7 @@ fn permission_adapter(options: &str, answer_file: &Path) -> String {
   prompt_id="$id"
   printf '{{"jsonrpc":"2.0","id":"perm-1","method":"session/request_permission","params":{{"sessionId":"{SESSION}","toolCall":{{"toolCallId":"t1","title":"write a file"}},"options":[{options}]}}}}\n' ;;
 *'"id":"perm-1"'*)
-  printf '%s\n' "$line" > "{answer}"
+  printf '%s\n' "$line" > {answer}
   printf '{{"jsonrpc":"2.0","id":"%s","result":{{"stopReason":"end_turn"}}}}\n' "$prompt_id" ;;
   esac
 done
@@ -185,9 +186,13 @@ struct Fixture {
 }
 
 impl Fixture {
-    /// A fixture whose adapter runs `script`.
+    /// A fixture whose adapter runs `script`. Shell metacharacters in its
+    /// directory also exercise literal output paths in the adapter scripts.
     fn with_script(script: &str) -> Self {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = tempfile::Builder::new()
+            .prefix("flow ' $USER `echo expanded` ")
+            .tempdir()
+            .expect("tempdir");
         let path = dir.path().join("adapter.sh");
         std::fs::write(&path, script).expect("write the adapter");
         let command = serde_json::json!({ "command": "sh", "args": [path] }).to_string();
@@ -441,7 +446,7 @@ fn counting_adapter(prompts: &Path, on_second: &str) -> String {
 /// always ends cleanly, because a turn that did not is never corrected at
 /// all — so this is the only way to pose a correction that itself failed.
 fn counting_adapter_stopping(prompts: &Path, on_second: &str, second_stop: &str) -> String {
-    let counter = prompts.display();
+    let counter = quote_path(prompts, Shell::Posix);
     format!(
         r#"count=0
 while IFS= read -r line; do
@@ -451,7 +456,7 @@ while IFS= read -r line; do
 {NEW_SESSION}
 *'"method":"session/prompt"'*)
   count=$((count+1))
-  printf '%s' "$count" > "{counter}"
+  printf '%s' "$count" > {counter}
   stop=end_turn
   if [ "$count" -ge 2 ]; then
     stop={second_stop}
@@ -475,9 +480,12 @@ fn prompts_sent(counter: &Path) -> u32 {
 }
 
 /// A scratch directory the fake adapter records into. Separate from the
-/// fixture's own, whose path is only known after the script is built.
+/// fixture's own, with metacharacters to exercise literal journal paths.
 fn probe(name: &str) -> (tempfile::TempDir, PathBuf) {
-    let dir = tempfile::tempdir().expect("tempdir");
+    let dir = tempfile::Builder::new()
+        .prefix("flow ' $USER `echo expanded` ")
+        .tempdir()
+        .expect("tempdir");
     let path = dir.path().join(name);
     (dir, path)
 }

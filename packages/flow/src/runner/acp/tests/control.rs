@@ -359,7 +359,7 @@ fn the_reported_timeout_leaves_out_the_waiting() {
 /// An adapter that asks twice: the second question arrives while the first
 /// is still parked, so it is sitting in the stream when a stop lands.
 fn asks_twice(options: &str, answer_file: &Path) -> String {
-    let answer = answer_file.display();
+    let answer = quote_path(answer_file, Shell::Posix);
     format!(
         r#"while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
@@ -371,7 +371,7 @@ fn asks_twice(options: &str, answer_file: &Path) -> String {
   printf '{{"jsonrpc":"2.0","id":"perm-1","method":"session/request_permission","params":{{"sessionId":"{SESSION}","toolCall":{{"toolCallId":"t1","title":"first"}},"options":[{options}]}}}}\n'
   printf '{{"jsonrpc":"2.0","id":"perm-2","method":"session/request_permission","params":{{"sessionId":"{SESSION}","toolCall":{{"toolCallId":"t2","title":"second"}},"options":[{options}]}}}}\n' ;;
 *'"id":"perm-1"'*)
-  printf '%s\n' "$line" > "{answer}" ;;
+  printf '%s\n' "$line" > {answer} ;;
   esac
 done
 "#

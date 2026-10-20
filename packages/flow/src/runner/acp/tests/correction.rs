@@ -12,7 +12,10 @@ use crate::runner::acp::another_turn::NEXT_TURN_FLOOR;
 /// Shell that writes the fixture's output — what an agent doing as it was
 /// asked the second time looks like from outside.
 fn writes(output: &Path) -> String {
-    format!(r#"printf 'the design\n' > "{}""#, output.display())
+    format!(
+        r#"printf 'the design\n' > {}"#,
+        quote_path(output, Shell::Posix)
+    )
 }
 
 /// Shell that writes JSON meeting [`VERDICT`] — an agent that read the schema
@@ -20,8 +23,8 @@ fn writes(output: &Path) -> String {
 fn writes_json(output: &Path) -> String {
     format!(
         r#"printf '{{"verdict":"pass"}}
-' > "{}""#,
-        output.display()
+' > {}"#,
+        quote_path(output, Shell::Posix)
     )
 }
 
@@ -222,8 +225,8 @@ fn asking_counting_adapter(
     answer_file: &Path,
     on_second: &str,
 ) -> String {
-    let counter = prompts.display();
-    let answer = answer_file.display();
+    let counter = quote_path(prompts, Shell::Posix);
+    let answer = quote_path(answer_file, Shell::Posix);
     format!(
         r#"count=0
 while IFS= read -r line; do
@@ -234,7 +237,7 @@ while IFS= read -r line; do
 *'"method":"session/prompt"'*)
   prompt_id="$id"
   count=$((count+1))
-  printf '%s' "$count" > "{counter}"
+  printf '%s' "$count" > {counter}
   if [ "$count" -ge 2 ]; then
     {on_second}
     printf '{{"jsonrpc":"2.0","id":"%s","result":{{"stopReason":"end_turn"}}}}\n' "$id"
@@ -242,7 +245,7 @@ while IFS= read -r line; do
     printf '{{"jsonrpc":"2.0","id":"perm-1","method":"session/request_permission","params":{{"sessionId":"{SESSION}","toolCall":{{"toolCallId":"t1","title":"write a file"}},"options":[{options}]}}}}\n'
   fi ;;
 *'"id":"perm-1"'*)
-  printf '%s\n' "$line" > "{answer}"
+  printf '%s\n' "$line" > {answer}
   printf '{{"jsonrpc":"2.0","id":"%s","result":{{"stopReason":"end_turn"}}}}\n' "$prompt_id" ;;
   esac
 done
@@ -399,12 +402,12 @@ properties:
 /// reasons to go round: a missing output, then an unfinished one.
 fn finishes_on_its_second_run(output: &Path, counter: &Path) -> String {
     format!(
-        r#"n=$(cat "{c}" 2>/dev/null || echo 0)
-n=$((n+1)); printf '%s' "$n" > "{c}"
+        r#"n=$(cat {c} 2>/dev/null || echo 0)
+n=$((n+1)); printf '%s' "$n" > {c}
 if [ "$n" -ge 2 ]; then s=done; else s=in_progress; fi
-printf '{{"state":"%s"}}\n' "$s" > "{o}""#,
-        c = counter.display(),
-        o = output.display()
+printf '{{"state":"%s"}}\n' "$s" > {o}"#,
+        c = quote_path(counter, Shell::Posix),
+        o = quote_path(output, Shell::Posix)
     )
 }
 

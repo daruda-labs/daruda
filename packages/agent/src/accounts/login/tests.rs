@@ -172,11 +172,15 @@ fn gone_within(pid: &str, budget: Duration) -> bool {
 #[test]
 fn cancelling_kills_a_grandchild_whose_parent_already_exited() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let pid_file = dir.path().join("grandchild.pid");
+    let pid_file = dir.path().join("grandchild ' $USER `echo expanded`.pid");
     // No `wait`: the shell exits as soon as it has forked and reported.
+    let child = format!(
+        "sh -c \"while :; do sleep 0.05; done\" & echo $! > {}",
+        daruda_core::shell::quote::quote_path(&pid_file, daruda_core::shell::Shell::Posix)
+    );
     let command = format!(
-        "/bin/sh -c 'sh -c \"while :; do sleep 0.05; done\" & echo $! > {}'",
-        pid_file.display()
+        "/bin/sh -c {}",
+        daruda_core::shell::single_quote_posix(&child)
     );
     let login = spawn_login(&from_line(&command), Duration::from_secs(20)).expect("spawn");
     let handle = login.handle();
@@ -217,10 +221,14 @@ fn cancelling_kills_a_grandchild_whose_parent_already_exited() {
 #[test]
 fn cancelling_kills_a_grandchild_the_direct_child_forked() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let pid_file = dir.path().join("grandchild.pid");
+    let pid_file = dir.path().join("grandchild ' $USER `echo expanded`.pid");
+    let child = format!(
+        "sh -c \"while :; do sleep 0.05; done\" & echo $! > {} ; wait",
+        daruda_core::shell::quote::quote_path(&pid_file, daruda_core::shell::Shell::Posix)
+    );
     let command = format!(
-        "/bin/sh -c 'sh -c \"while :; do sleep 0.05; done\" & echo $! > {} ; wait'",
-        pid_file.display()
+        "/bin/sh -c {}",
+        daruda_core::shell::single_quote_posix(&child)
     );
     let login = spawn_login(&from_line(&command), Duration::from_secs(20)).expect("spawn");
     let handle = login.handle();

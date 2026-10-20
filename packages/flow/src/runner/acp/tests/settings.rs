@@ -49,7 +49,7 @@ fn replying(arms: &[(&str, &[String])]) -> String {
 /// `journal`, which is the only place the order the agent saw them in is
 /// observable — and that order is the whole point of this task.
 fn settings_adapter(advertised: &[String], journal: &Path, replies: &str) -> String {
-    let journal = journal.display();
+    let journal = quote_path(journal, Shell::Posix);
     let advertised = advertised.join(",");
     format!(
         r#"while IFS= read -r line; do
@@ -61,10 +61,10 @@ fn settings_adapter(advertised: &[String], journal: &Path, replies: &str) -> Str
 *'"method":"session/set_config_option"'*)
   cfg=${{line#*\"configId\":\"}}; cfg=${{cfg%%\"*}}
   want=${{line#*\"value\":\"}}; want=${{want%%\"*}}
-  printf 'set %s=%s\n' "$cfg" "$want" >> "{journal}"
+  printf 'set %s=%s\n' "$cfg" "$want" >> {journal}
   {replies} ;;
 *'"method":"session/prompt"'*)
-  printf 'prompt\n' >> "{journal}"
+  printf 'prompt\n' >> {journal}
   printf '{{"jsonrpc":"2.0","id":"%s","result":{{"stopReason":"end_turn"}}}}\n' "$id" ;;
   esac
 done

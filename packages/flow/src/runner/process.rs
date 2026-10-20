@@ -316,10 +316,11 @@ mod tests {
     /// than any test would wait.
     #[cfg(unix)]
     fn long_running_tree(pid_file: &Path) -> String {
-        format!(
-            "{SHELL} -c 'echo $$ > {}; sleep 30' & wait",
-            pid_file.display()
-        )
+        let pid_file =
+            daruda_core::shell::quote::quote_path(pid_file, daruda_core::shell::Shell::Posix);
+        let child =
+            daruda_core::shell::single_quote_posix(&format!("echo $$ > {pid_file}; sleep 30"));
+        format!("{SHELL} -c {child} & wait")
     }
 
     #[cfg(unix)]
@@ -428,7 +429,7 @@ mod tests {
     #[test]
     fn a_command_over_its_timeout_kills_its_children_too() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let pid_file = dir.path().join("child.pid");
+        let pid_file = dir.path().join("child ' $USER `echo expanded`.pid");
         let mut fixture = Fixture::new(dir.path());
         fixture.timeout = Duration::from_millis(200);
 
@@ -453,7 +454,7 @@ mod tests {
     #[test]
     fn a_canceled_command_stops_without_inventing_an_exit_code() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let pid_file = dir.path().join("child.pid");
+        let pid_file = dir.path().join("child ' $USER `echo expanded`.pid");
         let fixture = Fixture::new(dir.path());
 
         let cancel = fixture.cancel.clone();
@@ -487,7 +488,7 @@ mod tests {
     #[test]
     fn a_quit_ends_the_command_tree() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let pid_file = dir.path().join("child.pid");
+        let pid_file = dir.path().join("child ' $USER `echo expanded`.pid");
         let fixture = Fixture::new(dir.path());
 
         let cancel = fixture.cancel.clone();
@@ -511,10 +512,13 @@ mod tests {
     #[test]
     fn a_command_reports_the_group_it_started() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let pid_file = dir.path().join("leader.pid");
+        let pid_file = dir.path().join("leader ' $USER `echo expanded`.pid");
         let fixture = Fixture::new(dir.path());
 
-        let line = format!("echo $$ > {}", pid_file.display());
+        let line = format!(
+            "echo $$ > {}",
+            daruda_core::shell::quote::quote_path(&pid_file, daruda_core::shell::Shell::Posix)
+        );
         let reported = std::cell::Cell::new(None);
         let ctx = RunContext {
             spawned: &|group| reported.set(Some(group)),

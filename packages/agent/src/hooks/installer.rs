@@ -192,7 +192,8 @@ fn bash_path(path: &Path) -> String {
 
 /// Per-event command string; Claude Code does not forward event args itself.
 fn command_for_event(notify_script: &Path, event: &str) -> String {
-    format!("\"{}\" {event}", bash_path(notify_script))
+    let script = daruda_core::shell::single_quote_posix(&bash_path(notify_script));
+    format!("{script} {event}")
 }
 
 // -----------------------------------------------------------------------
@@ -393,21 +394,28 @@ mod tests {
     #[test]
     fn the_script_reaches_the_installing_binary_off_path() {
         use std::os::unix::fs::PermissionsExt as _;
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::Builder::new()
+            .prefix("hook ' $USER `echo expanded` ")
+            .tempdir()
+            .unwrap();
         let log = dir.path().join("called");
         let fake = dir.path().join("my daruda");
         fs::write(
             &fake,
-            format!("#!/bin/sh\necho \"$@\" > '{}'\n", log.display()),
+            format!(
+                "#!/bin/sh\necho \"$@\" > {}\n",
+                daruda_core::shell::quote::quote_path(&log, daruda_core::shell::Shell::Posix)
+            ),
         )
         .unwrap();
         fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
         let script = dir.path().join("notify.sh");
         fs::write(&script, render_notify_script(Some(&fake))).unwrap();
+        set_executable(&script).unwrap();
 
-        let status = std::process::Command::new("bash")
-            .arg(&script)
-            .arg("Stop")
+        let status = daruda_core::process::command(daruda_core::shell::posix_tool("bash"))
+            .arg("-c")
+            .arg(command_for_event(&script, "Stop"))
             // A bare environment: no override, and no daruda on this PATH.
             .env_clear()
             .env("PATH", "/usr/bin:/bin")
