@@ -226,6 +226,13 @@ fn every_error_variant_round_trips_through_json() {
         },
         ControlError::FlowLocked {
             name: "ship.yaml".into(),
+            held_by: None,
+        },
+        ControlError::FlowLocked {
+            name: "ship.yaml".into(),
+            held_by: Some(RunHandle::Flow {
+                run_id: "20261020-1123-0002".into(),
+            }),
         },
         ControlError::FlowRefused {
             name: "ship.yaml".into(),
@@ -458,4 +465,36 @@ fn a_task_status_names_each_lifecycle() {
     for (lifecycle, status) in cases {
         assert_eq!(TaskStatus::of(&lifecycle), status, "{lifecycle:?}");
     }
+}
+
+/// The holder travels as the same `flow:<run-id>` handle daruda_flow_stop
+/// takes, and a payload written before the field existed still reads.
+#[test]
+fn flow_locked_names_its_holder_as_a_handle() {
+    let error = ControlError::FlowLocked {
+        name: "ship.yaml".into(),
+        held_by: Some(RunHandle::Flow {
+            run_id: "r1".into(),
+        }),
+    };
+    let wire = serde_json::to_value(&error).expect("serializes");
+    assert_eq!(wire["code"], "flow_locked");
+    assert_eq!(wire["held_by"], "flow:r1");
+    assert_eq!(
+        error.to_string(),
+        "flow already running: ship.yaml (held by flow:r1)"
+    );
+
+    let old: ControlError =
+        serde_json::from_value(serde_json::json!({"code": "flow_locked", "name": "ship.yaml"}))
+            .expect("an older payload still reads");
+    assert_eq!(
+        old,
+        ControlError::FlowLocked {
+            name: "ship.yaml".into(),
+            held_by: None,
+        }
+    );
+    let unknown = serde_json::to_value(&old).expect("serializes");
+    assert!(unknown.get("held_by").is_none(), "{unknown}");
 }

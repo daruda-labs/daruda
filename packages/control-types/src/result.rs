@@ -510,6 +510,10 @@ pub enum ControlError {
     },
     FlowLocked {
         name: String,
+        /// The run that holds the worktree, when it can be named — so a
+        /// caller can say which run is in the way, or stop that one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        held_by: Option<RunHandle>,
     },
     /// The flow will not run as written — the same static verdict
     /// `Validate Flow…` gives. Reported before dispatch so the phone is never
@@ -622,7 +626,14 @@ impl std::fmt::Display for ControlError {
             Self::NoTargetSelected => write!(f, "no target selected"),
             Self::TargetGone => write!(f, "target no longer exists"),
             Self::FlowNotFound { name } => write!(f, "no flow named {name}"),
-            Self::FlowLocked { name } => write!(f, "flow already running: {name}"),
+            Self::FlowLocked {
+                name,
+                held_by: None,
+            } => write!(f, "flow already running: {name}"),
+            Self::FlowLocked {
+                name,
+                held_by: Some(holder),
+            } => write!(f, "flow already running: {name} (held by {holder})"),
             Self::FlowRefused { name } => write!(f, "flow will not run as written: {name}"),
             Self::FlowNotStarted { name, reason } => {
                 write!(f, "flow did not start: {name}: {reason}")

@@ -19,6 +19,7 @@ use crate::workspace::Workspace;
 use crate::workspace::flow_ops::FlowStartRefused;
 use crate::workspace::flow_paths::{FlowOrigin, FoundFlow, flow_label};
 use crate::workspace::flow_request::{FlowSelection, FlowSubmitError};
+use daruda_control_types::runs::RunHandle;
 use daruda_store::project::LaneRef;
 
 /// A successful dispatch and the exact run it inserted.
@@ -88,24 +89,35 @@ impl Workspace {
         // a lane another process holds is refused here, where it is still an
         // answer rather than a run that ends at once.
         if self.lane_holder(&cwd).is_some() || self.is_flow_running_in(lane, cx) {
-            return Err(ControlError::FlowLocked { name: label });
+            return Err(ControlError::FlowLocked {
+                name: label,
+                held_by: self.flow_holder_in(lane, &cwd, cx),
+            });
         }
         // Same check `Validate Flow…` runs: no lock, no run directory.
         match self.check_flow(lane, &found.path, None, cx) {
             Ok(issues) if issues.is_empty() => {}
             Ok(_) => return Err(ControlError::FlowRefused { name: label }),
-            Err(e) => return Err(refusal_answer(label, FlowStartRefused::Submit(e))),
+            Err(e) => {
+                let held_by = self.flow_holder_in(lane, &cwd, cx);
+                return Err(refusal_answer(label, held_by, FlowStartRefused::Submit(e)));
+            }
         }
-        let run_id = self
-            .submit_flow_run(
-                lane,
-                &found.path,
-                None,
-                &FlowSelection::default(),
-                started_by,
-                cx,
-            )
-            .map_err(|refused| refusal_answer(label.clone(), refused))?;
+        let submitted = self.submit_flow_run(
+            lane,
+            &found.path,
+            None,
+            &FlowSelection::default(),
+            started_by,
+            cx,
+        );
+        let run_id = match submitted {
+            Ok(run_id) => run_id,
+            Err(refused) => {
+                let held_by = self.flow_holder_in(lane, &cwd, cx);
+                return Err(refusal_answer(label, held_by, refused));
+            }
+        };
         let entry = FlowEntry {
             name: label,
             origin: map_origin(found.origin),
@@ -129,21 +141,32 @@ impl Workspace {
         if self.lane_for(lane).is_none() {
             return Err(ControlError::TargetGone);
         }
-        if let Some(requested) = requested {
-            let current = self
-                .flow_run_in(lane, cx)
-                .and_then(|run| run.view().run_dir().file_name())
-                .and_then(|name| name.to_str());
-            if !matches!(requested, daruda_control_types::runs::RunHandle::Flow { run_id } if current == Some(run_id.as_str()))
-            {
-                return Err(ControlError::RunMismatch);
-            }
+        if let Some(requested) = requested
+            && self.hosted_flow_handle_in(lane, cx).as_ref() != Some(requested)
+        {
+            return Err(ControlError::RunMismatch);
         }
         if !self.is_flow_running_in(lane, cx) {
             return Ok(StopDisposition::AlreadyIdle);
         }
         self.stop_flow_run_in(lane, cx);
         Ok(StopDisposition::Stopped)
+    }
+
+    /// The handle of the run this process hosts in `lane`, the same one
+    /// `daruda_flow_run` answered with.
+    fn hosted_flow_handle_in(&self, lane: LaneRef, cx: &Context<Self>) -> Option<RunHandle> {
+        let run = self.flow_run_in(lane, cx)?;
+        flow_handle(run.view().run_dir().file_name()?.to_str()?)
+    }
+
+    /// The run holding `lane`'s worktree: one this process hosts, else the
+    /// live lock holder another process left. `None` when neither names one.
+    fn flow_holder_in(&self, lane: LaneRef, cwd: &Path, cx: &Context<Self>) -> Option<RunHandle> {
+        self.hosted_flow_handle_in(lane, cx).or_else(|| {
+            self.lane_holder(cwd)
+                .and_then(|holder| flow_handle(&holder.run_id))
+        })
     }
 
     /// This window's active worktree, if it can run `name`.
@@ -169,20 +192,30 @@ impl Workspace {
     }
 }
 
+/// A run id as the handle a control caller passes back; an id the handle
+/// grammar rejects (an unreadable lock's empty one) names nothing.
+fn flow_handle(run_id: &str) -> Option<RunHandle> {
+    format!("flow:{run_id}").parse().ok()
+}
+
 /// A start's refusal as the control caller's answer. A problem in the file
 /// is `FlowRefused`, a held worktree `FlowLocked`; anything else names its
 /// reason as a code, since this caller sees no toast and the toast's wording
 /// is localized desktop text that an MCP result must not carry.
-fn refusal_answer(name: String, refused: FlowStartRefused) -> ControlError {
+fn refusal_answer(
+    name: String,
+    held_by: Option<RunHandle>,
+    refused: FlowStartRefused,
+) -> ControlError {
     let error = match refused {
-        FlowStartRefused::AlreadyRunning => return ControlError::FlowLocked { name },
+        FlowStartRefused::AlreadyRunning => return ControlError::FlowLocked { name, held_by },
         FlowStartRefused::Submit(error) => error,
     };
     let reason = match error {
         FlowSubmitError::Load(_) | FlowSubmitError::Invalid(_) => {
             return ControlError::FlowRefused { name };
         }
-        FlowSubmitError::LockHeld { .. } => return ControlError::FlowLocked { name },
+        FlowSubmitError::LockHeld { .. } => return ControlError::FlowLocked { name, held_by },
         FlowSubmitError::NoLane => FlowNotStartedReason::NoLane,
         FlowSubmitError::LaneUnresolvable { .. } => FlowNotStartedReason::LaneUnresolvable,
         FlowSubmitError::RemoteLane { agent } => FlowNotStartedReason::RemoteLane { agent },

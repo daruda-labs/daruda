@@ -343,7 +343,8 @@ async fn a_lane_already_running_a_flow_refuses_the_next(cx: &mut TestAppContext)
                     cx
                 ),
                 Err(ControlError::FlowLocked {
-                    name: "ship.yaml".into()
+                    name: "ship.yaml".into(),
+                    held_by: Some("flow:seeded-run".parse().unwrap()),
                 })
             );
             assert!(
@@ -428,7 +429,8 @@ async fn a_named_worktree_already_running_refuses_without_a_dialog(cx: &mut Test
             assert_eq!(
                 ws.control_flow_run(other, "deploy", daruda_flow::request::StartedBy::Phone, cx),
                 Err(ControlError::FlowLocked {
-                    name: "deploy.yaml".into()
+                    name: "deploy.yaml".into(),
+                    held_by: Some("flow:seeded-elsewhere".parse().unwrap()),
                 })
             );
             assert!(
@@ -1130,6 +1132,106 @@ async fn a_stale_flow_handle_does_not_stop_a_new_run_in_the_same_worktree(cx: &m
             Ok(crate::control::result::StopDisposition::Stopped)
         );
     });
+}
+
+/// A worktree another process holds is refused with that process's run, read
+/// from the lock, so the caller can say which run is in the way.
+#[gpui::test]
+async fn a_worktree_held_by_another_process_names_its_run(cx: &mut TestAppContext) {
+    let (lane, ws, _path, _wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
+    let lock_dir = ws.read_with(cx, |ws, _| {
+        flow_paths::lane_lock_dir(&ws.lock_root, lane.path()).expect("the lane resolves")
+    });
+    std::fs::create_dir_all(&lock_dir).expect("create the lock dir");
+    let holder_process = test_process::sleeping();
+    std::fs::write(
+        lock_dir.join(".lock"),
+        format!(
+            "pid: {}\nrun_id: someone-elses\nstarted_unix_secs: 1\n",
+            holder_process.id()
+        ),
+    )
+    .expect("plant a lock");
+    ws.update(cx, |ws, cx| {
+        assert_eq!(
+            ws.control_flow_run(
+                ws.active,
+                "ship",
+                daruda_flow::request::StartedBy::Phone,
+                cx
+            ),
+            Err(ControlError::FlowLocked {
+                name: "ship.yaml".into(),
+                held_by: Some("flow:someone-elses".parse().unwrap()),
+            })
+        );
+    });
+}
+
+/// S6 with real runs: run A ends, run B starts in the same worktree, and a
+/// stop naming A is refused without touching B, which goes on to end on its
+/// own. The seeded test above proves the refusal; this proves B survives it.
+#[gpui::test]
+async fn a_stop_with_an_ended_runs_handle_leaves_the_next_run_to_finish(cx: &mut TestAppContext) {
+    use crate::runs::result::{EndedAs, RunKey, RunState};
+    // Real runs wake the app from the engine's thread from their first record.
+    cx.executor().allow_parking();
+    let (lane, ws, _path, _wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
+    let gate = lane.path().join("release-b");
+    let held_open = format!(
+        "version: 1\nnodes:\n  - id: hold\n    kind: command\n    run: \"while [ ! -e '{}' ]; do sleep 0.05; done\"\n",
+        gate.display()
+    );
+    std::fs::write(
+        flow_paths::flows_dir(lane.path()).join("hold.yaml"),
+        held_open,
+    )
+    .expect("write the second flow");
+    let start = |name: &'static str, ws: &gpui::Entity<Workspace>, cx: &mut TestAppContext| {
+        ws.update(cx, |ws, cx| {
+            ws.control_flow_run(ws.active, name, daruda_flow::request::StartedBy::Phone, cx)
+                .expect("dispatched")
+                .run_id
+        })
+    };
+
+    let run_a = start("ship", &ws, cx);
+    assert!(
+        wait_for_run(cx, |cx| !run_is_held(cx, lane.path())).await,
+        "run A did not end"
+    );
+    let run_b = start("hold", &ws, cx);
+    assert_ne!(run_a, run_b);
+
+    let stale: daruda_control_types::runs::RunHandle =
+        format!("flow:{run_a}").parse().expect("a handle");
+    ws.update(cx, |ws, cx| {
+        let active = ws.active;
+        assert_eq!(
+            ws.control_flow_stop(active, Some(&stale), cx),
+            Err(ControlError::RunMismatch)
+        );
+        let held = ws.flow_run_in(active, cx).expect("run B is still held");
+        assert!(!held.is_stopping(), "the refused stop reached run B");
+    });
+
+    std::fs::write(&gate, "").expect("release run B");
+    assert!(
+        wait_for_run(cx, |cx| !run_is_held(cx, lane.path())).await,
+        "run B did not end"
+    );
+    let ended = cx.update(|cx| crate::runs::RunsHost::run_query(RunKey::Flow(run_b), cx).read());
+    assert!(
+        matches!(
+            ended.state,
+            RunState::Ended {
+                ended_as: EndedAs::Completed,
+                ..
+            }
+        ),
+        "run B did not end on its own: {:?}",
+        ended.state
+    );
 }
 
 #[gpui::test]
