@@ -8,7 +8,7 @@
 //! be able to take one down, or its node waits on a reply nobody can send.
 //! Only an answer, a stop, or the engine closing its reply channel does.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use daruda_flow::NodeId;
@@ -104,6 +104,9 @@ pub(crate) enum AnswerRefused {
     /// The engine had already abandoned the question, so the answer reached
     /// nobody; the person is told rather than shown an answer that landed.
     Closed,
+    /// Someone answered this question first, on another surface or with an
+    /// earlier tap. Their answer stands; nothing is wrong with the run.
+    AlreadyAnswered,
 }
 
 /// Whether anything a window draws changed.
@@ -140,6 +143,10 @@ pub(crate) struct RunView {
     lull: Lull,
     /// Every open question by its log-assigned id: a set, not one slot.
     questions: BTreeMap<u64, ParkedAsk>,
+    /// Ids answered in this run, so a late answer can be told apart from one
+    /// to a question the run stopped waiting for. Ids are unique within a run
+    /// directory, and a run asks few questions.
+    answered: BTreeSet<u64>,
 }
 
 impl RunView {
@@ -151,6 +158,7 @@ impl RunView {
             nodes: NodeRunStates::new(),
             lull: Lull::Starting,
             questions: BTreeMap::new(),
+            answered: BTreeSet::new(),
         }
     }
 
@@ -261,12 +269,18 @@ impl RunView {
         decision: daruda_acp::PermissionDecision,
     ) -> Result<(), AnswerRefused> {
         let Some(question) = self.questions.remove(&ask_id) else {
-            return Err(AnswerRefused::NotOpen);
+            return Err(if self.answered.contains(&ask_id) {
+                AnswerRefused::AlreadyAnswered
+            } else {
+                AnswerRefused::NotOpen
+            });
         };
         question
             .pending
             .answer(decision)
-            .map_err(|AskClosed| AnswerRefused::Closed)
+            .map_err(|AskClosed| AnswerRefused::Closed)?;
+        self.answered.insert(ask_id);
+        Ok(())
     }
 
     /// Take every question down. Dropping the reply channels is what tells

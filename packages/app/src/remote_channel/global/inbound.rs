@@ -175,11 +175,25 @@ fn dispatch_claimed(
         ),
     };
     let aimed = dispatch::target::aim_in_app(routed, cx);
-    Some(dispatch::handle_in_app(
-        aimed,
-        &dispatch::Target::Remote(id.into()),
-        cx,
-    ))
+    let effect = dispatch::handle_in_app(aimed, &dispatch::Target::Remote(id.into()), cx);
+    if let IncomingKind::Callback {
+        data, message_id, ..
+    } = &incoming.kind
+    {
+        let connection = cx.global_mut::<RemoteChannels>().connections.get_mut(id)?;
+        if matches!(
+            &effect,
+            Effect::Feedback {
+                edit: Edit::ManagedCard,
+                ..
+            }
+        ) || connection.core.is_settled_callback(data)
+        {
+            // The callback identifies the message before the send response does.
+            connection.cards.get_mut().note_settled(message_id.clone());
+        }
+    }
+    Some(effect)
 }
 
 pub(super) fn spawn(receiver: UnboundedReceiver<WorkerEvent>, cx: &mut App) {
@@ -211,11 +225,8 @@ fn serve_events<F: Future<Output = ClaimResult> + 'static>(
                             .get_mut(&event.id)
                         {
                             connection.status = status;
-                            if !status.holds_claim()
-                                && let Some(bot) = connection.bot.take()
-                            {
-                                bot.revoke();
-                                connection.cards = Default::default();
+                            if !status.holds_claim() {
+                                connection.revoke_bot();
                             }
                         }
                     });
@@ -229,24 +240,13 @@ fn serve_events<F: Future<Output = ClaimResult> + 'static>(
                         cx.global_mut::<RemoteChannels>()
                             .connections
                             .get_mut(&event.id)
-                            .map(|connection| {
-                                if !connection
-                                    .bot
-                                    .as_ref()
-                                    .is_some_and(|current| Arc::ptr_eq(current, &bot))
-                                {
-                                    connection.cards = Default::default();
-                                    if let Some(previous) = connection.bot.take() {
-                                        previous.revoke();
-                                    }
-                                }
-                                connection.bot = Some(bot);
-                            })
+                            .map(|connection| connection.publish_bot(bot))
                             .is_some()
                     });
                     if !installed {
                         continue;
                     }
+                    cx.update(super::outbound::flush_edits);
                     backlog.take(&event.id, event.generation)
                 }
                 WorkerPayload::Incoming(incoming) => {
@@ -376,23 +376,46 @@ async fn serve<F: Future<Output = ClaimResult>>(
         if connection.generation != generation {
             return None;
         }
+        let tap = match &incoming.kind {
+            IncomingKind::Callback { message_id, .. } => {
+                if connection.cards.borrow().untracked(message_id) {
+                    Tap::Untracked
+                } else {
+                    Tap::Settled
+                }
+            }
+            IncomingKind::Message { .. } => Tap::Absent,
+        };
         Some((
             connection.config.kind,
             bot.clone(),
             connection.config.recipient.clone()?,
+            tap,
         ))
     });
-    let Some((kind, bot, recipient)) = delivery else {
+    let Some((kind, bot, recipient, tap)) = delivery else {
         return Served::Done;
     };
     let result = cx
         .background_executor()
         .spawn(async move {
-            match feedback_for(effect, incoming.kind) {
+            match feedback_for(effect, incoming.kind, tap) {
                 Feedback::Nothing => Ok(()),
                 Feedback::Send(message) => {
                     transport::send(kind, &bot.credentials, &recipient, message).map(|_| ())
                 }
+                Feedback::Edit {
+                    message_id,
+                    original,
+                    label,
+                } => transport::edit(
+                    kind,
+                    &bot.credentials,
+                    &recipient,
+                    &message_id,
+                    &original,
+                    &label,
+                ),
             }
         })
         .await;
@@ -411,29 +434,65 @@ async fn serve<F: Future<Output = ClaimResult>>(
 enum Feedback {
     Nothing,
     Send(Message),
+    /// Take the dead buttons off the tapped message and say why.
+    Edit {
+        message_id: String,
+        original: String,
+        label: String,
+    },
 }
 
-/// Managed cards settle through their shared ledger; feedback never rewrites
-/// the tapped card with a competing result.
-fn feedback_for(effect: Effect, kind: IncomingKind) -> Feedback {
-    let tapped = matches!(kind, IncomingKind::Callback { .. });
-    match (effect, tapped) {
-        (Effect::Reply(reply), _) => Feedback::Send(Message::plain(reply.text, reply.keyboard)),
+/// Who rewrites the tapped message, if anyone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Tap {
+    /// A message, not a button.
+    Absent,
+    /// A settlement edit owns the message; a tap racing it must not replace
+    /// the settled result with a competing label.
+    Settled,
+    /// No settlement will ever edit the message (a card from an earlier
+    /// process, or one whose tokens were dropped), so its buttons are removed
+    /// here or they stay tappable forever.
+    Untracked,
+}
+
+/// Live cards settle through their shared ledger; feedback rewrites only a
+/// tapped card the ledger does not own.
+fn feedback_for(effect: Effect, kind: IncomingKind, tap: Tap) -> Feedback {
+    let stale = |label: String| match (kind, tap) {
         (
-            Effect::Feedback {
-                edit: Edit::ManagedCard,
+            IncomingKind::Callback {
+                message_id,
+                original,
                 ..
             },
-            _,
-        ) => Feedback::Nothing,
-        (Effect::Feedback { label, .. }, _) => Feedback::Send(Message::plain(label, None)),
-        (Effect::None, true) => {
-            Feedback::Send(Message::plain(s::remote_channel::stale_callback(), None))
-        }
-        (Effect::None, false) => Feedback::Nothing,
+            Tap::Untracked,
+        ) => Feedback::Edit {
+            message_id,
+            original,
+            label,
+        },
+        _ => Feedback::Send(Message::plain(label, None)),
+    };
+    match effect {
+        Effect::Reply(reply) => Feedback::Send(Message::plain(reply.text, reply.keyboard)),
+        Effect::Feedback {
+            edit: Edit::ManagedCard,
+            ..
+        } => Feedback::Nothing,
+        Effect::Feedback {
+            label,
+            edit: Edit::StaleCard,
+        } => stale(label),
+        Effect::Feedback {
+            label,
+            edit: Edit::KeepButtons,
+        } => Feedback::Send(Message::plain(label, None)),
+        Effect::None if tap != Tap::Absent => stale(s::remote_channel::stale_callback()),
+        Effect::None => Feedback::Nothing,
         // The loop settles an effect before asking what it is owed; one that
         // is still waiting has nothing to send yet.
-        (Effect::Later(_), _) => Feedback::Nothing,
+        Effect::Later(_) => Feedback::Nothing,
     }
 }
 

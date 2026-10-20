@@ -11,10 +11,7 @@ use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded},
 };
 use gpui::App;
-use std::{
-    collections::HashMap,
-    sync::{Arc, Weak},
-};
+use std::{collections::HashMap, sync::Arc};
 
 pub(crate) struct Pending {
     pub id: String,
@@ -25,10 +22,12 @@ pub(crate) struct Pending {
     pub card: Option<SendClaim>,
 }
 
+/// A sent card's messages, editable by whichever session serves the identity
+/// that sent them.
+#[derive(Clone)]
 pub(super) struct Receipt {
     id: String,
-    generation: uuid::Uuid,
-    bot: Weak<BotSession>,
+    owner: String,
     recipient: RemoteRecipient,
     ids: Vec<String>,
     original: String,
@@ -65,7 +64,7 @@ pub(super) fn prepare(pending: &Pending, cx: &mut App) -> Option<Prepared> {
         .connections
         .get_mut(&pending.id)?;
     if let Some(card) = &pending.card
-        && !connection.cards.borrow_mut().begin(card)
+        && !connection.cards.get_mut().ledger_mut().begin(card)
     {
         return None;
     }
@@ -106,84 +105,90 @@ fn discard(pending: &Pending, cx: &mut App) {
             .global_mut::<RemoteChannels>()
             .connections
             .get_mut(&pending.id)
-        && connection.cards.borrow_mut().release(card)
+        && connection.cards.get_mut().ledger_mut().release(card)
     {
         connection.core.forget_card(&card.card);
     }
 }
 
-fn current(receipt: &Receipt, bot: &Arc<BotSession>, cx: &App) -> bool {
+/// Whether `pending` was sent by the session still serving its connection.
+fn current(pending: &Pending, cx: &App) -> bool {
     cx.global::<RemoteChannels>()
-        .live(&receipt.id, cx)
+        .live(&pending.id, cx)
         .is_some_and(|connection| {
-            connection.generation == receipt.generation
+            connection.generation == pending.generation
                 && connection.can_send()
-                && connection.config.recipient.as_ref() == Some(&receipt.recipient)
+                && connection.config.recipient.as_ref() == Some(&pending.recipient)
                 && connection
                     .bot
                     .as_ref()
-                    .is_some_and(|current| Arc::ptr_eq(current, bot))
+                    .is_some_and(|bot| Arc::ptr_eq(bot, &pending.bot))
         })
 }
 
+/// The session that may edit `receipt`'s messages: any live one serving the
+/// identity and recipient that sent them.
+fn editor(receipt: &Receipt, cx: &App) -> Option<(ChannelKind, Arc<BotSession>)> {
+    let connection = cx.global::<RemoteChannels>().live(&receipt.id, cx)?;
+    let serves = connection.can_send()
+        && connection.config.recipient.as_ref() == Some(&receipt.recipient)
+        && connection.cards.borrow().owner() == Some(&receipt.owner);
+    if !serves {
+        return None;
+    }
+    Some((connection.config.kind, connection.bot.clone()?))
+}
+
 pub(super) fn edit(receipt: Receipt, label: String, cx: &mut App) {
-    let Some(bot) = receipt.bot.upgrade() else {
+    let Some(connection) = cx
+        .global_mut::<RemoteChannels>()
+        .connections
+        .get_mut(&receipt.id)
+    else {
         return;
     };
-    if !current(&receipt, &bot, cx) {
+    let cards = connection.cards.get_mut();
+    if cards.owner() != Some(&receipt.owner) {
         return;
     }
-    #[cfg(test)]
-    if let Some(result) = crate::remote_channel::cards::tests::capture(
-        &receipt.id,
-        receipt.ids.clone(),
-        &receipt.original,
-        &label,
-        cx,
-    ) {
-        if let Err(error) = result {
-            crate::remote_channel::log_error(
-                "Remote settled card failed to edit",
-                &error,
-                "remote.card.edit",
-            );
-        }
+    for id in &receipt.ids {
+        cards.note_settled(id.clone());
+    }
+    let id = receipt.id.clone();
+    cards.edits.push(receipt, label);
+    flush_connection(&id, cx);
+}
+
+pub(super) fn flush_edits(cx: &mut App) {
+    let ids: Vec<_> = cx
+        .global::<RemoteChannels>()
+        .connections
+        .keys()
+        .cloned()
+        .collect();
+    for id in ids {
+        flush_connection(&id, cx);
+    }
+}
+
+fn flush_connection(id: &str, cx: &mut App) {
+    let Some(connection) = cx.global_mut::<RemoteChannels>().connections.get_mut(id) else {
+        return;
+    };
+    if !connection.can_send() {
         return;
     }
-    cx.spawn(async move |cx| {
-        for message_id in &receipt.ids {
-            let Some(bot) = receipt.bot.upgrade() else {
-                break;
-            };
-            let Some(kind) = cx.update(|cx| {
-                current(&receipt, &bot, cx).then(|| {
-                    cx.global::<RemoteChannels>().connections[&receipt.id]
-                        .config
-                        .kind
-                })
-            }) else {
-                break;
-            };
-            let recipient = receipt.recipient.clone();
-            let original = receipt.original.clone();
-            let label = label.clone();
-            let message_id = message_id.clone();
-            let result = cx
-                .background_executor()
-                .spawn(async move {
-                    if !bot.is_live() {
-                        return Ok(());
-                    }
-                    transport::edit(
-                        kind,
-                        &bot.credentials,
-                        &recipient,
-                        &message_id,
-                        &original,
-                        &label,
-                    )
-                })
-                .await;
+    let pending = connection.cards.get_mut().edits.claim();
+    for (attempt, receipt, label) in pending {
+        #[cfg(test)]
+        if let Some(result) = crate::remote_channel::cards::tests::capture(
+            &receipt.id,
+            receipt.ids.clone(),
+            &receipt.original,
+            &label,
+            cx,
+        ) {
+            let edited = result.is_ok();
             if let Err(error) = result {
                 crate::remote_channel::log_error(
                     "Remote settled card failed to edit",
@@ -191,9 +196,75 @@ pub(super) fn edit(receipt: Receipt, label: String, cx: &mut App) {
                     "remote.card.edit",
                 );
             }
+            finish_edit(&receipt, attempt, edited, cx);
+            continue;
         }
-    })
-    .detach();
+        cx.spawn(async move |cx| {
+            let mut edited = true;
+            for message_id in &receipt.ids {
+                let serving = cx.update(|cx| {
+                    let connection = cx.global::<RemoteChannels>().connections.get(&receipt.id)?;
+                    if !connection.cards.borrow().edits.contains(attempt) {
+                        return None;
+                    }
+                    editor(&receipt, cx)
+                });
+                let Some((kind, bot)) = serving else {
+                    edited = false;
+                    break;
+                };
+                let recipient = receipt.recipient.clone();
+                let original = receipt.original.clone();
+                let label = label.clone();
+                let message_id = message_id.clone();
+                let result = cx
+                    .background_executor()
+                    .spawn(async move {
+                        if !bot.is_live() {
+                            return Ok(false);
+                        }
+                        transport::edit(
+                            kind,
+                            &bot.credentials,
+                            &recipient,
+                            &message_id,
+                            &original,
+                            &label,
+                        )
+                        .map(|()| true)
+                    })
+                    .await;
+                match result {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        edited = false;
+                        break;
+                    }
+                    Err(error) => {
+                        crate::remote_channel::log_error(
+                            "Remote settled card failed to edit",
+                            &error,
+                            "remote.card.edit",
+                        );
+                        edited = false;
+                        break;
+                    }
+                }
+            }
+            cx.update(|cx| finish_edit(&receipt, attempt, edited, cx));
+        })
+        .detach();
+    }
+}
+
+fn finish_edit(receipt: &Receipt, attempt: uuid::Uuid, edited: bool, cx: &mut App) {
+    if let Some(connection) = cx
+        .global_mut::<RemoteChannels>()
+        .connections
+        .get_mut(&receipt.id)
+    {
+        connection.cards.get_mut().edits.finish(attempt, edited);
+    }
 }
 
 impl RemoteChannels {
@@ -203,8 +274,13 @@ impl RemoteChannels {
         }
         let mut edits = Vec::new();
         for connection in cx.global_mut::<Self>().connections.values_mut() {
-            connection.core.forget_card(card);
-            if let Some(edit) = connection.cards.borrow_mut().settle(card, label.to_owned()) {
+            connection.core.settle_card(card);
+            if let Some(edit) = connection
+                .cards
+                .get_mut()
+                .ledger_mut()
+                .settle(card, label.to_owned())
+            {
                 edits.push(edit);
             }
         }
@@ -218,7 +294,13 @@ impl RemoteChannels {
             .try_global::<Self>()
             .into_iter()
             .flat_map(|bridge| bridge.connections.values())
-            .flat_map(|connection| connection.cards.borrow().permissions(pane, session))
+            .flat_map(|connection| {
+                connection
+                    .cards
+                    .borrow()
+                    .ledger()
+                    .permissions(pane, session)
+            })
             .collect();
         for card in cards {
             Self::settle_card(&card, label, cx);
@@ -226,6 +308,10 @@ impl RemoteChannels {
     }
 }
 
+/// Record what a send came to. A card that reached the person is kept as sent
+/// even if its session was replaced meanwhile: the ledger's claim decides
+/// whether it still belongs to this identity, and a same-bot replacement can
+/// still edit it, so the pump must not offer it again.
 pub(super) fn finish(
     pending: &Pending,
     pane: Option<PaneRef>,
@@ -233,34 +319,40 @@ pub(super) fn finish(
     original: String,
     cx: &mut App,
 ) {
-    let receipt = Receipt {
-        id: pending.id.clone(),
-        generation: pending.generation,
-        bot: Arc::downgrade(&pending.bot),
-        recipient: pending.recipient.clone(),
-        ids,
-        original,
-    };
-    if !current(&receipt, &pending.bot, cx) {
+    let live = current(pending, cx);
+    if ids.is_empty() && !live {
+        // Nothing went out: the session was gone before the send.
         discard(pending, cx);
         return;
     }
     let orchestrator = crate::orchestrator::pane(cx);
-    let connection = cx
+    let Some(connection) = cx
         .global_mut::<RemoteChannels>()
         .connections
         .get_mut(&pending.id)
-        .unwrap();
-    if let Some(pane) = pane {
-        for id in &receipt.ids {
+    else {
+        return;
+    };
+    if live && let Some(pane) = pane {
+        for id in &ids {
             connection
                 .core
                 .record_delivered(id.clone(), pane, orchestrator);
         }
     }
     if let Some(card) = &pending.card {
-        let receipt = (!receipt.ids.is_empty()).then_some(receipt);
-        let completion = connection.cards.borrow_mut().complete(card, receipt);
+        let cards = connection.cards.get_mut();
+        let receipt = cards
+            .owner()
+            .filter(|_| !ids.is_empty())
+            .map(|owner| Receipt {
+                id: pending.id.clone(),
+                owner: owner.clone(),
+                recipient: pending.recipient.clone(),
+                ids,
+                original,
+            });
+        let completion = cards.ledger_mut().complete(card, receipt);
         if matches!(completion, CardCompletion::Unconfirmed) {
             connection.core.forget_card(&card.card);
         }
@@ -270,6 +362,15 @@ pub(super) fn finish(
 
 /// Each connection drains in order; a throttled channel does not block another.
 pub(super) fn spawn(mut receiver: UnboundedReceiver<Pending>, cx: &mut App) {
+    cx.spawn(async move |cx| {
+        loop {
+            cx.background_executor()
+                .timer(crate::remote_channel::cards::RETRY_INTERVAL)
+                .await;
+            cx.update(flush_edits);
+        }
+    })
+    .detach();
     cx.spawn(async move |cx| {
         let mut queues: HashMap<String, UnboundedSender<Pending>> = HashMap::new();
         while let Some(pending) = receiver.next().await {

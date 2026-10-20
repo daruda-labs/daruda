@@ -49,7 +49,7 @@ pub struct TelegramBridge {
     // `cx.try_global::<TelegramBridge>()`.
     outbound_tx: UnboundedSender<QueuedOutbound>,
     bot: Ownership,
-    cards: RefCell<Option<outbound::OwnedCards>>,
+    cards: RefCell<outbound::OwnedCards>,
 }
 
 impl Global for TelegramBridge {}
@@ -197,8 +197,18 @@ impl TelegramBridge {
             .then_some(config.telegram.authorized_chat_id)
             .flatten()
             .ok_or(())?;
+        // The ledger is bound to the serving identity by `sync_card_owner`; a
+        // card for another identity is refused rather than recorded where its
+        // receipt could not be edited.
         let card = match outbound.card_id() {
-            Some(id) => Some(self.cards_for(bot, chat_id).claim(id).ok_or(())?),
+            Some(id) => Some(
+                self.cards
+                    .borrow_mut()
+                    .ledger_for(&outbound::CardOwner::of(bot, chat_id))
+                    .ok_or(())?
+                    .claim(id)
+                    .ok_or(())?,
+            ),
             None => None,
         };
         let result = self
@@ -213,7 +223,7 @@ impl TelegramBridge {
         if result.is_err()
             && let Some(claim) = card
         {
-            self.cards_for(bot, chat_id).release(&claim);
+            self.cards.borrow_mut().ledger_mut().release(&claim);
         }
         result
     }
@@ -261,11 +271,12 @@ impl TelegramBridge {
         }
         Self::sync_card_owner(cx);
         let bridge = cx.global_mut::<TelegramBridge>();
-        if bridge.cards.borrow().as_ref().is_some_and(|cards| {
-            cards
-                .ledger
-                .contains(&crate::remote_channel::cards::CardId::Approval(id))
-        }) {
+        if bridge
+            .cards
+            .borrow()
+            .ledger()
+            .contains(&crate::remote_channel::cards::CardId::Approval(id))
+        {
             return false;
         }
         let (approve, refuse) = bridge.core.record_pending_approval(id);
@@ -345,8 +356,9 @@ impl TelegramBridge {
         if matches!(self.bot, Ownership::Ready(_)) {
             trace::state("bot.claim", || "state=released".to_string());
         }
+        // Card records stay: the same bot and chat may serve again, and their
+        // messages are still on the person's screen.
         self.bot = Ownership::Idle;
-        self.cards = RefCell::default();
     }
 
     /// Drop an approval's callback tokens once it has been decided.
@@ -459,7 +471,7 @@ pub fn install(cx: &mut App) {
 
 fn observe_settings(cx: &mut App) {
     TelegramBridge::sync_card_owner(cx);
-    cx.observe_global::<SettingsStore>(|cx| TelegramBridge::sync_card_owner(cx))
+    cx.observe_global::<SettingsStore>(TelegramBridge::sync_card_owner)
         .detach();
 }
 

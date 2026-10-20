@@ -187,6 +187,7 @@ impl BridgeCore {
                 chat_id,
                 callback_id,
                 data,
+                ..
             } => {
                 // A callback names its pane through the token it carries, so
                 // it never reaches the target question.

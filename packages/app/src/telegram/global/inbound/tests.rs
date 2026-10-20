@@ -277,3 +277,137 @@ async fn an_old_failed_claim_does_not_release_a_new_healthy_owner(cx: &mut TestA
     drop(current);
     wait_release(locks.path());
 }
+
+fn tap(message_id: i64, data: &str) -> client::Update {
+    client::Update {
+        update_id: 900 + message_id,
+        kind: client::UpdateKind::Callback {
+            chat_id: 42,
+            callback_id: format!("cb-{message_id}"),
+            data: data.into(),
+            message_id,
+            message_text: "daruda wants to create a worktree. Allow?".into(),
+        },
+    }
+}
+
+/// A tap on an approval card this process no longer tracks (an earlier
+/// run's card) is answered and loses its buttons; a tap racing a settlement
+/// edit is only answered, so the settled result is not overwritten.
+#[gpui::test]
+fn a_stale_tap_strips_only_a_card_no_settlement_owns(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        configure(cx);
+        let bot = cx.global::<TelegramBridge>().bot.ready().unwrap().clone();
+        let stale = format!(
+            "{}:{}",
+            crate::remote_channel::bridge::core::APPROVAL_TOKEN_PREFIX,
+            "0".repeat(32)
+        );
+        let (effect, tapped) = dispatch_update(&bot, Some(42), tap(7, &stale), cx).unwrap();
+        let Some(Answer::AckAndEdit {
+            callback_id,
+            message,
+            label,
+        }) = answer_for(effect, tapped)
+        else {
+            panic!("an untracked dead card loses its buttons");
+        };
+        assert_eq!(callback_id, "cb-7");
+        assert_eq!((message.chat_id, message.message_id), (42, 7));
+        assert_eq!(label, s::control::approval_already_answered());
+
+        cx.global::<TelegramBridge>()
+            .cards
+            .borrow_mut()
+            .note_settled(8);
+        let (effect, tapped) = dispatch_update(&bot, Some(42), tap(8, &stale), cx).unwrap();
+        assert!(matches!(
+            answer_for(effect, tapped),
+            Some(Answer::Ack { callback_id, .. }) if callback_id == "cb-8"
+        ));
+
+        let (effect, tapped) = dispatch_update(&bot, Some(42), tap(9, "unknown"), cx).unwrap();
+        assert!(matches!(
+            answer_for(effect, tapped),
+            Some(Answer::AckAndEdit { label, .. })
+                if label == s::notification::telegram_permission_stale()
+        ));
+    });
+}
+
+#[gpui::test]
+fn taps_before_the_send_response_never_compete_with_the_settlement_edit(cx: &mut TestAppContext) {
+    use crate::control::approval::{self, ApprovalOutcome};
+    use crate::remote_channel::cards::tests::EditCapture;
+    cx.update(|cx| {
+        let mut outgoing = super::super::install_for_test(true, Some(42), cx);
+        cx.set_global(EditCapture::default());
+        let (_id, answer) = approval::request(
+            "In flight".into(),
+            crate::remote_channel::global::Delivery::Explicit,
+            cx,
+        );
+        let bot = cx.global::<TelegramBridge>().bot.ready().unwrap().clone();
+        let queued = outgoing.receiver.try_recv().unwrap();
+        let crate::remote_channel::bridge::Outbound::Approval(prompt) = &queued.outbound else {
+            panic!("approval");
+        };
+        let (approve, refuse) = (prompt.buttons[0].1.clone(), prompt.buttons[1].1.clone());
+        cx.global::<TelegramBridge>()
+            .outbound_tx
+            .unbounded_send(queued)
+            .unwrap();
+        let finish = outgoing.begin_send(72, cx).unwrap();
+        let (effect, tapped) = dispatch_update(&bot, Some(42), tap(72, &approve), cx).unwrap();
+        assert!(matches!(
+            answer_for(effect, tapped),
+            Some(Answer::Ack { .. })
+        ));
+        assert_eq!(answer.try_recv(), Ok(ApprovalOutcome::Approved));
+        let (effect, tapped) = dispatch_update(&bot, Some(42), tap(72, &refuse), cx).unwrap();
+        assert!(matches!(
+            answer_for(effect, tapped),
+            Some(Answer::Ack { .. })
+        ));
+        assert!(cx.global::<EditCapture>().edits.is_empty());
+        finish(cx);
+        assert_eq!(cx.global::<EditCapture>().edits.len(), 1);
+        assert_eq!(
+            cx.global::<EditCapture>().edits[0].label,
+            s::control::approval_approved_telegram()
+        );
+    });
+}
+
+#[gpui::test]
+fn a_desktop_answer_before_the_send_response_protects_the_first_phone_tap(cx: &mut TestAppContext) {
+    use crate::control::approval;
+    cx.update(|cx| {
+        let mut outgoing = super::super::install_for_test(true, Some(42), cx);
+        cx.set_global(crate::remote_channel::cards::tests::EditCapture::default());
+        let (id, _answer) = approval::request(
+            "In flight".into(),
+            crate::remote_channel::global::Delivery::Explicit,
+            cx,
+        );
+        let bot = cx.global::<TelegramBridge>().bot.ready().unwrap().clone();
+        let queued = outgoing.receiver.try_recv().unwrap();
+        let crate::remote_channel::bridge::Outbound::Approval(prompt) = &queued.outbound else {
+            panic!("approval");
+        };
+        let approve = prompt.buttons[0].1.clone();
+        cx.global::<TelegramBridge>()
+            .outbound_tx
+            .unbounded_send(queued)
+            .unwrap();
+        let finish = outgoing.begin_send(73, cx).unwrap();
+        assert!(approval::resolve_desktop(id.0, "approve", cx));
+        let (effect, tapped) = dispatch_update(&bot, Some(42), tap(73, &approve), cx).unwrap();
+        assert!(matches!(
+            answer_for(effect, tapped),
+            Some(Answer::Ack { .. })
+        ));
+        finish(cx);
+    });
+}

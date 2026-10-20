@@ -456,6 +456,8 @@ mod tests {
             chat_id: 42,
             callback_id: "cb".to_string(),
             data: "perm:9:allow".to_string(),
+            message_id: 7,
+            message_text: "Allow?".to_string(),
         };
         assert_eq!(update_kind_name(&kind), "callback");
         assert_eq!(update_chat_id(&kind), Some(42));

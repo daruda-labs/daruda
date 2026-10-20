@@ -29,6 +29,7 @@ const FLOW_ASK_TOKEN_PREFIX: &str = "faq";
 /// card the user never answers times out on the app side — so this only
 /// bounds a pathological run of unanswered ones.
 const PENDING_APPROVALS_CAP: usize = 64;
+const SETTLED_CALLBACKS_CAP: usize = 64;
 
 /// One recipient's routing state. Native message IDs remain lossless.
 pub struct RoutingCore<M = i64> {
@@ -58,6 +59,7 @@ pub struct RoutingCore<M = i64> {
             PermissionDecision,
         ),
     >,
+    settled_callbacks: VecDeque<(String, InboundAction)>,
     command_state: crate::remote_channel::command::CommandState,
 }
 
@@ -72,6 +74,7 @@ impl<M: Eq + std::hash::Hash + Clone> Default for RoutingCore<M> {
             pending_approvals: HashMap::new(),
             pending_approvals_order: VecDeque::new(),
             pending_flow_asks: HashMap::new(),
+            settled_callbacks: VecDeque::new(),
             command_state: crate::remote_channel::command::CommandState::default(),
         }
     }
@@ -150,6 +153,13 @@ impl<M: Eq + std::hash::Hash + Clone> RoutingCore<M> {
     }
 
     pub fn route_callback(&mut self, data: String) -> InboundAction {
+        if let Some((_, action)) = self
+            .settled_callbacks
+            .iter()
+            .find(|(token, _)| token == &data)
+        {
+            return action.clone();
+        }
         if let Some((worktree, run_dir, ask_id, decision)) = self.pending_flow_asks.get(&data) {
             return InboundAction::ResolveFlowAsk {
                 worktree: worktree.clone(),
@@ -305,6 +315,65 @@ impl<M: Eq + std::hash::Hash + Clone> RoutingCore<M> {
         {
             self.pending_permissions.remove(&oldest);
         }
+    }
+
+    /// Keep a bounded routing tombstone: a late flow tap still names its
+    /// original question, and other settled taps cannot compete with edits.
+    pub(crate) fn settle_card(&mut self, card: &crate::remote_channel::cards::CardId) {
+        use crate::remote_channel::cards::CardId;
+        let callbacks: Vec<_> = match card {
+            CardId::Approval(id) => self
+                .pending_approvals
+                .iter()
+                .filter(|(_, (held, _))| held == id)
+                .map(|(token, _)| (token.clone(), InboundAction::StaleApproval))
+                .collect(),
+            CardId::FlowAsk { run_dir, ask_id } => self
+                .pending_flow_asks
+                .iter()
+                .filter(|(_, (_, held, id, _))| held == run_dir && id == ask_id)
+                .map(|(token, (worktree, run_dir, ask_id, decision))| {
+                    (
+                        token.clone(),
+                        InboundAction::ResolveFlowAsk {
+                            worktree: worktree.clone(),
+                            run_dir: run_dir.clone(),
+                            ask_id: *ask_id,
+                            decision: decision.clone(),
+                        },
+                    )
+                })
+                .collect(),
+            CardId::Permission {
+                pane,
+                session,
+                request,
+            } => self
+                .pending_permissions
+                .iter()
+                .filter(|(_, (held, scope, id, _))| {
+                    (*held, *scope, *id) == (*pane, *session, *request)
+                })
+                .map(|(token, _)| (token.clone(), InboundAction::Ignore))
+                .collect(),
+        };
+        self.forget_card(card);
+        for callback in callbacks {
+            self.settled_callbacks.push_back(callback);
+            if self.settled_callbacks.len() > SETTLED_CALLBACKS_CAP {
+                self.settled_callbacks.pop_front();
+            }
+        }
+    }
+
+    pub(crate) fn is_settled_callback(&self, data: &str) -> bool {
+        self.settled_callbacks
+            .iter()
+            .any(|(token, _)| token == data)
+    }
+
+    pub(crate) fn clear_settled_callbacks(&mut self) {
+        self.settled_callbacks.clear();
     }
 
     pub(crate) fn forget_card(&mut self, card: &crate::remote_channel::cards::CardId) {

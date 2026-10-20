@@ -111,6 +111,11 @@ fn parse(envelope: &Value) -> Option<Incoming> {
             },
             kind: IncomingKind::Callback {
                 data: payload["actions"][0]["value"].as_str()?.to_owned(),
+                message_id: payload["message"]["ts"].as_str()?.to_owned(),
+                original: payload["message"]["text"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned(),
             },
         }),
         _ => None,

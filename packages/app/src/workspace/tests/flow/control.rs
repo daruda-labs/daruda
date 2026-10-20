@@ -775,7 +775,7 @@ fn overage_toasts(ws: &Workspace) -> usize {
 /// that answer arrives long after `run_flow_at` was told where to run — so
 /// re-reading the active worktree there would run it in the wrong place.
 ///
-/// Not reachable from the control surface today (`needs_desktop_answer`
+/// Not reachable from the control surface today (`needs_profile_choice`
 /// refuses a profile-declaring flow before it gets here), which is exactly
 /// why it is worth pinning: the lane's correctness would otherwise rest on
 /// that unrelated guard staying in agreement.

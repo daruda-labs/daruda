@@ -2,7 +2,12 @@ use super::*;
 use daruda_config::remote::{ChannelKind, RemoteRecipient};
 use futures::{FutureExt, StreamExt};
 
-pub(super) fn ready_bot() -> Arc<BotSession> {
+pub(crate) fn ready_bot() -> Arc<BotSession> {
+    ready_bot_as("fake")
+}
+
+/// A session speaking as the bot `token` names.
+pub(crate) fn ready_bot_as(token: &str) -> Arc<BotSession> {
     let root = tempfile::tempdir().unwrap().keep();
     let lease = daruda_store::inbox::InboxLease::try_acquire(
         &root,
@@ -14,7 +19,7 @@ pub(super) fn ready_bot() -> Arc<BotSession> {
         daruda_store::inbox::InboxStore::open(lease, "test", || Ok(Default::default())).unwrap();
     Arc::new(BotSession::new(
         Arc::new(crate::remote_channel::transport::Credentials {
-            bot: "fake".into(),
+            bot: token.into(),
             app: Some("fake".into()),
         }),
         Arc::new(inbox),
@@ -51,7 +56,7 @@ pub(crate) fn setup(cx: &mut App) -> futures::channel::mpsc::UnboundedReceiver<P
     });
     reconcile(cx);
     for connection in cx.global_mut::<RemoteChannels>().connections.values_mut() {
-        connection.bot = Some(ready_bot());
+        connection.publish_bot(ready_bot());
     }
     receiver
 }
@@ -233,7 +238,7 @@ fn a_queued_message_cannot_move_to_a_replacement_session_with_the_same_config(
             .get_mut("personal")
             .unwrap();
         connection.bot.as_ref().unwrap().revoke();
-        connection.bot = Some(ready_bot());
+        connection.publish_bot(ready_bot());
         assert!(outbound::prepare(&pending, cx).is_none());
     });
 }
@@ -308,11 +313,13 @@ async fn a_shared_approval_settles_once_and_invalidates_every_channels_buttons(
         assert!(crate::control::approval::resolve(
             id,
             crate::control::approval::ApprovalChoice::Approved,
+            crate::control::approval::Answerer::Slack,
             cx
         ));
         assert!(!crate::control::approval::resolve(
             id,
             crate::control::approval::ApprovalChoice::Refused,
+            crate::control::approval::Answerer::Slack,
             cx
         ));
         for connection in cx.global::<RemoteChannels>().connections.values() {
@@ -409,7 +416,7 @@ fn disabled_or_revoked_connections_cannot_deliver(cx: &mut gpui::TestAppContext)
             .connections
             .get_mut("work")
             .unwrap();
-        connection.bot = Some(ready_bot());
+        connection.publish_bot(ready_bot());
         assert!(RemoteChannels::has_recipient(cx));
         config.remote.channels[0].enabled = false;
         cx.global_mut::<SettingsStore>()

@@ -1,6 +1,15 @@
 use super::*;
 use crate::telegram::global::{bot::Ownership, install_for_test};
 use futures::FutureExt as _;
+use std::ops::Not as _;
+
+/// A different bot than `bot`, as a re-pairing to another token produces.
+fn another_bot(bot: &ReadyBot) -> crate::telegram::keychain::TokenSnapshot {
+    crate::telegram::keychain::TokenSnapshot {
+        token: format!("{}-another", bot.token.token),
+        revision: bot.token.revision,
+    }
+}
 
 #[gpui::test]
 fn a_telegram_flow_callback_keeps_original_options_and_never_adopts_a_target(
@@ -34,7 +43,7 @@ fn a_telegram_flow_callback_keeps_original_options_and_never_adopts_a_target(
         cx.set_global(crate::remote_channel::cards::tests::EditCapture::default());
         TelegramBridge::settle_card(&CardId::FlowAsk { run_dir: "/worktree/with/a/long/path/.daruda/flow-runs/run".into(), ask_id: 4 }, "Done", cx);
         assert_eq!(cx.global::<crate::remote_channel::cards::tests::EditCapture>().edits.len(), 1);
-        assert_eq!(cx.global_mut::<TelegramBridge>().core.routing.route_callback(token), InboundAction::Ignore);
+        assert!(matches!(cx.global_mut::<TelegramBridge>().core.routing.route_callback(token), InboundAction::ResolveFlowAsk { ask_id: 4, .. }));
     });
 }
 
@@ -98,7 +107,7 @@ fn a_retired_card_send_cannot_forget_the_replacements_tokens(cx: &mut gpui::Test
         let old = outgoing.receiver.try_recv().unwrap();
         let original = cx.global::<TelegramBridge>().bot.ready().unwrap().clone();
         cx.global_mut::<TelegramBridge>().bot = Ownership::Ready(Arc::new(ReadyBot {
-            token: original.token.clone(),
+            token: another_bot(&original),
             inbox: original.inbox.clone(),
             generation: uuid::Uuid::new_v4(),
         }));
@@ -239,7 +248,7 @@ fn an_old_telegram_owner_cannot_extend_a_replacement_attempt(cx: &mut gpui::Test
         );
         let old = prepare(outgoing.receiver.try_recv().unwrap(), cx).unwrap();
         cx.global_mut::<TelegramBridge>().bot = Ownership::Ready(Arc::new(ReadyBot {
-            token: old.bot.token.clone(),
+            token: another_bot(&old.bot),
             inbox: old.bot.inbox.clone(),
             generation: uuid::Uuid::new_v4(),
         }));
@@ -269,9 +278,7 @@ fn an_old_telegram_owner_cannot_extend_a_replacement_attempt(cx: &mut gpui::Test
             cx.global::<TelegramBridge>()
                 .cards
                 .borrow()
-                .as_ref()
-                .unwrap()
-                .ledger
+                .ledger()
                 .is_sending(replacement.card.as_ref().unwrap())
         );
     });
@@ -308,9 +315,7 @@ fn telegram_settings_changes_retire_cards_without_a_workspace(cx: &mut gpui::Tes
             cx.global::<TelegramBridge>()
                 .cards
                 .borrow()
-                .as_ref()
-                .unwrap()
-                .ledger
+                .ledger()
                 .owns(&claim)
         );
     });
@@ -327,8 +332,9 @@ fn telegram_settings_changes_retire_cards_without_a_workspace(cx: &mut gpui::Tes
                 cx.global::<TelegramBridge>()
                     .cards
                     .borrow()
-                    .as_ref()
-                    .is_none_or(|cards| !cards.ledger.owns(&claim))
+                    .ledger()
+                    .owns(&claim)
+                    .not()
             );
         });
     }
@@ -380,4 +386,122 @@ fn a_receipt_from_before_recipient_rotation_cannot_extend_an_approval(
         .advance_clock(std::time::Duration::from_secs(11));
     cx.run_until_parked();
     assert_eq!(answer.try_recv(), Ok(ApprovalOutcome::TimedOut));
+}
+
+/// Releasing the bot and serving it again with the same token — an inbox
+/// reopen or a keychain revision — keeps the card it sent: no second card is
+/// offered, and the first answer edits the one on screen.
+#[gpui::test]
+fn a_same_bot_replacement_keeps_its_card_and_settles_it(cx: &mut gpui::TestAppContext) {
+    use crate::control::approval::{self, ApprovalOutcome};
+    cx.update(|cx| {
+        let mut outgoing = install_for_test(true, Some(42), cx);
+        cx.set_global(crate::remote_channel::cards::tests::EditCapture::default());
+        let (id, answer) = approval::request(
+            "Create worktree".into(),
+            super::super::Delivery::Explicit,
+            cx,
+        );
+        outgoing.begin_send(50, cx).unwrap()(cx);
+        let original = cx.global::<TelegramBridge>().bot.ready().unwrap().clone();
+        cx.global_mut::<TelegramBridge>().release_claim();
+        TelegramBridge::sync_card_owner(cx);
+        cx.global_mut::<TelegramBridge>().bot = Ownership::Ready(Arc::new(ReadyBot {
+            token: original.token.clone(),
+            inbox: original.inbox.clone(),
+            generation: uuid::Uuid::new_v4(),
+        }));
+        TelegramBridge::sync_card_owner(cx);
+
+        approval::relay_outstanding(cx);
+        assert!(
+            outgoing.try_recv().is_err(),
+            "the chat already shows this card"
+        );
+        assert_eq!(super::super::pending_approval_tokens_for_test(cx), 2);
+
+        assert!(approval::resolve_desktop(id.0, "approve", cx));
+        assert_eq!(answer.try_recv(), Ok(ApprovalOutcome::Approved));
+        let edits = &cx
+            .global::<crate::remote_channel::cards::tests::EditCapture>()
+            .edits;
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].ids, ["50"]);
+    });
+}
+
+#[gpui::test]
+fn an_offline_settlement_survives_replacement_and_an_edit_failure(cx: &mut gpui::TestAppContext) {
+    use crate::control::approval::{self, ApprovalOutcome};
+    use crate::remote_channel::cards::tests::EditCapture;
+    cx.update(|cx| {
+        let mut outgoing = install_for_test(true, Some(42), cx);
+        cx.set_global(EditCapture::default());
+        let (id, answer) =
+            approval::request("Recover".into(), super::super::Delivery::Explicit, cx);
+        outgoing.begin_send(71, cx).unwrap()(cx);
+        let original = cx.global::<TelegramBridge>().bot.ready().unwrap().clone();
+        cx.global_mut::<TelegramBridge>().release_claim();
+        assert!(approval::resolve_desktop(id.0, "approve", cx));
+        assert_eq!(answer.try_recv(), Ok(ApprovalOutcome::Approved));
+        assert!(cx.global::<EditCapture>().edits.is_empty());
+        cx.global_mut::<TelegramBridge>().bot = Ownership::Ready(Arc::new(ReadyBot {
+            token: original.token.clone(),
+            inbox: original.inbox.clone(),
+            generation: uuid::Uuid::new_v4(),
+        }));
+        TelegramBridge::sync_card_owner(cx);
+        cx.global_mut::<EditCapture>().fail = true;
+        flush_edits(cx);
+        assert_eq!(cx.global::<EditCapture>().edits.len(), 1);
+        cx.global_mut::<EditCapture>().fail = false;
+        flush_edits(cx);
+        assert_eq!(cx.global::<EditCapture>().edits.len(), 2);
+        flush_edits(cx);
+        assert_eq!(cx.global::<EditCapture>().edits.len(), 2);
+        assert!(
+            cx.global::<EditCapture>()
+                .edits
+                .iter()
+                .all(|edit| edit.ids == ["71"]
+                    && edit.label == crate::surface::strings::control::approval_approved_desktop())
+        );
+    });
+}
+
+#[gpui::test]
+fn a_late_send_response_keeps_its_settlement_while_telegram_reopens(cx: &mut gpui::TestAppContext) {
+    use crate::control::approval;
+    use crate::remote_channel::cards::tests::EditCapture;
+    cx.update(|cx| {
+        let mut outgoing = install_for_test(true, Some(42), cx);
+        cx.set_global(EditCapture::default());
+        let (id, _answer) = approval::request(
+            "Recover in flight".into(),
+            super::super::Delivery::Explicit,
+            cx,
+        );
+        let finish = outgoing.begin_send(74, cx).unwrap();
+        let original = cx.global::<TelegramBridge>().bot.ready().unwrap().clone();
+        cx.global_mut::<TelegramBridge>().release_claim();
+        assert!(approval::resolve_desktop(id.0, "approve", cx));
+        finish(cx);
+        assert!(cx.global::<EditCapture>().edits.is_empty());
+        cx.global_mut::<TelegramBridge>().bot = Ownership::Ready(Arc::new(ReadyBot {
+            token: original.token.clone(),
+            inbox: original.inbox.clone(),
+            generation: uuid::Uuid::new_v4(),
+        }));
+        TelegramBridge::sync_card_owner(cx);
+        flush_edits(cx);
+        let edits = &cx.global::<EditCapture>().edits;
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].ids, ["74"]);
+        assert_eq!(
+            edits[0].label,
+            crate::surface::strings::control::approval_approved_desktop()
+        );
+        approval::relay_outstanding(cx);
+        assert!(outgoing.try_recv().is_err());
+    });
 }

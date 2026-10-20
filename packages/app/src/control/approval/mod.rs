@@ -98,6 +98,36 @@ struct WaitingApproval {
     summary: String,
     deadline: Instant,
     desktop: Option<WeakEntity<AgentChatView>>,
+    offer: Offer,
+}
+
+/// How remote cards for a request are offered, fixed when it is made.
+///
+/// Solicitation is captured once: the phone that asked keeps its claim on a
+/// card when the pump re-offers it later. Presence is not: it is read again
+/// each time the card is offered, so it is not stored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Offer {
+    Solicited,
+    ByPresence,
+}
+
+impl Offer {
+    fn of(delivery: Delivery) -> Self {
+        match delivery {
+            Delivery::Explicit => Self::Solicited,
+            Delivery::Presence { .. } => Self::ByPresence,
+        }
+    }
+
+    fn delivery_now(self, cx: &mut App) -> Delivery {
+        match self {
+            Self::Solicited => Delivery::Explicit,
+            Self::ByPresence => Delivery::Presence {
+                away: crate::app_presence::is_away(cx),
+            },
+        }
+    }
 }
 
 impl Global for Approvals {}
@@ -134,12 +164,13 @@ pub(crate) fn request(
                 summary,
                 deadline,
                 desktop: None,
+                offer: Offer::of(delivery),
             },
         );
         (id, full)
     };
     if full {
-        settle(id, ApprovalOutcome::TooManyPending, "limit", cx);
+        settle(id, Settlement::TooManyPending, cx);
     } else {
         send_card(id, delivery, cx);
         if is_waiting(id, cx) {
@@ -155,7 +186,7 @@ pub(crate) fn request(
 /// The work behind the card has not started (that is what "waiting" means), so
 /// withdrawing is enough to make sure it never does.
 pub(crate) fn withdraw(id: ApprovalId, cx: &mut App) -> bool {
-    settle(id, ApprovalOutcome::Withdrawn, "caller", cx)
+    settle(id, Settlement::Withdrawn(Withdrawal::Caller), cx)
 }
 
 pub(crate) fn withdraw_all(cx: &mut App) {
@@ -164,7 +195,7 @@ pub(crate) fn withdraw_all(cx: &mut App) {
         .map(|approvals| approvals.waiting.keys().copied().collect())
         .unwrap_or_default();
     for id in ids {
-        settle(id, ApprovalOutcome::Withdrawn, "orchestrator_stop", cx);
+        settle(id, Settlement::Withdrawn(Withdrawal::OrchestratorStop), cx);
     }
 }
 
@@ -184,21 +215,16 @@ pub(crate) fn relay_outstanding(cx: &mut App) {
         .try_global::<Approvals>()
         .map(|approvals| approvals.waiting.keys().copied().collect())
         .unwrap_or_default();
-    if ids.is_empty() {
-        return;
-    }
-    let delivery = Delivery::Presence {
-        away: crate::app_presence::is_away(cx),
-    };
     for id in ids {
-        let Some(summary) = cx
+        let Some((summary, offer)) = cx
             .global::<Approvals>()
             .waiting
             .get(&id)
-            .map(|waiting| waiting.summary.clone())
+            .map(|waiting| (waiting.summary.clone(), waiting.offer))
         else {
             continue;
         };
+        let delivery = offer.delivery_now(cx);
         if crate::remote_channel::send_approval_card(id, summary, delivery, cx) {
             extend_phone_deadline(id, cx);
         }
@@ -225,14 +251,22 @@ pub(crate) fn resolve_desktop(card_id: u64, action_id: &str, cx: &mut App) -> bo
         ACTION_REFUSE => ApprovalChoice::Refused,
         _ => return false,
     };
-    settle(ApprovalId(card_id), choice.into(), "desktop", cx)
+    settle(
+        ApprovalId(card_id),
+        Settlement::Answered {
+            choice,
+            by: Answerer::Desktop,
+        },
+        cx,
+    )
 }
 
-/// Deliver a decision. `false` when `id` was already answered — the card keeps
-/// its buttons while it is live, so a second tap is ordinary use, and the
-/// caller needs to know not to confirm a decision that did not take effect.
-pub(crate) fn resolve(id: ApprovalId, choice: ApprovalChoice, cx: &mut App) -> bool {
-    settle(id, choice.into(), "remote", cx)
+/// Deliver a decision made on a remote channel. `false` when `id` was already
+/// answered — the card keeps its buttons while it is live, so a second tap is
+/// ordinary use, and the caller needs to know not to confirm a decision that
+/// did not take effect.
+pub(crate) fn resolve(id: ApprovalId, choice: ApprovalChoice, by: Answerer, cx: &mut App) -> bool {
+    settle(id, Settlement::Answered { choice, by }, cx)
 }
 
 /// Answer whichever request `id` names, if it is still waiting. `false` when
@@ -240,46 +274,116 @@ pub(crate) fn resolve(id: ApprovalId, choice: ApprovalChoice, cx: &mut App) -> b
 ///
 /// Removing the entry *is* the decision: the first desktop/remote answer,
 /// timeout or withdrawal wins, and later attempts find nothing.
-fn settle(id: ApprovalId, outcome: ApprovalOutcome, by: &'static str, cx: &mut App) -> bool {
+fn settle(id: ApprovalId, settlement: Settlement, cx: &mut App) -> bool {
     if !cx.has_global::<Approvals>() {
         return false;
     }
     let Some(waiting) = cx.global_mut::<Approvals>().waiting.remove(&id) else {
         return false;
     };
+    let outcome = settlement.outcome();
+    let label = settlement.label();
     crate::remote_channel::settle_card(
         crate::remote_channel::cards::CardId::Approval(id),
-        &result_label(outcome, by),
+        &label,
         cx,
     );
     crate::telegram::trace::delivery("approval.settled", || {
         format!(
-            "id={id:?} outcome={outcome:?} by={by} summary={}",
+            "id={id:?} outcome={outcome:?} by={} summary={}",
+            settlement.trace_key(),
             crate::telegram::trace::digest(&waiting.summary)
         )
     });
     let _ = waiting.tx.try_send(outcome);
     cx.defer(move |cx| {
         if let Some(view) = waiting.desktop.and_then(|view| view.upgrade()) {
-            view.update(cx, |view, cx| {
-                view.settle_host_card(id.0, result_label(outcome, by), cx)
-            });
+            view.update(cx, |view, cx| view.settle_host_card(id.0, label, cx));
         }
         crate::window_registry::WindowRegistry::for_each_workspace(cx, |_, _, cx| cx.notify());
     });
     true
 }
 
-fn result_label(outcome: ApprovalOutcome, by: &str) -> String {
-    match outcome {
-        ApprovalOutcome::Approved if by == "desktop" => s::control::approval_approved_desktop(),
-        ApprovalOutcome::Approved => s::control::approval_approved_phone(),
-        ApprovalOutcome::Refused if by == "desktop" => s::control::approval_refused_desktop(),
-        ApprovalOutcome::Refused => s::control::approval_refused_phone(),
-        ApprovalOutcome::Withdrawn => s::control::approval_cancelled(),
-        ApprovalOutcome::TimedOut => s::control::approval_timed_out(),
-        ApprovalOutcome::Undeliverable => s::control::error_approval_unavailable(),
-        ApprovalOutcome::TooManyPending => s::control::error_approvals_pending(),
+/// Where a person answered a card from. Names the surface on the settled
+/// card, so an answer given in a desktop Slack client does not read as "on
+/// phone".
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Answerer {
+    Desktop,
+    Telegram,
+    Slack,
+    Discord,
+}
+
+/// Who took a question back before anyone answered it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Withdrawal {
+    Caller,
+    OrchestratorStop,
+}
+
+/// How a request stopped waiting. Only an answer has an answerer, so a
+/// decision without a surface, or a timeout with one, cannot be built.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Settlement {
+    Answered {
+        choice: ApprovalChoice,
+        by: Answerer,
+    },
+    TimedOut,
+    Withdrawn(Withdrawal),
+    TooManyPending,
+    Undeliverable,
+}
+
+impl Settlement {
+    fn outcome(self) -> ApprovalOutcome {
+        match self {
+            Self::Answered { choice, .. } => choice.into(),
+            Self::TimedOut => ApprovalOutcome::TimedOut,
+            Self::Withdrawn(_) => ApprovalOutcome::Withdrawn,
+            Self::TooManyPending => ApprovalOutcome::TooManyPending,
+            Self::Undeliverable => ApprovalOutcome::Undeliverable,
+        }
+    }
+
+    /// The `by=` value of the `approval.settled` trace. Stable across
+    /// releases so delivery logs stay comparable.
+    fn trace_key(self) -> &'static str {
+        match self {
+            Self::Answered { by, .. } => match by {
+                Answerer::Desktop => "desktop",
+                Answerer::Telegram => "telegram",
+                Answerer::Slack => "slack",
+                Answerer::Discord => "discord",
+            },
+            Self::TimedOut => "timeout",
+            Self::Withdrawn(Withdrawal::Caller) => "caller",
+            Self::Withdrawn(Withdrawal::OrchestratorStop) => "orchestrator_stop",
+            Self::TooManyPending => "limit",
+            Self::Undeliverable => "delivery",
+        }
+    }
+
+    fn label(self) -> String {
+        use ApprovalChoice::{Approved, Refused};
+        match self {
+            Self::Answered { choice, by } => match (choice, by) {
+                (Approved, Answerer::Desktop) => s::control::approval_approved_desktop(),
+                (Approved, Answerer::Telegram) => s::control::approval_approved_telegram(),
+                (Approved, Answerer::Slack) => s::control::approval_approved_slack(),
+                (Approved, Answerer::Discord) => s::control::approval_approved_discord(),
+                (Refused, Answerer::Desktop) => s::control::approval_refused_desktop(),
+                (Refused, Answerer::Telegram) => s::control::approval_refused_telegram(),
+                (Refused, Answerer::Slack) => s::control::approval_refused_slack(),
+                (Refused, Answerer::Discord) => s::control::approval_refused_discord(),
+            },
+            Self::Withdrawn(_) => s::control::approval_cancelled(),
+            Self::TimedOut => s::control::approval_timed_out(),
+            Self::Undeliverable => s::control::error_approval_unavailable(),
+            Self::TooManyPending => s::control::error_approvals_pending(),
+        }
     }
 }
 
@@ -294,7 +398,7 @@ fn spawn_timeout(id: ApprovalId, cx: &mut App) {
                 let deadline = cx.try_global::<Approvals>()?.waiting.get(&id)?.deadline;
                 let now = cx.background_executor().now();
                 if deadline <= now {
-                    settle(id, ApprovalOutcome::TimedOut, "timeout", cx);
+                    settle(id, Settlement::TimedOut, cx);
                     None
                 } else {
                     Some(deadline.duration_since(now))
@@ -362,7 +466,7 @@ fn send_card(id: ApprovalId, delivery: Delivery, cx: &mut App) {
                 .dedup("approval.undeliverable")
                 .build(),
             );
-            settle(id, ApprovalOutcome::Undeliverable, "delivery", cx);
+            settle(id, Settlement::Undeliverable, cx);
             return;
         }
         if let Some(waiting) = cx.global_mut::<Approvals>().waiting.get_mut(&id) {
@@ -386,7 +490,7 @@ pub(crate) fn resolve_only_pending_for_test(choice: ApprovalChoice, cx: &mut App
         .map(|a| a.waiting.keys().copied().collect())
         .unwrap_or_default();
     assert_eq!(ids.len(), 1, "exactly one request must be outstanding");
-    resolve(ids[0], choice, cx);
+    resolve(ids[0], choice, Answerer::Telegram, cx);
 }
 
 #[cfg(test)]

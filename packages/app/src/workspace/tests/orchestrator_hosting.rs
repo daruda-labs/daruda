@@ -72,7 +72,12 @@ fn an_orchestrator_stop_withdraws_all_pending_approvals(cx: &mut TestAppContext)
                 );
                 for (id, answer) in &requests {
                     assert_eq!(answer.try_recv(), Ok(ApprovalOutcome::Withdrawn));
-                    assert!(!approval::resolve(*id, ApprovalChoice::Approved, cx));
+                    assert!(!approval::resolve(
+                        *id,
+                        ApprovalChoice::Approved,
+                        approval::Answerer::Telegram,
+                        cx
+                    ));
                     assert!(answer.is_empty());
                 }
             }
@@ -719,7 +724,8 @@ fn hidden_orchestrator_preserves_user_tabs_and_resolves_its_account(cx: &mut Tes
             assert!(ws.agent_chat_view(pane).is_some());
             assert_eq!(
                 ws.orchestrator_chip_state(cx),
-                Some(crate::workspace::status_bar::orchestrator_chip::OrchestratorChipState::Idle)
+                None,
+                "an existing session does not restore a switched-off chip"
             );
             assert_eq!(ws.agent_chat_account_selection(pane), account);
             ws.agent_chat_view(pane)
@@ -800,4 +806,65 @@ fn hidden_orchestrator_pulse_emits_completion_and_phone_fallback(cx: &mut TestAp
         outbound.next().now_or_never().is_none(),
         "no duplicate deliveries"
     );
+}
+
+#[gpui::test]
+fn a_non_host_chip_reveals_the_host_tab_without_toggling_it_closed(cx: &mut TestAppContext) {
+    use gpui::BorrowAppContext as _;
+    let host = crate::test_support::workspace_with_agent_chat(cx);
+    let other = crate::test_support::workspace_with_agent_chat(cx);
+    cx.update(|cx| {
+        cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            let mut config = (*store.user()).clone();
+            config.orchestrator.enabled = true;
+            store.set_user_for_testing(config);
+        });
+        crate::orchestrator::seed_control_surface_for_test(cx);
+        crate::window_registry::WindowRegistry::register(
+            host.window.into(),
+            host.workspace.downgrade(),
+            cx,
+        );
+        crate::window_registry::WindowRegistry::register(
+            other.window.into(),
+            other.workspace.downgrade(),
+            cx,
+        );
+    });
+    cx.update_window(host.window.into(), |_, window, cx| {
+        host.workspace.update(cx, |ws, cx| seed(ws, window, cx));
+    })
+    .unwrap();
+    cx.update(|cx| {
+        crate::window_registry::WindowRegistry::register_orchestrator(
+            host.window.into(),
+            host.workspace.downgrade(),
+            cx,
+        )
+    });
+    for _ in 0..2 {
+        cx.update_window(other.window.into(), |_, window, cx| {
+            crate::orchestrator::start_or_toggle_from_chip(
+                &other.workspace.downgrade(),
+                window,
+                cx,
+            );
+        })
+        .unwrap();
+        host.workspace
+            .update(cx, |ws, _| assert!(ws.orchestrator_tab_is_visible()));
+        other
+            .workspace
+            .update(cx, |ws, _| assert!(ws.orchestrator.chat.is_none()));
+    }
+    cx.update(|cx| {
+        cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            let mut config = (*store.user()).clone();
+            config.orchestrator.enabled = false;
+            store.set_user_for_testing(config);
+        });
+    });
+    host.workspace.update(cx, |ws, cx| {
+        assert_eq!(ws.orchestrator_chip_state(cx), None)
+    });
 }

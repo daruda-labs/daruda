@@ -158,7 +158,7 @@ async fn a_failed_claim_has_its_own_worker_reopen_the_inbox_without_losing_histo
             .connections
             .get_mut("work")
             .unwrap();
-        connection.bot = Some(reopened.clone());
+        connection.publish_bot(reopened.clone());
         connection.status = crate::remote_channel::runtime::Status::Connected;
         connection.generation
     });
@@ -254,7 +254,7 @@ fn install_connection(id: &str, bot: Arc<BotSession>, cx: &mut App) -> uuid::Uui
         .connections
         .get_mut(id)
         .unwrap();
-    connection.bot = Some(bot);
+    connection.publish_bot(bot);
     connection.status = crate::remote_channel::runtime::Status::Connected;
     connection.generation
 }
@@ -401,17 +401,47 @@ async fn worker_revocation_while_a_claim_waits_prevents_effects_before_status_is
 fn callback() -> IncomingKind {
     IncomingKind::Callback {
         data: "token".into(),
+        message_id: "12.34".into(),
+        original: "Allow write?".into(),
     }
 }
 
+/// A tap whose token names nothing live, on a message no settlement will
+/// edit, loses its buttons in place; otherwise they stay tappable forever.
 #[test]
-fn a_dead_tap_reports_staleness_without_overwriting_the_settled_result() {
-    let Feedback::Send(message) = feedback_for(Effect::None, callback()) else {
-        panic!("a stale tap must receive feedback");
-    };
+fn a_dead_tap_on_an_untracked_card_loses_its_buttons() {
     assert_eq!(
-        message,
-        Message::plain(s::remote_channel::stale_callback(), None)
+        feedback_for(Effect::None, callback(), Tap::Untracked),
+        Feedback::Edit {
+            message_id: "12.34".into(),
+            original: "Allow write?".into(),
+            label: s::remote_channel::stale_callback(),
+        }
+    );
+    assert_eq!(
+        feedback_for(
+            Effect::Feedback {
+                label: s::control::approval_already_answered(),
+                edit: Edit::StaleCard,
+            },
+            callback(),
+            Tap::Untracked,
+        ),
+        Feedback::Edit {
+            message_id: "12.34".into(),
+            original: "Allow write?".into(),
+            label: s::control::approval_already_answered(),
+        }
+    );
+}
+
+/// A tap racing a settlement edit is answered without rewriting the card, so
+/// the settled result is not replaced by a competing label.
+#[test]
+fn a_dead_tap_on_a_settled_card_does_not_overwrite_the_result() {
+    assert_eq!(
+        feedback_for(Effect::None, callback(), Tap::Settled),
+        Feedback::Send(Message::plain(s::remote_channel::stale_callback(), None))
     );
 }
 
@@ -424,6 +454,7 @@ fn a_managed_card_leaves_editing_to_the_ledger_and_a_selection_keeps_its_buttons
                 edit: Edit::ManagedCard,
             },
             callback(),
+            Tap::Untracked,
         ),
         Feedback::Nothing
     ));
@@ -435,6 +466,7 @@ fn a_managed_card_leaves_editing_to_the_ledger_and_a_selection_keeps_its_buttons
                 edit: Edit::KeepButtons,
             },
             callback(),
+            Tap::Untracked,
         ),
         Feedback::Send(Message::plain("Now talking to lane 2".into(), None)),
     );
@@ -448,7 +480,10 @@ fn a_plain_message_is_never_edited() {
         text: "ship it".into(),
         reply_to: None,
     };
-    assert_eq!(feedback_for(Effect::None, text), Feedback::Nothing);
+    assert_eq!(
+        feedback_for(Effect::None, text, Tap::Absent),
+        Feedback::Nothing
+    );
     assert_eq!(
         feedback_for(
             Effect::Reply(RenderedReply {
@@ -459,6 +494,7 @@ fn a_plain_message_is_never_edited() {
                 text: "ship it".into(),
                 reply_to: None,
             },
+            Tap::Absent,
         ),
         Feedback::Send(Message::plain("done".into(), None)),
     );
@@ -571,4 +607,50 @@ async fn a_command_whose_claim_failed_is_claimed_again_on_the_reopened_inbox(
     cx.run_until_parked();
     drop(reopened);
     wait_release(root.path());
+}
+
+#[gpui::test]
+fn callbacks_before_send_completion_cannot_schedule_a_stale_edit(cx: &mut TestAppContext) {
+    use crate::control::approval::{self, ApprovalOutcome};
+    use crate::remote_channel::cards::tests::EditCapture;
+    cx.update(|cx| {
+        let mut outgoing = crate::remote_channel::global::tests::setup(cx);
+        cx.set_global(EditCapture::default());
+        let (_id, answer) =
+            approval::request("In flight".into(), super::super::Delivery::Explicit, cx);
+        let pending = outgoing.try_recv().unwrap();
+        let _prepared = super::super::outbound::prepare(&pending, cx).unwrap();
+        let crate::remote_channel::bridge::Outbound::Approval(prompt) = &pending.outbound else {
+            panic!("approval");
+        };
+        for (index, (_, token)) in prompt.buttons.iter().enumerate() {
+            let incoming = transport::Incoming {
+                event_id: format!("tap-{index}"),
+                sender: pending.recipient.clone(),
+                kind: IncomingKind::Callback {
+                    data: token.clone(),
+                    message_id: "early-message".into(),
+                    original: prompt.summary.clone(),
+                },
+            };
+            let effect =
+                dispatch_claimed(&pending.id, pending.generation, &pending.bot, &incoming, cx)
+                    .unwrap();
+            let connection = &cx.global::<RemoteChannels>().connections[&pending.id];
+            assert!(!connection.cards.borrow().untracked(&"early-message".into()));
+            assert!(!matches!(
+                feedback_for(effect, incoming.kind, Tap::Settled),
+                Feedback::Edit { .. }
+            ));
+        }
+        assert_eq!(answer.try_recv(), Ok(ApprovalOutcome::Approved));
+        super::super::outbound::finish(
+            &pending,
+            None,
+            vec!["early-message".into()],
+            prompt.summary.clone(),
+            cx,
+        );
+        assert_eq!(cx.global::<EditCapture>().edits.len(), 1);
+    });
 }

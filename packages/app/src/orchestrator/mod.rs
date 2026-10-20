@@ -202,9 +202,8 @@ pub(crate) fn session_tools(cx: &mut App) -> Option<daruda_acp::McpServer> {
 /// so seeding has to go through the `&mut Window` already in hand — see
 /// [`prepare`].
 ///
-/// When the resolved host is a *different* window the session still starts
-/// there, but the tab is left alone rather than inserted into a window the
-/// person did not click.
+/// A chip in another window reveals the session in its host and activates
+/// that window, so the waiting indicator always leads to an answerable card.
 pub(crate) fn start_or_toggle_from_chip(
     chip_host: &gpui::WeakEntity<crate::workspace::Workspace>,
     window: &mut gpui::Window,
@@ -230,9 +229,19 @@ pub(crate) fn start_or_toggle_from_chip(
             return;
         }
     }
-    let host_is_the_clicked_window = WindowRegistry::orchestrator(cx)
-        .is_some_and(|(_, host)| host.entity_id() == chip_host.entity_id());
-    if !host_is_the_clicked_window {
+    if let Some((handle, host)) = WindowRegistry::orchestrator(cx)
+        && host.entity_id() != chip_host.entity_id()
+    {
+        let result = cx
+            .update_window(handle, |_, window, cx| {
+                host.update(cx, |ws, cx| ws.reveal_orchestrator_tab(window, cx))?;
+                window.activate_window();
+                anyhow::Ok(())
+            })
+            .and_then(|result| result);
+        if let Err(error) = result {
+            report_chip_start_failure(chip_host, &open_failed(error), cx);
+        }
         return;
     }
     if let Err(error) = chip_host.update(cx, |ws, cx| ws.toggle_orchestrator_tab(window, cx)) {

@@ -153,3 +153,34 @@ fn forgetting_a_pane_plain_text_was_not_aimed_at_moves_nothing() {
     assert_eq!(core.forget(pane(3)), Absorbed::Nothing);
     assert_eq!(injected_into(&mut core), Some(pane(4)));
 }
+
+#[test]
+fn settlement_keeps_late_flow_routing_separate_from_live_tokens_and_bounded() {
+    use crate::remote_channel::{bridge::FlowAskPrompt, cards::CardId};
+    let mut core = RoutingCore::<i64>::default();
+    let mut oldest = None;
+    let mut latest = String::new();
+    for ask_id in 0..=super::SETTLED_CALLBACKS_CAP as u64 {
+        let message = core.build_flow_ask(FlowAskPrompt {
+            worktree: "/tree".into(),
+            run_dir: "/tree/run".into(),
+            ask_id,
+            summary: "Question".into(),
+            buttons: vec![("Allow".into(), PermissionDecision::Allow("once".into()))],
+        });
+        latest = message.keyboard.unwrap().rows[0][0].1.clone();
+        oldest.get_or_insert(latest.clone());
+        core.settle_card(&CardId::FlowAsk {
+            run_dir: "/tree/run".into(),
+            ask_id,
+        });
+        assert!(core.pending_flow_asks.is_empty());
+    }
+    assert!(!core.is_settled_callback(&oldest.unwrap()));
+    assert!(core.is_settled_callback(&latest));
+    assert!(
+        matches!(core.route_callback(latest.clone()), InboundAction::ResolveFlowAsk { ask_id, .. } if ask_id == super::SETTLED_CALLBACKS_CAP as u64)
+    );
+    core.clear_settled_callbacks();
+    assert_eq!(core.route_callback(latest), InboundAction::Ignore);
+}

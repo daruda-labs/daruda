@@ -122,7 +122,7 @@ fn desktop_without_a_phone_can_answer_a_hidden_orchestrator_card(cx: &mut TestAp
         view.read_with(cx, |view, _| view.host_cards_for_test()),
         vec![(id.0, Some(s::control::approval_approved_desktop()))]
     );
-    assert!(!cx.update(|cx| resolve(id, ApprovalChoice::Refused, cx)));
+    assert!(!cx.update(|cx| resolve(id, ApprovalChoice::Refused, Answerer::Telegram, cx)));
 }
 
 #[gpui::test]
@@ -245,12 +245,12 @@ fn a_remote_decision_and_timeout_replace_desktop_choices(cx: &mut TestAppContext
     for choice in [ApprovalChoice::Approved, ApprovalChoice::Refused] {
         let (id, answer) = cx.update(|cx| request("Create a task".into(), Delivery::Explicit, cx));
         cx.run_until_parked();
-        assert!(cx.update(|cx| resolve(id, choice, cx)));
+        assert!(cx.update(|cx| resolve(id, choice, Answerer::Telegram, cx)));
         cx.run_until_parked();
         assert_eq!(answer.try_recv(), Ok(choice.into()));
         let label = match choice {
-            ApprovalChoice::Approved => s::control::approval_approved_phone(),
-            ApprovalChoice::Refused => s::control::approval_refused_phone(),
+            ApprovalChoice::Approved => s::control::approval_approved_telegram(),
+            ApprovalChoice::Refused => s::control::approval_refused_telegram(),
         };
         assert_eq!(
             view.read_with(cx, |view, _| view.host_cards_for_test()),
@@ -349,6 +349,16 @@ fn pending_approvals_notify_every_windows_chip_without_reading_the_host(cx: &mut
     let (host, _view) = desktop_host(cx);
     let other = crate::test_support::workspace_with_agent_chat(cx);
     let _outbound = setup_bridge(cx, false, None);
+    // A hosted session implies the feature is on; with it off, no window
+    // shows a chip at all.
+    cx.update(|cx| {
+        let mut config = crate::settings_store::SettingsStore::global(cx)
+            .user()
+            .clone();
+        config.orchestrator.enabled = true;
+        cx.global_mut::<crate::settings_store::SettingsStore>()
+            .set_user_for_testing(config);
+    });
     let notifications = [Rc::new(Cell::new(0)), Rc::new(Cell::new(0))];
     cx.update(|cx| {
         for (workspace, notifications) in [&host.workspace, &other.workspace]

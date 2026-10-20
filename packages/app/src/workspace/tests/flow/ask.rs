@@ -16,8 +16,14 @@ fn asking_ids(row: &crate::workspace::flow_rows::FlowRunRow) -> Vec<u64> {
     row.asking.iter().map(|ask| ask.ask_id).collect()
 }
 
+/// A waiting flow question lights the orchestrator chip in every window, but
+/// only where there is a chip: with the feature off there is nothing to show,
+/// and a chip that could only refuse a click is noise.
 #[gpui::test]
 async fn a_pending_flow_question_marks_the_orchestrator_chip(cx: &mut TestAppContext) {
+    use crate::workspace::status_bar::orchestrator_chip::OrchestratorChipState;
+    use gpui::BorrowAppContext as _;
+
     let (lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
     let unrelated = crate::test_support::workspace_for_control(cx);
     let mut cx = gpui::VisualTestContext::from_window(wh.into(), cx);
@@ -25,23 +31,39 @@ async fn a_pending_flow_question_marks_the_orchestrator_chip(cx: &mut TestAppCon
     let run_dir = lane.path().join("run");
     seed_run(&ws, &mut cx, here, &run_dir);
     let reply = park_question(&ws, &mut cx, here, &run_dir, 1);
-    ws.update(&mut cx, |ws, cx| {
-        assert_eq!(
-            ws.orchestrator_chip_state(cx),
-            Some(crate::workspace::status_bar::orchestrator_chip::OrchestratorChipState::AwaitingPermission)
-        );
-    });
-    unrelated.workspace.update(&mut cx, |ws, cx| {
-        assert_eq!(
-            ws.orchestrator_chip_state(cx),
-            Some(crate::workspace::status_bar::orchestrator_chip::OrchestratorChipState::AwaitingPermission)
-        );
-    });
+    let set_enabled = |enabled: bool, cx: &mut gpui::VisualTestContext| {
+        cx.update(|_, cx| {
+            cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+                let mut config = (*store.user()).clone();
+                config.orchestrator.enabled = enabled;
+                store.set_user_for_testing(config);
+            });
+        });
+    };
+    set_enabled(false, &mut cx);
+    for workspace in [&ws, &unrelated.workspace] {
+        workspace.update(&mut cx, |ws, cx| {
+            assert_eq!(
+                ws.orchestrator_chip_state(cx),
+                None,
+                "no chip while switched off"
+            );
+        });
+    }
+    set_enabled(true, &mut cx);
+    for workspace in [&ws, &unrelated.workspace] {
+        workspace.update(&mut cx, |ws, cx| {
+            assert_eq!(
+                ws.orchestrator_chip_state(cx),
+                Some(OrchestratorChipState::AwaitingPermission)
+            );
+        });
+    }
     drop(reply);
     ws.update(&mut cx, |ws, cx| {
         assert_ne!(
             ws.orchestrator_chip_state(cx),
-            Some(crate::workspace::status_bar::orchestrator_chip::OrchestratorChipState::AwaitingPermission)
+            Some(OrchestratorChipState::AwaitingPermission)
         );
     });
 }

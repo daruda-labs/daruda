@@ -1719,6 +1719,8 @@ flow:
   # its node was stopped or timed out — so nothing acted on the click.
   ask_closed: "The flow had stopped waiting for that answer, so it was not used"
   ask_answered: "The flow question was answered."
+  # A tap on a flow question someone already answered.
+  ask_already_answered: "Already answered"
   ask_withdrawn: "The flow question is no longer waiting for an answer."
   # The modal's way out that is not an answer. Names the object because
   # "Stop" alone, beside three answer buttons, reads as stopping the tool
@@ -2170,7 +2172,7 @@ control:
   # The reason of `error_flow_not_started` when the worktree's folder would
   # not resolve; the path stays on the desktop.
   flow_reason_lane_unresolvable: "That worktree folder could not be read"
-  error_flow_needs_interaction: "%{name} asks a question only the desktop can answer."
+  error_flow_needs_interaction: "%{name} needs a profile chosen on the desktop before it can start."
   error_no_active_lane: "No active worktree."
   usage_use: "Usage: /use <number> or /use -"
   usage_say: "Usage: /say <number> <message>"
@@ -2187,9 +2189,13 @@ control:
   approval_chat_new: "daruda wants to open another chat in %{path}. Allow?"
   approval_allow: "Allow"
   approval_approved_desktop: "Approved on desktop"
-  approval_approved_phone: "Approved on phone"
+  approval_approved_telegram: "Approved in Telegram"
+  approval_approved_slack: "Approved in Slack"
+  approval_approved_discord: "Approved in Discord"
   approval_refused_desktop: "Refused on desktop"
-  approval_refused_phone: "Refused on phone"
+  approval_refused_telegram: "Refused in Telegram"
+  approval_refused_slack: "Refused in Slack"
+  approval_refused_discord: "Refused in Discord"
   approval_cancelled: "Cancelled"
   approval_timed_out: "Timed out"
   approval_refuse: "Refuse"

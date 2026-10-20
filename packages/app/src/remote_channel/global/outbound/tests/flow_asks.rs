@@ -186,11 +186,24 @@ fn a_desktop_flow_answer_settles_delivered_cards_and_keeps_sibling_questions(
     let first = cx.update(|cx| park(fixture.root(), &run_dir, 1, cx));
     let second = cx.update(|cx| park(fixture.root(), &run_dir, 2, cx));
     cx.run_until_parked();
-    cx.update(|cx| {
-        complete(begin(&mut remote, cx), cx);
+    let token = cx.update(|cx| {
+        let sending = begin(&mut remote, cx);
+        let token = sending
+            .iter()
+            .find_map(|(pending, prepared)| match &pending.outbound {
+                Outbound::FlowAsk(prompt) if pending.id == "work" && prompt.ask_id == 1 => Some(
+                    prepared.message.keyboard.as_ref().unwrap().rows[0][0]
+                        .1
+                        .clone(),
+                ),
+                _ => None,
+            })
+            .unwrap();
+        complete(sending, cx);
         telegram.begin_send(102, cx).unwrap()(cx);
         telegram.begin_send(103, cx).unwrap()(cx);
         RunsHost::answer_flow_ask(fixture.root(), &run_dir, 1, allow(), cx).unwrap();
+        token
     });
     cx.run_until_parked();
     cx.update(|cx| {
@@ -203,7 +216,13 @@ fn a_desktop_flow_answer_settles_delivered_cards_and_keeps_sibling_questions(
                 .is_some()
         );
         assert!(second.is_empty());
+        let action = cx.global_mut::<RemoteChannels>().connections.get_mut("work").unwrap().core.route_callback(token);
+        assert!(matches!(action, crate::remote_channel::bridge::InboundAction::ResolveFlowAsk { ask_id: 1, .. }));
+        let effect = dispatch::handle_in_app(Aimed { action, adopted: None }, &Target::Remote("work".into()), cx);
+        assert!(matches!(effect, Effect::Feedback { label, .. } if label == crate::surface::strings::flow::ask_already_answered()));
     });
+    cx.run_until_parked();
+    cx.update(|cx| assert_eq!(cx.global::<EditCapture>().edits.len(), 3));
     assert_eq!(first.try_recv(), Ok(allow()));
 }
 
@@ -242,7 +261,7 @@ fn a_retired_flow_send_cannot_forget_a_new_owners_callback_tokens(cx: &mut gpui:
             .unwrap();
         connection.cards = Default::default();
         connection.generation = uuid::Uuid::new_v4();
-        connection.bot = Some(crate::remote_channel::global::tests::ready_bot());
+        connection.publish_bot(crate::remote_channel::global::tests::ready_bot());
         let Outbound::FlowAsk(prompt) = &old.outbound else {
             panic!("flow card");
         };

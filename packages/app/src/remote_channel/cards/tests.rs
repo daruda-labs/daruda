@@ -172,3 +172,67 @@ fn duplicate_or_unprepared_completions_have_no_effect() {
         Some(("first", "Allowed".into()))
     );
 }
+
+#[test]
+fn rebinding_the_same_identity_keeps_records_and_another_returns_them() {
+    let mut owned: OwnedCards<&str, &str, i64> = OwnedCards::default();
+    assert!(owned.bind("bot-a").is_empty());
+    let ledger = owned.ledger_for(&"bot-a").unwrap();
+    let claim = ledger.claim(approval()).unwrap();
+    assert!(ledger.begin(&claim));
+    ledger.complete(&claim, Some("message-1"));
+    assert!(owned.bind("bot-a").is_empty(), "a reconnect keeps the card");
+    assert!(owned.ledger().contains(&approval()));
+    assert!(owned.ledger_for(&"bot-b").is_none());
+    assert_eq!(owned.bind("bot-b"), vec![approval()]);
+    assert!(!owned.ledger().contains(&approval()));
+    assert!(
+        owned
+            .ledger_for(&"bot-b")
+            .unwrap()
+            .claim(approval())
+            .is_some()
+    );
+}
+
+#[test]
+fn settled_messages_are_remembered_for_stale_taps_and_bounded() {
+    let mut owned: OwnedCards<&str, &str, i64> = OwnedCards::default();
+    owned.bind("bot");
+    assert!(owned.untracked(&1));
+    owned.note_settled(1);
+    assert!(!owned.untracked(&1));
+    for message in 2..=(SETTLED_MESSAGES_CAP as i64 + 1) {
+        owned.note_settled(message);
+    }
+    assert!(owned.untracked(&1), "the oldest is evicted");
+    assert!(!owned.untracked(&2));
+    owned.bind("other");
+    assert!(owned.untracked(&2), "a new identity starts clean");
+}
+
+#[test]
+fn retiring_drops_records_and_the_identity() {
+    let mut owned: OwnedCards<&str, &str, i64> = OwnedCards::default();
+    owned.bind("bot");
+    owned.ledger_for(&"bot").unwrap().claim(approval()).unwrap();
+    assert_eq!(owned.retire(), vec![approval()]);
+    assert!(owned.owner().is_none());
+    assert!(owned.bind("bot").is_empty());
+    assert!(!owned.ledger().contains(&approval()));
+}
+
+#[test]
+fn queued_settlement_edits_follow_the_identity_and_not_a_connection() {
+    let mut owned: OwnedCards<&str, &str, i64> = OwnedCards::default();
+    owned.bind("bot");
+    owned.edits.push("message", "Approved".into());
+    owned.bind("bot");
+    let (id, _, _) = owned.edits.claim().pop().unwrap();
+    owned.edits.finish(id, false);
+    owned.bind("replacement");
+    assert!(owned.edits.claim().is_empty());
+    owned.edits.push("replacement-message", "Refused".into());
+    owned.retire();
+    assert!(owned.edits.claim().is_empty());
+}

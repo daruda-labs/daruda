@@ -61,7 +61,7 @@ fn request_one(cx: &mut TestAppContext) -> (ApprovalId, Receiver<ApprovalOutcome
 async fn an_approved_request_resolves_with_approved(cx: &mut TestAppContext) {
     let _outbound = setup(cx);
     let (id, rx) = request_one(cx);
-    assert!(cx.update(|cx| resolve(id, ApprovalChoice::Approved, cx)));
+    assert!(cx.update(|cx| resolve(id, ApprovalChoice::Approved, Answerer::Telegram, cx)));
     assert_eq!(rx.recv().await, Ok(ApprovalOutcome::Approved));
     cx.update(|cx| {
         assert_eq!(waiting_count_for_test(cx), 0);
@@ -76,9 +76,9 @@ async fn an_approved_request_resolves_with_approved(cx: &mut TestAppContext) {
 async fn a_refused_request_resolves_with_refused(cx: &mut TestAppContext) {
     let _outbound = setup(cx);
     let (id, rx) = request_one(cx);
-    assert!(cx.update(|cx| resolve(id, ApprovalChoice::Refused, cx)));
+    assert!(cx.update(|cx| resolve(id, ApprovalChoice::Refused, Answerer::Telegram, cx)));
     assert_eq!(rx.recv().await, Ok(ApprovalOutcome::Refused));
-    assert!(!cx.update(|cx| resolve(id, ApprovalChoice::Approved, cx)));
+    assert!(!cx.update(|cx| resolve(id, ApprovalChoice::Approved, Answerer::Telegram, cx)));
     cx.executor()
         .advance_clock(APPROVAL_TIMEOUT + Duration::from_secs(1));
     assert!(rx.is_empty());
@@ -104,7 +104,7 @@ async fn a_late_tap_after_timeout_does_not_resurrect_the_request(cx: &mut TestAp
         .advance_clock(APPROVAL_TIMEOUT + Duration::from_secs(1));
     assert_eq!(rx.recv().await, Ok(ApprovalOutcome::TimedOut));
     assert!(
-        !cx.update(|cx| resolve(id, ApprovalChoice::Approved, cx)),
+        !cx.update(|cx| resolve(id, ApprovalChoice::Approved, Answerer::Telegram, cx)),
         "a late tap settles nothing, and the caller must be told so"
     );
     assert!(rx.is_empty(), "nothing more may arrive");
@@ -116,9 +116,9 @@ async fn a_late_tap_after_timeout_does_not_resurrect_the_request(cx: &mut TestAp
 async fn a_second_tap_is_a_no_op(cx: &mut TestAppContext) {
     let _outbound = setup(cx);
     let (id, rx) = request_one(cx);
-    assert!(cx.update(|cx| resolve(id, ApprovalChoice::Approved, cx)));
+    assert!(cx.update(|cx| resolve(id, ApprovalChoice::Approved, Answerer::Telegram, cx)));
     assert!(
-        !cx.update(|cx| resolve(id, ApprovalChoice::Refused, cx)),
+        !cx.update(|cx| resolve(id, ApprovalChoice::Refused, Answerer::Telegram, cx)),
         "the second tap changed nothing"
     );
     assert_eq!(rx.recv().await, Ok(ApprovalOutcome::Approved));
@@ -137,7 +137,7 @@ async fn each_request_gets_its_own_answer(cx: &mut TestAppContext) {
         ids
     });
     assert_eq!(ids.len(), 2);
-    assert!(cx.update(|cx| resolve(ids[1], ApprovalChoice::Refused, cx)));
+    assert!(cx.update(|cx| resolve(ids[1], ApprovalChoice::Refused, Answerer::Telegram, cx)));
     assert_eq!(second.recv().await, Ok(ApprovalOutcome::Refused));
     assert!(first.is_empty(), "the other request is still waiting");
 }
@@ -149,7 +149,12 @@ async fn a_withdrawn_request_settles_once_and_forgets_its_tokens(cx: &mut TestAp
     cx.update(|cx| {
         assert!(withdraw(id, cx));
         assert!(!withdraw(id, cx));
-        assert!(!resolve(id, ApprovalChoice::Approved, cx));
+        assert!(!resolve(
+            id,
+            ApprovalChoice::Approved,
+            Answerer::Telegram,
+            cx
+        ));
         assert_eq!(waiting_count_for_test(cx), 0);
         assert_eq!(
             crate::telegram::global::pending_approval_tokens_for_test(cx),
@@ -256,7 +261,12 @@ async fn settling_forgets_the_cards_tokens(cx: &mut TestAppContext) {
             crate::telegram::global::pending_approval_tokens_for_test(cx) > 0,
             "the card is answerable while it waits"
         );
-        assert!(resolve(id, ApprovalChoice::Approved, cx));
+        assert!(resolve(
+            id,
+            ApprovalChoice::Approved,
+            Answerer::Telegram,
+            cx
+        ));
         assert_eq!(
             crate::telegram::global::pending_approval_tokens_for_test(cx),
             0,
@@ -296,7 +306,12 @@ async fn too_many_waiting_cards_refuses_rather_than_queueing(cx: &mut TestAppCon
 #[gpui::test]
 async fn resolving_an_unknown_id_does_nothing(cx: &mut TestAppContext) {
     let _outbound = setup(cx);
-    assert!(!cx.update(|cx| resolve(ApprovalId(9_999), ApprovalChoice::Approved, cx)));
+    assert!(!cx.update(|cx| resolve(
+        ApprovalId(9_999),
+        ApprovalChoice::Approved,
+        Answerer::Telegram,
+        cx
+    )));
     cx.update(|cx| assert_eq!(waiting_count_for_test(cx), 0));
 }
 
@@ -352,4 +367,88 @@ fn a_rejected_retry_queue_does_not_extend_the_deadline(cx: &mut TestAppContext) 
     cx.executor().advance_clock(Duration::from_secs(2));
     cx.run_until_parked();
     assert_eq!(answer.try_recv(), Ok(ApprovalOutcome::TimedOut));
+}
+
+/// A solicited request stays solicited when the pump re-offers it: the phone
+/// that asked must get its card even if its channel only connected later and
+/// the desk is still occupied.
+#[gpui::test]
+fn the_pump_reoffers_a_solicited_approval_regardless_of_presence(cx: &mut TestAppContext) {
+    let mut outgoing = cx.update(|cx| {
+        let outgoing = crate::remote_channel::global::tests::setup(cx);
+        cx.global_mut::<crate::remote_channel::global::RemoteChannels>()
+            .connections
+            .get_mut("work")
+            .unwrap()
+            .bot = None;
+        outgoing
+    });
+    let (id, _answer) = cx.update(|cx| request("Create worktree".into(), Delivery::Explicit, cx));
+    assert_eq!(outgoing.try_recv().unwrap().id, "personal");
+    assert!(outgoing.try_recv().is_err(), "work was still connecting");
+    cx.update(|cx| {
+        assert!(!crate::app_presence::is_away(cx));
+        cx.global_mut::<crate::remote_channel::global::RemoteChannels>()
+            .connections
+            .get_mut("work")
+            .unwrap()
+            .publish_bot(crate::remote_channel::global::tests::ready_bot());
+        relay_outstanding(cx);
+    });
+    assert_eq!(
+        outgoing.try_recv().unwrap().id,
+        "work",
+        "the only_when_away channel still owes the phone that asked its card"
+    );
+    cx.update(|cx| {
+        relay_outstanding(cx);
+        assert!(withdraw(id, cx));
+    });
+    assert!(outgoing.try_recv().is_err(), "offered once per channel");
+}
+
+/// The settled card names the surface that answered: a Slack answer may come
+/// from a desktop Slack client, so it must not read as "on phone".
+#[test]
+fn a_settled_card_names_the_surface_that_answered() {
+    let answered = |choice, by| Settlement::Answered { choice, by };
+    for (by, approved, refused, key) in [
+        (
+            Answerer::Desktop,
+            s::control::approval_approved_desktop(),
+            s::control::approval_refused_desktop(),
+            "desktop",
+        ),
+        (
+            Answerer::Telegram,
+            s::control::approval_approved_telegram(),
+            s::control::approval_refused_telegram(),
+            "telegram",
+        ),
+        (
+            Answerer::Slack,
+            s::control::approval_approved_slack(),
+            s::control::approval_refused_slack(),
+            "slack",
+        ),
+        (
+            Answerer::Discord,
+            s::control::approval_approved_discord(),
+            s::control::approval_refused_discord(),
+            "discord",
+        ),
+    ] {
+        assert_eq!(answered(ApprovalChoice::Approved, by).label(), approved);
+        assert_eq!(answered(ApprovalChoice::Refused, by).label(), refused);
+        assert_eq!(answered(ApprovalChoice::Approved, by).trace_key(), key);
+        assert_eq!(
+            answered(ApprovalChoice::Refused, by).outcome(),
+            ApprovalOutcome::Refused
+        );
+    }
+    assert_eq!(Settlement::TimedOut.trace_key(), "timeout");
+    assert_eq!(
+        Settlement::Withdrawn(Withdrawal::OrchestratorStop).outcome(),
+        ApprovalOutcome::Withdrawn
+    );
 }

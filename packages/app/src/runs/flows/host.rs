@@ -191,9 +191,8 @@ impl RunsHost {
                 _ => (None, Err(AnswerRefused::NotOpen)),
             }
         });
-        if let (Some(key), answer) = &answered
-            && *answer != Err(AnswerRefused::NotOpen)
-        {
+        // Only a question this call took down changes what anyone shows.
+        if let (Some(key), answer @ (Ok(()) | Err(AnswerRefused::Closed))) = &answered {
             Self::tell_windows(
                 key.clone(),
                 FlowChanged::AskClosed {

@@ -1,6 +1,6 @@
 //! Queue ownership and the off-foreground Telegram send loop.
 
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 
 use futures::StreamExt as _;
 use gpui::App;
@@ -8,7 +8,7 @@ use gpui::App;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 
-use crate::remote_channel::cards::{CardCompletion, CardId, CardLedger, SendClaim};
+use crate::remote_channel::cards::{CardCompletion, CardId, SendClaim};
 use crate::settings_store::SettingsStore;
 use crate::telegram::bridge::{Outbound, OutboundMsg, PaneRef};
 use crate::telegram::{client, keychain, trace};
@@ -23,18 +23,33 @@ pub(super) struct QueuedOutbound {
     pub card: Option<SendClaim>,
 }
 
+/// A sent card's message, editable by whichever bot serves its identity.
+#[derive(Clone)]
 pub(super) struct Receipt {
-    bot: Weak<ReadyBot>,
-    chat_id: i64,
+    owner: CardOwner,
     message_id: i64,
     original: String,
 }
 
-pub(super) struct OwnedCards {
-    generation: uuid::Uuid,
+/// The identity whose messages Telegram cards are: the bot, by its token, and
+/// the paired chat. Not the `ReadyBot` instance — a token revision or inbox
+/// reopen replaces that while the same bot keeps serving the same chat.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct CardOwner {
+    bot: String,
     chat_id: i64,
-    pub(super) ledger: CardLedger<Receipt>,
 }
+
+impl CardOwner {
+    pub(super) fn of(bot: &ReadyBot, chat_id: i64) -> Self {
+        Self {
+            bot: crate::remote_channel::lock::digest_of(&bot.token.token),
+            chat_id,
+        }
+    }
+}
+
+pub(super) type OwnedCards = crate::remote_channel::cards::OwnedCards<CardOwner, Receipt, i64>;
 
 #[cfg(test)]
 pub(crate) struct TestOutbox {
@@ -112,11 +127,7 @@ fn prepare(queued: QueuedOutbound, cx: &mut App) -> Option<Prepared> {
     let cfg = SettingsStore::global(cx).user_arc();
     let bridge = cx.global_mut::<TelegramBridge>();
     if let Some(card) = &queued.card
-        && !bridge
-            .cards
-            .borrow_mut()
-            .as_mut()
-            .is_some_and(|cards| cards.ledger.begin(card))
+        && !bridge.cards.get_mut().ledger_mut().begin(card)
     {
         return None;
     }
@@ -193,109 +204,162 @@ fn prepare(queued: QueuedOutbound, cx: &mut App) -> Option<Prepared> {
 
 fn discard(queued: &QueuedOutbound, cx: &mut App) {
     if let Some(card) = &queued.card {
-        let bridge = cx.global_mut::<TelegramBridge>();
-        if bridge
-            .cards
-            .borrow_mut()
-            .as_mut()
-            .is_some_and(|cards| cards.ledger.release(card))
-        {
-            bridge.core.routing.forget_card(&card.card);
-        }
+        release(card, cx);
     }
+}
+
+/// Give up a claim nothing was sent for, with the tokens minted for it.
+fn release(card: &SendClaim, cx: &mut App) {
+    let bridge = cx.global_mut::<TelegramBridge>();
+    if bridge.cards.get_mut().ledger_mut().release(card) {
+        bridge.core.routing.forget_card(&card.card);
+    }
+}
+
+/// The bot that may edit `receipt`'s message: the one serving its identity now.
+fn editor(receipt: &Receipt, cx: &App) -> Option<Arc<ReadyBot>> {
+    let bridge = cx.global::<TelegramBridge>();
+    let bot = bridge.bot.ready().filter(|_| bridge.bot.serves())?;
+    let config = &SettingsStore::global(cx).user().telegram;
+    let serves = config.enabled
+        && config.authorized_chat_id == Some(receipt.owner.chat_id)
+        && CardOwner::of(bot, receipt.owner.chat_id) == receipt.owner
+        && bridge.cards.borrow().owner() == Some(&receipt.owner);
+    serves.then(|| bot.clone())
 }
 
 pub(super) fn edit(receipt: Receipt, label: String, cx: &mut App) {
-    let Some(bot) = receipt.bot.upgrade() else {
-        return;
-    };
-    if !super::inbound::live_bot(&bot, Some(receipt.chat_id), keychain::revision(), cx) {
+    let cards = cx.global_mut::<TelegramBridge>().cards.get_mut();
+    if cards.owner() != Some(&receipt.owner) {
         return;
     }
-    #[cfg(test)]
-    if let Some(result) = crate::remote_channel::cards::tests::capture(
-        "telegram",
-        vec![receipt.message_id.to_string()],
-        &receipt.original,
-        &label,
-        cx,
-    ) {
-        if let Err(error) = result {
-            crate::remote_channel::log_error(
-                "Telegram settled card failed to edit",
-                &error,
-                "telegram.card.edit",
-            );
-        }
+    cards.note_settled(receipt.message_id);
+    cards.edits.push(receipt, label);
+    flush_edits(cx);
+}
+
+pub(super) fn flush_edits(cx: &mut App) {
+    let bridge = cx.global_mut::<TelegramBridge>();
+    if !bridge.bot.serves() {
         return;
     }
-    cx.spawn(async move |cx| {
-        let Some(bot) = receipt.bot.upgrade() else {
-            return;
-        };
-        if !cx.update(|cx| {
-            super::inbound::live_bot(&bot, Some(receipt.chat_id), keychain::revision(), cx)
-        }) {
-            return;
+    let pending = bridge.cards.get_mut().edits.claim();
+    for (attempt, receipt, label) in pending {
+        if editor(&receipt, cx).is_none() {
+            finish_edit(attempt, false, cx);
+            continue;
         }
-        let body =
-            crate::remote_channel::dispatch::target::compose_edit_body(&receipt.original, &label);
-        let result = cx
-            .background_executor()
-            .spawn(async move {
-                if bot.token.revision != keychain::revision() {
-                    return Ok(());
+        #[cfg(test)]
+        if let Some(result) = crate::remote_channel::cards::tests::capture(
+            "telegram",
+            vec![receipt.message_id.to_string()],
+            &receipt.original,
+            &label,
+            cx,
+        ) {
+            let edited = result.is_ok();
+            if let Err(error) = result {
+                crate::remote_channel::log_error(
+                    "Telegram settled card failed to edit",
+                    &error,
+                    "telegram.card.edit",
+                );
+            }
+            finish_edit(attempt, edited, cx);
+            continue;
+        }
+        cx.spawn(async move |cx| {
+            let bot = cx.update(|cx| {
+                if !cx
+                    .global::<TelegramBridge>()
+                    .cards
+                    .borrow()
+                    .edits
+                    .contains(attempt)
+                {
+                    return None;
                 }
-                client::edit_message_text(
-                    &bot.token.token,
-                    receipt.chat_id,
-                    receipt.message_id,
-                    &body,
-                )
-            })
-            .await;
-        if let Err(error) = result {
-            crate::remote_channel::log_error(
-                "Telegram settled card failed to edit",
-                &error,
-                "telegram.card.edit",
+                editor(&receipt, cx)
+            });
+            let Some(bot) = bot else {
+                cx.update(|cx| finish_edit(attempt, false, cx));
+                return;
+            };
+            let body = crate::remote_channel::dispatch::target::compose_edit_body(
+                &receipt.original,
+                &label,
             );
-        }
-    })
-    .detach();
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    if bot.token.revision != keychain::revision() {
+                        return Ok(false);
+                    }
+                    client::edit_message_text(
+                        &bot.token.token,
+                        receipt.owner.chat_id,
+                        receipt.message_id,
+                        &body,
+                    )
+                    .map(|()| true)
+                })
+                .await;
+            let edited = match result {
+                Ok(edited) => edited,
+                Err(error) => {
+                    crate::remote_channel::log_error(
+                        "Telegram settled card failed to edit",
+                        &error,
+                        "telegram.card.edit",
+                    );
+                    false
+                }
+            };
+            cx.update(|cx| finish_edit(attempt, edited, cx));
+        })
+        .detach();
+    }
+}
+
+fn finish_edit(attempt: uuid::Uuid, edited: bool, cx: &mut App) {
+    cx.global_mut::<TelegramBridge>()
+        .cards
+        .get_mut()
+        .edits
+        .finish(attempt, edited);
 }
 
 impl TelegramBridge {
-    pub(super) fn cards_for(
-        &self,
-        bot: &ReadyBot,
-        chat_id: i64,
-    ) -> std::cell::RefMut<'_, CardLedger<Receipt>> {
-        let mut slot = self.cards.borrow_mut();
-        if slot
-            .as_ref()
-            .is_none_or(|cards| cards.generation != bot.generation || cards.chat_id != chat_id)
-        {
-            *slot = Some(OwnedCards {
-                generation: bot.generation,
-                chat_id,
-                ledger: CardLedger::default(),
-            });
-        }
-        std::cell::RefMut::map(slot, |slot| &mut slot.as_mut().unwrap().ledger)
-    }
-
-    pub(super) fn sync_card_owner(cx: &App) {
+    /// Bind the card ledger to the identity now serving. The same bot and chat
+    /// keep every record; another identity can neither edit the old messages
+    /// nor receive their taps, so their callback tokens are forgotten with
+    /// them. Switching Telegram off or unpairing ends the identity the same
+    /// way. A bot that is only between claims keeps its records for its
+    /// return.
+    pub(super) fn sync_card_owner(cx: &mut App) {
         let Some(bridge) = cx.try_global::<Self>() else {
             return;
         };
         let config = &SettingsStore::global(cx).user().telegram;
-        if config.enabled
-            && let Some((bot, chat_id)) = bridge.bot.ready().zip(config.authorized_chat_id)
+        let paired = config.authorized_chat_id.filter(|_| config.enabled);
+        let owner = paired
+            .zip(bridge.bot.ready())
+            .map(|(chat_id, bot)| CardOwner::of(bot, chat_id));
+        let bridge = cx.global_mut::<Self>();
+        if owner
+            .as_ref()
+            .is_some_and(|owner| bridge.cards.get_mut().owner() != Some(owner))
+            || paired.is_none()
         {
-            drop(bridge.cards_for(bot, chat_id));
-        } else {
-            *bridge.cards.borrow_mut() = None;
+            bridge.core.routing.clear_settled_callbacks();
+        }
+        let forgotten = match (paired, owner) {
+            (None, _) => bridge.cards.get_mut().retire(),
+            (Some(_), Some(owner)) => bridge.cards.get_mut().bind(owner),
+            (Some(_), None) => return,
+        };
+        for card in forgotten {
+            bridge.core.routing.forget_card(&card);
         }
     }
 
@@ -304,12 +368,12 @@ impl TelegramBridge {
             return;
         }
         let bridge = cx.global_mut::<Self>();
-        bridge.core.routing.forget_card(card);
+        bridge.core.routing.settle_card(card);
         let edit_action = bridge
             .cards
-            .borrow_mut()
-            .as_mut()
-            .and_then(|cards| cards.ledger.settle(card, label.to_owned()));
+            .get_mut()
+            .ledger_mut()
+            .settle(card, label.to_owned());
         if let Some((receipt, label)) = edit_action {
             edit(receipt, label, cx);
         }
@@ -318,14 +382,7 @@ impl TelegramBridge {
     pub(crate) fn settle_permissions(pane: PaneRef, session: u64, label: &str, cx: &mut App) {
         let cards = cx
             .try_global::<Self>()
-            .map(|bridge| {
-                bridge
-                    .cards
-                    .borrow()
-                    .as_ref()
-                    .map(|cards| cards.ledger.permissions(pane, session))
-                    .unwrap_or_default()
-            })
+            .map(|bridge| bridge.cards.borrow().ledger().permissions(pane, session))
             .unwrap_or_default();
         for card in cards {
             Self::settle_card(&card, label, cx);
@@ -333,6 +390,10 @@ impl TelegramBridge {
     }
 }
 
+/// Record what a send came to. A card that reached the chat is kept as sent
+/// even if its `ReadyBot` was replaced meanwhile: the ledger's claim decides
+/// whether it still belongs to this identity, and a same-bot replacement can
+/// still edit it, so it must not be offered again.
 fn finish(
     bot: &Arc<ReadyBot>,
     chat_id: i64,
@@ -342,33 +403,26 @@ fn finish(
     original: String,
     cx: &mut App,
 ) {
-    if !super::inbound::live_bot(bot, Some(chat_id), keychain::revision(), cx) {
-        if let Some(card) = card
-            && let Some(cards) = cx.global::<TelegramBridge>().cards.borrow_mut().as_mut()
-        {
-            cards.ledger.release(&card);
+    let live = super::inbound::live_bot(bot, Some(chat_id), keychain::revision(), cx);
+    if !live && message_id.is_none() {
+        // Nothing went out: the bot was retired before the send.
+        if let Some(card) = &card {
+            release(card, cx);
         }
         return;
     }
     let orchestrator = crate::orchestrator::pane(cx);
     let bridge = cx.global_mut::<TelegramBridge>();
-    if let Some((pane, id)) = pane.zip(message_id) {
+    if live && let Some((pane, id)) = pane.zip(message_id) {
         bridge.core.record_delivered(id, pane, orchestrator);
     }
     if let Some(card) = card {
         let receipt = message_id.map(|message_id| Receipt {
-            bot: Arc::downgrade(bot),
-            chat_id,
+            owner: CardOwner::of(bot, chat_id),
             message_id,
             original,
         });
-        let completion = bridge
-            .cards
-            .borrow_mut()
-            .as_mut()
-            .map_or(CardCompletion::Ignored, |cards| {
-                cards.ledger.complete(&card, receipt)
-            });
+        let completion = bridge.cards.get_mut().ledger_mut().complete(&card, receipt);
         if matches!(completion, CardCompletion::Unconfirmed) {
             bridge.core.routing.forget_card(&card.card);
         }
@@ -430,6 +484,15 @@ pub(super) fn spawn_send_task(
     mut outbound_rx: futures::channel::mpsc::UnboundedReceiver<QueuedOutbound>,
     cx: &mut App,
 ) {
+    cx.spawn(async move |cx| {
+        loop {
+            cx.background_executor()
+                .timer(crate::remote_channel::cards::RETRY_INTERVAL)
+                .await;
+            cx.update(flush_edits);
+        }
+    })
+    .detach();
     cx.spawn(async move |cx| {
         while let Some(queued) = outbound_rx.next().await {
             trace::delivery("queue.drained", || {

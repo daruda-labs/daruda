@@ -38,31 +38,48 @@ impl Workspace {
     /// The registry is what makes the last case possible: a second window has
     /// no slot of its own, so reading `orchestrator.chat` alone would have it
     /// claim "not started" about a session that is working.
+    ///
+    /// A waiting approval or flow question is app-level, so every window that
+    /// shows a chip — or would, but for hosting elsewhere — says so. It never
+    /// creates a chip the feature switch has taken away: clicking that one
+    /// could only fail to start a session.
     pub(in crate::workspace) fn orchestrator_chip_state(
         &self,
         cx: &Context<Self>,
     ) -> Option<super::status_bar::orchestrator_chip::OrchestratorChipState> {
         use super::status_bar::orchestrator_chip::OrchestratorChipState;
 
+        let config = crate::settings_store::SettingsStore::global(cx).user_arc();
+        if !config.orchestrator.enabled {
+            return None;
+        }
+        let own = match self.orchestrator.chat.as_ref() {
+            Some(chat) => {
+                let view = chat.view.read(cx);
+                Some(OrchestratorChipState::from_activity(
+                    view.activity_state(),
+                    view.status(),
+                ))
+            }
+            None => {
+                // From the mirror `apply_config` keeps: `Config::resolved_agents()`
+                // deep-clones the catalog, and this runs on every render.
+                crate::orchestrator::config::resolve_from(
+                    &config.orchestrator,
+                    &self.mirrors.agents,
+                )?;
+                // By entity id, never by reading the registry's handle back: this
+                // runs inside the render of the workspace it may be naming
+                // (pitfall 5).
+                let hosted_elsewhere = crate::window_registry::WindowRegistry::orchestrator(cx)
+                    .is_some_and(|(_, host)| host.entity_id() != cx.entity_id());
+                (!hosted_elsewhere).then_some(OrchestratorChipState::NotStarted)
+            }
+        };
         if crate::control::approval::has_waiting(cx) || crate::runs::RunsHost::has_flow_asks(cx) {
             return Some(OrchestratorChipState::AwaitingPermission);
         }
-        if let Some(chat) = self.orchestrator.chat.as_ref() {
-            let view = chat.view.read(cx);
-            return Some(OrchestratorChipState::from_activity(
-                view.activity_state(),
-                view.status(),
-            ));
-        }
-        // From the mirror `apply_config` keeps: `Config::resolved_agents()`
-        // deep-clones the catalog, and this runs on every render.
-        let config = crate::settings_store::SettingsStore::global(cx).user_arc();
-        crate::orchestrator::config::resolve_from(&config.orchestrator, &self.mirrors.agents)?;
-        // By entity id, never by reading the registry's handle back: this runs
-        // inside the render of the workspace it may be naming (pitfall 5).
-        let hosted_elsewhere = crate::window_registry::WindowRegistry::orchestrator(cx)
-            .is_some_and(|(_, host)| host.entity_id() != cx.entity_id());
-        (!hosted_elsewhere).then_some(OrchestratorChipState::NotStarted)
+        own
     }
 
     #[cfg(feature = "screenshot")]
@@ -178,7 +195,13 @@ impl Workspace {
     pub(crate) fn toggle_orchestrator_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.orchestrator_tab_is_visible() {
             self.hide_orchestrator_tab(window, cx);
-        } else if self.orchestrator.chat.is_some() && !self.show_orchestrator_tab(window, cx) {
+        } else {
+            self.reveal_orchestrator_tab(window, cx);
+        }
+    }
+
+    pub(crate) fn reveal_orchestrator_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.orchestrator.chat.is_some() && !self.show_orchestrator_tab(window, cx) {
             self.report_error(
                 daruda_store::observability::error_report::ErrorReport::new(
                     crate::surface::strings::orchestrator::tab_unavailable(),

@@ -2,7 +2,7 @@
 
 use super::backoff::ErrorBackoff;
 use super::bridge::{ApprovalPrompt, BridgePing, MessageTail, Outbound, PaneRef, RoutingCore};
-use super::cards::CardLedger;
+use super::cards::OwnedCards;
 use super::pairing::Pairing;
 use super::runtime::{self, BotSession, Status, Worker, WorkerEvent};
 use crate::settings_store::SettingsStore;
@@ -22,7 +22,7 @@ pub struct Connection {
     pub config: ChannelConfig,
     pub generation: uuid::Uuid,
     pub core: RoutingCore<String>,
-    cards: RefCell<CardLedger<outbound::Receipt>>,
+    cards: RefCell<OwnedCards<String, outbound::Receipt, String>>,
     pub status: Status,
     pub bot: Option<Arc<BotSession>>,
     pairing: Option<Pairing>,
@@ -69,6 +69,40 @@ impl Connection {
         self.bot.as_ref().is_some_and(|bot| bot.is_live())
             && self.config.recipient.is_some()
             && self.status.holds_claim()
+    }
+
+    /// Serve with the bot the worker published. The one place `bot` gains a
+    /// session, so the card ledger is always bound to the identity that bot
+    /// speaks as: the same bot keeps its cards across reconnects and inbox
+    /// recovery, and another bot's arrival forgets the old cards' callback
+    /// tokens with their records.
+    pub(crate) fn publish_bot(&mut self, bot: Arc<BotSession>) {
+        if self
+            .bot
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, &bot))
+        {
+            return;
+        }
+        if let Some(previous) = self.bot.take() {
+            previous.revoke();
+        }
+        let owner = super::lock::digest_of(&bot.credentials.bot);
+        if self.cards.get_mut().owner() != Some(&owner) {
+            self.core.clear_settled_callbacks();
+        }
+        for card in self.cards.get_mut().bind(owner) {
+            self.core.forget_card(&card);
+        }
+        self.bot = Some(bot);
+    }
+
+    /// Withdraw the bot without forgetting its cards: the same bot may serve
+    /// again, and its messages are still the ones on the person's screen.
+    pub(super) fn revoke_bot(&mut self) {
+        if let Some(bot) = self.bot.take() {
+            bot.revoke();
+        }
     }
 }
 
@@ -236,7 +270,7 @@ impl RemoteChannels {
             return false;
         };
         let card = match outbound.card_id() {
-            Some(id) => match connection.cards.borrow_mut().claim(id) {
+            Some(id) => match connection.cards.borrow_mut().ledger_mut().claim(id) {
                 Some(claim) => Some(claim),
                 None => return false,
             },
@@ -252,7 +286,7 @@ impl RemoteChannels {
         });
         if let Err(error) = &result {
             if let Some(claim) = card {
-                connection.cards.borrow_mut().release(&claim);
+                connection.cards.borrow_mut().ledger_mut().release(&claim);
             }
             super::log_error(
                 "Remote outgoing queue closed",
@@ -299,7 +333,8 @@ impl RemoteChannels {
             };
             let Some(card) = connection
                 .cards
-                .borrow_mut()
+                .get_mut()
+                .ledger_mut()
                 .claim(super::cards::CardId::Approval(id))
             else {
                 continue;
@@ -325,7 +360,7 @@ impl RemoteChannels {
                 Err(error) => {
                     if let Some(connection) = bridge.connections.get_mut(&key) {
                         connection.core.forget_pending_approval(id);
-                        connection.cards.borrow_mut().release(&card);
+                        connection.cards.get_mut().ledger_mut().release(&card);
                     }
                     super::log_error(
                         "Remote approval queue closed",
@@ -362,9 +397,27 @@ impl RemoteChannels {
             *pending -= 1;
             return;
         }
-        bridge.connections.remove(id);
+        // A credential rewrite usually keeps the bot, and its cards are still on
+        // the person's screen: carry their records and callback tokens to the
+        // replacement. `publish_bot` drops them if a different bot turns up.
+        let carried = bridge.connections.remove(id).map(|mut old| {
+            (
+                old.config.kind,
+                old.config.recipient.clone(),
+                std::mem::take(&mut old.core),
+                std::mem::take(&mut old.cards),
+            )
+        });
         bridge.applied = None;
         reconcile(cx);
+        if let Some((kind, recipient, core, cards)) = carried
+            && let Some(connection) = cx.global_mut::<Self>().connections.get_mut(id)
+            && connection.config.kind == kind
+            && connection.config.recipient == recipient
+        {
+            connection.core = core;
+            connection.cards = cards;
+        }
     }
 
     /// Take a bot whose inbox writer failed out of service, and after this
@@ -389,7 +442,6 @@ impl RemoteChannels {
             return;
         }
         connection.bot = None;
-        connection.cards = RefCell::default();
         connection.status = Status::Failed;
         let delay = connection.claim_backoff.delay();
         let id = id.to_owned();
@@ -440,11 +492,8 @@ impl RemoteChannels {
                 claim_backoff: ErrorBackoff::new(),
             });
         connection.generation = uuid::Uuid::new_v4();
-        connection.cards = RefCell::default();
         connection.config = config;
-        if let Some(bot) = connection.bot.take() {
-            bot.revoke();
-        }
+        connection.revoke_bot();
         let pending = match connection.worker {
             WorkerState::UpdatingCredential { pending } => pending + 1,
             WorkerState::Idle | WorkerState::Running { .. } => 1,

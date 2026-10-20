@@ -31,6 +31,8 @@ fn callback(update_id: i64, chat_id: i64, callback_id: &str, data: &str) -> Upda
             chat_id,
             callback_id: callback_id.to_string(),
             data: data.to_string(),
+            message_id: 1,
+            message_text: "card".to_string(),
         },
     }
 }

@@ -29,6 +29,10 @@ pub enum IncomingKind {
     },
     Callback {
         data: String,
+        /// The tapped message, so a button that names nothing live can be
+        /// taken off it.
+        message_id: String,
+        original: String,
     },
 }
 

@@ -150,36 +150,52 @@ selects the chat and records its ping. An unsolicited announcement is a Notice,
 which changes neither selection nor reply-to/last-ping routing.
 
 The remote-channel facade fans out Flow questions and card settlement across
-Telegram, Slack and Discord. Telegram observes settings at process scope and
-reconciles card ownership when bot ownership changes; Workspace only updates
-its pane-local permission presentation.
+Telegram, Slack and Discord. Card ledgers belong to a remote identity (the bot
+and its recipient), not a session: reconnects, inbox recovery, token revisions
+and same-bot credential rewrites keep sent cards editable and are not
+re-offered. Up to 64 settlement receipts per identity survive an unavailable
+editor or failed edit; they retry on reconnection and every 15 seconds until
+successful or evicted. A different bot, or Telegram unpairing or disabling,
+drops the ledger, pending edits and callback tombstones with its live tokens;
+a waiting approval is then offered once to the new identity. The 64 most recent
+settled callbacks identify taps even before a send returns its message ids;
+the 64 most recent settled message ids prevent competing stale edits. A stale
+tap on an untracked message loses its buttons. Workspace only updates its
+pane-local permission presentation.
 
 `control/approval` owns the process-wide pending decision. The orchestrator's
 host-owned card strip remains answerable without a remote channel. Desktop and
-eligible remote cards share the first answer; settlement edits remote cards
-and defers the desktop update, notifying cached views and all window chips.
-Stop, MCP cancellation and disconnect withdraw outstanding approvals. The
-initial deadline is 300 seconds; a freshly queued or delivered phone card
-extends it to the later of the current deadline and that moment plus 120
-seconds. A 15-second presence pump offers each outstanding approval once to
-each owner/channel that has never queued it. Timeout means no answer, never
-consent or permission to retry or bypass the gate. Remote card ledgers retain
-settlement while a send is in flight, then edit its returned message ids.
-The ledger classifies send completion as ignored, delivered, unconfirmed or
-requiring an edit. The common coordinator extends approval deadlines only for
-a fresh delivery. Duplicate or retired completions neither extend deadlines nor
-discard current buttons. Transports keep their own receipts, token cleanup and
+eligible remote cards share the first answer; settlement edits remote cards and
+defers the desktop update, notifying cached views and all window chips. Stop,
+MCP cancellation and disconnect withdraw outstanding approvals. The initial
+deadline is 300 seconds; a freshly queued or delivered phone card extends it to
+the later of the current deadline and that moment plus 120 seconds. A 15-second
+presence pump offers each outstanding approval once to each owner/channel that
+has never queued it, keeping a solicited request explicit and re-reading
+presence for the rest. Settled cards name the surface that answered (desktop,
+Telegram, Slack or Discord). Timeout means no answer, never consent or
+permission to retry or bypass the gate. Remote card ledgers retain settlement
+while a send is in flight, then edit its returned message ids. The ledger
+classifies send completion as ignored, delivered, unconfirmed or requiring an
+edit. The common coordinator extends approval deadlines only for a fresh
+delivery. Duplicate or retired completions neither extend deadlines nor discard
+current buttons. Transports keep their own receipts, token cleanup and
 message-edit implementations.
 
 `permission = ask` flows can start through control; profile selection is still
 refused. Runtime questions appear in desktop modals or inline flow rows and on
 eligible remote channels with every original choice. Tokens identify the full
 `run_dir` and `ask_id`; a fresh directory can restart ids, while resume in the
-same directory retains the durable monotonic counter. The first answer wins,
-and `FlowChanged::AskClosed` settles remote cards and closes stale desktop
-questions. Modal Stop also checks that its original question is still open.
-Process-owned dispatch can deliver and answer questions without a window.
-Waiting state updates chips in all windows; native waiting notifications obey
+same directory retains the durable monotonic counter. The first answer wins (a
+later one is refused as already answered). The bounded settled callback table
+keeps late flow taps routable to their original question after its live tokens
+are removed, and `FlowChanged::AskClosed` settles
+remote cards and closes stale desktop questions. Modal Stop also checks that
+its original question is still open. Process-owned dispatch can deliver and
+answer questions without a window. Waiting state updates chips in all windows
+where the orchestrator feature is on, including non-host windows. Clicking a
+non-host chip reveals the host's tab and activates that window; switching the
+feature off hides chips even while a session exists. Native waiting notifications obey
 preferences and visibility without stealing focus. Removing settled OS alerts,
 app-exit card cleanup and restart durability remain outside this contract.
 

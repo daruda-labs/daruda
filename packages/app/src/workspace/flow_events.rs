@@ -217,7 +217,7 @@ impl Workspace {
             return;
         };
         match RunsHost::answer_flow_ask(&worktree, run_dir, ask_id, decision, cx) {
-            Ok(()) | Err(AnswerRefused::NotOpen) => {}
+            Ok(()) | Err(AnswerRefused::NotOpen | AnswerRefused::AlreadyAnswered) => {}
             Err(AnswerRefused::Closed) => self.report_error(
                 ErrorReport::new(s::flow::ask_closed())
                     .severity(ErrorSeverity::Warning)

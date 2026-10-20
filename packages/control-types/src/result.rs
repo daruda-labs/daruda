@@ -530,6 +530,8 @@ pub enum ControlError {
         reason: FlowNotStartedReason,
     },
     /// The flow declares profiles, requiring selection in a desktop dialog.
+    /// Runtime permission questions do not refuse a start; a profile choice
+    /// is the only input the control surface cannot supply.
     FlowNeedsInteraction {
         name: String,
     },
@@ -636,7 +638,9 @@ impl std::fmt::Display for ControlError {
             Self::FlowNotStarted { name, reason } => {
                 write!(f, "flow did not start: {name}: {reason}")
             }
-            Self::FlowNeedsInteraction { name } => write!(f, "flow needs desktop input: {name}"),
+            Self::FlowNeedsInteraction { name } => {
+                write!(f, "flow needs a profile chosen on the desktop: {name}")
+            }
             Self::RunMismatch => write!(f, "the requested run no longer owns this worktree"),
             Self::NoActiveLane => write!(f, "no active lane"),
             Self::OrchestratorDisabled => write!(f, "orchestrator is disabled"),

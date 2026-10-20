@@ -105,6 +105,36 @@ fn answering_takes_down_only_the_question_it_names() {
     assert_eq!(open_ids(&view), [1]);
 }
 
+/// A second answer to a question that was answered says so, rather than
+/// reading as a question the run stopped waiting for.
+#[test]
+fn a_second_answer_is_refused_as_already_answered() {
+    let mut view = view();
+    let (question, _rx) = ask(1, "design");
+    view.park(question);
+    assert_eq!(
+        view.answer(1, daruda_acp::PermissionDecision::Cancelled),
+        Ok(())
+    );
+    assert_eq!(
+        view.answer(1, daruda_acp::PermissionDecision::Cancelled),
+        Err(AnswerRefused::AlreadyAnswered)
+    );
+}
+
+/// Questions taken down unanswered are not "already answered".
+#[test]
+fn a_withdrawn_question_is_not_already_answered() {
+    let mut view = view();
+    let (question, _rx) = ask(1, "design");
+    view.park(question);
+    view.withdraw_questions();
+    assert_eq!(
+        view.answer(1, daruda_acp::PermissionDecision::Cancelled),
+        Err(AnswerRefused::NotOpen)
+    );
+}
+
 /// The engine abandoned the question, so the answer reaches nobody — and
 /// says so — and the question does not stay up.
 #[test]

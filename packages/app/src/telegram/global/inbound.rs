@@ -10,7 +10,7 @@
 //! neither one's changes should conflict with the other's.
 
 use crate::remote_channel::backoff::ErrorBackoff;
-use crate::remote_channel::dispatch;
+use crate::remote_channel::dispatch::{self, target::compose_edit_body};
 use daruda_store::inbox::InboxReleased;
 use futures::StreamExt as _;
 use futures::channel::mpsc::{UnboundedSender, unbounded};
@@ -180,24 +180,14 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
                     )
                 });
                 let dispatched = cx.update(|cx| dispatch_update(&bot, chat_id, update, cx));
-                let Some((effect, answer_callback_id)) = dispatched else {
+                let Some((effect, tapped)) = dispatched else {
                     continue;
                 };
                 let effect = effect.settled().await;
                 // Queued, not awaited: this loop is the only thing listening
                 // for the next message, and one queue keeps the answers in
                 // the order the messages came.
-                let answer = match (answer_callback_id, effect) {
-                    (Some(callback_id), dispatch::Effect::Feedback { label, .. }) => {
-                        Some(Answer::Ack { callback_id, label })
-                    }
-                    (Some(callback_id), _) => Some(Answer::Ack {
-                        callback_id,
-                        label: s::notification::telegram_permission_stale(),
-                    }),
-                    (None, dispatch::Effect::Reply(reply)) => Some(Answer::Reply(reply)),
-                    _ => None,
-                };
+                let answer = answer_for(effect, tapped);
                 if let Some(answer) = answer
                     && answers
                         .unbounded_send((Arc::downgrade(&bot), chat_id, answer))
@@ -226,7 +216,64 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
 /// What the phone is owed for one routed update, sent by [`spawn_answer_task`].
 enum Answer {
     Reply(crate::remote_channel::command::RenderedReply),
-    Ack { callback_id: String, label: String },
+    Ack {
+        callback_id: String,
+        label: String,
+    },
+    /// Answer the tap and take the dead buttons off its message.
+    AckAndEdit {
+        callback_id: String,
+        message: UntrackedMessage,
+        label: String,
+    },
+}
+
+/// A tapped button: the callback to answer, and its message when no
+/// settlement edit owns it.
+struct Tapped {
+    callback_id: String,
+    untracked: Option<UntrackedMessage>,
+}
+
+/// A tapped message no settlement will ever edit — a card from an earlier
+/// process, or one whose tokens were dropped. Unless a tap takes its buttons
+/// off, they stay tappable forever.
+struct UntrackedMessage {
+    chat_id: i64,
+    message_id: i64,
+    text: String,
+}
+
+/// Live cards settle through their shared ledger; an answer rewrites only a
+/// tapped card the ledger does not own.
+fn answer_for(effect: dispatch::Effect, tapped: Option<Tapped>) -> Option<Answer> {
+    let stale = |tapped: Tapped, label: String| match tapped.untracked {
+        Some(message) => Answer::AckAndEdit {
+            callback_id: tapped.callback_id,
+            message,
+            label,
+        },
+        None => Answer::Ack {
+            callback_id: tapped.callback_id,
+            label,
+        },
+    };
+    match (tapped, effect) {
+        (
+            Some(tapped),
+            dispatch::Effect::Feedback {
+                label,
+                edit: dispatch::Edit::StaleCard,
+            },
+        ) => Some(stale(tapped, label)),
+        (Some(tapped), dispatch::Effect::Feedback { label, .. }) => Some(Answer::Ack {
+            callback_id: tapped.callback_id,
+            label,
+        }),
+        (Some(tapped), _) => Some(stale(tapped, s::notification::telegram_permission_stale())),
+        (None, dispatch::Effect::Reply(reply)) => Some(Answer::Reply(reply)),
+        _ => None,
+    }
 }
 
 /// One task sends every answer in arrival order, so a reply to an earlier
@@ -254,6 +301,14 @@ fn spawn_answer_task(cx: &mut App) -> UnboundedSender<(Weak<ReadyBot>, Option<i6
                 }
                 Answer::Ack { callback_id, label } => {
                     answer_only(cx, token, callback_id, &label).await
+                }
+                Answer::AckAndEdit {
+                    callback_id,
+                    message,
+                    label,
+                } => {
+                    answer_only(cx, token, callback_id, &label).await;
+                    strip_buttons(cx, token, message, &label).await;
                 }
             }
         }
@@ -335,6 +390,7 @@ async fn claim_bot(
         }
         cx.global_mut::<TelegramBridge>().bot = ownership;
         TelegramBridge::sync_card_owner(cx);
+        super::outbound::flush_edits(cx);
         result
     })
 }
@@ -358,10 +414,28 @@ fn dispatch_update(
     chat_id: Option<i64>,
     update: client::Update,
     cx: &mut App,
-) -> Option<(dispatch::Effect, Option<String>)> {
+) -> Option<(dispatch::Effect, Option<Tapped>)> {
     if !live_bot(bot, chat_id, keychain::revision(), cx) {
         return None;
     }
+    // Only a message in the paired chat is ours to rewrite.
+    let tapped_message = match &update.kind {
+        client::UpdateKind::Callback {
+            chat_id: from,
+            message_id,
+            message_text,
+            ..
+        } if Some(*from) == chat_id => Some(UntrackedMessage {
+            chat_id: *from,
+            message_id: *message_id,
+            text: message_text.clone(),
+        }),
+        _ => None,
+    };
+    let callback_data = match &update.kind {
+        client::UpdateKind::Callback { data, .. } => Some(data.clone()),
+        _ => None,
+    };
     let config = SettingsStore::global(cx).user_arc();
     let core = &mut cx.global_mut::<TelegramBridge>().core;
     core.set_enabled(config.telegram.enabled);
@@ -397,7 +471,32 @@ fn dispatch_update(
         }
         dispatch::handle_in_app(aimed, &dispatch::Target::Telegram, cx)
     };
-    Some((effect, answer_callback_id))
+    if let Some(message) = &tapped_message {
+        let bridge = cx.global_mut::<TelegramBridge>();
+        if matches!(
+            &effect,
+            dispatch::Effect::Feedback {
+                edit: dispatch::Edit::ManagedCard,
+                ..
+            }
+        ) || callback_data
+            .as_ref()
+            .is_some_and(|data| bridge.core.routing.is_settled_callback(data))
+        {
+            // A tap can identify a sent message before its send response arrives.
+            bridge.cards.get_mut().note_settled(message.message_id);
+        }
+    }
+    let tapped = answer_callback_id.map(|callback_id| Tapped {
+        callback_id,
+        untracked: tapped_message.filter(|message| {
+            cx.global::<TelegramBridge>()
+                .cards
+                .borrow()
+                .untracked(&message.message_id)
+        }),
+    });
+    Some((effect, tapped))
 }
 
 async fn claim_update(
@@ -465,6 +564,44 @@ async fn finish_claim_update(
 
 fn release_bot(cx: &mut gpui::AsyncApp) {
     cx.update(|cx| cx.global_mut::<TelegramBridge>().release_claim());
+}
+
+/// Rewrite a tapped message to drop its dead buttons and append why. Best
+/// effort: the answer was already given, and a failure only leaves the
+/// buttons that were there.
+async fn strip_buttons(
+    cx: &mut gpui::AsyncApp,
+    token: &str,
+    message: UntrackedMessage,
+    label: &str,
+) {
+    let UntrackedMessage {
+        chat_id,
+        message_id,
+        text,
+    } = message;
+    let body = compose_edit_body(&text, label);
+    let token = token.to_string();
+    let edited = cx
+        .background_executor()
+        .spawn(async move { client::edit_message_text(&token, chat_id, message_id, &body) })
+        .await;
+    trace::delivery("edit_message", || {
+        format!(
+            "chat_id={chat_id} message_id={message_id} ok={}",
+            edited.is_ok()
+        )
+    });
+    if let Err(error) = edited {
+        LogWriter::log(
+            ErrorReport::new("Telegram editMessageText failed")
+                .severity(ErrorSeverity::Info)
+                .from_error(&error)
+                .at(file!(), line!())
+                .dedup("telegram.edit_message")
+                .build(),
+        );
+    }
 }
 
 #[cfg(test)]

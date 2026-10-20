@@ -186,6 +186,11 @@ fn parse(event: &Value) -> Option<Incoming> {
             data.get("user").unwrap_or(&data["member"]["user"]),
             IncomingKind::Callback {
                 data: data["data"]["custom_id"].as_str()?.to_owned(),
+                message_id: data["message"]["id"].as_str()?.to_owned(),
+                original: data["message"]["content"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned(),
             },
         ),
         _ => return None,

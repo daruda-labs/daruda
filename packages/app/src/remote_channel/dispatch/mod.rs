@@ -48,6 +48,27 @@ impl Target {
         }
     }
 
+    /// The surface a tap on this recipient's card came from. `None` once the
+    /// connection is gone, like [`Self::state`].
+    fn answerer(&self, cx: &App) -> Option<crate::control::approval::Answerer> {
+        use crate::control::approval::Answerer;
+        match self {
+            Self::Telegram => Some(Answerer::Telegram),
+            Self::Remote(id) => {
+                let kind = cx
+                    .try_global::<super::global::RemoteChannels>()?
+                    .connections
+                    .get(id)?
+                    .config
+                    .kind;
+                Some(match kind {
+                    daruda_config::remote::ChannelKind::Slack => Answerer::Slack,
+                    daruda_config::remote::ChannelKind::Discord => Answerer::Discord,
+                })
+            }
+        }
+    }
+
     /// Forget a gone pane on this recipient's routing, then hand back the
     /// table the reply renders against.
     fn forget<'a>(
@@ -104,8 +125,13 @@ impl Effect {
 
 #[derive(PartialEq, Eq)]
 pub enum Edit {
+    /// The buttons stay usable, as on a listing.
     KeepButtons,
+    /// The card's ledger edits it when its decision settles.
     ManagedCard,
+    /// The token named nothing live. Unless a settlement edit owns the
+    /// message, its buttons are taken off so they stop inviting taps.
+    StaleCard,
 }
 
 #[cfg(test)]
@@ -185,7 +211,10 @@ pub(crate) fn handle_in_app(aimed: Aimed, target: &Target, cx: &mut App) -> Effe
             })
         }
         InboundAction::ResolveApproval { id, choice } => {
-            let applied = crate::control::approval::resolve(id, choice, cx);
+            let Some(by) = target.answerer(cx) else {
+                return Effect::None;
+            };
+            let applied = crate::control::approval::resolve(id, choice, by, cx);
             let label = match (applied, choice) {
                 (false, _) => s::control::approval_already_answered(),
                 (true, crate::control::approval::ApprovalChoice::Approved) => {
@@ -214,21 +243,16 @@ pub(crate) fn handle_in_app(aimed: Aimed, target: &Target, cx: &mut App) -> Effe
                     daruda_acp::PermissionDecision::Reject { option_id }
                 }
             };
-            let applied =
-                crate::runs::RunsHost::answer_flow_ask(&worktree, &run_dir, ask_id, decision, cx)
-                    .is_ok();
+            let answered =
+                crate::runs::RunsHost::answer_flow_ask(&worktree, &run_dir, ask_id, decision, cx);
             Effect::Feedback {
-                label: if applied {
-                    s::flow::ask_answered()
-                } else {
-                    s::flow::ask_closed()
-                },
+                label: flow_answer_label(answered),
                 edit: Edit::ManagedCard,
             }
         }
         InboundAction::StaleApproval => Effect::Feedback {
             label: s::control::approval_already_answered(),
-            edit: Edit::KeepButtons,
+            edit: Edit::StaleCard,
         },
         InboundAction::StaleListing => Effect::Feedback {
             label: s::control::listing_stale(),
@@ -237,6 +261,16 @@ pub(crate) fn handle_in_app(aimed: Aimed, target: &Target, cx: &mut App) -> Effe
         InboundAction::Ignore | InboundAction::Unsupported | InboundAction::Paired { .. } => {
             Effect::None
         }
+    }
+}
+
+/// What a tap on a flow question's button is told.
+fn flow_answer_label(answered: Result<(), crate::runs::AnswerRefused>) -> String {
+    use crate::runs::AnswerRefused;
+    match answered {
+        Ok(()) => s::flow::ask_answered(),
+        Err(AnswerRefused::AlreadyAnswered) => s::flow::ask_already_answered(),
+        Err(AnswerRefused::NotOpen | AnswerRefused::Closed) => s::flow::ask_closed(),
     }
 }
 
@@ -494,6 +528,48 @@ mod tests {
             }
         }
         assert_eq!(notices, vec![expected]);
+    }
+
+    /// An approval tap is settled under the surface it came from, so the card
+    /// says "in Slack" rather than "on phone" for a desktop Slack client.
+    #[gpui::test]
+    fn a_tap_is_attributed_to_its_channel_kind(cx: &mut gpui::TestAppContext) {
+        use crate::control::approval::Answerer;
+        cx.update(|cx| {
+            let _outgoing = crate::remote_channel::global::tests::setup(cx);
+            assert_eq!(
+                super::Target::Remote("work".into()).answerer(cx),
+                Some(Answerer::Slack)
+            );
+            assert_eq!(
+                super::Target::Remote("personal".into()).answerer(cx),
+                Some(Answerer::Discord)
+            );
+            assert_eq!(
+                super::Target::Telegram.answerer(cx),
+                Some(Answerer::Telegram)
+            );
+            assert_eq!(super::Target::Remote("missing".into()).answerer(cx), None);
+        });
+    }
+
+    /// A tap on a flow question answered elsewhere is told so, not that the
+    /// flow stopped waiting for it.
+    #[test]
+    fn a_late_flow_answer_names_why_it_was_not_used() {
+        use crate::runs::AnswerRefused;
+        use crate::surface::strings as s;
+        assert_eq!(super::flow_answer_label(Ok(())), s::flow::ask_answered());
+        assert_eq!(
+            super::flow_answer_label(Err(AnswerRefused::AlreadyAnswered)),
+            s::flow::ask_already_answered()
+        );
+        for refused in [AnswerRefused::NotOpen, AnswerRefused::Closed] {
+            assert_eq!(
+                super::flow_answer_label(Err(refused)),
+                s::flow::ask_closed()
+            );
+        }
     }
 
     #[gpui::test]

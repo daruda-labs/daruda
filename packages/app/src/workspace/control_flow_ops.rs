@@ -84,7 +84,7 @@ impl Workspace {
                     name: name.to_string(),
                 })?;
         let label = flow_label(&found.path);
-        if needs_desktop_answer(&found.path) {
+        if needs_profile_choice(&found.path) {
             return Err(ControlError::FlowNeedsInteraction { name: label });
         }
         // The engine takes the on-disk lock only once the run has started, so
@@ -248,7 +248,7 @@ fn map_origin(origin: FlowOrigin) -> FlowOriginKind {
 /// A file that cannot be read or parsed answers `false`: the run that follows
 /// fails on the same read and names it properly, and refusing here would
 /// report a parse error as an interaction problem.
-fn needs_desktop_answer(path: &Path) -> bool {
+fn needs_profile_choice(path: &Path) -> bool {
     let Ok(text) = std::fs::read_to_string(path) else {
         return false;
     };
