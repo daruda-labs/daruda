@@ -1368,10 +1368,15 @@ async fn a_stop_with_an_ended_runs_handle_leaves_the_next_run_to_finish(cx: &mut
     cx.executor().allow_parking();
     let (lane, ws, _path, _wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
     let gate = lane.path().join("release-b");
-    let held_open = format!(
-        "version: 1\nnodes:\n  - id: hold\n    kind: command\n    run: \"while [ ! -e '{}' ]; do sleep 0.05; done\"\n",
-        gate.display()
-    );
+    // Commands run in the lane; a relative path avoids embedding Windows
+    // backslashes as escapes in the YAML double-quoted scalar.
+    let held_open = "\
+version: 1
+nodes:
+  - id: hold
+    kind: command
+    run: \"while [ ! -e release-b ]; do sleep 0.05; done\"
+";
     std::fs::write(
         flow_paths::flows_dir(lane.path()).join("hold.yaml"),
         held_open,
