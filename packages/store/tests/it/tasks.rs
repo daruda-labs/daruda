@@ -664,7 +664,17 @@ fn render_task_prompt_wraps_user_prompt_with_metadata() {
     assert!(out.starts_with("Task: \"Fix auth bug\" (feature-x)"));
     assert!(out.contains("Status: Backlog"));
     assert!(out.contains(&t.prompt));
-    assert!(out.contains(&format!("update task \"{}\"", t.id)));
+    assert!(out.contains("final answer is recorded as the task's result"));
+}
+
+/// Lane agents have no tool that updates a task, so the prompt must not ask
+/// them to; the final answer is what gets recorded instead.
+#[test]
+fn render_task_prompt_does_not_ask_the_agent_to_update_the_task() {
+    let t = sample_task();
+    let out = render_task_prompt(&record_of(&t), "feature-x");
+    assert!(!out.contains("update task"), "{out}");
+    assert!(!out.contains(&format!("\"{}\"", t.id)), "{out}");
 }
 
 // ---------------------------------------------------------------------------

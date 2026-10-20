@@ -48,9 +48,10 @@ fn prompt_file_named(worktree: &Path, stem: &str) -> PathBuf {
 }
 
 /// Wrap the user's raw prompt with task metadata + a closing instruction
-/// telling Claude to update the task on completion. Mirrors superset's
-/// `agent-prompt-template.ts`. `branch` is what the header names — the
-/// caller resolves it, since an existing lane's branch is read at Start.
+/// asking for a final summary. Lane agents have no tool that updates a task;
+/// their last answer is what the run records as the task's result. `branch`
+/// is what the header names — the caller resolves it, since an existing
+/// lane's branch is read at Start.
 pub fn render_task_prompt(task: &TaskRecord, branch: &str) -> String {
     let state_label = match task.lifecycle.kind() {
         LifecycleKind::Backlog => "Backlog",
@@ -79,12 +80,12 @@ pub fn render_task_prompt(task: &TaskRecord, branch: &str) -> String {
          {body}\n\
          \n\
          Work in the current workspace. Inspect the relevant code, make the needed \
-         changes, verify them when practical, and update task \"{id}\" with a short \
-         summary when done.\n",
+         changes, and verify them when practical. When done, end with a short summary \
+         of what you changed and how you verified it; that final answer is recorded \
+         as the task's result.\n",
         title = title,
         status = state_label,
         body = prompt,
-        id = spec.id,
     )
 }
 
