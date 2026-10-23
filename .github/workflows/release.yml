@@ -98,7 +98,7 @@ jobs:
             arm/daruda.app/Contents/MacOS/daruda \
             intel/daruda.app/Contents/MacOS/daruda \
             -output daruda.app/Contents/MacOS/daruda
-          lipo -verify_arch arm64 x86_64 daruda.app/Contents/MacOS/daruda
+          lipo daruda.app/Contents/MacOS/daruda -verify_arch arm64 x86_64
           codesign --force --deep --sign - daruda.app
           codesign --verify --deep --strict daruda.app
 
