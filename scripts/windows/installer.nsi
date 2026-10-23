@@ -61,8 +61,24 @@ FunctionEnd
 !macro CheckOwnedFile PATH PREFIX
   ${If} ${FileExists} "${PATH}"
     ${PREFIX}retry:
-    System::Call 'kernel32::CreateFileW(w "${PATH}", i 0x40010000, i 7, p 0, i 3, i 0, p 0) p.r0'
+    StrCpy $2 0
+    ${PREFIX}open:
+    System::Call 'kernel32::CreateFileW(w "${PATH}", i 0x40010000, i 7, p 0, i 3, i 0, p 0) p.r0 ?e'
+    Pop $1
     ${If} $0 == -1
+      ; WORKAROUND: a transient sharing violation, suspected malware scanning of
+      ; just-written files - the holding process is not yet identified. A running
+      ; daruda keeps its files past this window.
+      ${If} $1 == 32
+      ${AndIf} $2 < 20
+        IntOp $2 $2 + 1
+        Sleep 250
+        Goto ${PREFIX}open
+      ${EndIf}
+      FileOpen $3 "$TEMP\daruda-installer.log" a
+      FileSeek $3 0 END
+      FileWrite $3 "Refused ${PATH}: Windows error $1$\r$\n"
+      FileClose $3
       IfSilent 0 +3
       SetErrorLevel 2
       Abort

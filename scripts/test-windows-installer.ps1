@@ -15,6 +15,9 @@ $data = Join-Path $root 'state'
 New-Item -ItemType Directory -Path $root | Out-Null
 $oldData = $env:DARUDA_DATA_DIR
 $shortcutsBefore = @(Get-ChildItem -LiteralPath ([Environment]::GetFolderPath('Programs')) -Filter 'daruda-*.lnk' | ForEach-Object FullName)
+# The installer appends each refused file and its Windows error here.
+$refusalLog = Join-Path ([IO.Path]::GetTempPath()) 'daruda-installer.log'
+$refusalsBefore = if (Test-Path -LiteralPath $refusalLog) { @(Get-Content -LiteralPath $refusalLog).Count } else { 0 }
 try {
     $setup = Start-Process -FilePath $installerPath -ArgumentList @('/S', "/D=$install") -WindowStyle Hidden -PassThru
     if (-not $setup.WaitForExit(120000)) { throw 'Installer timed out' }
@@ -103,6 +106,11 @@ try { Set-Content -LiteralPath $Ready -Value 'ready'; Start-Sleep -Seconds 3 } f
         throw 'Uninstaller removed user-created files or application data'
     }
     Write-Host 'PASS: install, native storage migration, smoke, locked-file refusal, waited update, relocation ownership, uninstall, and data preservation'
+} catch {
+    if (Test-Path -LiteralPath $refusalLog) {
+        Get-Content -LiteralPath $refusalLog | Select-Object -Skip $refusalsBefore | ForEach-Object { Write-Host "Installer refusal: $_" }
+    }
+    throw
 } finally {
     $env:DARUDA_DATA_DIR = $oldData
     # Keep failed installations for diagnosis rather than deleting a live binary.
