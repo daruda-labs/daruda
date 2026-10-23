@@ -46,7 +46,8 @@ New chats open in the current worktree. Chats in the same worktree share files
 and a branch. Create or select a separate worktree before starting an
 independent task.
 
-Use `Cmd+Ctrl+1-9` to jump between worktrees.
+Use `Cmd+Ctrl+1-9` (`Ctrl+Alt+1-9` on Windows and Linux) to jump between the
+current project's worktrees.
 
 ---
 
@@ -56,7 +57,8 @@ Use `Cmd+Ctrl+1-9` to jump between worktrees.
 
 - macOS 12 Monterey or later
 - Rust 1.97 via rustup, pinned by `rust-toolchain.toml`
-- Xcode Command Line Tools
+- Xcode, selected with `xcode-select`; Command Line Tools alone cannot
+  compile GPUI's Metal shaders (see [setup](CONTRIBUTING.md#setup))
 - Zig 0.14.1, installed by the bootstrap script below on macOS
 
 ### Run From Source on macOS
@@ -66,7 +68,6 @@ git clone --recurse-submodules https://github.com/daruda-labs/daruda
 cd daruda
 
 ./scripts/bootstrap-zig.sh
-cargo fetch && ./scripts/apply-gpui-patch.sh
 cargo run -p daruda
 ```
 
@@ -99,7 +100,7 @@ see [CONTRIBUTING.md](CONTRIBUTING.md).
 |---|---|
 | macOS runtime | Primary supported target, Apple Silicon and Intel |
 | Linux | x86_64 `.deb` and tar.gz; CI builds, tests, and opens the window under Xvfb and sway; a real desktop (input, IME, menus) is still unverified |
-| Windows | Native x86_64 and ARM64 ZIP and installer; experimental GUI support with CI build, test, and smoke checks |
+| Windows | Native x86_64 and ARM64 ZIP and installer; experimental GUI support; CI builds, tests, and smoke-checks x86_64 and builds and smoke-checks ARM64 |
 | ACP chat sessions | Shipped for configured ACP agents |
 | Claude Code integration | Status, usage, skills, tools, and task launching shipped |
 | Other agent integrations | Ongoing as each CLI exposes stable metadata |
@@ -109,8 +110,8 @@ see [CONTRIBUTING.md](CONTRIBUTING.md).
 - Provider-specific status, usage, skills, and tools for more agents
 - Linux desktop runtime verification
 - Windows desktop runtime verification
-- Native app-identity notifications
-- Developer ID code-signing, notarization, and Homebrew Cask distribution
+- Native app-identity notifications on macOS
+- macOS Developer ID code-signing, notarization, and Homebrew Cask distribution
 - Kitty keyboard protocol, vi scrollback navigation, and image protocol support
 
 ---

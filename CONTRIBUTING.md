@@ -30,19 +30,21 @@ daruda locally. For a short product overview and first run instructions, see
 | Dependency | Version / status |
 |---|---|
 | macOS | 12.0 Monterey or later; Apple Silicon and Intel supported |
-| Linux | x86_64 `.deb` and portable tar.gz; CI builds, tests, and smoke-tests the window under Xvfb and sway; a real desktop is still unverified; requires system `libfontconfig`, `libxcb`, `libxkbcommon`, `libwayland`, and a Vulkan driver |
+| Linux | x86_64 `.deb` and portable tar.gz; CI builds, tests, and smoke-tests the window under Xvfb and sway; a real desktop is still unverified; requires the system libraries in `scripts/linux/build-deps.txt` (fontconfig, X11/XCB, xkbcommon, Wayland, GLib) and a Vulkan driver |
 | Windows | Experimental native MSVC build; GUI runtime still needs desktop verification |
 | Rust | 1.97 through rustup; `rust-toolchain.toml` pins local checks and CI |
-| Zig | 0.14.1; `./scripts/bootstrap-zig.sh` installs the pinned version on macOS |
-| Xcode Command Line Tools | Required on macOS |
+| Zig | 0.14.1; `./scripts/bootstrap-zig.sh` installs the pinned version on macOS and Linux, `bootstrap-zig.ps1` on Windows |
+| Xcode | Required on macOS; Command Line Tools alone lack the `metal` shader compiler GPUI's build runs |
+| jq | Required by `scripts/build-app.sh` and the Rust floor reader |
 
 Rust uses edition 2024. The minimum version is declared once in
 `[workspace.package]`; first-party crates inherit `rust-version.workspace = true`.
 `rust-toolchain.toml` pins the same version for local work and CI, because
 Clippy lints differ between releases; a toolchain that ignores this file, such
 as a Homebrew `rust`, can pass code that CI rejects.
-The vendored `gpui_component*` manifests retain upstream's Rust version policy;
-`ferrum_flow` declares the floor to enable `clippy::incompatible_msrv`.
+The vendored `gpui_component*` manifests are excluded from the floor check and
+declare no Rust version; `ferrum_flow` declares the floor to enable
+`clippy::incompatible_msrv`.
 
 Zig can be bootstrapped with `scripts/bootstrap-zig.sh` on macOS/Linux or
 `scripts/bootstrap-zig.ps1` on Windows x86_64 or ARM64; alternatively set `ZIG` or put
@@ -62,6 +64,15 @@ git clone --recurse-submodules https://github.com/daruda-labs/daruda
 cd daruda
 
 git submodule update --init --recursive
+```
+
+On macOS, select Xcode as the active developer directory and confirm that
+the Metal compiler resolves. Xcode 26 and later ship the Metal toolchain as
+a separate component; download it if `xcrun -f metal` fails:
+
+```bash
+sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+xcrun -f metal || xcodebuild -downloadComponent MetalToolchain
 ```
 
 On macOS and Linux, install the pinned Zig version:
@@ -150,10 +161,11 @@ cargo run -p vendor_gpui -- <zed-checkout> --output <new-directory>
 ```
 
 Replace `vendor/zed` with that output and review source and lockfile changes
-together. The tool reads pristine Git objects, applies the three patches in
-`patches/`, retains upstream licenses and test fonts, and materializes the Apache
-license symlink as a regular file on every OS. Git and tar are required for this
-maintenance check; no patching step is required before building.
+together. The tool reads pristine Git objects, applies the `gpui-*.patch` files
+listed in `tools/vendor_gpui`, retains upstream licenses and test fonts, and
+materializes the Apache license symlink as a regular file on every OS. Git and
+tar are required for this maintenance check; no patching step is required
+before building.
 `scripts/apply-gpui-patch.sh` remains a read-only verification entry point.
 
 Windows CI requires the native build, all app target compilation (including
@@ -437,7 +449,8 @@ registry snapshot.
 ## Tests and CI
 
 [ci.yml](.github/workflows/ci.yml) defines current job coverage. It runs
-macOS, Linux, and Windows build/test jobs plus one source-only Lint job.
+macOS, Linux, and Windows x86_64 build/test jobs, one source-only Lint job,
+a change-selection job, and a conditional Windows ARM64 packaging job.
 The Lint job runs format and selected lint scripts. Apply the scope-based
 local checks above, including relevant checks not yet wired into CI.
 
@@ -459,7 +472,7 @@ builds, startup, platform adapters, and packaging.
 CI reads the Rust floor through [rust-version.sh](scripts/rust-version.sh),
 using Cargo metadata. The reader rejects differing first-party and
 `ferrum_flow` declarations and a `rust-toolchain.toml` channel that differs
-from the floor; upstream widget MSRVs retain their independent policy. Its
+from the floor; vendored `gpui_component*` crates are excluded. Its
 self-test runs in the Lint job.
 
 For dependency and native-packaging changes, macOS CI also verifies a signed
@@ -483,8 +496,8 @@ remaining desktop checks.
 
 Shared registry requirements live in `[workspace.dependencies]`. Members inherit
 them with `workspace = true`, keeping their own features, optional flags, and
-target conditions. Different incompatible requirements, such as the app's
-`toml 0.8` and the GPUI vendor tool's `toml 0.9`, stay separate. Resolver 3
+target conditions. A member that needs an incompatible major version declares
+its own requirement instead of inheriting the shared one. Resolver 3
 prefers dependencies compatible with the declared Rust floor; the pinned Rust
 CI jobs and `--locked` Cargo gates remain the compatibility check.
 
@@ -545,7 +558,7 @@ independently rewrite generated vendor manifests or advance those pins.
 
 ## Visual Verification
 
-Render the UI offscreen to a PNG and read it back — text, layout, colors, images, and toasts all render, permission-free (no Screen Recording grant). Capture goes through gpui's `render_to_image`, gated upstream behind `test-support`; the `--screenshot` path below requires it, plus `gpui_macos/font-kit` (without that feature glyphs don't rasterize — shapes render but **text is invisible**).
+Render the UI offscreen to a PNG and read it back — text, layout, colors, images, and toasts all render, permission-free (no Screen Recording grant). Capture goes through gpui's `render_to_image`, gated upstream behind `test-support`; the `--screenshot` path below requires it. Text rasterization also needs `gpui_macos/font-kit` (without it glyphs don't rasterize — shapes render but **text is invisible**); the workspace dependency enables it for every build.
 
 **macOS:** offscreen capture uses `MetalHeadlessRenderer`. **Windows:**
 `--screenshot` uses the visible composed client surface instead of
@@ -561,7 +574,7 @@ cargo build -p daruda --features screenshot
 target/debug/daruda --screenshot /tmp/shot.png   # opens, settles ~2s, captures, quits
 ```
 
-The opt-in `screenshot` feature enables `gpui/test-support` + `gpui_macos/font-kit`; it is off by default to keep the shipping binary clean. Entry point: `packages/app/src/screenshot.rs`.
+The opt-in `screenshot` feature enables `devtools`, `gpui/test-support`, `gpui_macos/test-support`, and the chat and settings `screenshot` features; it is off by default to keep the shipping binary clean. Entry point: `packages/app/src/screenshot.rs`.
 
 Verification loop: render → PNG → an agent reads the PNG and checks the result. This catches both rendering bugs and runtime state (e.g. error toasts), so it doubles as a smoke test of the real app's startup.
 
@@ -708,8 +721,8 @@ To package an existing debug build for testing, use
 Build a per-user installer from that ZIP with NSIS 3.11 on PATH:
 
 ```powershell
-./scripts/build-windows-installer.ps1 -Archive target/packages/daruda-0.2.16-windows-x86_64.zip
-./scripts/test-windows-installer.ps1 -Installer target/packages/daruda-0.2.16-windows-x86_64-setup.exe
+./scripts/build-windows-installer.ps1 -Archive target/packages/daruda-<version>-windows-x86_64.zip
+./scripts/test-windows-installer.ps1 -Installer target/packages/daruda-<version>-windows-x86_64-setup.exe
 ```
 
 The installer defaults to `%LOCALAPPDATA%\Programs\daruda`, requires no
@@ -778,19 +791,16 @@ Help > Export Diagnostics writes a ZIP with version/platform information and
 bounded error metadata, excluding raw messages, personal paths, prompts, and transcripts.
 Windows toast clicks reveal the originating pane while the app is running.
 
-GitHub Actions produces Windows downloads in two ways:
+GitHub Actions produces downloads only through the Release workflow:
+pushing a `v<version>` tag matching `Cargo.toml` builds native Apple Silicon
+and Intel apps and combines them into one Universal macOS DMG, plus Windows
+x86_64 and ARM64 release ZIPs and per-user installers, the Linux `.deb` and
+tar.gz, and `SHA256SUMS.txt`, then publishes them after every build succeeds.
+**Run workflow** builds downloadable release artifacts without publishing a
+GitHub Release. CI does not upload build artifacts.
 
-- **CI** (push, pull request, or **Run workflow**): the Windows job uploads
-  `daruda-windows-x86_64-debug` under the run's **Artifacts**, retained for 14 days.
-- **Release**: pushing a `v<version>` tag matching `Cargo.toml` builds native
-  Apple Silicon and Intel apps and combines them into one Universal macOS DMG,
-  plus the Windows release ZIP and per-user installer and the Linux `.deb` and
-  tar.gz, then publishes them after every
-  build succeeds. **Run workflow** builds downloadable release artifacts without
-  publishing a GitHub Release.
-
-Both Windows workflows use the same Zig installer and package script as local
-builds. The installer verifies the pinned archive's SHA256. Missing package
+Windows CI and release jobs use the same Zig installer and package script as
+local builds. The installer verifies the pinned archive's SHA256. Missing package
 files fail the workflow instead of producing an empty download.
 
 ---
@@ -806,7 +816,7 @@ daruda/
 │   ├── config/                 # daruda_config: config system and agent presets
 │   ├── content/                # daruda_content: image + mermaid processing
 │   ├── control-types/          # daruda_control_types: control command contract
-│   ├── core/                   # daruda_core: shared dependency-free utilities
+│   ├── core/                   # daruda_core: shared utilities, no daruda_* or GPUI deps
 │   ├── flow/                   # daruda_flow: declarative ACP flow engine
 │   ├── flow-edit/              # daruda_flow_edit: source-preserving flow-file edits
 │   ├── project/                # daruda_project: runtime Project/Lane model, git ops
@@ -825,8 +835,12 @@ daruda/
 │   ├── acp_replay/             # ACP wire-log replay helper
 │   ├── gen_acp_presets/        # generated agent preset drift gate
 │   ├── gen_licenses/           # third-party license manifest generator
+│   ├── strings_gen/            # locale string codegen and en/ko parity checks
+│   ├── test_process/           # native subprocess fixtures for tests
+│   ├── vendor_gpui/            # regenerates and checks the vendor/zed override
 │   └── vt_dump/                # headless VT diagnostic CLI
 ├── vendor/                     # third-party sources, one directory per upstream
+│   ├── block/                  # patched block crate
 │   ├── ghostty/                # Ghostty v1.2.3 submodule
 │   ├── zed/                    # patched GPUI; regenerate with tools/vendor_gpui
 │   ├── gpui-component/         # vendored gpui-component crates
@@ -845,8 +859,9 @@ All code, comments, identifiers, and Markdown documents must be written in
 English.
 
 Use `cargo fmt`; formatting drift should not be hand-waved. Add tests for
-behavior changes, with inline unit tests for small modules and integration tests
-under `crate_root/tests/` when cross-module behavior is involved.
+behavior changes. Tests that reach internals stay in `src`; a library crate's
+public-API-only tests go in `tests/it/` as one binary with one module per
+topic. The app keeps all tests in `src`.
 
 User-visible failures should route through the app error-reporting path instead
 of `eprintln!`, which is invisible to users running the `.app` bundle.
@@ -882,7 +897,8 @@ Common types:
 | `refactor` | Code restructure with no behavior change |
 | `perf` | Performance improvement |
 | `test` | Adding or fixing tests |
-| `chore` | Build, CI, dependency updates |
+| `chore` | Build, release, dependency updates |
+| `ci` | CI workflow changes |
 | `docs` | Documentation only |
 
 Keep the summary under 72 characters. Use the body for the reason behind the
