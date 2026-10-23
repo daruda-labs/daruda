@@ -82,6 +82,7 @@ pub(crate) enum ScreenshotScenario {
     LeftDockSessionsSix,
     LeftDockRail,
     LeftDockExpanded,
+    LeftDockIndividual,
     LeftDockGroups,
     LeftDockGroupStatus,
     LeftDockGroupHover,
@@ -713,7 +714,8 @@ pub(crate) fn drive(
         ScreenshotScenario::LeftDockSessions
         | ScreenshotScenario::LeftDockSessionsSix
         | ScreenshotScenario::LeftDockRail
-        | ScreenshotScenario::LeftDockExpanded => {
+        | ScreenshotScenario::LeftDockExpanded
+        | ScreenshotScenario::LeftDockIndividual => {
             workspace.update(cx, |ws, cx| {
                 ws.seed_left_dock_for_shot(
                     matches!(
@@ -721,11 +723,18 @@ pub(crate) fn drive(
                         ScreenshotScenario::LeftDockSessions
                             | ScreenshotScenario::LeftDockSessionsSix
                     ),
-                    scenario == ScreenshotScenario::LeftDockExpanded,
+                    matches!(
+                        scenario,
+                        ScreenshotScenario::LeftDockExpanded
+                            | ScreenshotScenario::LeftDockIndividual
+                    ),
                     scenario == ScreenshotScenario::LeftDockSessionsSix,
                     window,
                     cx,
-                )
+                );
+                if scenario == ScreenshotScenario::LeftDockIndividual {
+                    ws.set_lane_panes_grouped(ws.active, false, cx);
+                }
             });
         }
         ScreenshotScenario::TabIndicators => {

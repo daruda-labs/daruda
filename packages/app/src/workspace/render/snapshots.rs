@@ -47,6 +47,11 @@ impl Workspace {
         LeftDockSnapshot {
             metrics: crate::ui::theme::UiMetrics(self.mirrors.left_dock_size),
             expanded: self.docks.left.read(cx).is_open,
+            individual_pane_lanes: self
+                .lane_scoped
+                .iter()
+                .filter_map(|(lane, state)| state.show_individual_panes.then_some(*lane))
+                .collect(),
             named_sessions,
             rail_panes: self.rail_pane_snapshots(&acp_statuses, cx),
             focused_pane: self.active_runtime().focused_pane_id,

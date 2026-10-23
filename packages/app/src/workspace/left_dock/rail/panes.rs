@@ -37,10 +37,17 @@ impl Workspace {
             .keys()
             .map(|target| {
                 let project = self.project_for(target.project);
-                let visible = compact
+                let individual = if compact {
+                    project
+                        .is_some_and(|project| !project.rail_grouped_lanes.contains(&target.lane))
+                } else {
+                    self.lane_scoped
+                        .get(target)
+                        .is_some_and(|state| state.show_individual_panes)
+                };
+                let visible = individual
                     && project.is_some_and(|project| {
                         !project.is_collapsed
-                            && !project.rail_grouped_lanes.contains(&target.lane)
                             && !project.group_id.is_some_and(|group| {
                                 self.groups
                                     .iter()

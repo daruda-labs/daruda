@@ -57,10 +57,13 @@ pub(in crate::workspace::left_dock) fn lane_menu(
         project: project_id,
         lane: lane.id,
     };
-    let grouped = snap
-        .projects
-        .iter()
-        .any(|project| project.id == project_id && project.rail_grouped_lanes.contains(&lane.id));
+    let grouped = if snap.expanded {
+        !snap.individual_pane_lanes.contains(&target)
+    } else {
+        snap.projects.iter().any(|project| {
+            project.id == project_id && project.rail_grouped_lanes.contains(&lane.id)
+        })
+    };
     let workspace = snap.workspace.clone();
     let (source_branch, source_repo_root, is_detached) = match &lane.kind {
         daruda_store::project::LaneKind::Git {
@@ -97,7 +100,7 @@ pub(in crate::workspace::left_dock) fn lane_menu(
                 surface_strings::dock::group_lane_panes()
             },
             false,
-            move |ws, _, cx| ws.set_lane_rail_grouped(target, !grouped, cx),
+            move |ws, _, cx| ws.set_lane_panes_grouped(target, !grouped, cx),
         ));
         build_context_menu_items(args.clone())
             .into_iter()

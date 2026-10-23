@@ -87,6 +87,7 @@ pub(in crate::workspace) struct GroupSnapshot {
 pub(in crate::workspace) struct LeftDockSnapshot {
     pub metrics: crate::ui::theme::UiMetrics,
     pub expanded: bool,
+    pub individual_pane_lanes: std::collections::HashSet<daruda_store::project::LaneRef>,
     pub open_tabs: std::collections::HashMap<daruda_store::project::LaneRef, usize>,
     pub named_sessions: std::collections::HashMap<
         daruda_store::project::LaneRef,

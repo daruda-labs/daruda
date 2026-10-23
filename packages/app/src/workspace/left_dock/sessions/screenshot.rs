@@ -167,6 +167,7 @@ mod tests {
             "left-dock-sessions",
             "left-dock-rail",
             "left-dock-expanded",
+            "left-dock-individual",
             "left-dock-sessions-six",
         ] {
             assert!(ScreenshotScenario::from_cli_name(name).is_some());

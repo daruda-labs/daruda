@@ -189,24 +189,7 @@ pub(in crate::workspace::left_dock::projects) fn worktree_row(
                     .text_ellipsis()
                     .child(sublabel.to_owned()),
             )
-        })
-        .when_some(
-            snap.agent_per_session_per_lane
-                .get(&daruda_store::project::LaneRef {
-                    project: project_id,
-                    lane: wt.id,
-                }),
-            |d, _sessions| {
-                d.child(crate::workspace::left_dock::sessions::named_rows(
-                    daruda_store::project::LaneRef {
-                        project: project_id,
-                        lane: wt.id,
-                    },
-                    snap,
-                    cx,
-                ))
-            },
-        );
+        });
 
     let body = div()
         .flex_1()
@@ -214,7 +197,10 @@ pub(in crate::workspace::left_dock::projects) fn worktree_row(
         .flex_col()
         .overflow_hidden()
         .child(label_line)
-        .child(sub_rows);
+        .child(sub_rows)
+        .child(crate::workspace::left_dock::sessions::lane_panes(
+            lane_ref, snap, cx,
+        ));
 
     let wt_id: LaneId = wt.id;
     let wt_label_shared = SharedString::from(label.clone());

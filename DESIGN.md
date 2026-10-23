@@ -417,6 +417,13 @@ letter. Both dock layouts use the same mark, and hover retains the full name.
 Clicking a rail project only folds its children, preserving the current pane,
 input draft, and keyboard focus.
 
+Expanded worktrees default to compact pane counts and status badges. Their
+context menu switches between grouped badges and individual single-line pane
+rows. Individual rows use a shallow 4px inset from the worktree body, without
+an additional status-column indent or a second status-text line. The choice
+is per worktree for the app session and independent of rail grouping. Clicking
+the badge strip opens the root-deployed pane chooser.
+
 Rail worktrees show individual pane rows by default, including terminal and
 file panes. Branch and worktree names appear only in tooltips, not as separate
 rail labels. Each pane keeps the shared 16px status indicator without a number,
@@ -435,12 +442,11 @@ chosen pane if a sibling was zoomed. Empty worktrees retain a neutral entry so
 project folding never hides their only
 navigation path.
 
-Each worktree's context menu can group its panes into one status/count row.
-That preference persists per workspace and survives project folding. Grouped
+In the rail, each worktree's context menu can group its panes into one
+status/count row. That preference persists per workspace and survives project folding. Grouped
 rows open a root-deployed pane chooser beside the rail without resizing the
 terminal; a single pane is entered directly. Escape, an outside press, or a
-second trigger click dismisses the chooser. The expanded dock keeps named
-agent-session child rows.
+second trigger click dismisses the chooser.
 
 Compact project groups use full-width, quiet horizontal headers and a small
 vertical gap between groups, without chevrons, guides, or child indentation.

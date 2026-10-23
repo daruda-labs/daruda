@@ -1,6 +1,7 @@
 //! Mutually exclusive worktree/session choices and the left-dock popup lifecycle.
 
 mod entries;
+mod presentation;
 mod render;
 #[cfg(feature = "screenshot")]
 mod screenshot;
@@ -16,7 +17,8 @@ use gpui::{
     Bounds, Context, FocusHandle, KeyDownEvent, MouseDownEvent, Pixels, SharedString, Window,
 };
 
-pub(in crate::workspace) use render::{chooser_overlay, named_rows};
+pub(in crate::workspace) use presentation::lane_panes;
+pub(in crate::workspace) use render::chooser_overlay;
 
 #[derive(Clone, PartialEq)]
 pub(in crate::workspace) struct SessionRow {

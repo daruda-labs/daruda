@@ -17,6 +17,8 @@ pub(in crate::workspace) struct LaneScoped {
     pub git: GitLaneState,
     pub files: FileTreeLaneState,
     pub input_history: HistoryBuffer,
+    /// Expanded-sidebar disclosure for this app session, independent of rail grouping.
+    pub show_individual_panes: bool,
 }
 
 #[derive(Default)]

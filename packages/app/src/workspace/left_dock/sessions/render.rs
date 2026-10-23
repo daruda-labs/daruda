@@ -8,9 +8,8 @@ use crate::ui::Sizable as _;
 use crate::{
     surface::strings as s,
     ui::{AgentStatusBadge, IndicatorSize, theme},
-    workspace::{Workspace, layout::LeftDockSnapshot},
+    workspace::Workspace,
 };
-use daruda_store::project::LaneRef;
 use gpui::{
     AnyElement, App, Context, IntoElement, WeakEntity, Window, anchored, deferred, div, prelude::*,
     px,
@@ -96,7 +95,8 @@ fn session_row(
         .when(current, |el| {
             el.child(
                 crate::ui::icons::icon(crate::ui::icons::CHECK)
-                    .with_size(px(metrics.icon(theme::CONTROL_ICON_SIZE))),
+                    .with_size(px(metrics.icon(theme::CONTROL_ICON_SIZE)))
+                    .text_color(t.text_primary),
             )
         })
         .tooltip(crate::ui::tooltip::text(title))
@@ -106,34 +106,6 @@ fn session_row(
                 ws.update(cx, |ws, cx| ws.activate_dock_row(&target, window, cx));
             }
         })
-}
-
-pub(in crate::workspace) fn named_rows(
-    lane: LaneRef,
-    snap: &LeftDockSnapshot,
-    cx: &App,
-) -> AnyElement {
-    div()
-        .flex()
-        .flex_col()
-        .children(
-            snap.named_sessions
-                .get(&lane)
-                .into_iter()
-                .flatten()
-                .map(|row| {
-                    session_row(
-                        RowTarget::Session(lane, row.clone()),
-                        snap.active == lane
-                            && snap.agent_active_session_id.as_deref() == Some(&row.id),
-                        false,
-                        snap.workspace.clone(),
-                        snap.metrics,
-                        cx,
-                    )
-                }),
-        )
-        .into_any_element()
 }
 
 pub(in crate::workspace) fn chooser_overlay(

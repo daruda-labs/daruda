@@ -7,6 +7,42 @@ use daruda_store::project::LaneRef;
 use gpui::{Context, Window};
 
 impl Workspace {
+    pub(super) fn on_pane_badges_key(
+        &mut self,
+        lane: LaneRef,
+        bounds: gpui::Bounds<gpui::Pixels>,
+        event: &gpui::KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !event.keystroke.modifiers.modified()
+            && matches!(event.keystroke.key.as_str(), "enter" | "space")
+        {
+            self.choose_lane_from_rail(lane, bounds, window, cx);
+            cx.stop_propagation();
+        }
+    }
+
+    pub(in crate::workspace) fn set_lane_panes_grouped(
+        &mut self,
+        lane: LaneRef,
+        grouped: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.docks.left.read(cx).is_open {
+            self.set_lane_rail_grouped(lane, grouped, cx);
+            return;
+        }
+        if self.lane_for(lane).is_none() {
+            return;
+        }
+        let state = self.lane_scoped_mut(lane);
+        if state.show_individual_panes == grouped {
+            state.show_individual_panes = !grouped;
+            cx.notify();
+        }
+    }
+
     pub(super) fn activate_dock_row(
         &mut self,
         target: &RowTarget,

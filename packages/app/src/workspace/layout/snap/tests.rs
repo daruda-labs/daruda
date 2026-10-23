@@ -16,6 +16,7 @@ fn fixture(window: &mut Window, cx: &mut gpui::App) -> LeftDockSnapshot {
     LeftDockSnapshot {
         metrics: Default::default(),
         expanded: true,
+        individual_pane_lanes: Default::default(),
         open_tabs: Default::default(),
         named_sessions: Default::default(),
         rail_panes: Default::default(),

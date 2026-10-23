@@ -324,3 +324,143 @@ async fn project_choices_drill_into_sessions_and_back_without_resizing(cx: &mut 
     vcx.run_until_parked();
     assert!(entity.read_with(vcx, |ws, _| ws.docks.session_chooser.is_none()));
 }
+
+#[gpui::test]
+async fn expanded_pane_menu_switches_layout_without_changing_rail(cx: &mut TestAppContext) {
+    let root = tempfile::tempdir().unwrap();
+    let (wh, entity) = crate::workspace::tests::build_workspace_with(
+        cx,
+        &daruda_config::Config::default(),
+        Some(daruda_store::project::Project::from_path(root.path())),
+    );
+    cx.run_until_parked();
+    cx.update_window(wh.into(), |_, window, cx| {
+        entity.update(cx, |ws, cx| {
+            ws.open_agent_chat_pane(window, cx);
+            ws.open_agent_chat_pane(window, cx);
+            let lane = ws.active;
+            ws.set_lane_rail_grouped(lane, true, cx);
+            ws.docks.left.update(cx, |dock, _| dock.open());
+            let before = ws.prepare_left_dock_snapshot(cx);
+            assert!(!before.individual_pane_lanes.contains(&lane));
+            ws.set_lane_panes_grouped(lane, false, cx);
+            let after = ws.prepare_left_dock_snapshot(cx);
+            assert!(after.individual_pane_lanes.contains(&lane));
+            assert!(
+                ws.active_project()
+                    .unwrap()
+                    .rail_grouped_lanes
+                    .contains(&lane.lane)
+            );
+            assert!(
+                before != after,
+                "presentation changes must invalidate the cached dock"
+            );
+            assert!(
+                after.rail_panes[&lane]
+                    .iter()
+                    .all(|row| !row.title.is_empty())
+            );
+            ws.docks.left.update(cx, |dock, _| dock.is_open = false);
+            ws.set_lane_panes_grouped(lane, false, cx);
+            assert!(
+                !ws.active_project()
+                    .unwrap()
+                    .rail_grouped_lanes
+                    .contains(&lane.lane)
+            );
+            ws.docks.left.update(cx, |dock, _| dock.open());
+            assert!(
+                ws.prepare_left_dock_snapshot(cx)
+                    .individual_pane_lanes
+                    .contains(&lane)
+            );
+            ws.set_lane_panes_grouped(lane, true, cx);
+            assert!(
+                !ws.prepare_left_dock_snapshot(cx)
+                    .individual_pane_lanes
+                    .contains(&lane)
+            );
+        });
+    })
+    .unwrap();
+}
+
+#[gpui::test]
+async fn expanded_menu_changes_visible_rows_and_keeps_the_pane_inset_shallow(
+    cx: &mut TestAppContext,
+) {
+    let root = tempfile::tempdir().unwrap();
+    let (wh, entity) = crate::workspace::tests::build_workspace_with(
+        cx,
+        &daruda_config::Config::default(),
+        Some(daruda_store::project::Project::from_path(root.path())),
+    );
+    let (lane, first) = cx
+        .update_window(wh.into(), |_, window, cx| {
+            entity.update(cx, |ws, cx| {
+                ws.open_agent_chat_pane(window, cx);
+                let first = ws.active_runtime().focused_pane_id;
+                ws.open_agent_chat_pane(window, cx);
+                ws.docks.left.update(cx, |dock, _| {
+                    dock.open();
+                    dock.resize(220.0);
+                });
+                ws.set_lane_rail_grouped(ws.active, true, cx);
+                cx.notify();
+                (ws.active, first)
+            })
+        })
+        .unwrap();
+    let lane_selector: &'static str =
+        Box::leak(format!("lane-row-{}-{}", lane.project, lane.lane).into_boxed_str());
+    let badge_selector: &'static str =
+        Box::leak(format!("dock-pane-badges-{}-{}", lane.project, lane.lane).into_boxed_str());
+    let pane_selector: &'static str =
+        Box::leak(format!("dock-pane-row-{}-{}-{first}", lane.project, lane.lane).into_boxed_str());
+    let vcx = &mut gpui::VisualTestContext::from_window(wh.into(), cx);
+    vcx.run_until_parked();
+    let badge = vcx
+        .debug_bounds(badge_selector)
+        .expect("grouped panes show a compact badge strip");
+    vcx.simulate_click(badge.center(), Default::default());
+    vcx.run_until_parked();
+    assert!(entity.read_with(vcx, |ws, _| ws.docks.session_chooser.is_some()));
+    vcx.simulate_keystrokes("escape");
+    vcx.run_until_parked();
+    // WORKAROUND: cached GPUI paint does not replay debug bounds; refresh test geometry.
+    vcx.update(|window, _| window.refresh());
+    vcx.run_until_parked();
+    let lane_row = vcx.debug_bounds(lane_selector).unwrap();
+    vcx.simulate_mouse_down(
+        lane_row.center(),
+        gpui::MouseButton::Right,
+        Default::default(),
+    );
+    vcx.run_until_parked();
+    assert!(entity.read_with(vcx, |ws, _| ws.main_area.popup_menu_deploy.is_some()));
+    vcx.simulate_keystrokes("down enter");
+    vcx.run_until_parked();
+    assert!(entity.read_with(vcx, |ws, _| ws.lane_scoped[&lane].show_individual_panes));
+    let row = vcx
+        .debug_bounds(pane_selector)
+        .expect("Show Individual Panes renders the inline pane row");
+    let parent = vcx.debug_bounds(lane_selector).unwrap();
+    assert!(
+        row.origin.x - parent.origin.x
+            <= px(crate::ui::theme::LANE_ROW_PAD_X + crate::ui::theme::PAD_XS)
+    );
+    assert!(row.size.height <= px(crate::ui::theme::DOCK_TREE_ROW_HEIGHT));
+    vcx.simulate_click(row.center(), Default::default());
+    vcx.run_until_parked();
+    assert_eq!(
+        entity.read_with(vcx, |ws, _| ws.active_runtime().focused_pane_id),
+        first
+    );
+    assert!(entity.read_with(vcx, |ws, _| {
+        ws.active_project()
+            .unwrap()
+            .rail_grouped_lanes
+            .contains(&lane.lane)
+    }));
+}

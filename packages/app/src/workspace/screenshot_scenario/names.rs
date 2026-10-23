@@ -76,6 +76,7 @@ const NAME_LEFT_DOCK_PROJECT_ALIAS: &str = "left-dock-project-alias";
 const NAME_LEFT_DOCK_WORKTREES: &str = "left-dock-worktrees";
 const NAME_LEFT_DOCK_RAIL: &str = "left-dock-rail";
 const NAME_LEFT_DOCK_EXPANDED: &str = "left-dock-expanded";
+const NAME_LEFT_DOCK_INDIVIDUAL: &str = "left-dock-individual";
 const NAME_TAB_INDICATORS: &str = "tab-indicators";
 /// CLI token for the mid-turn transcript, before the agent writes its answer.
 const NAME_AGENT_CHAT_WORKING: &str = "agent-chat-working";
@@ -210,6 +211,7 @@ impl ScreenshotScenario {
             NAME_LEFT_DOCK_WORKTREES => Some(Self::LeftDockWorktrees),
             NAME_LEFT_DOCK_RAIL => Some(Self::LeftDockRail),
             NAME_LEFT_DOCK_EXPANDED => Some(Self::LeftDockExpanded),
+            NAME_LEFT_DOCK_INDIVIDUAL => Some(Self::LeftDockIndividual),
             NAME_TAB_INDICATORS => Some(Self::TabIndicators),
             NAME_COMMAND_PALETTE => Some(Self::CommandPalette),
             NAME_LANE_SWITCHER => Some(Self::LaneSwitcher),
