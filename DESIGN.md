@@ -435,8 +435,9 @@ Shell and Agent Chat panes without a session or unseen outcome use terminal
 and message-square glyphs, respectively, in the same status slot, including
 in the pane chooser. Connected idle sessions, live activity, connecting,
 attention, failure, and unseen outcomes retain their existing status
-indicators. Empty lanes and ordinary file panes keep the
-neutral circle; grouped lanes retain their aggregate status.
+indicators. Empty worktrees use a muted dashed-square outline in the rail, expanded tree,
+and worktree chooser. Ordinary file panes keep the neutral circle; grouped
+lanes with panes retain their aggregate status.
 One click updates the input target and tab focus together, revealing the
 chosen pane if a sibling was zoomed. Empty worktrees retain a neutral entry so
 project folding never hides their only

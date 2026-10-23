@@ -121,13 +121,21 @@ pub(in crate::workspace::left_dock::projects) fn worktree_row(
         project: project_id,
         lane: wt.id,
     };
-    let status_cell = agent_status_cell(
-        snap.agent_status_per_lane.get(&lane_ref).copied(),
-        snap.agent_outcome_per_lane.get(&lane_ref).copied(),
-        snap.metrics,
-        row_metrics.leading_width,
-        cx,
-    );
+    let status_cell = if snap.open_tabs.get(&lane_ref).copied().unwrap_or_default() == 0 {
+        crate::workspace::left_dock::rail::empty_lane_indicator(
+            snap.metrics,
+            row_metrics.leading_width,
+            cx,
+        )
+    } else {
+        agent_status_cell(
+            snap.agent_status_per_lane.get(&lane_ref).copied(),
+            snap.agent_outcome_per_lane.get(&lane_ref).copied(),
+            snap.metrics,
+            row_metrics.leading_width,
+            cx,
+        )
+    };
 
     // The status cell shares the label's line so it stays pinned to the
     // first line when sub-rows (sublabel, multi-session badges) grow the row.

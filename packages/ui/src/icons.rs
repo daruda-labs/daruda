@@ -66,6 +66,7 @@ pub const TASKS: &str = "icons/lucide/list-checks.svg";
 pub const FLOWS: &str = "icons/lucide/workflow.svg";
 pub const FOLDER: &str = "icons/lucide/folder.svg";
 pub const FOLDER_OPEN: &str = "icons/lucide/folder-open.svg";
+pub const EMPTY_WORKTREE: &str = "icons/empty-worktree.svg";
 pub const SESSION: &str = "icons/lucide/message-square.svg";
 pub const SKILL: &str = "icons/lucide/file-text.svg";
 pub const SERVER: &str = "icons/lucide/server.svg";

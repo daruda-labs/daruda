@@ -254,9 +254,15 @@ pub(in crate::workspace) fn chooser_overlay(
                             .when(selected, |el| el.bg(t.lane_card_active_bg))
                             .hover(|el| el.bg(t.lane_row_hover_bg))
                             .cursor_pointer()
-                            .child(super::super::rail::lane_indicator(
-                                *status, *outcome, metrics, cx,
-                            ))
+                            .child(if *open_tabs == 0 {
+                                super::super::rail::empty_lane_indicator(
+                                    metrics,
+                                    metrics.icon(theme::STATUS_INDICATOR_CELL_WIDTH),
+                                    cx,
+                                )
+                            } else {
+                                super::super::rail::lane_indicator(*status, *outcome, metrics, cx)
+                            })
                             .child(
                                 div()
                                     .flex_1()

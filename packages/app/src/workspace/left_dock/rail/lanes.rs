@@ -90,12 +90,20 @@ fn grouped_row(
         .when(!active, |element| {
             element.hover(|element| element.bg(theme.lane_row_hover_bg))
         })
-        .child(super::lane_indicator(
-            snap.agent_status_per_lane.get(&target).copied(),
-            snap.agent_outcome_per_lane.get(&target).copied(),
-            snap.metrics,
-            cx,
-        ))
+        .child(if count == 0 {
+            super::empty_lane_indicator(
+                snap.metrics,
+                snap.metrics.icon(theme::STATUS_INDICATOR_CELL_WIDTH),
+                cx,
+            )
+        } else {
+            super::lane_indicator(
+                snap.agent_status_per_lane.get(&target).copied(),
+                snap.agent_outcome_per_lane.get(&target).copied(),
+                snap.metrics,
+                cx,
+            )
+        })
         .when(count > 1, |element| {
             element.child(
                 div()

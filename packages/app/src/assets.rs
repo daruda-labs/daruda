@@ -158,6 +158,7 @@ impl AssetSource for DarudaAssets {
             "icons/lucide/workflow.svg" => icon!("lucide/workflow.svg"),
             "icons/lucide/folder.svg" => icon!("lucide/folder.svg"),
             "icons/lucide/folder-open.svg" => icon!("lucide/folder-open.svg"),
+            "icons/empty-worktree.svg" => icon!("empty-worktree.svg"),
             "icons/lucide/message-square.svg" => icon!("lucide/message-square.svg"),
             "icons/lucide/file-text.svg" => icon!("lucide/file-text.svg"),
             "icons/lucide/server.svg" => icon!("lucide/server.svg"),
@@ -416,6 +417,7 @@ mod tests {
             FOLDER,
             FOLDER_OPEN,
             SESSION,
+            EMPTY_WORKTREE,
             SKILL,
             SERVER,
         ] {

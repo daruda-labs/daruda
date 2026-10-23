@@ -176,6 +176,20 @@ pub(in crate::workspace) fn render(
 #[cfg(test)]
 mod tests;
 
+pub(in crate::workspace::left_dock) fn empty_lane_indicator(
+    metrics: theme::UiMetrics,
+    slot_width: f32,
+    cx: &gpui::App,
+) -> AnyElement {
+    div()
+        .flex_none()
+        .w(px(slot_width))
+        .flex()
+        .justify_center()
+        .child(neutral_indicator(ui::icons::EMPTY_WORKTREE, metrics, cx))
+        .into_any_element()
+}
+
 pub(super) fn lane_indicator(
     status: Option<daruda_agent::SessionStatus>,
     outcome: Option<daruda_agent::AgentOutcome>,
@@ -205,15 +219,23 @@ pub(in crate::workspace::left_dock) fn pane_indicator(
     }
 }
 
+const UNCONNECTED_CHAT_ICON_SIZE: f32 = 14.0;
+
 fn neutral_indicator(icon: &'static str, metrics: theme::UiMetrics, cx: &gpui::App) -> AnyElement {
+    let artwork_size = if icon == ui::icons::SESSION {
+        UNCONNECTED_CHAT_ICON_SIZE
+    } else {
+        theme::CONTROL_ICON_SIZE
+    };
     div()
         .flex_none()
         .w(px(metrics.icon(theme::STATUS_INDICATOR_CELL_WIDTH)))
+        .h(px(metrics.icon(theme::CONTROL_ICON_SIZE)))
         .flex()
         .items_center()
         .justify_center()
         .text_color(theme::current(cx).text_muted)
-        .child(ui::icons::icon(icon).with_size(px(metrics.icon(theme::CONTROL_ICON_SIZE))))
+        .child(ui::icons::icon(icon).with_size(px(metrics.icon(artwork_size))))
         .into_any_element()
 }
 
