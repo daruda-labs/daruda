@@ -444,7 +444,6 @@ impl<'a> Run<'a> {
                     reserve_extra_turn: &reserve,
                     spawned: &spawned,
                 };
-                let attempt = ctx.attempt;
                 let result = self.call(node, &ctx, &prompt).await;
 
                 // Before `judge`, not after: a cancelled node judged as a
@@ -521,65 +520,10 @@ impl<'a> Run<'a> {
                     });
                 }
 
-                // Archive the whole invalidation set before anything else
-                // runs — a fix that starts first would read a live output
-                // instead of the evidence it is supposed to answer.
-                let set = self.invalidation_set(node, &policy);
-                // Which outputs stop being current is durable before any
-                // of them is moved, so a crash in between is a resume's to
-                // finish rather than a pass with no output.
-                let members: Vec<NodeId> = set
-                    .iter()
-                    .map(|(member, _)| member.clone())
-                    .filter(|member| member != id)
-                    .collect();
-                if !members.is_empty() {
-                    let gate = id.clone();
-                    let members = members.clone();
-                    self.log
-                        .commit(FlowRunEvent::Invalidated { gate, members })
-                        .await
-                        .map_err(|e| self.log.failure(site(id, attempt), e))?;
-                }
-                match crate::archive::archive_attempt(
-                    &self.log_dir,
-                    &set,
-                    attempt,
-                    ctx.evidence_seq,
-                    &artifacts,
-                ) {
-                    Ok(paths) => {
-                        durable::sync_dirs(&set, &self.log_dir).await;
-                        // The archive's own return, not a second derivation
-                        // of it: two computations of the same set drift.
-                        let invalidation = Invalidation {
-                            nodes: set.iter().map(|(id, _)| id.clone()).collect(),
-                            archived: paths.clone(),
-                        };
-                        self.settle(
-                            &ctx,
-                            AttemptOutcome::Failed(failure.clone()),
-                            invalidation,
-                            reported,
-                        )
-                        .await?;
-                        evidence.extend(paths);
-                    }
-                    Err(e) => {
-                        // Same reasoning as the cancel path: the attempt is
-                        // in the accounting whether or not its evidence
-                        // could be moved, so it is in the record too.
-                        self.settle(
-                            &ctx,
-                            AttemptOutcome::Failed(failure.clone()),
-                            Invalidation::default(),
-                            reported,
-                        )
-                        .await?;
-                        let (path, source) = e.into_io();
-                        return Err(node_io(&ctx, doing::ARCHIVE, path, source));
-                    }
-                }
+                let archived = self
+                    .archive_failed_attempt(node, &policy, &ctx, &failure, reported, &artifacts)
+                    .await?;
+                evidence.extend(archived.evidence);
 
                 if !policy.wait.is_zero() {
                     // ALLOW: this crate is GPUI-free, so there is no
@@ -598,7 +542,7 @@ impl<'a> Run<'a> {
                 }
 
                 if let PolicyKind::Repair { fix, .. } = &policy.kind {
-                    self.repair(fix, &members, &ctx, id, &evidence, &failure)
+                    self.repair(fix, &archived.members, &ctx, id, &evidence, &failure)
                         .await?;
                 }
 
@@ -716,6 +660,7 @@ fn judge(ctx: &RunContext<'_>, result: RunResult) -> Result<(), NodeFailure> {
     Ok(())
 }
 
+mod attempt_archive;
 mod budget;
 mod durable;
 mod permission;
