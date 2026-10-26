@@ -94,6 +94,11 @@ const NAME_AGENT_CHAT_CLI_ENDED: &str = "agent-chat-cli-ended";
 const NAME_AGENT_CHAT_QUEUE_PARKED: &str = "agent-chat-queue-parked";
 /// CLI token for the same strip once an empty Enter armed the resume gesture.
 const NAME_AGENT_CHAT_QUEUE_ARMED: &str = "agent-chat-queue-armed";
+/// CLI tokens for the composer's overflowing draft at the bottom dock's floor:
+/// alone, under a parked queue, and expanded.
+const NAME_INPUT_DOCK_SHRUNK: &str = "input-dock-shrunk";
+const NAME_INPUT_DOCK_SHRUNK_QUEUE: &str = "input-dock-shrunk-queue";
+const NAME_INPUT_DOCK_EXPANDED: &str = "input-dock-expanded";
 /// CLI token for a transcript of prose-only replies and their own folds.
 const NAME_AGENT_CHAT_SOLE_REPLY: &str = "agent-chat-sole-reply";
 const NAME_AGENT_CHAT_PLAN: &str = "agent-chat-plan";
@@ -259,6 +264,18 @@ impl ScreenshotScenario {
             NAME_AGENT_CHAT_QUEUE_PARKED => Some(Self::AgentChatQueueParked),
             NAME_AGENT_CHAT_QUEUE_ARMED => Some(Self::AgentChatQueueArmed),
             NAME_AGENT_CHAT_SOLE_REPLY => Some(Self::AgentChatSoleReply),
+            NAME_INPUT_DOCK_SHRUNK => Some(Self::InputDockShrunk {
+                with_queue: false,
+                expanded: false,
+            }),
+            NAME_INPUT_DOCK_SHRUNK_QUEUE => Some(Self::InputDockShrunk {
+                with_queue: true,
+                expanded: false,
+            }),
+            NAME_INPUT_DOCK_EXPANDED => Some(Self::InputDockShrunk {
+                with_queue: false,
+                expanded: true,
+            }),
             NAME_AGENT_CHAT_PLAN => Some(Self::AgentChatPlan),
             NAME_AGENT_CHAT_RUNNING_TOOL => Some(Self::AgentChatRunningTool),
             NAME_AGENT_CHAT_PLAN_STOPPED => Some(Self::AgentChatPlanStopped),

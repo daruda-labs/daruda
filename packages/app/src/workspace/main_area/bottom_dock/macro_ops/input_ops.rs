@@ -2,6 +2,7 @@
 //! prompt-history navigation, and slash-command completion.
 
 use crate::workspace::Workspace;
+use crate::workspace::layout::ComposerExpand;
 use crate::workspace::main_area::pane_input_ops::{PaneTextInput, PaneTextIntent};
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_chat::view::PromptId;
@@ -16,6 +17,55 @@ impl Workspace {
         self.input_dock.visible = true;
         self.sync_bottom_dock_min_to_panel(cx);
         cx.notify();
+    }
+
+    /// Expand or collapse the composer. The editor's row cap moves first, so
+    /// the dock floor that follows it reads the new row count.
+    pub(in crate::workspace) fn set_composer_expanded(
+        &mut self,
+        expanded: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.input_dock.expanded == expanded {
+            return;
+        }
+        self.input_dock.expanded = expanded;
+        let max_rows = self.input_dock.max_rows(self.mirrors.agent.input_max_rows);
+        self.input_dock
+            .input
+            .update(cx, |state, _| state.set_auto_grow(1, max_rows));
+        self.adapt_dock_to_input_lines(window, cx);
+        cx.notify();
+    }
+
+    /// An emptied draft — sent, or cleared by hand — has nothing left to read
+    /// at full height, so the composer returns to its configured rows.
+    pub(in crate::workspace) fn collapse_composer_if_empty(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.input_dock.expanded && self.input_dock.input.read(cx).value().is_empty() {
+            self.set_composer_expanded(false, window, cx);
+        }
+    }
+
+    /// The expand toggle's state: offered while the draft overflows the rows it
+    /// may show, and kept while expanded so it can always be collapsed.
+    pub(in crate::workspace) fn composer_expand(&self, cx: &App) -> ComposerExpand {
+        if self.input_dock.expanded {
+            return ComposerExpand::Collapse;
+        }
+        let state = self.input_dock.input.read(cx);
+        let overflowing = state
+            .last_bounds()
+            .is_some_and(|b| state.scroll_size().height > b.size.height + gpui::px(0.5));
+        if overflowing {
+            ComposerExpand::Expand
+        } else {
+            ComposerExpand::Hidden
+        }
     }
 
     /// Send the current terminal input text to the focused pane.

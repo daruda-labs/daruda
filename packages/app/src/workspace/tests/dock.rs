@@ -76,6 +76,122 @@ fn input_panel_lifts_the_bottom_dock_floor_to_its_one_row_height(cx: &mut TestAp
     });
 }
 
+/// A multi-line draft floors the displayed height so a dock dragged to its
+/// minimum still shows every row and the action row; the saved size stays the
+/// user's, so a shorter draft lets the dock return to it.
+#[gpui::test]
+fn input_draft_rows_floor_the_displayed_bottom_dock(cx: &mut TestAppContext) {
+    let (_wh, ws) = build_workspace(cx);
+    ws.update(cx, |ws, cx| {
+        let rows = layout::ops::bottom_dock_height_for_rows;
+        let tab_id = ws.panels.tabs[0].id.clone();
+        ws.set_active_panel_tab(tab_id, cx);
+        ws.activate_bottom_input(cx);
+        ws.docks.bottom.update(cx, |d, _| d.resize(0.0));
+        assert_eq!(ws.bottom_dock_display_size(cx), rows(1));
+
+        ws.input_dock.line_count = 4;
+        assert_eq!(ws.bottom_dock_display_size(cx), rows(4));
+        assert_eq!(ws.docks.bottom.read(cx).size, rows(1));
+
+        ws.input_dock.line_count = 1;
+        assert_eq!(ws.bottom_dock_display_size(cx), rows(1));
+    });
+}
+
+/// Expanding lifts the row cap past the configured rows, and the dock floor
+/// with it; an emptied draft — what a send leaves — collapses it again.
+#[gpui::test]
+fn composer_expand_lifts_the_row_cap_and_an_emptied_draft_collapses_it(cx: &mut TestAppContext) {
+    let (window_handle, ws) = build_workspace(cx);
+    let rows = layout::ops::bottom_dock_height_for_rows;
+    let configured = ws.read_with(cx, |ws, _| usize::from(ws.mirrors.agent.input_max_rows));
+    let draft = vec!["line"; configured + 3].join("\n");
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let tab_id = ws.panels.tabs[0].id.clone();
+            ws.set_active_panel_tab(tab_id, cx);
+            ws.activate_bottom_input(cx);
+            ws.docks.bottom.update(cx, |d, _| d.resize(0.0));
+            ws.input_dock
+                .input
+                .update(cx, |s, cx| s.set_value(draft, window, cx));
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    ws.read_with(cx, |ws, cx| {
+        assert_eq!(ws.input_dock.line_count, configured);
+        assert_eq!(ws.bottom_dock_display_size(cx), rows(configured));
+    });
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| ws.set_composer_expanded(true, window, cx));
+    })
+    .unwrap();
+    ws.read_with(cx, |ws, cx| {
+        assert_eq!(ws.input_dock.line_count, configured + 3);
+        assert_eq!(ws.bottom_dock_display_size(cx), rows(configured + 3));
+        assert_eq!(ws.composer_expand(cx), layout::ComposerExpand::Collapse);
+    });
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.input_dock
+                .input
+                .update(cx, |s, cx| s.set_value("", window, cx));
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    ws.read_with(cx, |ws, cx| {
+        assert!(!ws.input_dock.expanded);
+        assert_eq!(ws.input_dock.line_count, 1);
+        assert_eq!(ws.bottom_dock_display_size(cx), rows(1));
+    });
+}
+
+/// The toggle is clicked from inside the bottom dock's own view, and expanding
+/// re-lays out that dock: a click that leased the dock while doing so aborted.
+#[gpui::test]
+fn clicking_the_composer_expand_toggle_expands_the_composer(cx: &mut TestAppContext) {
+    let (window_handle, ws) = build_workspace(cx);
+    let configured = ws.read_with(cx, |ws, _| usize::from(ws.mirrors.agent.input_max_rows));
+    let draft = vec!["line"; configured + 3].join("\n");
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.docks.bottom.update(cx, |d, _| d.open());
+            let tab_id = ws.panels.tabs[0].id.clone();
+            ws.set_active_panel_tab(tab_id, cx);
+            ws.activate_bottom_input(cx);
+            ws.input_dock
+                .input
+                .update(cx, |s, cx| s.set_value(draft, window, cx));
+        });
+    })
+    .unwrap();
+
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle.into(), cx);
+    // Two frames: the first paints the overflowing editor, the second offers
+    // the toggle that paint revealed. Refresh bypasses the dock's view cache so
+    // the button records its debug bounds.
+    for _ in 0..2 {
+        vcx.run_until_parked();
+        vcx.update(|window, _| window.refresh());
+    }
+    vcx.run_until_parked();
+    let toggle = vcx
+        .debug_bounds("composer-expand")
+        .expect("an overflowing draft offers the expand toggle");
+    vcx.simulate_click(toggle.center(), gpui::Modifiers::default());
+    vcx.run_until_parked();
+
+    ws.read_with(&vcx, |ws, _| {
+        assert!(ws.input_dock.expanded);
+        assert_eq!(ws.input_dock.line_count, configured + 3);
+    });
+}
+
 #[gpui::test]
 fn dock_drag_resizes_clamps_tracks_positions_and_clears_stale(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);

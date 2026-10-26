@@ -24,6 +24,9 @@ pub(in crate::workspace) struct InputDock {
     /// so `adapt_dock_to_input_lines` can guard against redundant resizes
     /// without re-reading the entity on every render cycle.
     pub(in crate::workspace) line_count: usize,
+    /// The user expanded the composer past `[agent] input_max_rows`; an
+    /// emptied draft collapses it again.
+    pub(in crate::workspace) expanded: bool,
     /// When true, the bottom dock shows the built-in "Input" panel instead
     /// of the active macro tab.
     pub(in crate::workspace) visible: bool,
@@ -44,6 +47,16 @@ pub(in crate::workspace) struct InputDock {
 }
 
 impl InputDock {
+    /// Rows the composer may grow to: the configured cap, or the setting's
+    /// ceiling while the user has expanded it.
+    pub(in crate::workspace) fn max_rows(&self, configured: u8) -> usize {
+        if self.expanded {
+            usize::from(daruda_config::agent::INPUT_MAX_ROWS_MAX)
+        } else {
+            usize::from(configured)
+        }
+    }
+
     pub(in crate::workspace) fn new(
         workspace: &WeakEntity<Workspace>,
         config: &daruda_config::Config,
@@ -166,6 +179,7 @@ impl InputDock {
                     this.send_terminal_input(window, cx);
                 }
                 crate::ui::InputEvent::Change => {
+                    this.collapse_composer_if_empty(window, cx);
                     this.adapt_dock_to_input_lines(window, cx);
                     // The composer no longer holds what the resume gesture was
                     // armed against, so the next Enter sends rather than confirms.
@@ -178,6 +192,7 @@ impl InputDock {
             input: terminal_input,
             _subscription: terminal_input_sub,
             line_count: 1,
+            expanded: false,
             visible: false,
             drafts: HashMap::new(),
             owner: None,

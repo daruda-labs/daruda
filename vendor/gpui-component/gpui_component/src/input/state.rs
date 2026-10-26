@@ -634,6 +634,8 @@ impl InputState {
     /// time only; this setter lets `Workspace::apply_config` update the cap
     /// after a `[agent] input_max_rows` change so the editor cap and the dock
     /// height cap stay in sync (single source of truth, Issue C fix).
+    /// The current row count is re-clamped against the new bounds at once, so
+    /// a raised cap shows rows the old one hid without waiting for an edit.
     pub fn set_auto_grow(&mut self, min_rows: usize, max_rows: usize) {
         if let InputMode::AutoGrow {
             min_rows: ref mut min,
@@ -643,6 +645,7 @@ impl InputState {
         {
             *min = min_rows;
             *max = max_rows;
+            self.mode.update_auto_grow(&self.text_wrapper);
         }
     }
 

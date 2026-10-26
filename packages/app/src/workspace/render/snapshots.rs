@@ -365,6 +365,7 @@ impl Workspace {
             agent_mode,
             agent_config_options,
             queued_prompts,
+            composer_expand: self.composer_expand(cx),
             shell,
             workspace: Handle(self.docks.bottom.read(cx).workspace.clone()),
         }

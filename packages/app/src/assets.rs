@@ -116,6 +116,7 @@ impl AssetSource for DarudaAssets {
             "icons/ui/indeterminate-check-box.svg" => icon!("ui/indeterminate-check-box.svg"),
             "icons/ui/refresh.svg" | "icons/refresh.svg" => icon!("ui/refresh.svg"),
             "icons/ui/open-in-full.svg" | "icons/maximize.svg" => icon!("ui/open-in-full.svg"),
+            "icons/ui/close-fullscreen.svg" => icon!("ui/close-fullscreen.svg"),
             "icons/ui/chevron-right.svg" | "icons/chevron-right.svg" => {
                 icon!("ui/chevron-right.svg")
             }

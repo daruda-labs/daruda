@@ -29,6 +29,58 @@ pub(crate) enum ThoughtsShot {
 #[cfg(feature = "screenshot")]
 const SHOT_RUNNING_TOOL_AGE: std::time::Duration = std::time::Duration::from_secs(12);
 
+/// A mode axis and model / effort options, as a connected session advertises
+/// them, so a capture shows the composer's selector chips.
+#[cfg(feature = "screenshot")]
+fn composer_chip_events() -> [daruda_acp::AcpEvent; 2] {
+    use daruda_acp::{
+        AcpEvent, ConfigChoiceView, ConfigOptionCategoryView, ConfigOptionKindView,
+        ConfigOptionView, ModeStateView, SessionModeView,
+    };
+    let select = |id: &str, name: &str, category, value: &str, label: &str| ConfigOptionView {
+        id: id.into(),
+        name: name.into(),
+        description: None,
+        category,
+        kind: ConfigOptionKindView::Select {
+            current_value: value.into(),
+            options: vec![ConfigChoiceView {
+                value: value.into(),
+                name: label.into(),
+                description: None,
+            }],
+        },
+    };
+    [
+        AcpEvent::ModeChanged {
+            state: ModeStateView {
+                available: vec![SessionModeView {
+                    id: "manual".into(),
+                    name: "Manual".into(),
+                    description: None,
+                }],
+                current: "manual".into(),
+            },
+        },
+        AcpEvent::ConfigOptionsChanged(vec![
+            select(
+                "model",
+                "Model",
+                ConfigOptionCategoryView::Model,
+                "default",
+                "Default (Opus 5.5)",
+            ),
+            select(
+                "effort",
+                "Effort",
+                ConfigOptionCategoryView::ThoughtLevel,
+                "default",
+                "Default",
+            ),
+        ]),
+    ]
+}
+
 impl Workspace {
     /// Seed failure copy and its remedy before focus can start a real adapter.
     #[cfg(feature = "screenshot")]
@@ -285,6 +337,62 @@ impl Workspace {
             window,
             cx,
         );
+    }
+
+    /// Open the composer holding a draft longer than its rows, then drag the
+    /// bottom dock as far down as it goes — optionally with a parked queue above
+    /// the input, or with the composer expanded. The floor keeps the draft and
+    /// its action row unclipped; the top fade and the expand toggle mark the
+    /// rows scrolled away, and only a capture shows whether they read as such.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_input_dock_shrunk_for_shot(
+        &mut self,
+        with_queue: bool,
+        expanded: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::workspace::layout::DockPosition;
+
+        self.open_agent_chat_pane_seeded(
+            None,
+            move |v, window, cx| {
+                v.seed_transcript(
+                    daruda_chat::shot_transcript::interrupted_transcript(),
+                    window,
+                    cx,
+                );
+                if with_queue {
+                    v.seed_parked_queue_for_shot(false, cx);
+                }
+                // The selector chips share the action row with the toggle and
+                // Submit; their spacing only shows with all of them present.
+                for event in composer_chip_events() {
+                    v.apply_event(event, "", false, cx);
+                }
+            },
+            window,
+            cx,
+        );
+        self.docks.bottom.update(cx, |d, _| d.open());
+        self.activate_bottom_input(cx);
+        self.input_dock.input.update(cx, |state, cx| {
+            state.set_value(
+                "first line\nsecond line\nthird line\nfourth line\nfifth line\nsixth line",
+                window,
+                cx,
+            );
+            // As after typing: the caret at the end, the first rows scrolled off.
+            state.move_cursor_to_end(cx);
+        });
+        self.adapt_dock_to_input_lines(window, cx);
+        // Drag well past the floor: the dock clamps to its minimum.
+        self.begin_dock_drag(DockPosition::Bottom, 0.0, cx);
+        self.update_dock_drag(10_000.0, window, cx);
+        self.end_dock_drag(cx);
+        if expanded {
+            self.set_composer_expanded(true, window, cx);
+        }
     }
 
     /// Open the seeded transcript mid-turn — the agent's answer not yet

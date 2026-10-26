@@ -63,6 +63,7 @@ pub(in crate::workspace) fn config_chip(
         .child(crate::ui::icons::icon(crate::ui::icons::EXPAND_MORE))
         .ghost()
         .h(px(theme::BUTTON_HEIGHT))
+        .px(px(theme::COMPOSER_CHIP_PAD_X))
         .rounded(px(theme::RADIUS_MD))
         .tooltip(tooltip)
         .dropdown_menu(move |menu, _window, _cx| {

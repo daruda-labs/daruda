@@ -53,6 +53,7 @@ pub const REFRESH: &str = "icons/ui/refresh.svg";
 pub const COPY: &str = "icons/ui/content-copy.svg";
 pub const CHECK: &str = "icons/ui/check.svg";
 pub const EXPAND: &str = "icons/ui/open-in-full.svg";
+pub const COLLAPSE: &str = "icons/ui/close-fullscreen.svg";
 pub const HISTORY: &str = "icons/ui/history.svg";
 pub const VISIBILITY: &str = "icons/ui/visibility.svg";
 pub const DIFFERENCE: &str = "icons/ui/difference.svg";

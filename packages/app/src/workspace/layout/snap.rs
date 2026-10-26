@@ -248,6 +248,15 @@ pub(in crate::workspace) struct QueuedPromptsSnapshot {
     pub resume_armed: bool,
 }
 
+/// The composer's expand toggle: offered only while the draft overflows the
+/// configured rows, and kept while expanded so it can always be collapsed.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(in crate::workspace) enum ComposerExpand {
+    Hidden,
+    Expand,
+    Collapse,
+}
+
 /// The CLI status row a mirrored pane shows in place of the composer.
 #[derive(PartialEq)]
 pub(in crate::workspace) struct CliSnapshot {
@@ -316,6 +325,7 @@ pub(in crate::workspace) struct BottomDockSnapshot {
     /// focus, an agent pane with an empty queue, or the Landing state — the
     /// strip is then not rendered.
     pub queued_prompts: Option<QueuedPromptsSnapshot>,
+    pub composer_expand: ComposerExpand,
     /// Shell flavour of the focused pane's PTY. Drives drag-and-drop path
     /// quoting in the terminal input — Posix backslash/single-quote rules,
     /// fish, PowerShell, and cmd.exe all differ.

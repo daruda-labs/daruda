@@ -9,8 +9,8 @@ use crate::ui::ScrollableElement as _;
 use crate::ui::theme;
 use gpui::{AnyElement, ClickEvent, Context, ExternalPaths, IntoElement, div, prelude::*, px};
 
-use crate::workspace::layout::BottomDockSnapshot;
 use crate::workspace::layout::Dock;
+use crate::workspace::layout::{BottomDockSnapshot, ComposerExpand};
 use crate::workspace::path_drag::PathDrag;
 
 /// Build the terminal input panel body.
@@ -56,6 +56,34 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
     // carries `None`, so only Submit shows. Selecting dispatches through
     // `Workspace::set_agent_mode` / `set_agent_config_option` (one-way data flow).
     let mut chips: Vec<AnyElement> = Vec::new();
+    let expand = match snap.composer_expand {
+        ComposerExpand::Hidden => None,
+        ComposerExpand::Expand => Some((
+            crate::ui::icons::EXPAND,
+            crate::surface::strings::bottom_dock::composer_expand(),
+            true,
+        )),
+        ComposerExpand::Collapse => Some((
+            crate::ui::icons::COLLAPSE,
+            crate::surface::strings::bottom_dock::composer_collapse(),
+            false,
+        )),
+    };
+    // The expand toggle rides the action row's left edge, apart from the
+    // send-side controls: it acts on the draft above, not on the send.
+    let expand_toggle = expand.map(|(icon, tooltip, expanded)| {
+        let ws = snap.workspace.clone();
+        crate::ui::button_icon("composer-expand", icon, cx)
+            .tooltip(tooltip)
+            .debug_selector(|| "composer-expand".into())
+            // Not `cx.listener`: expanding re-lays out this dock, which
+            // must not still be leased by its own click handler.
+            .on_click(move |_, window, cx| {
+                if let Some(ws) = ws.upgrade() {
+                    ws.update(cx, |ws, cx| ws.set_composer_expanded(expanded, window, cx));
+                }
+            })
+    });
     if snap.attachment_draft.is_some() {
         let ws = snap.workspace.clone();
         chips.push(
@@ -94,6 +122,18 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
             row = row.child(chip);
         }
         row.child(submit).into_any_element()
+    };
+    let action: AnyElement = match expand_toggle {
+        None => action,
+        Some(toggle) => div()
+            .flex_1()
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_between()
+            .child(toggle)
+            .child(action)
+            .into_any_element(),
     };
     // The action column sits beside the text in its own column (see
     // `input_with_action_grow`). In auto-grow mode the editor self-sizes

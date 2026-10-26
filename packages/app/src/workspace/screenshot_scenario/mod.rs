@@ -220,6 +220,12 @@ pub(crate) enum ScreenshotScenario {
     /// The same strip after one empty-composer Enter armed the resume gesture,
     /// where the count gives way to the sentence asking for the second press.
     AgentChatQueueArmed,
+    /// The composer with a draft longer than its rows after the bottom dock
+    /// was dragged to its floor; optionally under a parked queue, or expanded.
+    InputDockShrunk {
+        with_queue: bool,
+        expanded: bool,
+    },
     /// Prose-only replies — the `/usage` shape — with the first reply's own
     /// fold shut and the second open. Such a turn renders one block, which the
     /// response bar cannot fold (the conclusion escape keeps it on screen), so
@@ -776,6 +782,14 @@ pub(crate) fn drive(
         ScreenshotScenario::AgentChatQueueArmed => {
             workspace.update(cx, |ws, cx| {
                 ws.open_agent_chat_parked_queue_for_shot(true, window, cx)
+            });
+        }
+        ScreenshotScenario::InputDockShrunk {
+            with_queue,
+            expanded,
+        } => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_input_dock_shrunk_for_shot(with_queue, expanded, window, cx)
             });
         }
         ScreenshotScenario::AgentChatSoleReply => {

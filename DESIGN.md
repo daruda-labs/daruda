@@ -239,7 +239,8 @@ or the screen rendering it. Single-line fields use these pixel metrics:
 Both bordered profiles use 12px text and a 1px border. Multi-line form inputs
 grow by 20px per row, retaining the same padding and the state-owned row cap.
 Borderless pane-search fields retain 28px height with 4px vertical padding.
-Composers and prose editors use 12px horizontal / 8px vertical padding;
+Composers and prose editors use 12px horizontal / 8px vertical padding, except
+the bottom-dock composer's 4px top inset (see TerminalInputDock);
 prose and code editors follow the configured editor font and line height.
 Screen code owns width and spacing between fields, never inner padding.
 
@@ -982,8 +983,16 @@ padding:    sm (8px)
   focus-border:  1px solid accent
   text:          ui-md, ink
   placeholder:   ui-md, mute
-  padding:       sm md (8px 12px)
+  padding:       4px md (text column; the action row sits below it)
   ```
+- Grows to `[agent] input_max_rows`, then scrolls. Rows scrolled off the top
+  get a top fade: opaque over the inset, then the first row fading out from its
+  top edge (the tab-overflow edge fade turned vertical).
+- Expand toggle: icon button at the action row's left edge, shown only while
+  the draft overflows (expand) or is expanded (collapse); an emptied draft
+  collapses it.
+- Selector chips (mode, model, effort): ghost buttons, 28px high, 6px side
+  padding so neighbouring labels do not read as far apart.
 - Submit button: `background accent, text accent-fg, radius md, height 28px, padding 0 md`
 - Secondary action buttons: `background surface-2, text body, radius md, height 28px`
 

@@ -112,23 +112,30 @@ impl Workspace {
         }
     }
 
-    /// Draft attachments occupy one scrollable row without changing the saved dock size.
+    /// The Input panel's content floors the displayed height without changing
+    /// the saved dock size: the draft's rows and action row, an attachment row,
+    /// and the queued-prompt strip's reserve. A drag cannot paint the composer
+    /// clipped, and once the draft shrinks the dock returns to the saved size.
     pub(in crate::workspace) fn bottom_dock_display_size(&self, cx: &gpui::App) -> f32 {
-        let size = self.docks.bottom.read(cx).size;
-        let has_attachments = self.input_dock.visible
-            && self
-                .agent_chat_view(self.active_runtime().focused_pane_id)
-                .is_some_and(|view| !view.read(cx).draft_attachments().is_empty());
-        if has_attachments {
-            size.max(
-                bottom_dock_height_for_rows(self.input_dock.line_count.max(1))
-                    + crate::ui::theme::BUTTON_HEIGHT
-                    + crate::ui::theme::GAP_SM,
-            )
-        } else {
-            size
+        use crate::ui::theme::{AGENT_QUEUE_STRIP_OUTER_MAX_H, BUTTON_HEIGHT, GAP_SM};
+
+        let dock = self.docks.bottom.read(cx);
+        if !self.input_dock.visible {
+            return dock.size;
         }
+        let mut floor = bottom_dock_height_for_rows(self.input_dock.line_count.max(1));
+        if let Some(view) = self.agent_chat_view(self.active_runtime().focused_pane_id) {
+            let view = view.read(cx);
+            if !view.draft_attachments().is_empty() {
+                floor += BUTTON_HEIGHT + GAP_SM;
+            }
+            if view.queue().in_strip_order().next().is_some() {
+                floor += AGENT_QUEUE_STRIP_OUTER_MAX_H;
+            }
+        }
+        dock.size.max(floor.min(dock.max_size))
     }
+
     pub(in crate::workspace) fn on_toggle_left_dock(
         &mut self,
         _: &ToggleLeftDock,
@@ -326,7 +333,9 @@ impl Workspace {
         let start_size = match position {
             DockPosition::Left => self.docks.left.read(cx).display_size(),
             DockPosition::Right => self.docks.right.read(cx).size,
-            DockPosition::Bottom => self.docks.bottom.read(cx).size,
+            // From the displayed height: a drag starting under a content floor
+            // must move the dock at once, not first cross the hidden gap.
+            DockPosition::Bottom => self.bottom_dock_display_size(cx),
         };
         self.docks.drag = Some(DockDrag {
             position,
@@ -444,29 +453,22 @@ impl Workspace {
         }
     }
 
-    /// Recompute and apply the bottom dock height to match the current
-    /// line count of the shared bottom input. Called from the
-    /// `InputEvent::Change` subscription in `bottom_dock/input_dock.rs`.
+    /// Track the shared bottom input's row count. Called from the
+    /// `InputEvent::Change` subscription in `bottom_dock/input_dock.rs` and
+    /// whenever the composer's row cap moves.
     ///
-    /// Height formula: `DOCK_BOTTOM_ROW_PRESET_1_H` covers the 1-row
-    /// base (tab bar + padding + one text line); each additional line
-    /// adds `DOCK_BOTTOM_INPUT_EXTRA_LINE_H`. The result is clamped to
-    /// `[DOCK_BOTTOM_MIN_H, DOCK_BOTTOM_MAX_H]` by `Dock::resize`.
+    /// The dock grows through [`Self::bottom_dock_display_size`], which floors
+    /// the displayed height at `bottom_dock_height_for_rows(line_count)`. The
+    /// saved size stays the user's drag, so a shorter draft — a send, or a
+    /// collapsed composer — hands the room back without undoing that drag.
     ///
-    /// Redundant calls are guarded: the new height is compared to the
-    /// dock's current size before going through the resize path to
-    /// avoid notify storms when the content changes within the same row
-    /// count (e.g. typing within a single line doesn't change N).
+    /// Redundant calls are guarded: typing within the same row count does not
+    /// re-lay out the panes.
     pub(in crate::workspace) fn adapt_dock_to_input_lines(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Read display-row count from the input state (re-entrant-safe: we read
-        // `InputDock::input` here while holding `&mut Workspace` — it is a
-        // separate entity so no re-entry conflict; we are not inside an
-        // `entity.update` on `InputDock::input`).
-        //
         // `display_rows()` returns the soft-wrapped row count that the editor
         // uses for its own layout (`update_auto_grow` → `text_wrapper.len()`),
         // so the dock height stays in sync with the editor's actual height.
@@ -477,28 +479,18 @@ impl Workspace {
         // Pitfall #8). The per-row height constant lives in the palette instead.
         let new_line_count = self.input_dock.input.read(cx).display_rows().max(1);
 
-        let max_rows = usize::from(self.mirrors.agent.input_max_rows);
-        let clamped = new_line_count.min(max_rows);
-
-        // Guard: only resize when line count actually changes.
+        let clamped =
+            new_line_count.min(self.input_dock.max_rows(self.mirrors.agent.input_max_rows));
         if clamped == self.input_dock.line_count {
             return;
         }
         self.input_dock.line_count = clamped;
 
-        let desired = bottom_dock_height_for_rows(clamped);
-
-        // Grow-only: auto-height may enlarge the dock to fit more lines, but
-        // never shrinks it. The user manually dragged the dock to its current
-        // height; reducing it (e.g. after clearing the input on submit) would
-        // undo that intentional action. A smaller `desired` is silently
-        // ignored; only when `desired > current` do we invoke the resize path.
-        let current = self.docks.bottom.read(cx).size;
-        if desired <= current {
-            return;
-        }
-
-        self.set_bottom_dock_row_preset(desired, window, cx);
+        // Cached bottom dock — notify its entity (Pitfall #10); the panes take
+        // the height the new floor leaves them.
+        self.docks.bottom.update(cx, |_, cx| cx.notify());
+        self.resize_all_tabs(window, cx);
+        cx.notify();
     }
 
     // ---- Context menu (root-deployed PopupMenu) ----

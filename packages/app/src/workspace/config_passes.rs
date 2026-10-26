@@ -164,7 +164,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         // Also baked in at construction. No `&mut Window` needed, so inline.
-        let new_max_rows = usize::from(config.agent.input_max_rows);
+        let new_max_rows = self.input_dock.max_rows(config.agent.input_max_rows);
         self.input_dock
             .input
             .update(cx, |s, _cx| s.set_auto_grow(1, new_max_rows));

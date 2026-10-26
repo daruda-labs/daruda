@@ -84,6 +84,7 @@ pub(super) fn render(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> Optio
         s::bottom_dock::queued_count(prompts.len())
     };
     let header = div()
+        .flex_shrink_0()
         .flex()
         .flex_row()
         .items_center()
@@ -110,6 +111,7 @@ pub(super) fn render(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> Optio
         .flex()
         .flex_col()
         .gap(px(theme::AGENT_QUEUE_STRIP_GAP))
+        .min_h_0()
         .max_h(px(theme::AGENT_QUEUE_STRIP_MAX_H))
         .overflow_y_scroll();
     for qp in prompts {
@@ -223,9 +225,13 @@ pub(super) fn render(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> Optio
         list = list.child(row);
     }
 
+    // The outer cap is the space the dock floor reserves for the strip; past it
+    // the list shrinks and scrolls so the composer below keeps its rows.
     Some(
         div()
             .flex_shrink_0()
+            .max_h(px(theme::AGENT_QUEUE_STRIP_OUTER_MAX_H))
+            .overflow_hidden()
             .flex()
             .flex_col()
             .gap(px(theme::AGENT_QUEUE_STRIP_GAP))

@@ -102,7 +102,7 @@ pub const INPUT_MAX_ROWS_MIN: u8 = 2;
 /// Maximum allowed value for `AgentConfig::input_max_rows`.
 pub const INPUT_MAX_ROWS_MAX: u8 = 20;
 /// Default maximum rows for the bottom input before it scrolls.
-pub const INPUT_MAX_ROWS_DEFAULT: u8 = 8;
+pub const INPUT_MAX_ROWS_DEFAULT: u8 = 3;
 /// Minimum readable-content column width for AgentChat.
 pub const READING_WIDTH_MIN: f32 = 360.0;
 /// Maximum readable-content column width for AgentChat.

@@ -139,6 +139,27 @@ fn agent_chat_names_map_to_their_scenarios() {
         Some(ScreenshotScenario::AgentChatQueueArmed)
     );
     assert_eq!(
+        ScreenshotScenario::from_cli_name("input-dock-shrunk"),
+        Some(ScreenshotScenario::InputDockShrunk {
+            with_queue: false,
+            expanded: false
+        })
+    );
+    assert_eq!(
+        ScreenshotScenario::from_cli_name("input-dock-shrunk-queue"),
+        Some(ScreenshotScenario::InputDockShrunk {
+            with_queue: true,
+            expanded: false
+        })
+    );
+    assert_eq!(
+        ScreenshotScenario::from_cli_name("input-dock-expanded"),
+        Some(ScreenshotScenario::InputDockShrunk {
+            with_queue: false,
+            expanded: true
+        })
+    );
+    assert_eq!(
         ScreenshotScenario::from_cli_name("agent-chat-narrowed"),
         Some(ScreenshotScenario::AgentChatNarrowed)
     );

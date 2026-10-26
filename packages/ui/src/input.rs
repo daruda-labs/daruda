@@ -8,6 +8,7 @@
 
 use crate::field_geometry::FieldGeometry;
 use crate::theme as d;
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, Element as _, Entity, Focusable as _, InteractiveElement as _, IntoElement,
     MouseButton, ParentElement as _, SharedString, Styled as _, Window, div, px,
@@ -289,6 +290,9 @@ pub fn input_with_action_grow<T: InputTabSpec>(
     let t = d::current(cx);
     // Focus-within accent border.
     let focus_handle = state.read(cx).focus_handle(cx);
+    // The editor scrolls itself (negative y = rows hidden above). Read from the
+    // last paint; an input scroll notifies its ancestors, so this re-renders.
+    let scrolled_past_top = state.read(cx).scroll_handle().offset().y < px(-0.5);
 
     match grow_mode {
         InputGrowMode::Fill => {
@@ -344,15 +348,20 @@ pub fn input_with_action_grow<T: InputTabSpec>(
                 .border_color(t.border)
                 .in_focus(|s| s.border_color(d::PRIMARY))
                 .rounded(px(d::RADIUS_MD))
-                // Text area — full width, auto-sized to content row count.
+                // Text area — full width, auto-sized to content row count. Once
+                // rows scroll off the top, a fade over the first row says the
+                // draft continues above (DESIGN.md's tab-overflow edge fade).
                 .child(
                     div()
                         .flex_1()
                         .flex()
                         .min_w_0()
                         .px(px(d::INPUT_TEXTAREA_PAD_X))
-                        .pt(px(d::INPUT_TEXTAREA_PAD_Y))
-                        .child(inner),
+                        .pt(px(d::COMPOSER_TEXT_PAD_Y))
+                        .child(inner)
+                        .when(scrolled_past_top, |area| {
+                            area.child(overflow_fade_top(t.modal_input_bg))
+                        }),
                 )
                 // Action row — right-aligned below the text, with gap to the
                 // chrome edge. Matches `DOCK_BOTTOM_INPUT_ACTION_ROW_H` in
@@ -371,6 +380,24 @@ pub fn input_with_action_grow<T: InputTabSpec>(
                 .into_any()
         }
     }
+}
+
+/// Input-colored to transparent over the composer's top padding and first
+/// row. It has no listeners, so clicks and wheel events reach the editor.
+fn overflow_fade_top(bg: gpui::Hsla) -> gpui::Div {
+    div()
+        .absolute()
+        .top_0()
+        .left_0()
+        .right_0()
+        .h(px(d::INPUT_OVERFLOW_FADE_H))
+        .bg(gpui::linear_gradient(
+            180.,
+            // Opaque over the padding only: the first row itself fades out
+            // from its top edge, so it reads as cut off rather than missing.
+            gpui::linear_color_stop(bg, d::COMPOSER_TEXT_PAD_Y / d::INPUT_OVERFLOW_FADE_H),
+            gpui::linear_color_stop(bg.opacity(0.), 1.),
+        ))
 }
 
 #[cfg(test)]
@@ -397,6 +424,24 @@ mod tests {
                 state.set_value("first\nsecond\nthird", window, cx);
                 assert_eq!(state.value().as_ref(), "firstsecondthird");
                 assert!(!state.value().contains('\n'));
+            })
+            .unwrap();
+    }
+
+    /// Raising the auto-grow cap shows the rows the old cap hid at once — the
+    /// expand toggle has no edit to wait for — and lowering it hides them again.
+    #[gpui::test]
+    fn set_auto_grow_reclamps_the_shown_rows(cx: &mut TestAppContext) {
+        init_gpui_component(cx);
+        let window = cx.add_window(|window, cx| InputState::new(window, cx).auto_grow(1, 2));
+        window
+            .update(cx, |state, window, cx| {
+                state.set_value("1\n2\n3\n4", window, cx);
+                assert_eq!(state.display_rows(), 2);
+                state.set_auto_grow(1, 5);
+                assert_eq!(state.display_rows(), 4);
+                state.set_auto_grow(1, 3);
+                assert_eq!(state.display_rows(), 3);
             })
             .unwrap();
     }

@@ -812,6 +812,9 @@ bottom_dock:
   queue_edit: "Edit"
   # Queued-prompt strip — cancel-edit (↩) button tooltip on the row being edited.
   queue_edit_cancel: "Cancel edit"
+  # Composer expand toggle tooltips — grow past the configured rows, and back.
+  composer_expand: "Expand input"
+  composer_collapse: "Collapse input"
   # Queued-prompt strip — inline label on the row currently pulled into the
   # composer for editing.
   queue_editing: "Editing…"

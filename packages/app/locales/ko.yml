@@ -635,6 +635,8 @@ bottom_dock:
   queue_remove: "대기열에서 제거"
   queue_edit: "편집"
   queue_edit_cancel: "편집 취소"
+  composer_expand: "입력창 펼치기"
+  composer_collapse: "입력창 접기"
   queue_editing: "편집 중…"
   queue_resume: "재개"
   queue_paused: "일시정지"

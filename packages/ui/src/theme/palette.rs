@@ -252,7 +252,7 @@ pub const DOCK_BOTTOM_ROW_PRESET_2_H: f32 = 114.0;
 pub const DOCK_BOTTOM_ROW_PRESET_3_H: f32 = 152.0;
 // Same row height as the composer, independent of the terminal font.
 pub const DOCK_BOTTOM_INPUT_EXTRA_LINE_H: f32 = INPUT_LINE_HEIGHT;
-pub const DOCK_BOTTOM_INPUT_TEXT_PAD_H: f32 = INPUT_TEXTAREA_PAD_Y * 2.0;
+pub const DOCK_BOTTOM_INPUT_TEXT_PAD_H: f32 = COMPOSER_TEXT_PAD_Y * 2.0;
 pub const DOCK_BOTTOM_INPUT_ACTION_ROW_H: f32 = BUTTON_HEIGHT + INPUT_PANEL_BUTTON_GAP;
 pub const AGENT_ATTACHMENT_CHIP_MAX_W: f32 = 290.0;
 
@@ -262,6 +262,16 @@ pub const INPUT_PANEL_SECTION_GAP: f32 = GAP_LG;
 pub const INPUT_PANEL_BUTTON_GAP: f32 = GAP_SM;
 pub const INPUT_TEXTAREA_PAD_X: f32 = 12.0;
 pub const INPUT_TEXTAREA_PAD_Y: f32 = 8.0;
+/// The auto-grow composer's top inset — tighter than a form textarea's, so the
+/// bottom dock spends its height on draft rows.
+pub const COMPOSER_TEXT_PAD_Y: f32 = 4.0;
+/// Side padding of the composer's ghost selector chips (mode, model, effort).
+/// Their fill shows only on hover, so a standard button's padding reads as a
+/// wide gap between neighbouring labels.
+pub const COMPOSER_CHIP_PAD_X: f32 = PAD_SM;
+/// Top fade over an auto-grow composer scrolled past its first row: the top
+/// padding plus one line, so the clipped row reads as continuing above.
+pub const INPUT_OVERFLOW_FADE_H: f32 = COMPOSER_TEXT_PAD_Y + INPUT_LINE_HEIGHT;
 pub const INPUT_PANEL_MIN_H: f32 = 48.0;
 pub const INPUT_PANEL_FLOATING_BAR_H: f32 = 32.0;
 pub const BUTTON_WIDGET_HEIGHT: f32 = 32.0;
@@ -667,6 +677,10 @@ pub const AGENT_CHAT_COMPACT_OPTIONS_W: f32 =
     AGENT_CHAT_TITLE_MIN_W + AGENT_CHAT_OPTIONS_CLUSTER_W + 2.0 * AGENT_CHAT_PAD_X;
 
 pub const AGENT_QUEUE_STRIP_MAX_H: f32 = 120.0;
+/// Cap on the whole queued-prompt strip (header, padding, and list). The bottom
+/// dock reserves exactly this above the composer, so the strip scrolls its list
+/// rather than pushing the composer out of a short dock.
+pub const AGENT_QUEUE_STRIP_OUTER_MAX_H: f32 = 160.0;
 pub const AGENT_QUEUE_STRIP_GAP: f32 = GAP_SM;
 pub const AGENT_QUEUE_STRIP_FONT_SIZE: f32 = FONT_SIZE_MD;
 pub const AGENT_QUEUE_STRIP_ROW_RADIUS: f32 = RADIUS_SM;
