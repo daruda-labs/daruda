@@ -241,7 +241,7 @@ pub(crate) fn parse_numstat(text: &str) -> Vec<(u32, u32, PathBuf)> {
 /// Runs from `wt_path` (the lane directory) so that paths relative to the
 /// lane are resolved correctly for both main and linked lanes.
 pub fn git_diff(wt_path: &Path, path: &Path, staged: bool) -> Result<String, GitError> {
-    let mut args: Vec<String> = vec!["diff".into()];
+    let mut args: Vec<String> = vec!["--literal-pathspecs".into(), "diff".into()];
     if staged {
         args.push("--cached".into());
     }
@@ -272,7 +272,12 @@ pub fn git_diff_untracked(wt_path: &Path, path: &Path) -> Result<String, GitErro
 
 /// `git add -- <path>` — stage a specific file.
 pub fn git_add(repo_root: &Path, path: &Path) -> Result<(), GitError> {
-    let args: Vec<&OsStr> = vec![OsStr::new("add"), OsStr::new("--"), path.as_os_str()];
+    let args: Vec<&OsStr> = vec![
+        OsStr::new("--literal-pathspecs"),
+        OsStr::new("add"),
+        OsStr::new("--"),
+        path.as_os_str(),
+    ];
     run_git(repo_root, args).map(|_| ())
 }
 
@@ -283,7 +288,11 @@ pub fn git_add_paths(repo_root: &Path, paths: &[PathBuf]) -> Result<(), GitError
     if paths.is_empty() {
         return Ok(());
     }
-    let mut args: Vec<&OsStr> = vec![OsStr::new("add"), OsStr::new("--")];
+    let mut args: Vec<&OsStr> = vec![
+        OsStr::new("--literal-pathspecs"),
+        OsStr::new("add"),
+        OsStr::new("--"),
+    ];
     args.extend(paths.iter().map(|p| p.as_os_str()));
     run_git(repo_root, args).map(|_| ())
 }
@@ -296,32 +305,64 @@ pub fn git_add_all(wt_path: &Path) -> Result<(), GitError> {
     run_git(wt_path, ["add", "--all"]).map(|_| ())
 }
 
-/// `git restore --staged -- <path>` — remove a file from the index (unstage).
+/// Unstage a file, including both sides when the staged entry is a rename.
 ///
 /// Requires git ≥ 2.23 (macOS 12 Monterey ships git 2.30+, which satisfies
 /// our minimum deployment target).
 pub fn git_restore_staged(repo_root: &Path, path: &Path) -> Result<(), GitError> {
-    let args: Vec<&OsStr> = vec![
-        OsStr::new("restore"),
-        OsStr::new("--staged"),
-        OsStr::new("--"),
-        path.as_os_str(),
-    ];
-    run_git(repo_root, args).map(|_| ())
+    git_restore_staged_paths(repo_root, &[path.to_path_buf()])
 }
 
-/// `git restore --staged -- <path>...` — unstage a batch of paths in a
-/// single git invocation. Companion to [`git_add_paths`] for per-dir
-/// "unstage all" actions.
+/// Unstage selected paths, including rename sources, without changing disk
+/// contents. An unborn repository removes index entries instead of restoring
+/// from HEAD. Companion to [`git_add_paths`] for per-directory actions.
 pub fn git_restore_staged_paths(repo_root: &Path, paths: &[PathBuf]) -> Result<(), GitError> {
     if paths.is_empty() {
         return Ok(());
     }
-    let mut args: Vec<&OsStr> = vec![
-        OsStr::new("restore"),
-        OsStr::new("--staged"),
-        OsStr::new("--"),
-    ];
+    let raw = run_git(repo_root, ["status", "--porcelain=v1", "-z"])?;
+    let status = parse_git_status_output(&raw);
+    let mut selected = paths.to_vec();
+    for entry in &status.staged {
+        if entry.x == 'R'
+            && paths.contains(&entry.path)
+            && let Some(original) = &entry.original_path
+            && !selected.contains(original)
+        {
+            selected.push(original.clone());
+        }
+    }
+    unstage_paths(repo_root, &selected)
+}
+
+fn unstage_paths(repo_root: &Path, paths: &[PathBuf]) -> Result<(), GitError> {
+    let unborn = match run_git(repo_root, ["rev-parse", "--verify", "--quiet", "HEAD"]) {
+        Ok(_) => false,
+        Err(GitError::Exit { code: Some(1), .. }) => {
+            let head = run_git(repo_root, ["symbolic-ref", "--quiet", "HEAD"])?;
+            match run_git(repo_root, ["show-ref", "--verify", "--quiet", head.trim()]) {
+                Err(GitError::Exit { code: Some(1), .. }) => true,
+                Ok(_) => {
+                    return Err(GitError::Parse(
+                        "HEAD does not resolve to its existing branch".into(),
+                    ));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Err(error) => return Err(error),
+    };
+    if unborn && run_git(repo_root, ["ls-files", "--cached", "-z"])?.is_empty() {
+        return Ok(());
+    }
+    // Before the first commit there is no HEAD tree to restore. Removing
+    // index entries must preserve later edits in the working tree as well.
+    let command: &[&str] = if unborn {
+        &["--literal-pathspecs", "rm", "--cached", "-r", "-f", "--"]
+    } else {
+        &["--literal-pathspecs", "restore", "--staged", "--"]
+    };
+    let mut args: Vec<&OsStr> = command.iter().map(OsStr::new).collect();
     args.extend(paths.iter().map(|p| p.as_os_str()));
     run_git(repo_root, args).map(|_| ())
 }
@@ -336,9 +377,9 @@ pub fn git_push(repo_root: &Path) -> Result<(), GitError> {
     run_git(repo_root, ["push"]).map(|_| ())
 }
 
-/// `git restore --staged .` — remove all files from the index, keeping working-tree state.
+/// Unstage every path, preserving working-tree bytes even before the first commit.
 pub fn git_restore_all_staged(wt_path: &Path) -> Result<(), GitError> {
-    run_git(wt_path, ["restore", "--staged", "."]).map(|_| ())
+    unstage_paths(wt_path, &[PathBuf::from(".")])
 }
 
 /// `git commit --amend -m <message>` — replace the tip commit with staged changes

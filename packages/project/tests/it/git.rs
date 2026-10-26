@@ -443,3 +443,127 @@ fn git_dirs_separate_a_linked_worktree_from_the_shared_repository() {
 
     teardown(&dir);
 }
+
+fn regression_repo(committed: bool) -> tempfile::TempDir {
+    let temp = tempfile::tempdir().unwrap();
+    init(temp.path()).unwrap();
+    if committed {
+        commit_initial(temp.path());
+    }
+    temp
+}
+
+#[test]
+fn explicit_file_staging_and_diffs_use_literal_pathspecs() {
+    for batch in [false, true] {
+        let temp = regression_repo(true);
+        let root = temp.path();
+        for name in ["[id].tsx", "i.tsx"] {
+            std::fs::write(root.join(name), "base\n").unwrap();
+        }
+        git_add_all(root).unwrap();
+        git_commit(root, "base").unwrap();
+        for (name, text) in [("[id].tsx", "selected\n"), ("i.tsx", "sibling\n")] {
+            std::fs::write(root.join(name), text).unwrap();
+        }
+        if batch {
+            git_add_paths(root, &[PathBuf::from("[id].tsx")]).unwrap();
+        } else {
+            git_add(root, Path::new("[id].tsx")).unwrap();
+        }
+        let staged = git_worktree_status(root).unwrap().staged;
+        assert_eq!(
+            staged.iter().map(|e| e.path.as_path()).collect::<Vec<_>>(),
+            vec![Path::new("[id].tsx")]
+        );
+        git_add_all(root).unwrap();
+        let diff = git_diff(root, Path::new("[id].tsx"), true).unwrap();
+        assert!(diff.contains("selected"));
+        assert!(!diff.contains("sibling"), "{diff}");
+        let from = git_command(root)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        let from = String::from_utf8(from.stdout).unwrap();
+        git_commit(root, "changes").unwrap();
+        let range =
+            base::git_diff_range(root, from.trim(), "HEAD", &[Path::new("[id].tsx")]).unwrap();
+        assert!(!range.contains("sibling"), "{range}");
+    }
+}
+
+#[test]
+fn explicit_file_unstaging_uses_literal_pathspecs() {
+    for batch in [false, true] {
+        let temp = regression_repo(true);
+        let root = temp.path();
+        for name in ["[id].tsx", "i.tsx"] {
+            std::fs::write(root.join(name), "new\n").unwrap();
+        }
+        git_add_all(root).unwrap();
+        if batch {
+            git_restore_staged_paths(root, &[PathBuf::from("[id].tsx")]).unwrap();
+        } else {
+            git_restore_staged(root, Path::new("[id].tsx")).unwrap();
+        }
+        let staged = git_worktree_status(root).unwrap().staged;
+        assert_eq!(
+            staged.iter().map(|e| e.path.as_path()).collect::<Vec<_>>(),
+            vec![Path::new("i.tsx")]
+        );
+    }
+}
+
+#[test]
+fn unstaging_a_rename_restores_both_index_paths() {
+    for batch in [false, true] {
+        let temp = regression_repo(true);
+        let root = temp.path();
+        std::fs::write(root.join("old.txt"), "original\n").unwrap();
+        git_add_all(root).unwrap();
+        git_commit(root, "base").unwrap();
+        std::fs::create_dir(root.join("other")).unwrap();
+        std::fs::rename(root.join("old.txt"), root.join("other/new.txt")).unwrap();
+        git_add_all(root).unwrap();
+        if batch {
+            git_restore_staged_paths(root, &[PathBuf::from("other/new.txt")]).unwrap();
+        } else {
+            git_restore_staged(root, Path::new("other/new.txt")).unwrap();
+        }
+        assert!(git_worktree_status(root).unwrap().staged.is_empty());
+        assert_eq!(
+            std::fs::read(root.join("other/new.txt")).unwrap(),
+            b"original\n"
+        );
+        assert!(!root.join("old.txt").exists());
+    }
+}
+
+#[test]
+fn all_unstage_entry_points_preserve_files_before_the_first_commit() {
+    for mode in 0..3 {
+        let temp = regression_repo(false);
+        let root = temp.path();
+        std::fs::write(root.join("new.txt"), "staged\n").unwrap();
+        git_add_all(root).unwrap();
+        std::fs::write(root.join("new.txt"), "later worktree bytes\n").unwrap();
+        match mode {
+            0 => git_restore_staged(root, Path::new("new.txt")),
+            1 => git_restore_staged_paths(root, &[PathBuf::from("new.txt")]),
+            _ => git_restore_all_staged(root),
+        }
+        .unwrap();
+        assert!(git_worktree_status(root).unwrap().staged.is_empty());
+        assert_eq!(
+            std::fs::read(root.join("new.txt")).unwrap(),
+            b"later worktree bytes\n"
+        );
+    }
+}
+
+#[test]
+fn unstaging_an_empty_unborn_index_succeeds() {
+    let temp = regression_repo(false);
+    git_restore_all_staged(temp.path()).unwrap();
+    assert!(git_worktree_status(temp.path()).unwrap().staged.is_empty());
+}

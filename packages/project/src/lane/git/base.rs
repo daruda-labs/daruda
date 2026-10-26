@@ -163,6 +163,7 @@ pub fn git_diff_range(
     paths: &[&Path],
 ) -> Result<String, GitError> {
     let mut args: Vec<String> = vec![
+        "--literal-pathspecs".into(),
         "diff".into(),
         "-M".into(),
         from.into(),
