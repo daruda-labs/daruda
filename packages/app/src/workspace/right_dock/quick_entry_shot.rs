@@ -19,6 +19,7 @@ pub(crate) enum QuickEntryShot {
     McpCodexReview,
     McpCodexTail,
     LibraryClaude,
+    LibrarySkillsClaude,
     LibraryCodex,
     SkillPaste,
     SkillReview,
@@ -34,7 +35,9 @@ pub(crate) fn drive(
 ) {
     if matches!(
         shot,
-        QuickEntryShot::LibraryClaude | QuickEntryShot::LibraryCodex
+        QuickEntryShot::LibraryClaude
+            | QuickEntryShot::LibraryCodex
+            | QuickEntryShot::LibrarySkillsClaude
     ) {
         workspace.update(cx, |ws, cx| {
             ws.right_views.library.manual = Some(if shot == QuickEntryShot::LibraryCodex {
@@ -42,7 +45,16 @@ pub(crate) fn drive(
             } else {
                 crate::agent::configuration::Provider::Claude
             });
-            ws.reveal_right_dock_view(daruda_store::project::RightDockView::Tools, cx);
+            let view = if shot == QuickEntryShot::LibrarySkillsClaude {
+                // Searching expands matching scopes and plugin groups for layout captures.
+                ws.right_views.skill_search_input.update(cx, |input, cx| {
+                    input.set_value("layout", window, cx);
+                });
+                daruda_store::project::RightDockView::Skills
+            } else {
+                daruda_store::project::RightDockView::Tools
+            };
+            ws.reveal_right_dock_view(view, cx);
         });
         return;
     }
@@ -100,7 +112,9 @@ pub(crate) fn drive(
             window,
             cx,
         ),
-        QuickEntryShot::LibraryClaude | QuickEntryShot::LibraryCodex => unreachable!(),
+        QuickEntryShot::LibraryClaude
+        | QuickEntryShot::LibraryCodex
+        | QuickEntryShot::LibrarySkillsClaude => unreachable!(),
         QuickEntryShot::McpPaste
         | QuickEntryShot::McpReview
         | QuickEntryShot::McpStdio

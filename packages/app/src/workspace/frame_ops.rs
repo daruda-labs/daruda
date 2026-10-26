@@ -156,7 +156,4 @@ impl Workspace {
 }
 
 #[cfg(test)]
-mod tests {
-    // Search/close behavior, drag settlement and tab structure are covered by
-    // workspace/tests/{file_save,dock,tab_drag,splits}.rs.
-}
+mod tests;

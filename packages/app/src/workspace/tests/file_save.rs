@@ -359,3 +359,36 @@ async fn closing_the_window_saves_a_task_draft_left_behind_a_lane_switch(cx: &mu
         "Save all reaches a task draft outside the active lane"
     );
 }
+
+#[gpui::test]
+async fn file_search_escape_clears_the_query_before_a_second_escape_closes_the_pane(
+    cx: &mut TestAppContext,
+) {
+    let (handle, workspace, _temp) = open_temp_file(cx, b"hello");
+    cx.update_window(handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            let pane = ws.active_runtime().focused_pane_id;
+            ws.on_file_view_search_open(&crate::workspace::FileViewerSearchOpen, window, cx);
+            let input = ws.focused_file_content().unwrap().search_input.clone();
+            input.update(cx, |input, cx| input.set_value("hello", window, cx));
+            assert!(ws.focused_file_view().unwrap().search.is_some());
+            let escape = gpui::KeyDownEvent {
+                keystroke: gpui::Keystroke {
+                    key: "escape".into(),
+                    key_char: None,
+                    modifiers: Default::default(),
+                },
+                is_held: false,
+                prefer_character_input: false,
+            };
+            ws.on_file_view_key_down(&escape, window, cx);
+            assert_eq!(ws.active_runtime().focused_pane_id, pane);
+            assert!(ws.focused_file_view().unwrap().search.is_none());
+            assert!(input.read(cx).value().is_empty());
+
+            ws.on_file_view_key_down(&escape, window, cx);
+            assert!(ws.active_runtime().panes.iter().all(|p| p.id != pane));
+        });
+    })
+    .unwrap();
+}

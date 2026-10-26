@@ -316,3 +316,13 @@ fn toast_name_maps_to_scenario() {
         Some(ScreenshotScenario::Toast)
     );
 }
+
+#[test]
+fn library_skills_has_a_cli_name() {
+    assert_eq!(
+        ScreenshotScenario::from_cli_name("library-skills-claude"),
+        Some(ScreenshotScenario::QuickEntry(
+            crate::workspace::right_dock::quick_entry_shot::QuickEntryShot::LibrarySkillsClaude,
+        )),
+    );
+}

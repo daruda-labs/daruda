@@ -170,6 +170,7 @@ impl ScreenshotScenario {
             "mcp-codex-tail" => Some(Self::QuickEntry(QuickEntryShot::McpCodexTail)),
             "mcp-codex-review" => Some(Self::QuickEntry(QuickEntryShot::McpCodexReview)),
             "library-claude" => Some(Self::QuickEntry(QuickEntryShot::LibraryClaude)),
+            "library-skills-claude" => Some(Self::QuickEntry(QuickEntryShot::LibrarySkillsClaude)),
             "library-codex" => Some(Self::QuickEntry(QuickEntryShot::LibraryCodex)),
             "skill-paste" => Some(Self::QuickEntry(QuickEntryShot::SkillPaste)),
             "skill-review" => Some(Self::QuickEntry(QuickEntryShot::SkillReview)),

@@ -71,6 +71,10 @@ pub(super) fn assert_hover_targets_fit_beside(
         let bounds = vcx.debug_bounds(selector).expect("row content painted");
         assert!(bounds.left() >= content.left(), "{selector} covers icon");
         assert!(
+            bounds.size.height <= px(theme::CONTROL_TARGET_SIZE),
+            "{selector} wraps instead of staying on one line"
+        );
+        assert!(
             bounds.right() <= content.right(),
             "{selector} past text column"
         );

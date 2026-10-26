@@ -327,6 +327,7 @@ mod tests {
         "icons/ui/block.svg",
         "icons/ui/check-circle.svg",
         "icons/ui/check.svg",
+        "icons/ui/close-fullscreen.svg",
         "icons/ui/chrome-reader-mode.svg",
         "icons/ui/coffee.svg",
         "icons/ui/code.svg",

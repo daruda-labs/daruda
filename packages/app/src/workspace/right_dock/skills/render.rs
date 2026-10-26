@@ -531,6 +531,7 @@ fn skill_row(
         let full = description_full.clone();
         div()
             .id(desc_id)
+            .debug_selector(|| "skill-description".into())
             .w_full()
             .min_w_0()
             .truncate()
@@ -677,7 +678,7 @@ mod tests {
             dir: std::path::PathBuf::from("sample-skill"),
             scope,
             frontmatter: Default::default(),
-            body_preview: "A sample skill".into(),
+            body_preview: "긴설명😀".repeat(80),
             aux_file_count: 0,
             modified_at: std::time::SystemTime::UNIX_EPOCH,
             plugin_id: plugin.then(|| "sample-plugin".into()),
@@ -687,7 +688,7 @@ mod tests {
         crate::workspace::right_dock::row_tests::assert_hover_targets_fit(
             cx,
             selectors,
-            &["skill-name-text"],
+            &["skill-name-text", "skill-description"],
             move |workspace, cx| skill_row(&skill, false, workspace, theme::current(cx), cx),
         );
     }
