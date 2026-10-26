@@ -232,6 +232,75 @@ fn truncated_file_reparsed_from_scratch() {
 }
 
 #[test]
+fn incomplete_tail_is_retried_when_size_and_timestamp_are_unchanged() {
+    let (_tmp, projects, cache) = fixture();
+    let first = user_line(D1, "s1");
+    let second = user_line(D1, "s2");
+    let mut partial = second.clone();
+    partial.pop();
+    partial.push(' ');
+    let path = write_log(&projects, "p", "a", &(first.clone() + &partial));
+    let modified = fs::metadata(&path).unwrap().modified().unwrap();
+    assert_eq!(
+        update_activity(&projects, &cache).unwrap().daily[0].turns,
+        1
+    );
+
+    fs::write(&path, first + &second).unwrap();
+    fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
+    assert_eq!(
+        update_activity(&projects, &cache).unwrap().daily[0].turns,
+        2
+    );
+}
+
+#[test]
+fn same_size_rewrite_with_an_incomplete_tail_rebuilds_the_prefix() {
+    assert_partial_tail_rewrite_rebuilds(1);
+}
+
+#[test]
+fn shrink_above_consumed_offset_rebuilds_the_prefix() {
+    assert_partial_tail_rewrite_rebuilds(3);
+}
+
+fn assert_partial_tail_rewrite_rebuilds(initial_tail_lines: usize) {
+    let (_tmp, projects, cache) = fixture();
+    let first = user_line(D1, "s1");
+    let replacement = user_line(D2, "s2");
+    assert_eq!(first.len(), replacement.len());
+    let path = write_log(
+        &projects,
+        "p",
+        "a",
+        &(first.clone() + &"x".repeat(first.len() * initial_tail_lines)),
+    );
+    let set_mtime = |seconds| {
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(UNIX_EPOCH + std::time::Duration::from_secs(seconds))
+            .unwrap();
+    };
+    set_mtime(1);
+    let before = update_activity(&projects, &cache).unwrap();
+    assert_eq!(before.daily[0].date, expected_date(D1));
+
+    fs::write(&path, replacement + &"x".repeat(first.len())).unwrap();
+    set_mtime(2);
+    let after = update_activity(&projects, &cache).unwrap();
+    assert_eq!(after.daily.len(), 1);
+    assert_eq!(after.daily[0].date, expected_date(D2));
+    assert_eq!(after.daily[0].turns, 1);
+}
+
+#[test]
 fn incomplete_last_line_consumed_only_after_newline_lands() {
     let (_tmp, projects, cache) = fixture();
     let full = user_line(D1, "s1");

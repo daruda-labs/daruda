@@ -114,7 +114,12 @@ fn refresh_file<F: SessionLogFormat>(
         Some(e) if e.consumed_offset == size && e.mtime_ms == mtime_ms => {
             return Ok(Some(e.clone()));
         }
-        Some(e) if size > e.consumed_offset => e.clone(),
+        // A partial line can finish within the timestamp's millisecond tick.
+        // Retry the tail even when metadata is unchanged.
+        Some(e) if e.size == size && e.mtime_ms == mtime_ms => e.clone(),
+        // Only growth preserves the append-only prefix. Comparing against the
+        // consumed offset would mistake rewrites with a partial tail for growth.
+        Some(e) if size > e.size && size > e.consumed_offset => e.clone(),
         _ => FileEntry::default(),
     };
 
