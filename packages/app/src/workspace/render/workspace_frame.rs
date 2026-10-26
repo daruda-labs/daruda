@@ -2,20 +2,14 @@
 //! root's key context and action listeners.
 
 use crate::ui::theme;
-use gpui::{
-    ClipboardItem, Context, Focusable as _, KeyDownEvent, MouseButton, MouseMoveEvent,
-    MouseUpEvent, Window, div, prelude::*, px,
-};
+use gpui::{Context, KeyDownEvent, MouseButton, Window, div, prelude::*, px};
 
 use super::docks::{DockFrame, dock_resize_handle, dock_toggle_icon};
 use super::{center, root_key_context};
 use crate::workspace::layout::DockPosition;
 use crate::workspace::main_area::pane_drag_ops::PaneHeaderDrag;
-use crate::workspace::main_area::pane_tree::SplitDirection;
 use crate::workspace::main_area::tab_drag_ops::TabDrag;
-use crate::workspace::{
-    FileViewerSearchNext, FileViewerSearchOpen, FileViewerSearchPrev, SaveFilePane, Workspace,
-};
+use crate::workspace::{FileViewerSearchNext, FileViewerSearchPrev, SaveFilePane, Workspace};
 
 impl Workspace {
     /// Title bar, tab strip, panes and docks.
@@ -211,16 +205,7 @@ impl Workspace {
             .on_action(cx.listener(|this, _: &SaveFilePane, window, cx| {
                 this.save_focused_file_pane(window, cx);
             }))
-            .on_action(cx.listener(|this, _: &FileViewerSearchOpen, window, cx| {
-                if let Some(fv) = this.focused_file_view_mut() {
-                    fv.search_open();
-                }
-                if let Some(fc) = this.focused_file_content() {
-                    let fh = fc.search_input.read(cx).focus_handle(cx);
-                    fh.focus(window, cx);
-                    cx.notify();
-                }
-            }))
+            .on_action(cx.listener(Self::on_file_view_search_open))
             .on_action(cx.listener(|this, _: &FileViewerSearchNext, _window, cx| {
                 this.file_view_search_next(cx);
             }))
@@ -237,53 +222,7 @@ impl Workspace {
             // owns the panel-level shortcuts (close pane, search close,
             // copy / select-all when no input is focused).
             .when(focused_is_file, |el| {
-                el.on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
-                    let search_open = this
-                        .focused_file_view()
-                        .is_some_and(|fv| fv.search.is_some());
-                    match ev.keystroke.key.as_str() {
-                        // Escape while the search panel is open closes it +
-                        // clears the query and restores pane focus.
-                        // `gpui_component::Input` doesn't emit Escape via
-                        // `InputEvent`, so the per-pane subscription can't
-                        // see it; the panel-level handler picks it up.
-                        "escape" if search_open => {
-                            let pane_id = this.active_runtime().focused_pane_id;
-                            if let Some(fc) = this.focused_file_content() {
-                                let input = fc.search_input.clone();
-                                input.update(cx, |inp, cx_state| {
-                                    inp.set_value("", window, cx_state)
-                                });
-                            }
-                            if let Some(fv) = this.focused_file_view_mut() {
-                                fv.search_close();
-                            }
-                            this.focus_pane(pane_id, window, cx);
-                            cx.notify();
-                            cx.stop_propagation();
-                        }
-                        "escape" => {
-                            this.close_focused_file_pane(window, cx);
-                        }
-                        "c" if ev.keystroke.modifiers.platform && !search_open => {
-                            let text = this
-                                .focused_file_view()
-                                .map(|fv| fv.selected_text_for_copy())
-                                .unwrap_or_default();
-                            if !text.is_empty() {
-                                cx.write_to_clipboard(ClipboardItem::new_string(text));
-                            }
-                        }
-                        "a" if ev.keystroke.modifiers.platform && !search_open => {
-                            if let Some(fv) = this.focused_file_view_mut()
-                                && fv.select_all()
-                            {
-                                cx.notify();
-                            }
-                        }
-                        _ => {}
-                    }
-                }))
+                el.on_key_down(cx.listener(Self::on_file_view_key_down))
             })
             // The three overlay key interceptors below all capture rather than
             // bubble: key events dispatch to the focused element first, and
@@ -307,52 +246,11 @@ impl Workspace {
                     this.on_flow_picker_key(ev, window, cx)
                 }))
             })
-            .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, window, cx| {
-                // A mouse-up released outside the window never reaches the
-                // bubble-phase on_mouse_up below — it fails the root div's
-                // hit-test — so any drag begun inside stays "live". The first
-                // re-entry move carries pressed_button: None: treat that as
-                // the missed release and settle every live drag (dock/divider
-                // resize + file-view text/block selection) instead of
-                // continuing it. The root move handler spans the whole window,
-                // so it catches the release wherever the cursor re-enters.
-                if !ev.dragging() {
-                    this.end_stale_resize_drags(cx);
-                    this.end_file_selection_drag(cx);
-                    this.clear_pane_drop_hover(cx);
-                    this.finish_tab_drag(false, cx);
-                    return;
-                }
-                if let Some(drag) = this.docks.drag {
-                    let cursor_px: f32 = match drag.position {
-                        DockPosition::Left | DockPosition::Right => ev.position.x.into(),
-                        DockPosition::Bottom => ev.position.y.into(),
-                    };
-                    this.update_dock_drag(cursor_px, window, cx);
-                    return;
-                }
-                let Some(drag) = this.main_area.drag_state else {
-                    return;
-                };
-                let cursor_px: f32 = match drag.direction {
-                    SplitDirection::Horizontal => ev.position.x.into(),
-                    SplitDirection::Vertical => ev.position.y.into(),
-                };
-                this.update_divider_drag(cursor_px, window, cx);
-            }))
+            .on_mouse_move(cx.listener(Self::on_frame_mouse_move))
             // Bubble phase, so every `on_drop` has already had its shot and a
             // consumed drop stopped propagation (gpui `div.rs`). Reaching
             // here means the release hit no drop target at all.
-            .on_mouse_up(
-                MouseButton::Left,
-                cx.listener(|this, _: &MouseUpEvent, _window, cx| {
-                    this.end_divider_drag(cx);
-                    this.end_dock_drag(cx);
-                    this.end_file_selection_drag(cx);
-                    this.clear_pane_drop_hover(cx);
-                    this.finish_tab_drag(false, cx);
-                }),
-            )
+            .on_mouse_up(MouseButton::Left, cx.listener(Self::on_frame_left_mouse_up))
             .on_action(cx.listener(Self::on_new_tab))
             .on_action(cx.listener(Self::on_close_tab))
             .on_action(cx.listener(Self::on_close_pane))

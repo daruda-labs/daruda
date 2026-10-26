@@ -132,10 +132,11 @@ impl Workspace {
         };
         let root = managed
             .or_else(|| {
-                env.iter()
-                    .rev()
-                    .find(|(k, _)| k == key)
-                    .map(|(_, v)| PathBuf::from(v))
+                daruda_core::process::env_value(
+                    env.iter().map(|(key, value)| (key, value)),
+                    std::ffi::OsStr::new(key),
+                )
+                .map(PathBuf::from)
             })
             .or_else(|| std::env::var_os(key).map(PathBuf::from));
         view.config = Configuration::resolve(
