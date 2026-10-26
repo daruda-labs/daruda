@@ -124,7 +124,9 @@ jobs:
         run: ./scripts/lint-no-silent-update.sh
 
       - name: Lint — single agent-activity source
-        run: ./scripts/lint-agent-activity.sh
+        run: |
+          ./scripts/lint-agent-activity.sh
+          ./scripts/lint-agent-activity.sh --self-test
 
   macos:
     name: macOS — build and test

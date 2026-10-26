@@ -413,6 +413,7 @@ bash ./scripts/lint-modal-fields.sh --self-test
 ./scripts/lint-platform-boundary.sh
 ./scripts/lint-no-silent-update.sh
 ./scripts/lint-agent-activity.sh
+./scripts/lint-agent-activity.sh --self-test
 ./scripts/lint-daruda-path-literals.sh
 ./scripts/lint-env-literals.sh
 ./scripts/lint-env-literals.sh --self-test

@@ -314,6 +314,25 @@ self_test() {
         return 2
     fi
 
+    local dangling="$SELF_TEST_DIR/dangling.rs"
+    ln -s "$removed" "$dangling"
+    discovered="$(printf '%s\n' "$dangling" | existing_sources)"
+    if [ "$discovered" != "$dangling" ]; then
+        echo "[lint-env-literals] discovery must retain dangling symlinks" >&2
+        return 2
+    fi
+    local output status
+    if output="$(scan_sources "$dangling" 2>&1)"; then
+        status=0
+    else
+        status=$?
+    fi
+    if [ "$status" -ne 2 ]; then
+        echo "[lint-env-literals] dangling source must report a scanner error" >&2
+        echo "$output" >&2
+        return 2
+    fi
+
     echo "[lint-env-literals] self-test passed."
 }
 
