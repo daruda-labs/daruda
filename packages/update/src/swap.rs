@@ -30,116 +30,54 @@ pub fn swap_into(bundle: &Path, root: &Path) -> Result<(), UpdateError> {
 /// Marks a file copied into place but not yet live.
 const STAGED_SUFFIX: &str = ".daruda-new";
 
-/// Copy every file next to where it will land, without touching the install.
-///
-/// This is where a swap actually fails — a short disk, a truncated archive, a
-/// directory that refuses one file — and none of it is destructive: on the way
-/// out, the copies are removed and the install is exactly as it was.
-fn stage(plan: &[(PathBuf, PathBuf)]) -> Result<Vec<(PathBuf, PathBuf)>, UpdateError> {
-    let mut staged: Vec<(PathBuf, PathBuf)> = Vec::new();
-    for (from, to) in plan {
-        let step = to
-            .parent()
-            .map_or(Ok(()), std::fs::create_dir_all)
-            .and_then(|()| {
-                let target = staged_path(to);
-                let mut source = std::fs::File::open(from)?;
-                let mut staged = std::fs::OpenOptions::new()
-                    .create_new(true)
-                    .write(true)
-                    .open(&target)?;
-                std::io::copy(&mut source, &mut staged)?;
-                staged.set_permissions(source.metadata()?.permissions())?;
-                staged.sync_all()?;
-                Ok(target)
-            });
-        match step {
-            Ok(target) => staged.push((target, to.clone())),
-            Err(error) => {
-                clear_staged(&staged);
-                return Err(io(error));
-            }
-        }
-    }
-    Ok(staged)
-}
-
-/// Move every staged file into place, putting the install back if one cannot.
-///
-/// Renames only, which is what makes this the cheap half: they work on a file
-/// mapped into a running process, and they undo.
-fn commit(staged: Vec<(PathBuf, PathBuf)>) -> Result<(), UpdateError> {
-    let mut done = Vec::new();
-    for (from, to) in &staged {
-        match commit_one(from, to) {
-            Ok(step) => done.push(step),
-            Err(error) => {
-                roll_back(done);
-                clear_staged(&staged);
-                return Err(error);
-            }
-        }
-    }
-    Ok(())
-}
-
-/// One file's swap, and what undoing it needs.
-struct Committed {
+/// One validated swap entry, including its journaled rollback source.
+struct PlannedFile {
+    source: PathBuf,
     live: PathBuf,
     staged: PathBuf,
     aside: Option<PathBuf>,
 }
 
-fn commit_one(from: &Path, to: &Path) -> Result<Committed, UpdateError> {
-    // Rename rather than overwrite: `to` may be mapped into this very
-    // process, which is the case this module exists for.
-    let aside = match std::fs::symlink_metadata(to) {
-        Ok(_) => {
-            let aside = free_aside(to)?;
-            std::fs::rename(to, &aside).map_err(io)?;
-            Some(aside)
+/// Copy every replacement before any live entry is renamed.
+/// The journal owns cleanup, including a partially written staged file.
+fn stage(plan: &[PlannedFile]) -> Result<(), UpdateError> {
+    for file in plan {
+        if let Some(parent) = file.live.parent() {
+            std::fs::create_dir_all(parent).map_err(io)?;
         }
-        Err(_) => None,
-    };
-    if let Err(error) = std::fs::rename(from, to) {
-        // This file never went live, so its own step undoes here rather than
-        // joining the list the caller walks back.
-        if let Some(aside) = &aside {
-            let _ = std::fs::rename(aside, to);
-        }
-        return Err(io(error));
+        let mut source = std::fs::File::open(&file.source).map_err(io)?;
+        let mut staged = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&file.staged)
+            .map_err(io)?;
+        std::io::copy(&mut source, &mut staged).map_err(io)?;
+        staged
+            .set_permissions(source.metadata().map_err(io)?.permissions())
+            .map_err(io)?;
+        staged.sync_all().map_err(io)?;
     }
-    Ok(Committed {
-        live: to.to_path_buf(),
-        staged: from.to_path_buf(),
-        aside,
-    })
+    Ok(())
 }
 
-/// Put back what was already swapped, newest first.
-///
-/// Best effort by necessity: the install was whole before this ran, and these
-/// renames are the only way back to it — reporting a failure here would leave
-/// the caller with nothing to do about it.
-fn roll_back(done: Vec<Committed>) {
-    for step in done.into_iter().rev() {
-        let _ = std::fs::rename(&step.live, &step.staged);
-        if let Some(aside) = step.aside {
-            let _ = std::fs::rename(&aside, &step.live);
+/// Publish using the exact rollback sources recorded before staging.
+/// The transaction recovers any failure from its Prepared journal.
+fn commit(plan: &[PlannedFile]) -> Result<(), UpdateError> {
+    for file in plan {
+        // Rename rather than overwrite: live files may be mapped into
+        // the running process, including its executable and runtime DLLs.
+        if let Some(aside) = &file.aside {
+            std::fs::rename(&file.live, aside).map_err(io)?;
         }
+        std::fs::rename(&file.staged, &file.live).map_err(io)?;
     }
+    Ok(())
 }
 
 fn staged_path(path: &Path) -> PathBuf {
     let mut name = path.as_os_str().to_os_string();
     name.push(STAGED_SUFFIX);
     PathBuf::from(name)
-}
-
-fn clear_staged(staged: &[(PathBuf, PathBuf)]) {
-    for (path, _) in staged {
-        let _ = std::fs::remove_file(path);
-    }
 }
 
 /// Unpack `zip` and swap what it holds over `install_root`.
@@ -461,54 +399,6 @@ mod tests {
             !install.join(format!("daruda.exe{STAGED_SUFFIX}")).exists(),
             "the copies made before the failure must be cleared"
         );
-    }
-
-    /// The commit's other half: what is already live goes back, so a failure
-    /// partway leaves the install whole rather than half-new.
-    #[test]
-    fn a_rolled_back_commit_restores_every_file_it_had_moved() {
-        let tmp = tempfile::tempdir().unwrap();
-        let install = tmp.path().join("install");
-        let exe = install.join("daruda.exe");
-        let dll = install.join("vcruntime140.dll");
-        // The state a commit is in after one file went live and before the
-        // next one did.
-        write(&exe, "new exe");
-        write(
-            &install.join(format!("daruda.exe{ASIDE_SUFFIX}")),
-            "old exe",
-        );
-        write(&dll, "old dll");
-        write(&staged_path(&dll), "new dll");
-
-        roll_back(vec![Committed {
-            live: exe.clone(),
-            staged: staged_path(&exe),
-            aside: Some(install.join(format!("daruda.exe{ASIDE_SUFFIX}"))),
-        }]);
-
-        assert_eq!(read(&exe), "old exe", "the live file has to come back");
-        assert_eq!(read(&staged_path(&exe)), "new exe", "its replacement waits");
-        assert_eq!(read(&dll), "old dll", "an untouched file stays untouched");
-    }
-
-    /// A first install has nothing aside, so rolling one back is a removal
-    /// rather than a restore — and must not leave the new file live.
-    #[test]
-    fn rolling_back_a_first_install_takes_the_new_file_out_of_the_way() {
-        let tmp = tempfile::tempdir().unwrap();
-        let install = tmp.path().join("install");
-        let exe = install.join("daruda.exe");
-        write(&exe, "new exe");
-
-        roll_back(vec![Committed {
-            live: exe.clone(),
-            staged: staged_path(&exe),
-            aside: None,
-        }]);
-
-        assert!(!exe.exists(), "nothing was there before, so nothing stays");
-        assert_eq!(read(&staged_path(&exe)), "new exe");
     }
 
     /// A read-only install is the common Windows case (`C:\\Program Files`

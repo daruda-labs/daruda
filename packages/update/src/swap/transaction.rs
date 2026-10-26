@@ -1,6 +1,8 @@
 //! Durable phase tracking prevents interrupted file swaps losing their rollback sources.
 
-use super::{ASIDE_SUFFIX, STAGED_SUFFIX, commit, free_aside, io, plan, stage, staged_path};
+use super::{
+    ASIDE_SUFFIX, PlannedFile, STAGED_SUFFIX, commit, free_aside, io, plan, stage, staged_path,
+};
 use crate::UpdateError;
 use serde::{Deserialize, Serialize};
 use std::path::{Component, Path, PathBuf};
@@ -133,9 +135,9 @@ fn reserved(relative: &Path) -> bool {
 pub(super) fn install(bundle: &Path, root: &Path) -> Result<(), UpdateError> {
     let _ownership = lock(root)?;
     recover_owned(root)?;
-    let plan = plan(bundle, root)?;
+    let mut prepared = Vec::new();
     let mut files = Vec::new();
-    for (_, live) in &plan {
+    for (source, live) in plan(bundle, root)? {
         let relative = live
             .strip_prefix(root)
             .map_err(|error| UpdateError::Sync(error.to_string()))?;
@@ -145,18 +147,26 @@ pub(super) fn install(bundle: &Path, root: &Path) -> Result<(), UpdateError> {
                 "Package contains reserved update paths".into(),
             ));
         }
-        let aside = if live.try_exists().map_err(io)? {
-            Some(
-                free_aside(live)?
-                    .strip_prefix(root)
-                    .map_err(|error| UpdateError::Sync(error.to_string()))?
-                    .to_path_buf(),
-            )
+        let aside = if entry_exists(&live)? {
+            Some(free_aside(&live)?)
         } else {
             None
         };
         files.push(Entry {
             live: relative.to_path_buf(),
+            aside: aside
+                .as_ref()
+                .map(|path| {
+                    path.strip_prefix(root)
+                        .map(Path::to_path_buf)
+                        .map_err(|error| UpdateError::Sync(error.to_string()))
+                })
+                .transpose()?,
+        });
+        prepared.push(PlannedFile {
+            source,
+            staged: staged_path(&live),
+            live,
             aside,
         });
     }
@@ -166,10 +176,10 @@ pub(super) fn install(bundle: &Path, root: &Path) -> Result<(), UpdateError> {
     };
     // Publish before staging so an abandoned attempt always has an owner.
     publish(root, &journal)?;
-    let result = stage(&plan).and_then(|staged| {
+    let result = stage(&prepared).and_then(|()| {
         journal.phase = Phase::Prepared;
         publish(root, &journal)?;
-        commit(staged)
+        commit(&prepared)
     });
     if let Err(error) = result {
         return match recover_owned(root) {
@@ -249,15 +259,13 @@ fn recover_owned(root: &Path) -> Result<(), UpdateError> {
                 remove_if_present(aside)?;
             }
         } else if let Some(aside) = aside {
-            if aside.try_exists().map_err(io)? {
-                if live.try_exists().map_err(io)? {
+            if entry_exists(aside)? {
+                if entry_exists(live)? {
                     std::fs::rename(live, &staged).map_err(io)?;
                 }
                 std::fs::rename(aside, live).map_err(io)?;
             }
-        } else if journal.phase == Phase::Prepared
-            && !staged.try_exists().map_err(io)?
-            && live.try_exists().map_err(io)?
+        } else if journal.phase == Phase::Prepared && !entry_exists(&staged)? && entry_exists(live)?
         {
             // This originally absent file was published by the interrupted swap.
             std::fs::rename(live, &staged).map_err(io)?;
@@ -265,6 +273,15 @@ fn recover_owned(root: &Path) -> Result<(), UpdateError> {
         remove_if_present(&staged)?;
     }
     std::fs::remove_file(root.join(JOURNAL)).map_err(io)
+}
+
+/// A symlink is an install entry even when its target no longer exists.
+fn entry_exists(path: &Path) -> Result<bool, UpdateError> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(io(error)),
+    }
 }
 
 fn remove_if_present(path: &Path) -> Result<(), UpdateError> {
@@ -276,181 +293,4 @@ fn remove_if_present(path: &Path) -> Result<(), UpdateError> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn legacy_journals_keep_their_recovery_phase() {
-        for (flags, expected) in [
-            (serde_json::json!({"committed": false}), Phase::Staging),
-            (serde_json::json!({"committed": true}), Phase::Committed),
-            (
-                serde_json::json!({"committed": false, "prepared": false}),
-                Phase::Staging,
-            ),
-            (
-                serde_json::json!({"committed": false, "prepared": true}),
-                Phase::Prepared,
-            ),
-            (
-                serde_json::json!({"committed": true, "prepared": false}),
-                Phase::Committed,
-            ),
-            (
-                serde_json::json!({"committed": true, "prepared": true}),
-                Phase::Committed,
-            ),
-        ] {
-            let mut value = flags;
-            value["files"] = serde_json::json!([]);
-            let journal: Journal = serde_json::from_value(value).expect("legacy journal");
-            assert_eq!(journal.phase, expected);
-        }
-    }
-
-    #[test]
-    fn new_journals_remain_readable_by_the_legacy_format() {
-        for phase in [Phase::Staging, Phase::Prepared, Phase::Committed] {
-            let encoded = serde_json::to_value(Journal {
-                phase,
-                files: vec![],
-            })
-            .expect("serialize journal");
-            assert!(encoded.get("phase").is_none());
-            assert_eq!(encoded["committed"], phase == Phase::Committed);
-            assert_eq!(encoded["prepared"], phase != Phase::Staging);
-            let decoded: Journal = serde_json::from_value(encoded).expect("round trip");
-            assert_eq!(decoded.phase, phase);
-        }
-    }
-
-    #[test]
-    fn install_refuses_symlinked_parents_before_staging() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().join("install");
-        let bundle = dir.path().join("bundle");
-        let outside = dir.path().join("outside");
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::create_dir_all(bundle.join("licenses")).unwrap();
-        std::fs::create_dir_all(&outside).unwrap();
-        std::fs::write(outside.join("notice.txt"), "preserve").unwrap();
-        std::fs::write(bundle.join("licenses/notice.txt"), "replacement").unwrap();
-        let link = root.join("licenses");
-        daruda_core::path::symlink(&outside, &link).unwrap();
-        let result = install(&bundle, &root);
-        daruda_core::path::remove_symlink(&link).unwrap();
-        assert!(result.is_err());
-        assert_eq!(
-            std::fs::read_to_string(outside.join("notice.txt")).unwrap(),
-            "preserve"
-        );
-        assert!(!outside.join("notice.txt.daruda-new").exists());
-        assert!(!root.join(JOURNAL).exists());
-    }
-
-    #[test]
-    fn staging_does_not_follow_an_existing_destination_symlink() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().join("install");
-        let bundle = dir.path().join("bundle");
-        let outside = dir.path().join("outside.txt");
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::create_dir_all(&bundle).unwrap();
-        std::fs::write(&outside, "preserve").unwrap();
-        std::fs::write(bundle.join("app.exe"), "replacement").unwrap();
-        let link = root.join("app.exe.daruda-new");
-        daruda_core::path::symlink(&outside, &link).unwrap();
-        let result = install(&bundle, &root);
-        assert!(result.is_err());
-        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "preserve");
-        assert!(!root.join("app.exe").exists());
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn windows_reserved_paths_are_case_insensitive() {
-        let root = tempfile::tempdir().unwrap();
-        let bundle = tempfile::tempdir().unwrap();
-        std::fs::write(bundle.path().join(".DARUDA-UPDATE-JOURNAL.JSON"), "package").unwrap();
-        assert!(install(bundle.path(), root.path()).is_err());
-        assert!(!root.path().join(JOURNAL).exists());
-        std::fs::write(root.path().join("app.exe"), "preserve").unwrap();
-        publish(
-            root.path(),
-            &Journal {
-                phase: Phase::Prepared,
-                files: vec![
-                    Entry {
-                        live: "app.exe".into(),
-                        aside: None,
-                    },
-                    Entry {
-                        live: "APP.EXE".into(),
-                        aside: None,
-                    },
-                ],
-            },
-        )
-        .unwrap();
-        assert!(recover_update(root.path()).is_err());
-        assert_eq!(
-            std::fs::read_to_string(root.path().join("app.exe")).unwrap(),
-            "preserve"
-        );
-        assert!(root.path().join(JOURNAL).exists());
-    }
-
-    #[test]
-    fn interrupted_mixed_install_restores_every_old_file() {
-        let root = tempfile::tempdir().unwrap();
-        std::fs::write(root.path().join("app.exe"), "new").unwrap();
-        std::fs::write(root.path().join("app.exe.daruda-old"), "old").unwrap();
-        std::fs::write(root.path().join("runtime.dll.daruda-new"), "new runtime").unwrap();
-        std::fs::write(root.path().join("runtime.dll"), "old runtime").unwrap();
-        publish(
-            root.path(),
-            &Journal {
-                phase: Phase::Prepared,
-                files: vec![
-                    Entry {
-                        live: "app.exe".into(),
-                        aside: Some("app.exe.daruda-old".into()),
-                    },
-                    Entry {
-                        live: "runtime.dll".into(),
-                        aside: Some("runtime.dll.daruda-old".into()),
-                    },
-                ],
-            },
-        )
-        .unwrap();
-        recover_update(root.path()).unwrap();
-        assert_eq!(
-            std::fs::read_to_string(root.path().join("app.exe")).unwrap(),
-            "old"
-        );
-        assert_eq!(
-            std::fs::read_to_string(root.path().join("runtime.dll")).unwrap(),
-            "old runtime"
-        );
-        assert!(!root.path().join(JOURNAL).exists());
-    }
-
-    #[test]
-    fn journal_cannot_modify_files_outside_the_install() {
-        let root = tempfile::tempdir().unwrap();
-        publish(
-            root.path(),
-            &Journal {
-                phase: Phase::Prepared,
-                files: vec![Entry {
-                    live: "../escape".into(),
-                    aside: None,
-                }],
-            },
-        )
-        .unwrap();
-        assert!(recover_update(root.path()).is_err());
-        assert!(root.path().join(JOURNAL).exists());
-    }
-}
+mod tests;
