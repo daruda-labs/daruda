@@ -40,8 +40,10 @@ event. Never a dependency on the app.
 
 ## Layout
 
-- `initialize.rs` builds widgets from the host's snapshot; `bindings.rs` owns
-  ordinary input subscriptions and value synchronization.
+- `initialize/` builds widgets from the host's snapshot. Its private appearance,
+  workspace, behavior, and render select constructors keep allocation separate
+  from the ordered subscription and focus wiring in `mod.rs`; `bindings.rs`
+  owns ordinary input subscriptions and value synchronization.
 - `catalog/` owns agent rows, subscriptions, collection and saving;
   `validation.rs` is pure, `path_warning.rs` checks executables on edit, never
   while rendering.
