@@ -29,6 +29,7 @@ tracing = { workspace = true }
 unicode-width = "0.2"
 
 [dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
 criterion = { version = "0.8", features = ["html_reports"] }
 tempfile = { workspace = true }
 

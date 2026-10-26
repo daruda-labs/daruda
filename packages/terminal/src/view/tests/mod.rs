@@ -1,3 +1,5 @@
+mod annotation_mouse;
+
 use ghostty_vt::Rgb;
 
 use super::jump::next_prompt_index;
