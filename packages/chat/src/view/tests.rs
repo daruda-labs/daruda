@@ -5,7 +5,6 @@ use daruda_transcript::fold_mode::FoldPreset;
 mod activity;
 mod attachments;
 mod card_folding;
-mod compaction;
 mod diff_layout;
 mod host_cards;
 mod output_layout;

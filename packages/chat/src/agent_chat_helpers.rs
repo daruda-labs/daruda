@@ -273,7 +273,7 @@ fn normalize_prompt_title(text: &str) -> String {
     if glyphs < decisive {
         return head;
     }
-    let kept: String = head.chars().take(FALLBACK_TITLE_HEAD).collect();
+    let kept = daruda_core::text::char_prefix(&head, FALLBACK_TITLE_HEAD).0;
     format!("{}…", kept.trim_end())
 }
 

@@ -450,7 +450,7 @@ pub struct AgentChatView {
     /// goes out, and `None` when the turn is not the phone's, was consumed by
     /// a permission request, or has been completed. Read by the connect-ops
     /// event pump, the periodic Telegram flush pump, and the completion
-    /// relay. Transitions go through the methods in `view/queue_ops.rs`; the
+    /// relay. Transitions go through the methods in `view/queue_ops/phone.rs`; the
     /// type itself is sealed.
     phone_turn_state: Option<PhoneTurn>,
     /// Diff editors, mermaid diagrams, and tool-output images built async

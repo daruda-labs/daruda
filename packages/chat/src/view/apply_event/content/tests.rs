@@ -1,5 +1,6 @@
-use super::*;
+use crate::fold::{FoldContext, FoldKey};
 use crate::view::list_sync::CollapseAnchor;
+use crate::view::tests::make_test_view;
 use daruda_acp::{AcpEvent, ChatItem, CompactionStatusView};
 use serde_json::json;
 

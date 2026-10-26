@@ -1,6 +1,5 @@
 //! Prompt-queue send / edit / cancel routing for one Agent chat pane: the
-//! composer send paths, the Telegram first-response watch's lifecycle, the
-//! queued/parked prompt list ops, and the escape-key dispatch. Stay `impl
+//! composer send paths, queued/parked prompt list ops, and escape-key dispatch. Stay `impl
 //! AgentChatView` (not [`PromptQueue`](super::PromptQueue)) since they also
 //! need `items`.
 
@@ -13,9 +12,11 @@ use super::super::fold::FoldKey;
 use super::super::phone_turn::{PhoneTurn, PhoneTurnMode};
 use super::{
     AgentChatEvent, AgentChatView, AgentSessionStatus, EmptySubmitOutcome, EscapeOutcome,
-    FirstResponseOutcome, InternalDispatch, PhoneAckEffect, PromptDispatch, PromptDropReason,
-    PromptId, PromptOrigin, PromptQueue, QueuedPrompt,
+    InternalDispatch, PromptDispatch, PromptDropReason, PromptId, PromptOrigin, PromptQueue,
+    QueuedPrompt,
 };
+
+mod phone;
 
 #[derive(Clone, Copy)]
 pub(super) enum EditSource {
@@ -47,31 +48,6 @@ impl AgentChatView {
         cx.notify();
     }
 
-    /// Test-only hook: mark a prompt turn in flight (as `send_prompt_text`
-    /// does) — `Turn` is module-private, so tests drive it through this.
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn set_turn_in_flight(&mut self) {
-        self.queue.turn.start(std::time::Instant::now());
-    }
-
-    /// Test-only hook: return the turn to idle (as `settle_turn` does).
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn set_turn_idle(&mut self) {
-        self.queue.turn.finish();
-    }
-
-    /// Test-only hook: whether the turn is idle (no prompt in flight).
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn turn_is_idle(&self) -> bool {
-        !self.queue.turn.is_in_flight()
-    }
-
-    /// Test-only hook: whether a Stop's cancel window is still open.
-    #[cfg(test)]
-    pub(super) fn turn_awaiting_cancel_ack(&self) -> bool {
-        self.queue.turn.awaiting_cancel_ack()
-    }
-
     /// Test-only hook: run the model half of the queued-prompt drain without a
     /// live ACP handle, as `pump_pending_prompt` does before sending.
     #[cfg(test)]
@@ -82,20 +58,6 @@ impl AgentChatView {
         let prompt = self.take_next_queued_prompt(cx)?;
         self.activate_queued_prompt(&prompt, cx);
         Some(prompt.text)
-    }
-
-    /// Test-only hook: arm the phone turn without needing a live ACP handle.
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn start_phone_turn_for_test(&mut self, started_at: std::time::Instant) {
-        self.phone_turn_state = Some(PhoneTurn::start(started_at, self.items.len()));
-    }
-
-    /// Test-only hook: resolve the turn's first response exactly as the relay
-    /// path does, so a test can reach `Answered` without an ACP session.
-    /// Returns whether anything resolved.
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn take_phone_first_response_for_test(&mut self) -> bool {
-        self.take_phone_first_response().is_some()
     }
 
     /// Send `text` from the bottom-dock composer. Sugar over
@@ -358,107 +320,6 @@ impl AgentChatView {
         self.overage_notice = None;
     }
 
-    /// Arms the Telegram turn ledger the instant a Telegram-origin prompt
-    /// reaches the wire — called from both dispatch paths so it starts at the
-    /// true dispatch point, never at enqueue time. No-op for
-    /// [`PromptOrigin::InApp`].
-    pub(super) fn arm_phone_turn_if(&mut self, origin: PromptOrigin) {
-        if origin == PromptOrigin::Telegram {
-            self.phone_turn_state = Some(PhoneTurn::start(
-                std::time::Instant::now(),
-                self.items.len(),
-            ));
-        }
-    }
-
-    /// Whether this pane is still waiting to produce the first phone-visible
-    /// response for a Telegram-origin prompt.
-    pub fn is_phone_turn_waiting(&self) -> bool {
-        self.phone_turn_state
-            .as_ref()
-            .is_some_and(PhoneTurn::is_waiting)
-    }
-
-    /// Resolve the turn's first response if a completed text reply or first
-    /// tool call has appeared since its prompt was echoed, recording it as
-    /// sent. `None` when the turn is not the phone's, or nothing qualifying
-    /// has arrived yet.
-    pub(super) fn take_phone_first_response(&mut self) -> Option<FirstResponseOutcome> {
-        self.phone_turn_state
-            .as_mut()?
-            .take_first_response(&self.items)
-    }
-
-    /// Finish the turn's wait at a terminal boundary. A final streaming text is
-    /// resolved first (because `settle_turn` has just finalized it); otherwise
-    /// the old immediate "received" ack is used as the fallback.
-    pub(super) fn finish_phone_turn(&mut self) -> PhoneAckEffect {
-        if let Some(outcome) = self.take_phone_first_response() {
-            return PhoneAckEffect::Relay(outcome);
-        }
-        if self.answer_phone_turn_without_agent_text() {
-            return PhoneAckEffect::Fallback;
-        }
-        PhoneAckEffect::None
-    }
-
-    /// Drop the ledger once a Stop has ended the turn. Nothing further is
-    /// owed: the phone's `/stop` was answered on the spot, and a cancel-ack
-    /// reports nothing new.
-    pub(super) fn clear_phone_turn(&mut self) {
-        self.phone_turn_state = None;
-    }
-
-    /// A permission card went to the phone before this fold, so the wait is
-    /// answered without agent text — and the ledger stays open: the turn is
-    /// still the phone's, and its completion is still owed.
-    pub(super) fn answer_phone_turn_for_permission(&mut self) {
-        // Whether this call answered is moot: the card already went out, so
-        // no ack follows here either way.
-        self.answer_phone_turn_without_agent_text();
-    }
-
-    /// End the turn at the completion boundary, where its phone conversation
-    /// ends. Returns nothing on purpose: [`Self::phone_turn`] is how the
-    /// ledger is read, and handing a value back here is what invites the
-    /// read-and-thereby-retire pattern this split removed.
-    pub fn end_phone_turn(&mut self) {
-        self.phone_turn_state = None;
-    }
-
-    /// What the phone has been told, without ending the turn — the completion
-    /// relay's question, asked before it knows whether it will send.
-    pub fn phone_turn(&self) -> Option<&PhoneTurn> {
-        self.phone_turn_state.as_ref()
-    }
-
-    /// Record that a waiting turn was answered with something carrying no
-    /// agent text (the fixed ack, or a tool note). Returns whether there was a
-    /// waiting turn to answer, so the caller sends that ack exactly once.
-    fn answer_phone_turn_without_agent_text(&mut self) -> bool {
-        self.phone_turn_state
-            .as_mut()
-            .is_some_and(|turn| turn.answer(None))
-    }
-
-    /// Periodic safety net for turns that stay silent for the first-response
-    /// window. Returns true only once — the turn moves to answered, so later
-    /// flush ticks do not repeat the fallback ack.
-    pub fn take_phone_fallback_if_overdue(
-        &mut self,
-        now: std::time::Instant,
-        timeout_secs: u64,
-    ) -> bool {
-        if !self
-            .phone_turn_state
-            .as_ref()
-            .is_some_and(|turn| turn.is_overdue(now, timeout_secs))
-        {
-            return false;
-        }
-        self.answer_phone_turn_without_agent_text()
-    }
-
     /// Append `text` to the transcript as a `UserText` item and refresh the
     /// render (mermaid raster + row projection + scroll-to-end). Shared by the
     /// send-now path and the queue drain — the echo happens at *send* time.
@@ -568,22 +429,6 @@ impl AgentChatView {
             task,
         });
         Some(id)
-    }
-
-    /// Push `depth` placeholder prompts, for the queue-cap tests.
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn fill_queue_for_test(&mut self, depth: usize) {
-        while self.queued_prompt_count() < depth {
-            let id = PromptId(self.queue.next_prompt_id);
-            self.queue.next_prompt_id += 1;
-            self.queue.pending_prompts.push(QueuedPrompt {
-                id,
-                text: String::new(),
-                attachments: Vec::new(),
-                origin: PromptOrigin::InApp,
-                task: None,
-            });
-        }
     }
 
     /// Remove the queued prompt `id` from either the live or parked queue,

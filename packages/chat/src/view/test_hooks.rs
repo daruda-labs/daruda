@@ -10,13 +10,72 @@ use daruda_transcript::fold_mode::FoldMode;
 use gpui::Context;
 
 use super::super::pane_choice::PaneChoice;
+use super::super::phone_turn::PhoneTurn;
 use super::super::rows::tail::TailWindow;
 use super::super::transcript_defaults::TranscriptDefaults;
-use super::{ActivitySpan, AgentChatView, AgentSessionStatus, TurnOutcome};
+use super::{
+    ActivitySpan, AgentChatView, AgentSessionStatus, PromptId, PromptOrigin, QueuedPrompt,
+    TurnOutcome,
+};
 
 // Restated here so a per-file scan sees the impl is test-only.
 #[cfg(any(test, feature = "test-support"))]
 impl AgentChatView {
+    /// Test-only hook: mark a prompt turn in flight (as `send_prompt_text`
+    /// does) — `Turn` is module-private, so tests drive it through this.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn set_turn_in_flight(&mut self) {
+        self.queue.turn.start(std::time::Instant::now());
+    }
+
+    /// Test-only hook: return the turn to idle (as `settle_turn` does).
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn set_turn_idle(&mut self) {
+        self.queue.turn.finish();
+    }
+
+    /// Test-only hook: whether the turn is idle (no prompt in flight).
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn turn_is_idle(&self) -> bool {
+        !self.queue.turn.is_in_flight()
+    }
+
+    /// Test-only hook: whether a Stop's cancel window is still open.
+    #[cfg(test)]
+    pub(super) fn turn_awaiting_cancel_ack(&self) -> bool {
+        self.queue.turn.awaiting_cancel_ack()
+    }
+
+    /// Test-only hook: arm the phone turn without needing a live ACP handle.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn start_phone_turn_for_test(&mut self, started_at: std::time::Instant) {
+        self.phone_turn_state = Some(PhoneTurn::start(started_at, self.items.len()));
+    }
+
+    /// Test-only hook: resolve the turn's first response exactly as the relay
+    /// path does, so a test can reach `Answered` without an ACP session.
+    /// Returns whether anything resolved.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn take_phone_first_response_for_test(&mut self) -> bool {
+        self.take_phone_first_response().is_some()
+    }
+
+    /// Push `depth` placeholder prompts, for the queue-cap tests.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn fill_queue_for_test(&mut self, depth: usize) {
+        while self.queued_prompt_count() < depth {
+            let id = PromptId(self.queue.next_prompt_id);
+            self.queue.next_prompt_id += 1;
+            self.queue.pending_prompts.push(QueuedPrompt {
+                id,
+                text: String::new(),
+                attachments: Vec::new(),
+                origin: PromptOrigin::InApp,
+                task: None,
+            });
+        }
+    }
+
     pub fn host_cards_for_test(&self) -> Vec<(u64, Option<String>)> {
         self.host_cards
             .entries()

@@ -21,7 +21,7 @@
 # completion straight from an `AcpEvent::TurnEnded` / `AcpEvent::Error` match arm
 # fires early and can double-fire. `Turn` is therefore module-private to the
 # chat package's `view/` module tree (`packages/chat/src/view/`) (`view/mod.rs` + its submodules —
-# `queue_ops.rs` owns the field, `session_ops.rs` / `apply_event.rs` /
+# `queue_ops/` owns the field, `session_ops.rs` / `apply_event/` /
 # `tests.rs` touch it as `view`'s own descendants, which is exactly the
 # access `pub(super)` / plain-private grants and nothing outside the tree
 # does).
@@ -33,7 +33,7 @@
 #       through `is_busy()` / `activity_state()` / `activity_elapsed()`.
 #
 #   (b) The file that owns `apply_event`'s `AcpEvent::TurnEnded` /
-#       `AcpEvent::Error` match arms (view/apply_event.rs) must not call the
+#       `AcpEvent::Error` match arms (view/apply_event/mod.rs) must not call the
 #       completion sinks (`apply_agent_chat_task_ended` /
 #       `maybe_notify_agent_completed`) directly — completion must route out
 #       via `fire_activity_completion` at the settle edge. (agent_chat_ops/notify.rs
@@ -60,7 +60,8 @@ cd "$ROOT"
 
 PANE_DIR="packages/chat/src"
 VIEW_DIR="$PANE_DIR/view"
-APPLY_EVENT_RS="$VIEW_DIR/apply_event.rs"
+APPLY_EVENT_DIR="$VIEW_DIR/apply_event"
+APPLY_EVENT_RS="$APPLY_EVENT_DIR/mod.rs"
 SCAN_DIR="$PANE_DIR"
 
 if [[ ! -f "$VIEW_DIR/mod.rs" ]]; then
@@ -124,12 +125,13 @@ fi
 
 # ── Check (b): apply_event's AcpEvent arms must not fire completion directly ──
 #
-# view/apply_event.rs owns the `AcpEvent::TurnEnded` / `AcpEvent::Error`
+# view/apply_event/mod.rs owns the `AcpEvent::TurnEnded` / `AcpEvent::Error`
 # match arms. Guard against wiring the completion sinks into those arms:
-# completion must route out via `fire_activity_completion` at the reconcile
-# settle edge. First confirm apply_event.rs really holds the arms (so the
+# The lifecycle helpers are part of that reducer, so scan its complete tree.
+# Completion must route out via `fire_activity_completion` at the reconcile
+# settle edge. First confirm apply_event/mod.rs really holds the arms (so the
 # check fails loudly if apply_event moves again and this guard silently
-# stops covering it), then forbid the sink calls there.
+# stops covering it), then forbid sink calls throughout the reducer module.
 
 if ! grep -qE 'AcpEvent::(TurnEnded|Error)' "$APPLY_EVENT_RS"; then
     echo "" >&2
@@ -139,14 +141,14 @@ if ! grep -qE 'AcpEvent::(TurnEnded|Error)' "$APPLY_EVENT_RS"; then
     FAIL=1
 else
     HITS_B=$(
-        grep -nE 'apply_agent_chat_task_ended\(|maybe_notify_agent_completed\(' "$APPLY_EVENT_RS" \
+        grep -rnE 'apply_agent_chat_task_ended\(|maybe_notify_agent_completed\(' "$APPLY_EVENT_DIR" --include='*.rs' \
             | sed -E 's#//.*##' \
             | grep -E 'apply_agent_chat_task_ended\(|maybe_notify_agent_completed\(' \
             || true
     )
     if [[ -n "$HITS_B" ]]; then
         echo "" >&2
-        echo "lint-agent-activity: FAIL — completion fired from apply_event.rs:" >&2
+        echo "lint-agent-activity: FAIL — completion fired from apply_event/:" >&2
         echo "$HITS_B" >&2
         echo "" >&2
         echo "  Completion side effects must not fire from a raw AcpEvent::TurnEnded /" >&2
@@ -155,7 +157,7 @@ else
         echo "  busy→idle edge, where fire_activity_completion emits it exactly once." >&2
         FAIL=1
     else
-        echo "✓ apply_event.rs does not fire completion from the AcpEvent match arms."
+        echo "✓ apply_event/ does not fire completion from the AcpEvent match arms."
     fi
 fi
 
