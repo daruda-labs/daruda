@@ -61,12 +61,22 @@ pub fn sanitize_title(raw: &str) -> Option<String> {
 /// mid-character. Line breaks are preserved — a caller wanting one line wants
 /// [`sanitize_title`].
 pub fn elide_middle(text: &str, head: usize, tail: usize, marker: &str) -> String {
-    let chars: Vec<char> = text.chars().collect();
-    if chars.len() <= head + tail {
+    let Some((head_end, _)) = text.char_indices().nth(head) else {
+        return text.to_string();
+    };
+    let tail_start = if tail == 0 {
+        text.len()
+    } else {
+        let Some((start, _)) = text.char_indices().rev().nth(tail - 1) else {
+            return text.to_string();
+        };
+        start
+    };
+    if head_end >= tail_start {
         return text.to_string();
     }
-    let head: String = chars[..head].iter().collect();
-    let tail: String = chars[chars.len() - tail..].iter().collect();
+    let head = &text[..head_end];
+    let tail = &text[tail_start..];
     format!("{head}\n{marker}\n{tail}")
 }
 
@@ -112,6 +122,21 @@ mod tests {
         assert_eq!(out, "가나\nCUT\n마바");
         // Every retained char survived whole.
         assert!(out.chars().all(|c| c == '\n' || "가나마바CUT".contains(c)));
+    }
+
+    #[test]
+    fn elision_accepts_empty_sides_and_oversized_budgets() {
+        for (head, tail, expected) in [
+            (0, 2, "\nCUT\né😀"),
+            (2, 0, "한e\nCUT\n"),
+            (0, 0, "\nCUT\n"),
+            (usize::MAX, 1, "한eé😀"),
+            (1, usize::MAX, "한eé😀"),
+            (usize::MAX, usize::MAX, "한eé😀"),
+        ] {
+            assert_eq!(elide_middle("한eé😀", head, tail, "CUT"), expected);
+        }
+        assert_eq!(elide_middle("", 0, 0, "CUT"), "");
     }
 
     #[test]

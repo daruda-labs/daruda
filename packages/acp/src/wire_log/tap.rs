@@ -248,21 +248,9 @@ impl Elider {
         } else {
             UNRECORDED_ID.to_string()
         };
-        let preview = &text[..floor_char_boundary(text, PREVIEW_BYTES.min(self.cap))];
+        let preview = &text[..text.floor_char_boundary(PREVIEW_BYTES.min(self.cap))];
         format!("{preview}…{}", payload_marker(&id, bytes))
     }
-}
-
-/// Largest index `<= max` that starts a UTF-8 character, so a preview never
-/// splits a multi-byte character (which would panic the slice).
-fn floor_char_boundary(text: &str, max: usize) -> usize {
-    if max >= text.len() {
-        return text.len();
-    }
-    (0..=max)
-        .rev()
-        .find(|&i| text.is_char_boundary(i))
-        .unwrap_or(0)
 }
 
 /// An unset or unparseable value falls back to [`DEFAULT_MAX_FIELD`]; an

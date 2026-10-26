@@ -670,16 +670,22 @@ fn prepend_to_path(bin_dir: &Path) -> String {
 /// binary always does.
 fn prepend_to(bin_dir: &Path, existing: Option<std::ffi::OsString>) -> String {
     match existing {
-        Some(existing) => {
-            let joined = std::iter::once(bin_dir.to_path_buf())
-                .chain(std::env::split_paths(&existing))
-                .collect::<Vec<_>>();
-            std::env::join_paths(joined)
-                .map(|p| p.to_string_lossy().into_owned())
-                .unwrap_or_else(|_| bin_dir.to_string_lossy().into_owned())
-        }
+        Some(existing) => prepend_path(bin_dir, &existing)
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| bin_dir.to_string_lossy().into_owned()),
         None => bin_dir.to_string_lossy().into_owned(),
     }
+}
+
+/// Join a runtime's bin directory ahead of a supplied native PATH.
+/// Callers retain their own missing-PATH and join-error policies.
+pub(crate) fn prepend_path(
+    bin_dir: &Path,
+    existing: &std::ffi::OsStr,
+) -> Result<std::ffi::OsString, std::env::JoinPathsError> {
+    std::env::join_paths(
+        std::iter::once(bin_dir.to_path_buf()).chain(std::env::split_paths(existing)),
+    )
 }
 
 /// Extract Node's platform archive (ZIP on Windows, gzip tarball on Unix).

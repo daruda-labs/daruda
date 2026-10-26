@@ -31,10 +31,9 @@ impl NpmRuntime {
         env.retain(|key, _| {
             !daruda_core::process::env_name_eq(key.as_ref(), std::ffi::OsStr::new("PATH"))
         });
-        let paths = std::iter::once(bin.to_path_buf()).chain(std::env::split_paths(&original_path));
         env.insert(
             "PATH".into(),
-            std::env::join_paths(paths)
+            crate::node::prepend_path(bin, &original_path)
                 .map_err(|error| {
                     PreparationError::new(PreparationKind::Configuration, error.to_string())
                 })?
