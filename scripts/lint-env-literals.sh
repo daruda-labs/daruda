@@ -264,6 +264,17 @@ expect_registry() {
     fi
 }
 
+existing_sources() {
+    local file
+    while IFS= read -r file; do
+        # The index still names unstaged deletions after a module move.
+        # Keep broken symlinks so the scanner reports their read failure.
+        if [ -e "$file" ] || [ -L "$file" ]; then
+            printf '%s\n' "$file"
+        fi
+    done
+}
+
 self_test() {
     SELF_TEST_DIR="$(mktemp -d)"
     trap 'rm -rf "$SELF_TEST_DIR"' EXIT
@@ -293,6 +304,16 @@ self_test() {
     expect_scan 2 "scanner failure is not clean" "broken.rs" \
         $'let _ = "DARUDA_UNCLOSED;\n'
 
+    local present="$SELF_TEST_DIR/present.rs"
+    local removed="$SELF_TEST_DIR/removed.rs"
+    printf '%s\n' '// present source' > "$present"
+    local discovered
+    discovered="$(printf '%s\n' "$present" "$removed" | existing_sources)"
+    if [ "$discovered" != "$present" ]; then
+        echo "[lint-env-literals] discovery must omit deleted sources" >&2
+        return 2
+    fi
+
     echo "[lint-env-literals] self-test passed."
 }
 
@@ -312,7 +333,7 @@ esac
 validate_registry
 
 file_list="$(git ls-files --cached --others --exclude-standard -- \
-    ':(glob)packages/**/*.rs' ':(glob)tools/**/*.rs')" || {
+    ':(glob)packages/**/*.rs' ':(glob)tools/**/*.rs' | existing_sources)" || {
     echo "[lint-env-literals] source discovery failed" >&2
     exit 2
 }
