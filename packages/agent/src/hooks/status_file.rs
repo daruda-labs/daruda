@@ -20,6 +20,8 @@ use serde::{Deserialize, Serialize};
 use crate::SessionStatus;
 use crate::hooks::events::{NotificationType, PermissionMode};
 
+pub(super) mod lock;
+
 /// Bumped only when a structural change can't be absorbed by
 /// `#[serde(default)]` on optional fields.
 pub const SCHEMA_VERSION: u32 = 1;
@@ -156,9 +158,9 @@ pub fn path_for(dir: &Path, session_id: &str) -> PathBuf {
 }
 
 /// Path for a single session's advisory lock file inside `dir`. The
-/// hook handler flocks this during its read-modify-write window; cold
-/// restore and dead-session pruning sweep it. Centralized here so the
-/// `.lock` suffix has a single definition.
+/// hook handler and startup maintenance lock this during read-modify-write.
+/// The pathname stays in place: unlinking it can let a second writer lock
+/// a new file while a previous writer still owns the old one.
 pub fn lock_path_for(dir: &Path, session_id: &str) -> PathBuf {
     dir.join(format!("{session_id}.lock"))
 }

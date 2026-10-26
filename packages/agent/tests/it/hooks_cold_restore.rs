@@ -255,7 +255,7 @@ fn run_skips_malformed_recent_file_in_place() {
 }
 
 #[test]
-fn run_sweeps_old_lock_files() {
+fn run_preserves_old_lock_identity_even_while_it_is_held() {
     let dir = tempfile::TempDir::new().unwrap();
     let stale_lock = dir.path().join("orphan.lock");
     let fresh_lock = dir.path().join("active.lock");
@@ -267,12 +267,59 @@ fn run_sweeps_old_lock_files() {
         return; // platform skipped
     }
 
+    let held = fs::File::options()
+        .read(true)
+        .write(true)
+        .open(&stale_lock)
+        .unwrap();
+    held.lock().unwrap();
     run(dir.path(), &policy()).unwrap();
     assert!(
-        !stale_lock.exists(),
-        "stale lock file should have been deleted"
+        stale_lock.exists(),
+        "age cannot prove that a lock is orphaned"
     );
+    let contender = fs::File::options()
+        .read(true)
+        .write(true)
+        .open(&stale_lock)
+        .unwrap();
+    assert!(matches!(
+        contender.try_lock(),
+        Err(fs::TryLockError::WouldBlock)
+    ));
     assert!(fresh_lock.exists(), "fresh lock should be left alone");
+}
+
+#[test]
+fn run_does_not_reset_or_delete_a_status_while_its_writer_holds_the_lock() {
+    use daruda_agent::hooks::status_file::lock_path_for;
+    let dir = tempfile::TempDir::new().unwrap();
+    for (id, age) in [("stale", 600), ("expired", 8 * 24 * 60 * 60)] {
+        let path = path_for(dir.path(), id);
+        let mut old = file_aged(SessionStatus::Working, Duration::from_secs(age));
+        old.session_id = id.into();
+        write_atomic(&path, &old).unwrap();
+        let lock = fs::File::options()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(lock_path_for(dir.path(), id))
+            .unwrap();
+        lock.lock().unwrap();
+        assert!(run(dir.path(), &policy()).unwrap().is_empty());
+        assert_eq!(read(&path).unwrap().unwrap().status, SessionStatus::Working);
+        let fresh = StatusFile::new_hook(id, "/tmp/x", SessionStatus::ExecutingTool, "PreToolUse");
+        write_atomic(&path, &fresh).unwrap();
+        drop(lock);
+        let loaded = run(dir.path(), &policy()).unwrap();
+        assert!(
+            loaded
+                .iter()
+                .any(|f| f.session_id == id && f.status == SessionStatus::ExecutingTool)
+        );
+        fs::remove_file(&path).unwrap();
+    }
 }
 
 #[test]

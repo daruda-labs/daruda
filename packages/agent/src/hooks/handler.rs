@@ -18,14 +18,13 @@
 //! 7. Release the lock; exit 0 regardless of internal failures
 //!    (per official-doc non-blocking convention).
 
-use std::fs::OpenOptions;
 use std::io::{self, Read};
-use std::path::Path;
 
 use super::events::HookEvent;
 use super::fsm::{self, FsmAction};
+use super::status_file::lock::SessionLock;
 use super::status_file::{
-    self, Source, StatusFile, default_dir, delete, lock_path_for, path_for, read, write_atomic,
+    self, Source, StatusFile, default_dir, delete, path_for, read, write_atomic,
 };
 
 /// Run the hook handler. Always returns the exit code that `main`
@@ -92,44 +91,12 @@ fn run_inner(_event_type: &str) -> Result<(), Box<dyn std::error::Error>> {
         }
         FsmAction::Delete => {
             delete(&path)?;
-            // SessionEnd: can't delete the lock file here — this handler
-            // still holds it, and deleting now would race another
-            // `daruda --hook` for the same session_id during shutdown.
-            // `cold_restore::run`'s TTL sweep (next daruda startup) reaps
-            // stale `*.lock` files instead.
+            // Keep the lock pathname: other handlers may already have it
+            // open, so unlinking could split the synchronization identity.
         }
     }
 
     Ok(())
-}
-
-/// Per-session exclusive advisory lock. Holds an open file handle on
-/// `<dir>/<session_id>.lock`; the lock is released when the handle is
-/// dropped (RAII).
-struct SessionLock {
-    file: std::fs::File,
-}
-
-impl SessionLock {
-    fn acquire(dir: &Path, session_id: &str) -> std::io::Result<Self> {
-        let path = lock_path_for(dir, session_id);
-        let file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .open(&path)?;
-        file.lock()?;
-        Ok(Self { file })
-    }
-}
-
-impl Drop for SessionLock {
-    fn drop(&mut self) {
-        // Best-effort unlock; release happens automatically on close
-        // anyway, so an error here is informational.
-        let _ = self.file.unlock();
-    }
 }
 
 /// The notification subtype, present only on `Notification` events.

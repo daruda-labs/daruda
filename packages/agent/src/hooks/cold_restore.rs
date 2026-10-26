@@ -25,6 +25,7 @@ use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::observability::system_info::redact_home;
 
 use crate::SessionStatus;
+use crate::hooks::status_file::lock::SessionLock;
 use crate::hooks::status_file::{
     StatusFile, StatusFileError, delete, list_dir, read, write_atomic,
 };
@@ -101,18 +102,20 @@ fn system_time_from_utc(ts: DateTime<Utc>) -> SystemTime {
 /// because cold restore must not block daruda startup. Returns an
 /// error only if the directory itself can't be enumerated for reasons
 /// other than "doesn't exist" (which is normal on first run).
+/// Busy session locks are skipped; lock pathnames are never reclaimed by age.
 pub fn run(dir: &Path, policy: &ColdRestorePolicy) -> Result<Vec<StatusFile>, StatusFileError> {
-    // Best-effort sweep of stale per-session lock files left behind
-    // when `SessionEnd` fired and the hook handler couldn't safely
-    // delete its own lock (it was still holding it). The status JSON
-    // sweep below handles its own files; locks need a separate pass
-    // because `list_dir` filters them out by extension.
-    cleanup_orphan_locks(dir, policy);
-
     let now = SystemTime::now();
     let mut loaded = Vec::new();
 
     for entry in list_dir(dir)? {
+        let Some(session) = entry.path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        // A live handler owns the newer state. Never delay startup for it;
+        // the file watcher will deliver its committed update instead.
+        let Ok(Some(_lock)) = SessionLock::try_acquire(dir, session) else {
+            continue;
+        };
         match read(&entry.path) {
             Ok(Some(mut file)) => match classify(system_time_from_utc(file.timestamp), now, policy)
             {
@@ -148,7 +151,10 @@ pub fn run(dir: &Path, policy: &ColdRestorePolicy) -> Result<Vec<StatusFile>, St
             // (leave it; the next event overwrites). Anything past the
             // stale threshold is an orphan — drop it.
             Ok(None) => {
-                if classify(entry.modified, now, policy) != ColdRestoreAction::Load {
+                let modified = std::fs::metadata(&entry.path).and_then(|m| m.modified());
+                if modified
+                    .is_ok_and(|mtime| classify(mtime, now, policy) != ColdRestoreAction::Load)
+                {
                     let _ = delete(&entry.path);
                 }
             }
@@ -167,27 +173,4 @@ pub fn load(dir: &Path) -> Result<Vec<StatusFile>, StatusFileError> {
         .into_iter()
         .filter_map(|entry| read(&entry.path).ok().flatten())
         .collect())
-}
-
-/// Delete `<dir>/*.lock` files older than `policy.file_ttl`. Silent
-/// on errors — this is housekeeping, not correctness.
-fn cleanup_orphan_locks(dir: &Path, policy: &ColdRestorePolicy) {
-    let now = SystemTime::now();
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().is_none_or(|e| e != "lock") {
-            continue;
-        }
-        let Ok(meta) = entry.metadata() else { continue };
-        let Ok(modified) = meta.modified() else {
-            continue;
-        };
-        let age = now.duration_since(modified).unwrap_or(Duration::ZERO);
-        if age >= policy.file_ttl {
-            let _ = std::fs::remove_file(&path);
-        }
-    }
 }

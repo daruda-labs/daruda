@@ -52,14 +52,8 @@ impl Workspace {
                     if let Ok(dir) = daruda_agent::hooks::status_file::default_dir() {
                         use daruda_agent::hooks::status_file as sf;
                         let _ = sf::delete(&sf::path_for(&dir, &session_id));
-                        // `claude` is gone (the OS no longer has its PID),
-                        // so no NEW hook can spawn for this
-                        // session. At most one straggler hook subprocess may
-                        // still hold the flock; POSIX unlink keeps its open
-                        // fd valid, and a single writer needs no
-                        // serialization — safe to sweep now rather than
-                        // waiting for the cold-restore TTL pass.
-                        let _ = sf::delete(&sf::lock_path_for(&dir, &session_id));
+                        // Queued hook subprocesses can outlive the CLI.
+                        // Retain their shared lock identity even after exit.
                     }
                     self.notify_status_docks(cx);
                 }
@@ -67,3 +61,6 @@ impl Workspace {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
