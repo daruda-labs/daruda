@@ -14,6 +14,7 @@ mod mermaid_label_geometry;
 mod mermaid_label_stroke;
 mod mermaid_node_contrast;
 mod mermaid_text_measurer;
+mod svg_fonts;
 pub mod syntax;
 pub mod visual;
 
