@@ -569,7 +569,7 @@ fn resolve_pane_bindings(
     let shell_to_pane: HashMap<u32, PaneId> =
         panes.iter().map(|(pane, shell)| (*shell, *pane)).collect();
 
-    let mut result: HashMap<PaneId, PtyBinding> = HashMap::new();
+    let mut candidates: HashMap<PaneId, (usize, u32, PtyBinding)> = HashMap::new();
     for session in sessions {
         let mut cur = session.pid;
         let mut seen: HashSet<u32> = HashSet::new();
@@ -584,16 +584,32 @@ fn resolve_pane_bindings(
             }
             depth += 1;
             if let Some(&pane_id) = shell_to_pane.get(&parent) {
-                result.entry(pane_id).or_insert_with(|| PtyBinding {
-                    claude_pid: session.pid,
-                    session_id: session.session_id.clone(),
-                });
+                let rank = (depth, session.pid);
+                if candidates
+                    .get(&pane_id)
+                    .is_none_or(|(depth, pid, _)| rank < (*depth, *pid))
+                {
+                    candidates.insert(
+                        pane_id,
+                        (
+                            depth,
+                            session.pid,
+                            PtyBinding {
+                                claude_pid: session.pid,
+                                session_id: session.session_id.clone(),
+                            },
+                        ),
+                    );
+                }
                 break;
             }
             cur = parent;
         }
     }
-    result
+    candidates
+        .into_iter()
+        .map(|(pane, (_, _, binding))| (pane, binding))
+        .collect()
 }
 
 /// One full re-resolution. Returns the new per-pane bindings —

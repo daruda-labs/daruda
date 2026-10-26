@@ -96,6 +96,24 @@ fn no_binding_when_claude_is_not_under_any_registered_shell() {
 }
 
 #[test]
+fn competing_sessions_choose_depth_then_pid_independent_of_scan_order() {
+    let panes = HashMap::from([(1u64, 100u32)]);
+    let parent_of = |pid| match pid {
+        110 | 120 => Some(100),
+        90 => Some(110),
+        _ => None,
+    };
+    for sessions in [
+        vec![meta(90, "nested"), meta(120, "peer"), meta(110, "outer")],
+        vec![meta(120, "peer"), meta(110, "outer"), meta(90, "nested")],
+        vec![meta(110, "outer"), meta(90, "nested"), meta(120, "peer")],
+    ] {
+        let bindings = resolve_pane_bindings(&panes, &sessions, &parent_of);
+        assert_eq!(bindings.get(&1), Some(&binding(110, "outer")));
+    }
+}
+
+#[test]
 fn resolves_independent_bindings_for_multiple_panes() {
     let panes = HashMap::from([(1u64, 100u32), (2u64, 200u32)]);
     let sessions = vec![meta(110, "sess-1"), meta(210, "sess-2")];
