@@ -1524,3 +1524,18 @@ fn legacy_events_and_records_default_result_and_history() {
     assert!(legacy.ended_executions.is_empty());
     assert!(legacy.started_at.is_none());
 }
+
+#[test]
+fn a_rejected_delete_of_an_unknown_task_leaves_apply_a_no_op() {
+    let mut book = TasksBook::default();
+    let at = Utc.timestamp_opt(0, 0).unwrap();
+    TaskMachine::apply(
+        &mut book,
+        &TaskEvent::SubtaskAdded {
+            id: "missing".into(),
+            subtask: SubTask::default(),
+            at,
+        },
+    );
+    assert!(book.is_empty());
+}

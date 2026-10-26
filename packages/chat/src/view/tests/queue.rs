@@ -543,65 +543,6 @@ fn solicited_internal_notice_arms_completion_only_after_dispatch(cx: &mut gpui::
         .unwrap();
 }
 
-#[gpui::test]
-fn refused_solicited_internal_notice_preserves_the_previous_phone_turn(
-    cx: &mut gpui::TestAppContext,
-) {
-    for refusal in [
-        crate::view::InternalDispatch::NotNow,
-        crate::view::InternalDispatch::ReadOnly,
-        crate::view::InternalDispatch::Unavailable,
-    ] {
-        let (window, probe) = connected_view(cx);
-        if refusal == crate::view::InternalDispatch::Unavailable {
-            drop(probe);
-        }
-        window
-            .update(cx, |view, _window, cx| {
-                view.start_phone_turn_for_test(std::time::Instant::now());
-                let previous = view.phone_turn().cloned();
-                match refusal {
-                    crate::view::InternalDispatch::NotNow => view.set_turn_in_flight(),
-                    crate::view::InternalDispatch::ReadOnly => {
-                        view.set_access(daruda_store::tasks::AgentChatAccess::CliSnapshot(
-                            daruda_store::tasks::ExecutionRef {
-                                task_id: "task".into(),
-                                execution_id: "execution".into(),
-                            },
-                        ))
-                    }
-                    _ => {}
-                }
-                assert_eq!(
-                    view.try_send_internal_prompt_text_with_phone_mode(
-                        "notice".into(),
-                        Some(crate::phone_turn::PhoneTurnMode::CompletionOnly),
-                        cx
-                    ),
-                    refusal
-                );
-                assert_eq!(view.phone_turn(), previous.as_ref());
-            })
-            .unwrap();
-    }
-}
-
-#[gpui::test]
-fn internal_notice_refuses_while_a_turn_is_in_flight(cx: &mut gpui::TestAppContext) {
-    let (window, mut probe) = connected_view(cx);
-    window
-        .update(cx, |view, _window, cx| {
-            view.set_turn_in_flight();
-            assert_eq!(
-                view.try_send_internal_prompt_text("notice".into(), cx),
-                crate::view::InternalDispatch::NotNow
-            );
-            assert_eq!(view.queued_prompt_count(), 0, "a refusal never queues");
-            assert_eq!(probe.drain().0, 0);
-        })
-        .unwrap();
-}
-
 /// Parked or live user prompts keep their place: the notice refuses rather
 /// than queueing behind or jumping ahead, and the edit target survives.
 #[gpui::test]

@@ -34,4 +34,6 @@ tree-sitter-highlight = "0.25"
 tree-sitter-python = { workspace = true }
 
 [dev-dependencies]
+# Integration tests use the same public widget initialization as host tests.
+daruda_ui = { workspace = true, features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }

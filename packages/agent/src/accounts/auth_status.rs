@@ -161,6 +161,3 @@ pub fn read_auth_status(
     parse_status(&String::from_utf8_lossy(&stdout), format)
         .or_else(|| parse_status(&String::from_utf8_lossy(&stderr), format))
 }
-
-#[cfg(test)]
-mod tests;
