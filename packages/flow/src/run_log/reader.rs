@@ -153,27 +153,19 @@ pub fn inspect(run_dir: &Path) -> Result<Option<Inspection>, daruda_runlog::Open
     if awaits(&history.state, run_dir) {
         return Ok(None);
     }
-    let mut after = FlowRunState::default();
     let mut end = None;
-    for event in history.records.iter().filter_map(event_of) {
-        FlowRunMachine::apply(&mut after, event);
-        if let Some(FlowEvent::RunEnded { end: ended }) =
-            super::narrate::narrate(run_dir, event, &after)
-        {
+    let mut resumed_at = 0;
+    visit_narration(run_dir, &history.records, |seq, event, narrated| {
+        if let Some(FlowEvent::RunEnded { end: ended }) = narrated {
             end = Some(ended);
         }
         if matches!(event, E::Resumed { .. }) {
             end = None;
+            resumed_at = seq;
         }
-    }
+    });
     Ok(Some(Inspection {
-        resumed_at: history
-            .records
-            .iter()
-            .rev()
-            .find(|record| matches!(event_of(record), Some(E::Resumed { .. })))
-            .map(|record| record.seq)
-            .unwrap_or_default(),
+        resumed_at,
         state: history.state,
         replay: replay_events(history.records.iter().filter_map(event_of)),
         end,
@@ -217,21 +209,34 @@ pub fn narration(run_dir: &Path) -> Vec<Sequenced<FlowEvent>> {
     let Some(Ok(history)) = history(run_dir) else {
         return Vec::new();
     };
-    let mut state = FlowRunState::default();
     let mut said = Vec::new();
-    for record in history.records {
-        let Body::Event { event } = &record.body else {
+    visit_narration(run_dir, &history.records, |seq, _, narrated| {
+        if let Some(event) = narrated {
+            said.push(Sequenced { seq, event });
+        }
+    });
+    said
+}
+
+/// Flow logs keep the whole run, so narration starts at the default state.
+/// Apply before narrating, just as the durable live hook does.
+fn visit_narration(
+    run_dir: &Path,
+    records: &[Record<E>],
+    mut visit: impl FnMut(u64, &E, Option<FlowEvent>),
+) {
+    let mut state = FlowRunState::default();
+    for record in records {
+        let Some(event) = event_of(record) else {
             continue;
         };
         FlowRunMachine::apply(&mut state, event);
-        if let Some(narrated) = super::narrate::narrate(run_dir, event, &state) {
-            said.push(Sequenced {
-                seq: record.seq,
-                event: narrated,
-            });
-        }
+        visit(
+            record.seq,
+            event,
+            super::narrate::narrate(run_dir, event, &state),
+        );
     }
-    said
 }
 
 /// Fold a run's events into what a resumed run starts from. Which nodes
@@ -376,6 +381,64 @@ mod tests {
         std::fs::write(&path, b"broken\nbroken\n").unwrap();
         assert!(inspect(dir.path()).is_err());
         assert_eq!(std::fs::read(&path).unwrap(), b"broken\nbroken\n");
+    }
+
+    /// A resumed episode must not retain the previous ending or its resume seq.
+    #[test]
+    fn inspection_tracks_the_latest_durable_episode_and_its_ending() {
+        use crate::event::RunEnd;
+        use crate::run_log::line::EndLine;
+
+        let dir = tempfile::tempdir().unwrap();
+        let loaded = crate::load::load(
+            "version: 1\nnodes:\n  - id: a\n    kind: command\n    run: echo a\n",
+            None,
+        )
+        .unwrap();
+        let store = super::super::testing::started_store(dir.path(), &loaded, None, vec![]);
+        smol::block_on(async {
+            store
+                .commit(E::RunEnded {
+                    end: EndLine::Stalled {
+                        nodes: vec!["a".into()],
+                    },
+                })
+                .await
+                .unwrap();
+            let initial = inspect(dir.path()).unwrap().unwrap();
+            assert_eq!(initial.resumed_at, 0);
+            assert!(matches!(initial.end, Some(RunEnd::Stalled { .. })));
+
+            store.commit(E::Resumed { carried: 0 }).await.unwrap();
+            let resumed = inspect(dir.path()).unwrap().unwrap();
+            assert_eq!(resumed.resumed_at, 4);
+            assert!(resumed.end.is_none());
+            assert_eq!(resumed.state.phase(), RunPhase::Running);
+
+            store
+                .commit(E::RunEnded {
+                    end: EndLine::Stalled {
+                        nodes: vec!["a".into()],
+                    },
+                })
+                .await
+                .unwrap();
+            let stalled = inspect(dir.path()).unwrap().unwrap();
+            assert_eq!(stalled.resumed_at, 4);
+            assert!(matches!(stalled.end, Some(RunEnd::Stalled { .. })));
+
+            store.commit(E::Resumed { carried: 0 }).await.unwrap();
+            let resumed_again = inspect(dir.path()).unwrap().unwrap();
+            assert_eq!(resumed_again.resumed_at, 6);
+            assert!(resumed_again.end.is_none());
+            store
+                .commit(E::RunEnded { end: EndLine::Done })
+                .await
+                .unwrap();
+            let finished = inspect(dir.path()).unwrap().unwrap();
+            assert_eq!(finished.resumed_at, 6);
+            assert!(matches!(finished.end, Some(RunEnd::Done)));
+        });
     }
 
     /// Pins count as passed; a lost output and an invalidation take a pass
