@@ -7,10 +7,9 @@ use daruda_store::project::LaneRef;
 use gpui::{Context, Window};
 
 impl Workspace {
-    pub(super) fn on_pane_badges_key(
+    pub(super) fn on_pane_badge_key(
         &mut self,
-        lane: LaneRef,
-        bounds: gpui::Bounds<gpui::Pixels>,
+        target: &RowTarget,
         event: &gpui::KeyDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -18,7 +17,7 @@ impl Workspace {
         if !event.keystroke.modifiers.modified()
             && matches!(event.keystroke.key.as_str(), "enter" | "space")
         {
-            self.choose_lane_from_rail(lane, bounds, window, cx);
+            self.activate_dock_row(target, window, cx);
             cx.stop_propagation();
         }
     }

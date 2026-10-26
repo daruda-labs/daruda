@@ -1,7 +1,5 @@
 //! Expanded-sidebar pane summaries and shallow, single-line pane rows.
 
-use std::{cell::Cell, rc::Rc};
-
 use daruda_agent::SessionStatus;
 use daruda_store::project::LaneRef;
 use gpui::{AnyElement, App, IntoElement, SharedString, div, prelude::*, px};
@@ -40,15 +38,12 @@ pub(in crate::workspace) fn lane_panes(
     }
 }
 
-fn individual_row(
+/// Named sessions enter through their session identity; other panes by id.
+fn pane_target(
     lane: LaneRef,
     pane: &PaneSnapshot,
     snap: &LeftDockSnapshot,
-    cx: &App,
-) -> impl IntoElement + use<> {
-    let metrics = snap.metrics;
-    let t = theme::current(cx);
-    let current = snap.active == lane && snap.focused_pane == pane.pane;
+) -> (RowTarget, SharedString) {
     let target = snap
         .named_sessions
         .get(&lane)
@@ -59,6 +54,19 @@ fn individual_row(
         RowTarget::Session(_, session) => session.title.clone(),
         RowTarget::Pane(_, pane) => pane.title.clone(),
     };
+    (target, title)
+}
+
+fn individual_row(
+    lane: LaneRef,
+    pane: &PaneSnapshot,
+    snap: &LeftDockSnapshot,
+    cx: &App,
+) -> impl IntoElement + use<> {
+    let metrics = snap.metrics;
+    let t = theme::current(cx);
+    let current = snap.active == lane && snap.focused_pane == pane.pane;
+    let (target, title) = pane_target(lane, pane, snap);
     let workspace = snap.workspace.clone();
     let pane_id = pane.pane;
     div()
@@ -101,79 +109,92 @@ fn individual_row(
         })
 }
 
+/// Expanded grouped panes: each badge enters its own pane directly. The
+/// pane chooser is reserved for grouped worktrees in the collapsed rail.
 fn badges(lane: LaneRef, panes: &[PaneSnapshot], snap: &LeftDockSnapshot, cx: &App) -> AnyElement {
     let metrics = snap.metrics;
     let t = theme::current(cx);
-    let bounds = Rc::new(Cell::new(gpui::Bounds::default()));
-    let measured = bounds.clone();
-    let key_bounds = bounds.clone();
-    let workspace = snap.workspace.clone();
-    let key_workspace = workspace.clone();
-    let label = crate::surface::strings::dock::pane_count(panes.len());
     div()
         .id(SharedString::from(format!(
             "dock-pane-badges-{}-{}",
             lane.project, lane.lane
         )))
         .debug_selector(move || format!("dock-pane-badges-{}-{}", lane.project, lane.lane))
-        .focusable()
-        .tab_stop(true)
-        .relative()
-        .child(
-            gpui::canvas(move |value, _, _| measured.set(value), |_, _, _, _| {})
-                .absolute()
-                .inset_0()
-                .size_full(),
-        )
         .flex()
         .flex_wrap()
         .items_center()
         .min_h(px(metrics.target(theme::CONTROL_TARGET_SIZE)))
         .gap(px(metrics.space(theme::STATUS_BADGES_ROW_GAP)))
         .pl(px(metrics.space(theme::PAD_XS)))
-        .rounded(px(theme::RADIUS_SM))
         .text_size(px(metrics.text(theme::STATUS_BADGES_LABEL_FONT_SIZE)))
         .text_color(t.text_muted)
+        .child(crate::surface::strings::dock::pane_count(panes.len()))
+        .children(panes.iter().map(|pane| badge(lane, pane, snap, cx)))
+        .into_any_element()
+}
+
+fn badge(lane: LaneRef, pane: &PaneSnapshot, snap: &LeftDockSnapshot, cx: &App) -> AnyElement {
+    let metrics = snap.metrics;
+    let t = theme::current(cx);
+    let current = snap.active == lane && snap.focused_pane == pane.pane;
+    let status = match TabIndicator::resolve(pane.status, pane.outcome) {
+        Some(TabIndicator::Done) => Some((SessionStatus::Idle, t.status_idle_dark)),
+        Some(TabIndicator::Errored) => Some((SessionStatus::Failed, t.status_failed_dark)),
+        _ => pane
+            .status
+            .map(|status| (status, crate::ui::color_for_status(status, cx))),
+    };
+    let indicator = if let Some((status, color)) = status {
+        let status_badge =
+            AgentStatusBadge::new(status, IndicatorSize::Badge, color).with_metrics(metrics);
+        if current {
+            status_badge.active()
+        } else {
+            status_badge
+        }
+        .into_any_element()
+    } else {
+        crate::ui::icons::icon(pane.neutral_icon)
+            .with_size(px(metrics.icon(theme::STATUS_INDICATOR_BADGE_SIZE)))
+            .text_color(if current {
+                t.text_primary
+            } else {
+                t.text_muted
+            })
+            .into_any_element()
+    };
+    let (target, title) = pane_target(lane, pane, snap);
+    let key_target = target.clone();
+    let workspace = snap.workspace.clone();
+    let key_workspace = workspace.clone();
+    let pane_id = pane.pane;
+    div()
+        .id(SharedString::from(format!(
+            "dock-pane-badge-{}-{}-{pane_id}",
+            lane.project, lane.lane
+        )))
+        .debug_selector(move || format!("dock-pane-badge-{}-{}-{pane_id}", lane.project, lane.lane))
+        .focusable()
+        .tab_stop(true)
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(theme::RADIUS_SM))
         .hover(|style| style.bg(t.lane_row_hover_bg))
         .cursor_pointer()
-        .child(label.clone())
-        .children(panes.iter().map(|pane| {
-            let current = snap.active == lane && snap.focused_pane == pane.pane;
-            let status = match TabIndicator::resolve(pane.status, pane.outcome) {
-                Some(TabIndicator::Done) => Some((SessionStatus::Idle, t.status_idle_dark)),
-                Some(TabIndicator::Errored) => Some((SessionStatus::Failed, t.status_failed_dark)),
-                _ => pane
-                    .status
-                    .map(|status| (status, crate::ui::color_for_status(status, cx))),
-            };
-            if let Some((status, color)) = status {
-                let badge = AgentStatusBadge::new(status, IndicatorSize::Badge, color)
-                    .with_metrics(metrics);
-                if current { badge.active() } else { badge }.into_any_element()
-            } else {
-                crate::ui::icons::icon(pane.neutral_icon)
-                    .with_size(px(metrics.icon(theme::STATUS_INDICATOR_BADGE_SIZE)))
-                    .text_color(if current {
-                        t.text_primary
-                    } else {
-                        t.text_muted
-                    })
-                    .into_any_element()
-            }
-        }))
-        .tooltip(crate::ui::tooltip::text(label))
+        .child(indicator)
+        .tooltip(crate::ui::tooltip::text(title))
         .on_click(move |_, window, cx| {
             cx.stop_propagation();
             if let Some(ws) = workspace.upgrade() {
-                ws.update(cx, |ws, cx| {
-                    ws.choose_lane_from_rail(lane, bounds.get(), window, cx)
-                });
+                ws.update(cx, |ws, cx| ws.activate_dock_row(&target, window, cx));
             }
         })
         .on_key_down(move |event, window, cx| {
             if let Some(ws) = key_workspace.upgrade() {
                 ws.update(cx, |ws, cx| {
-                    ws.on_pane_badges_key(lane, key_bounds.get(), event, window, cx)
+                    ws.on_pane_badge_key(&key_target, event, window, cx)
                 });
             }
         })

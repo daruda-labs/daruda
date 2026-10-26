@@ -396,19 +396,20 @@ async fn expanded_menu_changes_visible_rows_and_keeps_the_pane_inset_shallow(
         &daruda_config::Config::default(),
         Some(daruda_store::project::Project::from_path(root.path())),
     );
-    let (lane, first) = cx
+    let (lane, first, second) = cx
         .update_window(wh.into(), |_, window, cx| {
             entity.update(cx, |ws, cx| {
                 ws.open_agent_chat_pane(window, cx);
                 let first = ws.active_runtime().focused_pane_id;
                 ws.open_agent_chat_pane(window, cx);
+                let second = ws.active_runtime().focused_pane_id;
                 ws.docks.left.update(cx, |dock, _| {
                     dock.open();
                     dock.resize(220.0);
                 });
                 ws.set_lane_rail_grouped(ws.active, true, cx);
                 cx.notify();
-                (ws.active, first)
+                (ws.active, first, second)
             })
         })
         .unwrap();
@@ -416,18 +417,31 @@ async fn expanded_menu_changes_visible_rows_and_keeps_the_pane_inset_shallow(
         Box::leak(format!("lane-row-{}-{}", lane.project, lane.lane).into_boxed_str());
     let badge_selector: &'static str =
         Box::leak(format!("dock-pane-badges-{}-{}", lane.project, lane.lane).into_boxed_str());
-    let pane_selector: &'static str =
-        Box::leak(format!("dock-pane-row-{}-{}-{first}", lane.project, lane.lane).into_boxed_str());
+    let pane_selector: &'static str = Box::leak(
+        format!("dock-pane-row-{}-{}-{second}", lane.project, lane.lane).into_boxed_str(),
+    );
     let vcx = &mut gpui::VisualTestContext::from_window(wh.into(), cx);
     vcx.run_until_parked();
-    let badge = vcx
-        .debug_bounds(badge_selector)
+    let first_badge_selector: &'static str = Box::leak(
+        format!("dock-pane-badge-{}-{}-{first}", lane.project, lane.lane).into_boxed_str(),
+    );
+    vcx.debug_bounds(badge_selector)
         .expect("grouped panes show a compact badge strip");
+    assert_eq!(
+        entity.read_with(vcx, |ws, _| ws.active_runtime().focused_pane_id),
+        second
+    );
+    let badge = vcx.debug_bounds(first_badge_selector).unwrap();
     vcx.simulate_click(badge.center(), Default::default());
     vcx.run_until_parked();
-    assert!(entity.read_with(vcx, |ws, _| ws.docks.session_chooser.is_some()));
-    vcx.simulate_keystrokes("escape");
-    vcx.run_until_parked();
+    assert!(
+        entity.read_with(vcx, |ws, _| ws.docks.session_chooser.is_none()),
+        "expanded badges enter their pane without the rail chooser"
+    );
+    assert_eq!(
+        entity.read_with(vcx, |ws, _| ws.active_runtime().focused_pane_id),
+        first
+    );
     // WORKAROUND: cached GPUI paint does not replay debug bounds; refresh test geometry.
     vcx.update(|window, _| window.refresh());
     vcx.run_until_parked();
@@ -455,7 +469,7 @@ async fn expanded_menu_changes_visible_rows_and_keeps_the_pane_inset_shallow(
     vcx.run_until_parked();
     assert_eq!(
         entity.read_with(vcx, |ws, _| ws.active_runtime().focused_pane_id),
-        first
+        second
     );
     assert!(entity.read_with(vcx, |ws, _| {
         ws.active_project()

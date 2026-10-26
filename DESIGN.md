@@ -423,7 +423,7 @@ context menu switches between grouped badges and individual single-line pane
 rows. Individual rows use a shallow 4px inset from the worktree body, without
 an additional status-column indent or a second status-text line. The choice
 is per worktree for the app session and independent of rail grouping. Clicking
-the badge strip opens the root-deployed pane chooser.
+a badge enters its pane directly; the pane chooser belongs to the rail.
 
 Rail worktrees show individual pane rows by default, including terminal and
 file panes. Branch and worktree names appear only in tooltips, not as separate
