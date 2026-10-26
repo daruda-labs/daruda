@@ -5,9 +5,9 @@ use chrono::{DateTime, Utc};
 
 use super::{
     ErrorCause, InterruptCause, Lifecycle, SettleOutcome, TaskEdit, TaskEvent, TaskRecord,
-    TasksBook, TodoItem, UndeliveredReason,
+    TasksBook, UndeliveredReason, subtasks,
 };
-use crate::tasks::{ExecutionRef, SessionEndReason, SubTask, TaskExecution, TaskExecutionSource};
+use crate::tasks::{ExecutionRef, SessionEndReason, TaskExecution, TaskExecutionSource};
 
 pub(super) fn apply(book: &mut TasksBook, event: &TaskEvent) {
     match event {
@@ -47,15 +47,11 @@ fn apply_to(record: &mut TaskRecord, event: &TaskEvent) {
             record.updated_at = *at;
         }
         TaskEvent::SubtaskAdded { subtask, at, .. } => {
-            record.subtasks.push(SubTask {
-                title: subtask.title.trim().to_owned(),
-                ..subtask.clone()
-            });
+            subtasks::add(&mut record.subtasks, subtask);
             record.updated_at = *at;
         }
         TaskEvent::SubtaskToggled { subtask_id, at, .. } => {
-            if let Some(sub) = record.subtasks.iter_mut().find(|s| s.id == *subtask_id) {
-                sub.completed = !sub.completed;
+            if subtasks::toggle(&mut record.subtasks, subtask_id) {
                 record.updated_at = *at;
             }
         }
@@ -65,16 +61,12 @@ fn apply_to(record: &mut TaskRecord, event: &TaskEvent) {
             at,
             ..
         } => {
-            let title = title.trim();
-            if let Some(sub) = record.subtasks.iter_mut().find(|s| s.id == *subtask_id)
-                && sub.title != title
-            {
-                title.clone_into(&mut sub.title);
+            if subtasks::rename(&mut record.subtasks, subtask_id, title) {
                 record.updated_at = *at;
             }
         }
         TaskEvent::SubtaskDeleted { subtask_id, at, .. } => {
-            record.subtasks.retain(|s| s.id != *subtask_id);
+            subtasks::delete(&mut record.subtasks, subtask_id);
             record.updated_at = *at;
         }
         TaskEvent::TodoMerged {
@@ -83,7 +75,7 @@ fn apply_to(record: &mut TaskRecord, event: &TaskEvent) {
             at,
             ..
         } => {
-            if merge_todos(&mut record.subtasks, session_id, items, *at) {
+            if subtasks::merge_todos(&mut record.subtasks, session_id, items, *at) {
                 record.updated_at = *at;
             }
         }
@@ -281,45 +273,6 @@ fn edit_spec(record: &mut TaskRecord, edit: &TaskEdit) {
             spec.project = project;
         }
     }
-}
-
-/// The `TodoWrite` merge: a row folds into an existing auto row only when
-/// both title and session agree, so manual rows and other sessions' rows are
-/// never touched. Titles are not rewritten, and dropped items stay.
-fn merge_todos(
-    subtasks: &mut Vec<SubTask>,
-    session_id: &str,
-    items: &[TodoItem],
-    at: DateTime<Utc>,
-) -> bool {
-    let mut changed = false;
-    for item in items {
-        let title = item.content.trim();
-        if title.is_empty() {
-            continue;
-        }
-        let existing = subtasks
-            .iter_mut()
-            .find(|s| s.source_session_id.as_deref() == Some(session_id) && s.title == title);
-        match existing {
-            Some(existing) if existing.completed == item.completed => {}
-            Some(existing) => {
-                existing.completed = item.completed;
-                changed = true;
-            }
-            None => {
-                subtasks.push(SubTask {
-                    id: item.id.clone(),
-                    title: title.to_owned(),
-                    completed: item.completed,
-                    created_at: Some(at),
-                    source_session_id: Some(session_id.to_owned()),
-                });
-                changed = true;
-            }
-        }
-    }
-    changed
 }
 
 /// Name the run's session once; `true` when it was unset.

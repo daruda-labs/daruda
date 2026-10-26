@@ -10,6 +10,7 @@ mod check;
 mod event;
 mod lifecycle;
 mod rejected;
+mod subtasks;
 
 pub use book::{EndedExecution, ExecutionDescription, TaskRecord, TaskSpec, TasksBook};
 pub use event::{EventKind, SettleOutcome, StartedBy, StopCause, TaskEdit, TaskEvent, TodoItem};

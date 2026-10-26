@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use super::{EventKind, LifecycleKind, TaskEvent, TaskRecord, TaskRejected, TasksBook};
+use super::{EventKind, LifecycleKind, TaskEvent, TaskRecord, TaskRejected, TasksBook, subtasks};
 use crate::tasks::TaskExecutionSource;
 
 /// Whether `event` may leave a record in `from`. `Imported` and `Created`
@@ -98,61 +98,18 @@ fn check_payload(record: &TaskRecord, event: &TaskEvent) -> Result<(), TaskRejec
         .execution
         .as_ref()
         .and_then(|run| run.session_id.as_deref());
-    let subtask = |subtask_id: &str| {
-        if record.subtasks.iter().any(|sub| sub.id == subtask_id) {
-            Ok(())
-        } else {
-            Err(TaskRejected::UnknownSubtask {
-                id: id(),
-                subtask_id: subtask_id.to_owned(),
-            })
-        }
-    };
     match event {
-        TaskEvent::SubtaskAdded { subtask, .. } => {
-            if subtask.title.trim().is_empty() {
-                return Err(TaskRejected::BlankSubtaskTitle { id: id() });
-            }
-            if record.subtasks.iter().any(|sub| sub.id == subtask.id) {
-                return Err(TaskRejected::DuplicateSubtask {
-                    id: id(),
-                    subtask_id: subtask.id.clone(),
-                });
-            }
-            Ok(())
-        }
+        TaskEvent::SubtaskAdded { subtask, .. } => subtasks::check_added(record, subtask),
         TaskEvent::SubtaskToggled { subtask_id, .. }
-        | TaskEvent::SubtaskDeleted { subtask_id, .. } => subtask(subtask_id),
+        | TaskEvent::SubtaskDeleted { subtask_id, .. } => {
+            subtasks::check_existing(record, subtask_id)
+        }
         TaskEvent::SubtaskRenamed {
             subtask_id, title, ..
-        } => {
-            subtask(subtask_id)?;
-            if title.trim().is_empty() {
-                return Err(TaskRejected::BlankSubtaskTitle { id: id() });
-            }
-            Ok(())
-        }
+        } => subtasks::check_renamed(record, subtask_id, title),
         TaskEvent::TodoMerged {
             session_id, items, ..
-        } => {
-            if !record.session_ids.contains(session_id) {
-                return Err(TaskRejected::UnknownSession {
-                    id: id(),
-                    session_id: session_id.clone(),
-                });
-            }
-            let mut fresh = HashSet::new();
-            for item in items.iter().filter(|item| !item.content.trim().is_empty()) {
-                let taken = record.subtasks.iter().any(|sub| sub.id == item.id);
-                if taken || !fresh.insert(item.id.as_str()) {
-                    return Err(TaskRejected::DuplicateSubtask {
-                        id: id(),
-                        subtask_id: item.id.clone(),
-                    });
-                }
-            }
-            Ok(())
-        }
+        } => subtasks::check_merge(record, session_id, items),
         TaskEvent::Dispatched {
             session_id: Some(session_id),
             ..
