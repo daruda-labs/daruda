@@ -9,7 +9,7 @@
 //! - The permission checker is passed in by reference rather than
 //!   stashed in a `OnceLock` global, so callers can swap it for
 //!   different `~/.claude/settings.json` snapshots in tests.
-//! - Public surface is [`determine_status`] + [`last_meaningful_timestamp`];
+//! - Explicit-clock classification also reports the next quiet transition;
 //!   the helpers c9watch exposes for `pending_tool_name` are dropped because
 //!   the hook channel already carries that information when daruda needs it.
 
@@ -40,6 +40,54 @@ mod thresholds {
     pub const ASK_QUESTION_DELAY_S: i64 = 20;
 }
 
+/// A status assessment and the next instant at which quiet input changes it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StatusClassification {
+    pub status: SessionStatus,
+    pub next_transition_at: Option<DateTime<Utc>>,
+}
+
+/// Classify a fixed transcript snapshot using an explicit wall clock.
+/// The deadline is absent once time alone cannot change the status.
+pub fn classify_status_at(
+    entries: &[SessionEntry],
+    permissions: &PermissionChecker,
+    now: DateTime<Utc>,
+) -> StatusClassification {
+    let status = determine_status_at(entries, permissions, now);
+    let last = entries.iter().rev().find(|entry| {
+        matches!(
+            entry,
+            SessionEntry::User { .. } | SessionEntry::Assistant { .. }
+        )
+    });
+    let delay = match last {
+        Some(SessionEntry::User { .. }) => Some(thresholds::USER_RECENT_S),
+        Some(SessionEntry::Assistant { message, .. }) => {
+            if is_assistant_asking_question(message) {
+                Some(thresholds::ASK_QUESTION_DELAY_S)
+            } else if status == SessionStatus::Working && !has_pending_tool_uses(&message.content) {
+                Some(thresholds::STREAMING_RECENT_S)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+    let next_transition_at = last_meaningful_timestamp(entries)
+        .zip(delay)
+        .and_then(|(timestamp, seconds)| {
+            timestamp.checked_add_signed(chrono::Duration::seconds(seconds))
+        })
+        .filter(|deadline| {
+            *deadline > now && determine_status_at(entries, permissions, *deadline) != status
+        });
+    StatusClassification {
+        status,
+        next_transition_at,
+    }
+}
+
 /// Decide the session's current status from its tail entries.
 ///
 /// `entries` is typically the last 20 lines of the JSONL file
@@ -47,6 +95,14 @@ mod thresholds {
 pub fn determine_status(
     entries: &[SessionEntry],
     permissions: &PermissionChecker,
+) -> SessionStatus {
+    determine_status_at(entries, permissions, Utc::now())
+}
+
+fn determine_status_at(
+    entries: &[SessionEntry],
+    permissions: &PermissionChecker,
+    now: DateTime<Utc>,
 ) -> SessionStatus {
     if entries.is_empty() {
         return SessionStatus::Connecting;
@@ -74,12 +130,12 @@ pub fn determine_status(
     match &entries[idx] {
         SessionEntry::User { base, message } => {
             if message.is_tool_result {
-                if is_recent(&base.timestamp, thresholds::USER_RECENT_S) {
+                if is_recent(&base.timestamp, thresholds::USER_RECENT_S, now) {
                     SessionStatus::Working
                 } else {
                     SessionStatus::Idle
                 }
-            } else if is_recent(&base.timestamp, thresholds::USER_RECENT_S) {
+            } else if is_recent(&base.timestamp, thresholds::USER_RECENT_S, now) {
                 SessionStatus::Working
             } else {
                 SessionStatus::Idle
@@ -94,7 +150,7 @@ pub fn determine_status(
             // "?"-ending text answer with end_turn — wait the
             // anti-flicker delay so we don't catch a partial stream.
             if is_assistant_asking_question(message)
-                && !is_recent(&base.timestamp, thresholds::ASK_QUESTION_DELAY_S)
+                && !is_recent(&base.timestamp, thresholds::ASK_QUESTION_DELAY_S, now)
             {
                 return SessionStatus::NeedsAttention;
             }
@@ -105,7 +161,7 @@ pub fn determine_status(
                         // Pending tool: active execution while recent
                         // or trailing progress is present.
                         if has_trailing_progress
-                            || is_recent(&base.timestamp, thresholds::PENDING_TOOL_RECENT_S)
+                            || is_recent(&base.timestamp, thresholds::PENDING_TOOL_RECENT_S, now)
                         {
                             SessionStatus::ExecutingTool
                         } else {
@@ -113,7 +169,7 @@ pub fn determine_status(
                             // hook channel will correct if finished.
                             SessionStatus::ExecutingTool
                         }
-                    } else if is_recent(&base.timestamp, thresholds::STREAMING_RECENT_S) {
+                    } else if is_recent(&base.timestamp, thresholds::STREAMING_RECENT_S, now) {
                         // Streaming text without stop_reason.
                         SessionStatus::Working
                     } else {
@@ -160,13 +216,12 @@ pub fn last_meaningful_timestamp(entries: &[SessionEntry]) -> Option<DateTime<Ut
 
 /// Pure helper — true if `timestamp` (RFC 3339) is within the last
 /// `seconds`. Unparseable timestamps return `false`.
-fn is_recent(timestamp: &str, seconds: i64) -> bool {
+fn is_recent(timestamp: &str, seconds: i64, now: DateTime<Utc>) -> bool {
     let Ok(t) = DateTime::parse_from_rfc3339(timestamp) else {
         return false;
     };
-    let now = Utc::now();
     let age = now.signed_duration_since(t.with_timezone(&Utc));
-    age.num_seconds() < seconds
+    age < chrono::Duration::seconds(seconds)
 }
 
 fn has_pending_ask_user_question(content: &[MessageContent]) -> bool {

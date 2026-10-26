@@ -18,7 +18,7 @@ The following daruda files are derived from c9watch sources:
 |-------------|---------------|-------|
 | `src/jsonl/parser.rs` | `src-tauri/src/session/parser.rs` | 34-240 (SessionEntry, MessageContent, UserMessage) |
 | `src/jsonl/tail.rs` | `src-tauri/src/session/parser.rs` | 255-303 (read_last_n_lines reverse-read) |
-| `src/jsonl/fsm.rs` | `src-tauri/src/session/status.rs` | 38-238 (determine_status + helpers) |
+| `src/jsonl/fsm/mod.rs` | `src-tauri/src/session/status.rs` | 38-238 (determine_status + helpers) |
 | `src/jsonl/permissions.rs` | `src-tauri/src/session/permissions.rs` | 1-208 (allow patterns + auto-approve whitelist) |
 
 Modifications:

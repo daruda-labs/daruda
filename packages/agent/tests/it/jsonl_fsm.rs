@@ -310,3 +310,117 @@ fn last_meaningful_timestamp_skips_trailing_unknown() {
     let age = Utc::now().signed_duration_since(ts.unwrap());
     assert!(age.num_seconds() >= 14 && age.num_seconds() <= 17);
 }
+
+fn at_timestamp(mut entry: SessionEntry, timestamp: chrono::DateTime<Utc>) -> SessionEntry {
+    match &mut entry {
+        SessionEntry::User { base, .. } | SessionEntry::Assistant { base, .. } => {
+            base.timestamp = timestamp.to_rfc3339();
+        }
+        _ => panic!("meaningful fixture required"),
+    }
+    entry
+}
+
+#[test]
+fn explicit_clock_expires_quiet_streaming_at_its_exact_deadline() {
+    let start = chrono::DateTime::parse_from_rfc3339("2026-10-26T00:00:00.125Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let entries = [at_timestamp(
+        assistant_entry(
+            vec![MessageContent::Text {
+                text: "partial".into(),
+            }],
+            None,
+            0,
+        ),
+        start,
+    )];
+    let before = classify_status_at(
+        &entries,
+        &empty_perms(),
+        start + CDuration::milliseconds(4999),
+    );
+    assert_eq!(before.status, SessionStatus::Working);
+    assert_eq!(
+        before.next_transition_at,
+        Some(start + CDuration::seconds(5))
+    );
+    let expired = classify_status_at(&entries, &empty_perms(), start + CDuration::seconds(5));
+    assert_eq!(expired.status, SessionStatus::Idle);
+    assert_eq!(expired.next_transition_at, None);
+    assert_eq!(last_meaningful_timestamp(&entries), Some(start));
+}
+
+#[test]
+fn explicit_clock_delays_a_completed_question_until_twenty_seconds() {
+    let start = chrono::DateTime::parse_from_rfc3339("2026-10-26T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let entries = [at_timestamp(
+        assistant_entry(
+            vec![MessageContent::Text {
+                text: "Continue?".into(),
+            }],
+            Some("end_turn"),
+            0,
+        ),
+        start,
+    )];
+    let before = classify_status_at(
+        &entries,
+        &empty_perms(),
+        start + CDuration::milliseconds(19999),
+    );
+    assert_eq!(before.status, SessionStatus::Idle);
+    assert_eq!(
+        before.next_transition_at,
+        Some(start + CDuration::seconds(20))
+    );
+    let due = classify_status_at(&entries, &empty_perms(), start + CDuration::seconds(20));
+    assert_eq!(due.status, SessionStatus::NeedsAttention);
+    assert_eq!(due.next_transition_at, None);
+}
+
+#[test]
+fn only_time_dependent_states_have_a_pending_transition() {
+    let start = chrono::DateTime::parse_from_rfc3339("2026-10-26T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let user = [at_timestamp(user_entry("hello", false, 0), start)];
+    let fresh = classify_status_at(&user, &empty_perms(), start);
+    assert_eq!(
+        fresh.next_transition_at,
+        Some(start + CDuration::seconds(30))
+    );
+    assert_eq!(
+        classify_status_at(&user, &empty_perms(), start + CDuration::seconds(30)).status,
+        SessionStatus::Idle
+    );
+    let idle = [at_timestamp(
+        assistant_entry(
+            vec![MessageContent::Text {
+                text: "done".into(),
+            }],
+            Some("end_turn"),
+            0,
+        ),
+        start,
+    )];
+    assert_eq!(
+        classify_status_at(&idle, &empty_perms(), start).next_transition_at,
+        None
+    );
+    assert_eq!(
+        classify_status_at(&[], &empty_perms(), start).next_transition_at,
+        None
+    );
+    let mut malformed = idle;
+    if let SessionEntry::Assistant { base, .. } = &mut malformed[0] {
+        base.timestamp = "invalid".into();
+    }
+    assert_eq!(
+        classify_status_at(&malformed, &empty_perms(), start).next_transition_at,
+        None
+    );
+}
