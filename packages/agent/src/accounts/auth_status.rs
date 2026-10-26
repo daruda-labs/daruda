@@ -17,7 +17,7 @@
 //! [`PlanInfo`](super::credentials::PlanInfo): providers add values without
 //! notice, and a stale enum would report a metered login as unknown.
 
-use daruda_store::observability::{error_report::ErrorReport, log_writer::LogWriter};
+mod probe;
 
 /// How a domain's CLI reports its status, and the arguments that ask for it.
 ///
@@ -141,29 +141,6 @@ fn field(v: &serde_json::Value, names: &[&str]) -> Option<String> {
         .map(str::to_string)
 }
 
-/// Tear down a probe and everything it forked.
-///
-/// The command routinely forks (adapter → the CLI), and the child leads its own
-/// group, so its pid doubles as a group id. Reaped afterwards so the handle is
-/// not dropped on a live child.
-///
-/// Only call this where the child is known unreaped — the deadline path. A
-/// caller that cannot tell must kill the direct child instead; see the
-/// contract on [`daruda_core::process::Group::adopt`].
-fn kill_probe_tree(group: &daruda_core::process::Group, child: &mut std::process::Child) {
-    // Unreaped — the `wait` below is the reap — so the pid is still this
-    // process's to name, which is what the group requires.
-    if let Err(error) = group.try_terminate_child(child) {
-        LogWriter::log(
-            ErrorReport::new("Failed to terminate authentication probe tree")
-                .from_error(&error)
-                .at(file!(), line!())
-                .dedup("account.auth_probe.termination")
-                .build(),
-        );
-    }
-}
-
 /// Ask the agent CLI for its current auth status.
 ///
 /// **Blocking**, and it spawns a process. Callers must run this off the UI
@@ -178,159 +155,12 @@ pub fn read_auth_status(
     format: AuthStatusFormat,
     timeout: std::time::Duration,
 ) -> Option<AuthStatus> {
-    let mut cmd = command.command();
-    cmd.stdin(std::process::Stdio::null());
-    cmd.stdout(std::process::Stdio::piped());
-    // Both streams: the reading is not always on stdout. The codex CLI prints
-    // its status line to stderr, so discarding it left that domain reporting
-    // nothing at all — indistinguishable from being signed out.
-    cmd.stderr(std::process::Stdio::piped());
-    // Own group, so a probe that hangs can be torn down whole — the command
-    // routinely forks (adapter → the CLI), exactly as the login path does.
-    daruda_core::process::lead_own_group(&mut cmd);
-
-    let mut child = cmd.spawn().ok()?;
-    let group = match daruda_core::process::Group::try_adopt(child.id()) {
-        Ok(group) => group,
-        Err(error) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            LogWriter::log(
-                ErrorReport::new("Cannot own authentication probe process")
-                    .from_error(&error)
-                    .at(file!(), line!())
-                    .build(),
-            );
-            return None;
-        }
-    };
-    let deadline = std::time::Instant::now() + timeout;
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) => {}
-            // Cannot tell whether it exited, so it may still be running:
-            // tear it down rather than dropping the handle on a live child.
-            //
-            // The direct child only. `try_wait` most often fails with ECHILD,
-            // meaning the child was already reaped — and the group requires
-            // an unreaped pid precisely because a reaped one may already name
-            // someone else's group.
-            Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-        }
-        if std::time::Instant::now() >= deadline {
-            kill_probe_tree(&group, &mut child);
-            return None;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(25));
-    }
-    // Both payloads are a line or two, well under the pipe buffers, so the
-    // child cannot have blocked on a full pipe before exiting above.
-    let out = child.wait_with_output().ok()?;
-    // stdout first: that is where a JSON payload lands, and where a wrapper's own
-    // chatter does *not* go — parsing the streams merged would let a warning
-    // line break the JSON.
-    parse_status(&String::from_utf8_lossy(out.stdout.as_slice()), format)
-        .or_else(|| parse_status(&String::from_utf8_lossy(out.stderr.as_slice()), format))
+    let (stdout, stderr) = probe::output(command, timeout)?;
+    // stdout has priority; parsing streams separately keeps wrapper chatter
+    // on stderr from corrupting a JSON payload.
+    parse_status(&String::from_utf8_lossy(&stdout), format)
+        .or_else(|| parse_status(&String::from_utf8_lossy(&stderr), format))
 }
 
 #[cfg(test)]
-mod tests {
-    use super::super::cli_command::from_line;
-    use super::*;
-
-    /// The exact payload `claude auth status --json` produced for a
-    /// subscription login.
-    #[cfg(unix)]
-    const SUBSCRIPTION: &str = r#"{
-        "loggedIn": true,
-        "authMethod": "claude.ai",
-        "apiProvider": "firstParty",
-        "email": "a@x.com",
-        "orgId": "org-1",
-        "orgName": "Acme",
-        "subscriptionType": "team"
-    }"#;
-
-    /// An unknown field must not sink the whole reading.
-    #[cfg(unix)]
-    #[test]
-    fn a_real_probe_reads_what_the_command_printed() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("status ' $USER `echo expanded`.json");
-        std::fs::write(&path, SUBSCRIPTION).expect("fixture");
-        let status = read_auth_status(
-            &from_line(&format!(
-                "/bin/cat {}",
-                daruda_core::shell::quote::quote_path(&path, daruda_core::shell::Shell::Posix)
-            )),
-            AuthStatusFormat::Json,
-            std::time::Duration::from_secs(10),
-        )
-        .expect("the probe parses what the command printed");
-        assert!(status.logged_in);
-        assert_eq!(status.auth_method.as_deref(), Some("claude.ai"));
-    }
-
-    /// A probe that never answers must not hold the caller — and must not
-    /// leave the tree it spawned behind either.
-    /// The reading is not always on stdout — the codex CLI puts its status line
-    /// on stderr. Reading only stdout reported that whole domain as having no
-    /// sign-in method, which the display cannot tell from signed out.
-    #[cfg(unix)]
-    #[test]
-    fn a_reading_on_stderr_is_still_found() {
-        let status = read_auth_status(
-            &from_line("/bin/sh -c 'echo Logged in using ChatGPT 1>&2'"),
-            AuthStatusFormat::Prose,
-            std::time::Duration::from_secs(10),
-        )
-        .expect("the probe reads the stream the CLI actually used");
-        assert_eq!(status.auth_method.as_deref(), Some("ChatGPT"));
-    }
-
-    /// stdout wins when both carry something, so a wrapper's chatter on stderr
-    /// cannot displace a real payload.
-    #[cfg(unix)]
-    #[test]
-    fn stdout_wins_over_stderr() {
-        let status = read_auth_status(
-            &from_line(
-                "/bin/sh -c 'echo Logged in using ChatGPT; echo Logged in using an API key 1>&2'",
-            ),
-            AuthStatusFormat::Prose,
-            std::time::Duration::from_secs(10),
-        )
-        .expect("parses");
-        assert_eq!(status.auth_method.as_deref(), Some("ChatGPT"));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_hanging_probe_gives_up() {
-        let started = std::time::Instant::now();
-        let status = read_auth_status(
-            &from_line("/bin/sh -c 'sleep 30'"),
-            AuthStatusFormat::Json,
-            std::time::Duration::from_millis(200),
-        );
-        assert_eq!(status, None);
-        assert!(started.elapsed() < std::time::Duration::from_secs(5));
-    }
-
-    #[test]
-    fn a_command_that_does_not_exist_is_not_a_reading() {
-        assert_eq!(
-            read_auth_status(
-                &from_line("/nonexistent/daruda-probe"),
-                AuthStatusFormat::Json,
-                std::time::Duration::from_secs(1)
-            ),
-            None
-        );
-    }
-}
+mod tests;
