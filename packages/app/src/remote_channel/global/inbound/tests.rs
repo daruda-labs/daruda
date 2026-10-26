@@ -1,6 +1,10 @@
 use super::*;
 use crate::remote_channel::command::RenderedReply;
-use crate::remote_channel::{lock, runtime::BotSession, transport::Credentials};
+use crate::remote_channel::{
+    lock,
+    runtime::{BotSession, WorkerPayload},
+    transport::Credentials,
+};
 use daruda_config::remote::{ChannelConfig, ChannelKind, RemoteRecipient};
 use daruda_store::inbox::{InboxLease, InboxSeed, InboxStore};
 use gpui::TestAppContext;
@@ -97,16 +101,10 @@ async fn a_failed_claim_has_its_own_worker_reopen_the_inbox_without_losing_histo
             .await
             .is_some()
     );
-    let config = cx.update(|cx| {
-        cx.global::<RemoteChannels>().connections["work"]
-            .config
-            .clone()
-    });
     let result = finish_claim(
         "work",
         generation,
         bot.clone(),
-        config,
         std::future::ready(Err(daruda_store::inbox::CommitError::Io(
             std::io::Error::other("temporary storage failure"),
         ))),
@@ -336,11 +334,6 @@ async fn worker_revocation_while_a_claim_waits_prevents_effects_before_status_is
     let root = tempfile::tempdir().unwrap();
     let bot = open_bot(root.path(), || Ok(InboxSeed::default()));
     let generation = cx.update(|cx| install_connection("profile-local-id", bot.clone(), cx));
-    let config = cx.update(|cx| {
-        cx.global::<RemoteChannels>().connections["profile-local-id"]
-            .config
-            .clone()
-    });
     let queued = crate::runs::RunsHost::claim_inbound(
         &bot.inbox,
         channel_key(ChannelKind::Slack),
@@ -355,7 +348,6 @@ async fn worker_revocation_while_a_claim_waits_prevents_effects_before_status_is
                 "profile-local-id",
                 generation,
                 waiting_bot,
-                config,
                 async move {
                     let committed = queued.await;
                     entered.send(()).await.unwrap();
@@ -653,4 +645,54 @@ fn callbacks_before_send_completion_cannot_schedule_a_stale_edit(cx: &mut TestAp
         );
         assert_eq!(cx.global::<EditCapture>().edits.len(), 1);
     });
+}
+
+/// An outbound preference does not revoke a command already entering the inbox.
+#[gpui::test]
+async fn a_presence_edit_during_a_durable_claim_preserves_the_command(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let root = tempfile::tempdir().unwrap();
+    let bot = open_bot(root.path(), || Ok(InboxSeed::default()));
+    let generation = cx.update(|cx| install_connection("work", bot.clone(), cx));
+    let claim = crate::runs::RunsHost::claim_inbound(
+        &bot.inbox,
+        channel_key(ChannelKind::Slack),
+        InboxId::Opaque("presence-edit".into()),
+    );
+    let (entered, blocked) = smol::channel::bounded(1);
+    let (release, resume) = smol::channel::bounded(1);
+    let claimed_bot = bot.clone();
+    let pending = cx.update(|cx| {
+        cx.spawn(async move |cx| {
+            finish_claim(
+                "work",
+                generation,
+                claimed_bot,
+                async move {
+                    let committed = claim.await;
+                    entered.send(()).await.unwrap();
+                    resume.recv().await.unwrap();
+                    committed
+                },
+                cx,
+            )
+            .await
+        })
+    });
+    blocked.recv().await.unwrap();
+    cx.update(|cx| {
+        let mut config = SettingsStore::global(cx).user().clone();
+        config.remote.channels[0].only_when_away = false;
+        cx.global_mut::<SettingsStore>()
+            .set_user_for_testing(config);
+        super::super::reconcile(cx);
+    });
+    release.send(()).await.unwrap();
+    assert!(
+        matches!(pending.await, Claimed::Ready(_)),
+        "presence must not consume an inbound command"
+    );
+    cx.update(|cx| cx.global_mut::<RemoteChannels>().connections.clear());
+    drop(bot);
+    wait_release(root.path());
 }

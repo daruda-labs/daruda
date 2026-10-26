@@ -3,7 +3,7 @@ use crate::remote_channel::{
     self,
     dispatch::{self, Edit, Effect},
     pairing::pair_code,
-    runtime::{BotSession, WorkerEvent, WorkerPayload, channel_key},
+    runtime::{BotSession, WorkerEvent, channel_key},
     transport::{self, IncomingKind, Message},
 };
 use crate::settings_store::SettingsStore;
@@ -11,9 +11,8 @@ use crate::surface::strings as s;
 use daruda_store::inbox::{
     ChannelKey, CommitError, Committed, InboxId, InboxMachine, InboxRejected, InboxStore,
 };
-use futures::{StreamExt, channel::mpsc::UnboundedReceiver};
+use futures::channel::mpsc::UnboundedReceiver;
 use gpui::App;
-use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 type ClaimResult = Result<Committed<InboxMachine>, CommitError<InboxRejected>>;
@@ -31,45 +30,8 @@ enum Claimed {
     Retry,
 }
 
-/// Commands whose claim failed, kept in arrival order per connection until its
-/// worker publishes a reopened inbox. Later commands queue behind them so none
-/// is acted on ahead of one the user sent first.
-#[derive(Default)]
-struct Backlog(HashMap<String, (uuid::Uuid, VecDeque<transport::Incoming>)>);
-
-impl Backlog {
-    /// Queue behind held commands, or hand `incoming` back when none are held.
-    fn admit(
-        &mut self,
-        id: &str,
-        generation: uuid::Uuid,
-        incoming: transport::Incoming,
-    ) -> Option<transport::Incoming> {
-        match self.0.get_mut(id) {
-            Some((held, queue)) if *held == generation => {
-                queue.push_back(incoming);
-                None
-            }
-            _ => {
-                self.0.remove(id);
-                Some(incoming)
-            }
-        }
-    }
-
-    fn hold(&mut self, id: &str, generation: uuid::Uuid, queue: VecDeque<transport::Incoming>) {
-        self.0.insert(id.to_owned(), (generation, queue));
-    }
-
-    /// Everything held for this generation; a replaced generation's commands
-    /// are dropped with the connection that received them.
-    fn take(&mut self, id: &str, generation: uuid::Uuid) -> VecDeque<transport::Incoming> {
-        match self.0.remove(id) {
-            Some((held, queue)) if held == generation => queue,
-            _ => VecDeque::new(),
-        }
-    }
-}
+mod queue;
+use queue::serve_events;
 
 /// Events from a replaced or disabled connection's worker are stale.
 fn live_generation(id: &str, generation: uuid::Uuid, cx: &App) -> bool {
@@ -112,14 +74,13 @@ async fn claim_incoming<F: Future<Output = ClaimResult>>(
         channel_key(config.kind),
         InboxId::Opaque(event_id.into()),
     );
-    finish_claim(id, generation, bot, config, claimed, cx).await
+    finish_claim(id, generation, bot, claimed, cx).await
 }
 
 async fn finish_claim(
     id: &str,
     generation: uuid::Uuid,
     bot: Arc<BotSession>,
-    config: daruda_config::remote::ChannelConfig,
     claimed: impl Future<Output = ClaimResult>,
     cx: &mut gpui::AsyncApp,
 ) -> Claimed {
@@ -133,11 +94,9 @@ async fn finish_claim(
         }
     }
     cx.update(|cx| {
-        let current = live_session(id, generation, &bot, cx)
-            && cx
-                .global::<RemoteChannels>()
-                .live(id, cx)
-                .is_some_and(|connection| connection.config == config);
+        // Reconcile changes generation for enabled/kind/recipient changes;
+        // an outbound presence preference does not revoke this command.
+        let current = live_session(id, generation, &bot, cx);
         if !current {
             return Claimed::Skip;
         }
@@ -198,76 +157,6 @@ fn dispatch_claimed(
 
 pub(super) fn spawn(receiver: UnboundedReceiver<WorkerEvent>, cx: &mut App) {
     serve_events(receiver, crate::runs::RunsHost::claim_inbound, cx);
-}
-
-/// The inbound loop, with the inbox claim passed in so a failing writer can be
-/// staged without a failing disk.
-fn serve_events<F: Future<Output = ClaimResult> + 'static>(
-    mut receiver: UnboundedReceiver<WorkerEvent>,
-    claim: impl Fn(&InboxStore, ChannelKey, InboxId) -> F + 'static,
-    cx: &mut App,
-) {
-    cx.spawn(async move |cx| {
-        let mut backlog = Backlog::default();
-        while let Some(event) = receiver.next().await {
-            if !cx.update(|cx| live_generation(&event.id, event.generation, cx)) {
-                continue;
-            }
-            let mut ready = match event.payload {
-                WorkerPayload::Status(status) => {
-                    cx.update(|cx| {
-                        if !live_generation(&event.id, event.generation, cx) {
-                            return;
-                        }
-                        if let Some(connection) = cx
-                            .global_mut::<RemoteChannels>()
-                            .connections
-                            .get_mut(&event.id)
-                        {
-                            connection.status = status;
-                            if !status.holds_claim() {
-                                connection.revoke_bot();
-                            }
-                        }
-                    });
-                    continue;
-                }
-                WorkerPayload::Ready(bot) => {
-                    let installed = cx.update(|cx| {
-                        if !live_generation(&event.id, event.generation, cx) {
-                            return false;
-                        }
-                        cx.global_mut::<RemoteChannels>()
-                            .connections
-                            .get_mut(&event.id)
-                            .map(|connection| connection.publish_bot(bot))
-                            .is_some()
-                    });
-                    if !installed {
-                        continue;
-                    }
-                    cx.update(super::outbound::flush_edits);
-                    backlog.take(&event.id, event.generation)
-                }
-                WorkerPayload::Incoming(incoming) => {
-                    match backlog.admit(&event.id, event.generation, incoming) {
-                        Some(incoming) => VecDeque::from([incoming]),
-                        None => continue,
-                    }
-                }
-            };
-            while let Some(incoming) = ready.pop_front() {
-                if let Served::Retry(incoming) =
-                    serve(&event.id, event.generation, incoming, &claim, cx).await
-                {
-                    ready.push_front(incoming);
-                    backlog.hold(&event.id, event.generation, ready);
-                    break;
-                }
-            }
-        }
-    })
-    .detach();
 }
 
 /// What serving one command came to.
