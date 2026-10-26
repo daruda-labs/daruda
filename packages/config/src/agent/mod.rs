@@ -103,15 +103,15 @@ pub enum AgentLaunch {
     /// hand-written escape hatch; new remote setups should use `Ssh` /
     /// `Docker` instead.
     Raw(String),
-    /// `adapter_command` runs on `host` over SSH; [`AgentLaunch::wrap`]
-    /// assembles `ssh <host> sh -c 'cd "<remote path>" && <adapter_command>'`.
+    /// `adapter_command` runs on `host` over SSH after changing directory.
+    /// [`AgentLaunch::wrap`] preserves quoting through SSH's remote shell.
     Ssh {
         adapter_command: String,
         host: String,
     },
     /// `adapter_command` runs inside the already-running container
-    /// `container`; [`AgentLaunch::wrap`] assembles
-    /// `docker exec -i <container> sh -c 'cd "<remote path>" && <adapter_command>'`.
+    /// `container`; [`AgentLaunch::wrap`] passes a directory-guarded script
+    /// to `docker exec -i <container> sh -c`.
     Docker {
         adapter_command: String,
         container: String,

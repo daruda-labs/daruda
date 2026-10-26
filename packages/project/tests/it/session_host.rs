@@ -170,7 +170,7 @@ fn wrap_matches_the_shipped_assembly() {
     assert_eq!(wrap(&LaneSessionHost::Local, ADAPTER), ADAPTER);
     assert_eq!(
         wrap(&ssh("build-box", "/home/user/project"), ADAPTER),
-        format!("ssh build-box sh -c 'cd \"/home/user/project\" && {ADAPTER}'")
+        format!("ssh build-box sh -c ''\\''cd \"/home/user/project\" || exit; {ADAPTER}'\\'''")
     );
     assert_eq!(
         wrap(
@@ -181,7 +181,7 @@ fn wrap_matches_the_shipped_assembly() {
             },
             ADAPTER
         ),
-        format!("docker exec -i dev-1 sh -c 'cd \"/workspace\" && {ADAPTER}'")
+        format!("docker exec -i dev-1 sh -c 'cd \"/workspace\" || exit; {ADAPTER}'")
     );
 }
 
@@ -229,11 +229,13 @@ fn wrap_with_env_local_matches_the_shipped_assembly() {
 
 /// The script argument of a built `Ssh`/`Docker` command, recovered the
 /// way the launcher gets it: tokenize the **whole** command with POSIX
-/// rules and take the word after `-c`. Mirrors `sh_c_script` in
-/// `daruda_config`'s agent tests — passing through that outer split is
-/// the point, it is the first of the two layers a value must survive.
+/// rules, reparse SSH's joined command, and take the word after `-c`.
+/// Docker forwards argv directly, while SSH passes through a login shell.
 fn sh_c_script(cmd: &str) -> String {
-    let tokens = shell_words::split(cmd).expect("built command tokenizes as one POSIX command");
+    let mut tokens = shell_words::split(cmd).expect("built command tokenizes as one POSIX command");
+    if tokens.first().is_some_and(|t| t == "ssh") {
+        tokens = shell_words::split(&tokens[2..].join(" ")).expect("SSH remote command tokenizes");
+    }
     let dash_c = tokens
         .iter()
         .position(|t| t == "-c")
@@ -346,19 +348,24 @@ fn wrap_with_env_remote_value_survives_a_real_shell() {
     for host in hosts {
         let cmd = wrap_with_env(&host, "printf %s \"$CODEX_CONFIG\"", &env);
 
-        // Drop the `ssh <target>` / `docker exec -i <container>`
-        // transport prefix and run the rest — the argv the remote shell
-        // would have been exec'd with.
+        // SSH joins its remote command argv for a login shell. Docker
+        // forwards its shell argv directly; reproduce both boundaries.
         let tokens =
             shell_words::split(&cmd).expect("built command tokenizes as one POSIX command");
-        let sh = tokens
-            .iter()
-            .position(|t| t == "sh")
-            .unwrap_or_else(|| panic!("no `sh` in tokens: {tokens:?}"));
-        let out = std::process::Command::new(&tokens[sh])
-            .args(&tokens[sh + 1..])
-            .output()
-            .expect("a POSIX shell runs");
+        let out = if tokens.first().is_some_and(|t| t == "ssh") {
+            daruda_core::process::command("sh")
+                .args(["-c", &tokens[2..].join(" ")])
+                .output()
+        } else {
+            let sh = tokens
+                .iter()
+                .position(|t| t == "sh")
+                .expect("Docker shell argv");
+            daruda_core::process::command(&tokens[sh])
+                .args(&tokens[sh + 1..])
+                .output()
+        }
+        .expect("a POSIX shell runs");
         assert!(
             out.status.success(),
             "shell failed: {}",

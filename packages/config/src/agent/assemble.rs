@@ -78,7 +78,7 @@ pub fn is_valid_env_name(name: &str) -> bool {
 ///   local process to set an environment on.
 ///
 /// Every injected value is single-quoted, and the remote script is quoted
-/// again as a whole, so a value holding `"`, `'`, `$`, a backtick or `\`
+/// again as a whole (and once more for SSH's argument joining), so a value holding `"`, `'`, `$`, a backtick or `\`
 /// survives both the launch string's own re-tokenization
 /// (`daruda_acp::node::split_env_prefixed_tokens` / `AcpAgent::from_str`)
 /// and the remote shell.
@@ -123,7 +123,15 @@ pub fn assemble_launch_command(
         LaunchTransport::Ssh {
             target,
             session_path,
-        } => remote(&format!("ssh {target}"), session_path, adapter_command, env),
+        } => {
+            // SSH joins command argv before the login shell parses it, so its
+            // script needs a second quoting layer that Docker's exec argv does not.
+            let script = remote_script(session_path, adapter_command, env);
+            format!(
+                "ssh {target} sh -c {}",
+                shell_single_quote(&shell_single_quote(&script))
+            )
+        }
         LaunchTransport::Docker {
             container,
             session_path,
@@ -140,6 +148,11 @@ pub fn assemble_launch_command(
 /// applies `env`, then runs the adapter. The script is single-quoted once as
 /// a whole, so a `'` inside it cannot close the wrapper early.
 fn remote(prefix: &str, session_path: &str, adapter_command: &str, env: &AccountEnv) -> String {
+    let script = remote_script(session_path, adapter_command, env);
+    format!("{prefix} sh -c {}", shell_single_quote(&script))
+}
+
+fn remote_script(session_path: &str, adapter_command: &str, env: &AccountEnv) -> String {
     let mut env_script = String::new();
     for s in &env.strip {
         env_script.push_str(&format!("unset {s}; "));
@@ -147,8 +160,8 @@ fn remote(prefix: &str, session_path: &str, adapter_command: &str, env: &Account
     for (k, v) in &env.inject {
         env_script.push_str(&format!("export {k}={}; ", shell_single_quote(v)));
     }
-    let script = format!("cd \"{session_path}\" && {env_script}{adapter_command}");
-    format!("{prefix} sh -c {}", shell_single_quote(&script))
+    // Exit this shell before any env statements or the adapter when cd fails.
+    format!("cd \"{session_path}\" || exit; {env_script}{adapter_command}")
 }
 
 #[cfg(test)]

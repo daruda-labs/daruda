@@ -72,7 +72,7 @@ fn restored_remote_pane_follows_the_lanes_ssh_host_not_a_local_fallback() {
     );
     assert_eq!(
         command,
-        Ok("ssh vm-work sh -c 'cd \"/srv/app\" && npx acp-adapter'".to_string())
+        Ok("ssh vm-work sh -c ''\\''cd \"/srv/app\" || exit; npx acp-adapter'\\'''".to_string())
     );
     assert_eq!(
         connect_cwd,
@@ -419,7 +419,10 @@ fn env_is_folded_in_for_the_lane_resolved_path() {
     // Asserted on the script the remote shell actually receives: the
     // outer layer quotes it as a whole, so the inner `'…'` shows up
     // escaped in the command text.
-    let tokens = shell_words::split(&command).expect("tokenizes as one POSIX command");
+    let mut tokens = shell_words::split(&command).expect("tokenizes as one POSIX command");
+    if tokens.first().is_some_and(|t| t == "ssh") {
+        tokens = shell_words::split(&tokens[2..].join(" ")).expect("SSH remote command tokenizes");
+    }
     let script = tokens
         .iter()
         .position(|t| t == "-c")
@@ -747,7 +750,7 @@ fn resolve_launch_uses_resolved_host_for_command_and_cached_for_write_back_basel
     let spec = r.spec.expect("an ssh-resolved host still assembles");
     assert_eq!(
         spec.command,
-        "ssh vm sh -c 'cd \"/srv/app\" && npx acp-adapter'"
+        "ssh vm sh -c ''\\''cd \"/srv/app\" || exit; npx acp-adapter'\\'''"
     );
     assert_eq!(r.resolved_cwd, PaneCwd::Remote("/srv/app".to_string()));
     assert_eq!(r.wire_cwd, PathBuf::from("/srv/app"));
@@ -849,7 +852,10 @@ fn local_assignments(command: &str) -> Vec<(String, String)> {
 /// quoting layers: the outer tokenization the launcher does, then the
 /// remote shell's own split of the script it received.
 fn exported(command: &str, name: &str) -> Option<String> {
-    let tokens = shell_words::split(command).expect("the outer command tokenizes");
+    let mut tokens = shell_words::split(command).expect("the outer command tokenizes");
+    if tokens.first().is_some_and(|t| t == "ssh") {
+        tokens = shell_words::split(&tokens[2..].join(" ")).expect("SSH remote command tokenizes");
+    }
     let script = tokens
         .iter()
         .position(|t| t == "-c")
@@ -993,7 +999,7 @@ fn no_declared_env_and_no_account_assembles_the_bare_command() {
     );
     assert_eq!(
         remote.spec.expect("resolves").command,
-        "ssh vm sh -c 'cd \"/srv/app\" && npx acp-adapter'"
+        "ssh vm sh -c ''\\''cd \"/srv/app\" || exit; npx acp-adapter'\\'''"
     );
 }
 

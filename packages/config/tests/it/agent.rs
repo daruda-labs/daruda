@@ -500,7 +500,7 @@ fn wrap_ssh_builds_exact_command() {
     assert_eq!(
         launch.wrap(Some("/home/user/project")),
         Ok(
-            "ssh vm-work sh -c 'cd \"/home/user/project\" && npx -y @agentclientprotocol/claude-agent-acp@latest'"
+            "ssh vm-work sh -c ''\\''cd \"/home/user/project\" || exit; npx -y @agentclientprotocol/claude-agent-acp@latest'\\'''"
                 .to_string()
         )
     );
@@ -525,7 +525,7 @@ fn wrap_docker_builds_exact_command_with_dash_i_never_dash_it() {
     let wrapped = launch.wrap(Some("/home/user/project")).unwrap();
     assert_eq!(
         wrapped,
-        "docker exec -i ubuntu-dev sh -c 'cd \"/home/user/project\" && npx -y @agentclientprotocol/claude-agent-acp@latest'"
+        "docker exec -i ubuntu-dev sh -c 'cd \"/home/user/project\" || exit; npx -y @agentclientprotocol/claude-agent-acp@latest'"
     );
     assert!(wrapped.contains(" -i "));
     assert!(!wrapped.contains(" -it "));
@@ -609,10 +609,13 @@ fn wrap_with_env_ssh_exports_and_unsets() {
 
 /// The script argument of a built `Ssh`/`Docker` command, recovered the way
 /// the launcher gets it: tokenize the **whole** command with POSIX rules and
-/// take the word after `-c`. Passing through that outer split is the point —
-/// it is the first of the two layers an injected value has to survive.
+/// reparse SSH's joined remote command, then take the word after `-c`.
+/// Docker forwards that argv directly; SSH adds the login-shell layer.
 fn sh_c_script(cmd: &str) -> String {
-    let tokens = shell_words::split(cmd).expect("built command tokenizes as one POSIX command");
+    let mut tokens = shell_words::split(cmd).expect("built command tokenizes as one POSIX command");
+    if tokens.first().is_some_and(|t| t == "ssh") {
+        tokens = shell_words::split(&tokens[2..].join(" ")).expect("SSH remote command tokenizes");
+    }
     let dash_c = tokens
         .iter()
         .position(|t| t == "-c")
@@ -701,20 +704,25 @@ fn wrap_with_env_docker_preserves_a_double_quote_value_intact() {
     assert_eq!(exported_value(&cmd, "CODEX_CONFIG"), value);
 }
 
-/// Run the `sh -c` argv a built remote command would exec, and hand back what
-/// the shell printed. Drops the `ssh <host>` / `docker exec -i <container>`
-/// transport prefix, which is the only part a local test cannot run.
+/// Execute the shell portion with each transport's semantics: SSH joins argv
+/// for the login shell; Docker forwards argv directly to the container shell.
 #[cfg(unix)]
 fn run_remote_script(cmd: &str) -> String {
     let tokens = shell_words::split(cmd).expect("built command tokenizes as one POSIX command");
-    let sh = tokens
-        .iter()
-        .position(|t| t == "sh")
-        .unwrap_or_else(|| panic!("no `sh` in tokens: {tokens:?}"));
-    let out = std::process::Command::new(&tokens[sh])
-        .args(&tokens[sh + 1..])
-        .output()
-        .expect("a POSIX shell runs");
+    let out = if tokens.first().is_some_and(|t| t == "ssh") {
+        daruda_core::process::command("sh")
+            .args(["-c", &tokens[2..].join(" ")])
+            .output()
+    } else {
+        let sh = tokens
+            .iter()
+            .position(|t| t == "sh")
+            .expect("Docker shell argv");
+        daruda_core::process::command(&tokens[sh])
+            .args(&tokens[sh + 1..])
+            .output()
+    }
+    .expect("a POSIX shell runs");
     assert!(
         out.status.success(),
         "shell failed: {}",
@@ -826,7 +834,7 @@ fn account_recipe_is_none_for_every_remote_launch() {
     // A `Raw` carrying `{{cwd}}` is the legacy remote escape hatch.
     assert_eq!(
         AgentLaunch::Raw(
-            "docker exec -i ubuntu-dev sh -c \"cd {{cwd}} && npx -y @agentclientprotocol/claude-agent-acp@latest\""
+            "docker exec -i ubuntu-dev sh -c \"cd {{cwd}} || exit; npx -y @agentclientprotocol/claude-agent-acp@latest\""
                 .into()
         )
         .account_recipe(false),
@@ -1215,14 +1223,9 @@ fn a_config_env_name_that_breaks_out_of_the_remote_shell_never_reaches_the_comma
     );
     assert!(!cmd.contains("PWNED"), "{cmd}");
 
-    // Run the `sh -c` argv the remote host would have been exec'd with.
     let tokens = shell_words::split(&cmd).expect("built command tokenizes as one POSIX command");
-    let sh = tokens
-        .iter()
-        .position(|t| t == "sh")
-        .unwrap_or_else(|| panic!("no `sh` in tokens: {tokens:?}"));
-    let out = std::process::Command::new(&tokens[sh])
-        .args(&tokens[sh + 1..])
+    let out = daruda_core::process::command("sh")
+        .args(["-c", &tokens[2..].join(" ")])
         .output()
         .expect("a POSIX shell runs");
     let stderr = String::from_utf8_lossy(&out.stderr);

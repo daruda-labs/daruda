@@ -21,7 +21,7 @@ fn the_ambient_env_adds_nothing_to_any_transport() {
             ADAPTER,
             &ambient,
         ),
-        format!("ssh build-box sh -c 'cd \"/home/user/project\" && {ADAPTER}'")
+        format!("ssh build-box sh -c ''\\''cd \"/home/user/project\" || exit; {ADAPTER}'\\'''")
     );
     assert_eq!(
         assemble_launch_command(
@@ -32,7 +32,7 @@ fn the_ambient_env_adds_nothing_to_any_transport() {
             ADAPTER,
             &ambient,
         ),
-        format!("docker exec -i dev-1 sh -c 'cd \"/workspace\" && {ADAPTER}'")
+        format!("docker exec -i dev-1 sh -c 'cd \"/workspace\" || exit; {ADAPTER}'")
     );
 }
 
@@ -83,7 +83,11 @@ fn a_hostile_value_survives_every_transports_quoting_layers() {
             },
         ] {
             let cmd = assemble_launch_command(transport, ADAPTER, &built);
-            let outer = shell_words::split(&cmd).expect("outer command tokenizes");
+            let mut outer = shell_words::split(&cmd).expect("outer command tokenizes");
+            if outer.first().is_some_and(|t| t == "ssh") {
+                outer = shell_words::split(&outer[2..].join(" "))
+                    .expect("SSH remote command tokenizes");
+            }
             let script = outer
                 .iter()
                 .position(|t| t == "-c")
@@ -115,5 +119,75 @@ fn env(inject: &[(&str, &str)], strip: &[&'static str]) -> AccountEnv {
             .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
             .collect(),
         strip: strip.to_vec(),
+    }
+}
+
+// SSH joins command argv with spaces before the server's login shell parses it.
+#[cfg(unix)]
+#[test]
+fn ssh_preserves_cwd_and_env_after_remote_argument_joining() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("work space");
+    std::fs::create_dir(&root).unwrap();
+    let root = daruda_core::path::canonicalize(root).unwrap();
+    let value = r#"it's $HOME `pwd` \ "quoted""#;
+    let built = assemble_launch_command(
+        LaunchTransport::Ssh {
+            target: "vm",
+            session_path: root.to_str().unwrap(),
+        },
+        r#"printf '%s\n' "$PWD" "$K" "${REMOVE-unset}""#,
+        &env(&[("K", value)], &["REMOVE"]),
+    );
+    let tokens = shell_words::split(&built).unwrap();
+    let out = daruda_core::process::command("sh")
+        .args(["-c", &tokens[2..].join(" ")])
+        .env("REMOVE", "inherited")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let expected_root = daruda_core::path::canonicalize(&root).unwrap();
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap(),
+        format!("{}\n{value}\nunset\n", expected_root.display())
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn remote_transports_never_launch_the_adapter_when_cd_fails_with_env() {
+    let temp = tempfile::tempdir().unwrap();
+    let absent = temp.path().join("absent");
+    for transport in [
+        LaunchTransport::Ssh {
+            target: "vm",
+            session_path: absent.to_str().unwrap(),
+        },
+        LaunchTransport::Docker {
+            container: "dev",
+            session_path: absent.to_str().unwrap(),
+        },
+    ] {
+        let built = assemble_launch_command(
+            transport,
+            "printf adapter-ran",
+            &env(&[("K", "value")], &["REMOVE"]),
+        );
+        let tokens = shell_words::split(&built).unwrap();
+        let out = if tokens[0] == "ssh" {
+            daruda_core::process::command("sh")
+                .args(["-c", &tokens[2..].join(" ")])
+                .output()
+        } else {
+            daruda_core::process::command(&tokens[4])
+                .args(&tokens[5..])
+                .output()
+        }
+        .unwrap();
+        assert!(!out.status.success(), "{built}");
+        assert!(
+            out.stdout.is_empty(),
+            "adapter ran despite missing directory: {built}"
+        );
     }
 }

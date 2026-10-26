@@ -75,7 +75,7 @@ fn is_bare_word_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '@' | ':' | '[' | ']' | '%')
 }
 
-/// Characters that would break out of `wrap`'s `'cd "…" && …'` nesting. A
+/// Characters excluded from `wrap`'s remote directory-change script. A
 /// denylist here (unlike a bare word) because a path legitimately holds spaces,
 /// parentheses and the like, and the double quotes keep those inert — only
 /// these six plus a line break can reach the shell:
