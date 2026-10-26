@@ -10,7 +10,10 @@ use gpui::ClipboardItem;
 
 mod hit_test;
 mod motion;
+mod report;
 mod scroll;
+
+use report::MouseReport;
 
 // ---------------------------------------------------------------------------
 // Free functions
@@ -249,17 +252,11 @@ impl TerminalView {
         // intercepted before the regular word-selection path kicks in.
         if event.button == MouseButton::Left
             && event.click_count == 2
-            && let Some((col, row)) = self.mouse_position_to_cell(event.position, window)
+            && let Some(mark_id) = self.annotation_at_window_position(event.position, window)
         {
-            let row0 = row.saturating_sub(1) as u32;
-            let screen_row = self.session.viewport_row_offset().saturating_add(row0);
-            if let Some(line_coord) = self.session.screen_row_to_line_coord(screen_row)
-                && let Some((mark_id, _)) = self.session.annotation_at_point(line_coord, col)
-            {
-                cx.emit(super::TerminalViewEvent::AnnotationDoubleClicked { id: mark_id });
-                cx.stop_propagation();
-                return;
-            }
+            cx.emit(super::TerminalViewEvent::AnnotationDoubleClicked { id: mark_id });
+            cx.stop_propagation();
+            return;
         }
 
         if event.modifiers.shift || self.input.is_none() || !self.session.mouse_reporting_enabled()
@@ -307,36 +304,20 @@ impl TerminalView {
             return;
         };
 
-        if let Some(input) = self.input.as_ref() {
-            let base_button = match event.button {
-                MouseButton::Left => 0,
-                MouseButton::Middle => 1,
-                MouseButton::Right => 2,
-                _ => return,
-            };
-
-            let button_value = sgr_mouse_button_value(
-                base_button,
-                false,
-                false,
-                event.modifiers.alt,
-                event.modifiers.control,
-            );
-            if self.session.mouse_sgr_enabled() {
-                let seq = sgr_mouse_sequence(button_value, col, row, true);
-                input.send(seq.as_bytes());
-            } else {
-                let seq = normal_mouse_sequence(
-                    button_value,
-                    col,
-                    row,
-                    self.session.mouse_utf8_enabled(),
-                );
-                if !seq.is_empty() {
-                    input.send(&seq);
-                }
-            }
-        }
+        let base_button = match event.button {
+            MouseButton::Left => 0,
+            MouseButton::Middle => 1,
+            MouseButton::Right => 2,
+            _ => return,
+        };
+        let button_value = sgr_mouse_button_value(
+            base_button,
+            false,
+            false,
+            event.modifiers.alt,
+            event.modifiers.control,
+        );
+        self.send_mouse_report(MouseReport::Press(button_value), col, row, 1);
     }
 
     pub(super) fn on_mouse_up(
@@ -373,38 +354,19 @@ impl TerminalView {
             return;
         };
 
-        if let Some(input) = self.input.as_ref() {
-            let base_button = match event.button {
-                MouseButton::Left => 0,
-                MouseButton::Middle => 1,
-                MouseButton::Right => 2,
-                _ => return,
-            };
-
-            let mods_value = sgr_mouse_button_value(
-                0,
-                false,
-                false,
-                event.modifiers.alt,
-                event.modifiers.control,
-            );
-            if self.session.mouse_sgr_enabled() {
-                let button_value = base_button + mods_value;
-                let seq = sgr_mouse_sequence(button_value, col, row, false);
-                input.send(seq.as_bytes());
-            } else {
-                // Normal mode: release is always encoded as button 3
-                let release_value = 3u8 + mods_value;
-                let seq = normal_mouse_sequence(
-                    release_value,
-                    col,
-                    row,
-                    self.session.mouse_utf8_enabled(),
-                );
-                if !seq.is_empty() {
-                    input.send(&seq);
-                }
-            }
-        }
+        let base_button = match event.button {
+            MouseButton::Left => 0,
+            MouseButton::Middle => 1,
+            MouseButton::Right => 2,
+            _ => return,
+        };
+        let button_value = sgr_mouse_button_value(
+            base_button,
+            false,
+            false,
+            event.modifiers.alt,
+            event.modifiers.control,
+        );
+        self.send_mouse_report(MouseReport::Release(button_value), col, row, 1);
     }
 }

@@ -40,22 +40,7 @@ impl TerminalView {
                     event.modifiers.alt,
                     event.modifiers.control,
                 );
-                if let Some(input) = self.input.as_ref() {
-                    if self.session.mouse_sgr_enabled() {
-                        let seq = sgr_mouse_sequence(button_value, col, row, true);
-                        input.send(seq.as_bytes());
-                    } else {
-                        let seq = normal_mouse_sequence(
-                            button_value,
-                            col,
-                            row,
-                            self.session.mouse_utf8_enabled(),
-                        );
-                        if !seq.is_empty() {
-                            input.send(&seq);
-                        }
-                    }
-                }
+                self.send_mouse_report(MouseReport::Press(button_value), col, row, 1);
                 return;
             }
         }
@@ -71,22 +56,10 @@ impl TerminalView {
                     let current_y = f32::from(event.position.y) - f32::from(bounds.origin.y);
                     let total = self.session.total_rows();
                     let rows = self.session.rows() as u32;
-                    // Recompute thumb height to derive the usable track range.
-                    let thumb_ratio = rows as f32 / total as f32;
-                    let thumb_height = (track_height * thumb_ratio)
-                        .max(crate::ux::theme::TERMINAL_SCROLLBAR_THUMB_MIN_H);
-                    // Maintain the offset between the cursor and the thumb top
-                    // so the thumb doesn't jump on the first move.
-                    let new_thumb_top =
-                        (current_y - click_offset).clamp(0.0, track_height - thumb_height);
-                    let usable = track_height - thumb_height;
-                    let fraction = if usable > 0.0 {
-                        (new_thumb_top / usable).clamp(0.0, 1.0)
-                    } else {
-                        0.0
-                    };
-                    let scrollable = total.saturating_sub(rows);
-                    let offset = (fraction * scrollable as f32).round() as i32;
+                    let metrics =
+                        super::super::scrollbar::ScrollbarMetrics::new(track_height, total, rows);
+                    // Preserve the cursor-to-thumb offset captured on mouse-down.
+                    let offset = metrics.offset_for_drag(current_y, click_offset);
                     let current = self.session.viewport_row_offset() as i32;
                     let delta = offset - current;
                     if delta != 0 {
@@ -329,17 +302,7 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let next = self
-            .mouse_position_to_cell(position, window)
-            .and_then(|(col, row)| {
-                // 1-indexed → 0-indexed visual row; convert to LineCoord.
-                let row0 = row.saturating_sub(1) as u32;
-                let screen_row = self.session.viewport_row_offset().saturating_add(row0);
-                let line_coord = self.session.screen_row_to_line_coord(screen_row)?;
-                self.session
-                    .annotation_at_point(line_coord, col)
-                    .map(|(id, _)| id)
-            });
+        let next = self.annotation_at_window_position(position, window);
         // Route through the public setter so the no-op short-circuit
         // and `cx.notify()` live in exactly one place.
         self.set_hovered_annotation(next, cx);

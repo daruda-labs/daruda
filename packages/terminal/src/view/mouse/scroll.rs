@@ -47,9 +47,7 @@ impl TerminalView {
             return;
         }
 
-        if let Some(input) = self.input.as_ref()
-            && !event.modifiers.shift
-            && self.session.mouse_reporting_enabled()
+        if self.input.is_some() && !event.modifiers.shift && self.session.mouse_reporting_enabled()
         {
             let Some((col, row)) = self.mouse_position_to_cell(event.position, window) else {
                 return;
@@ -64,24 +62,7 @@ impl TerminalView {
                 event.modifiers.control,
             );
             let steps = delta_lines.unsigned_abs().min(10);
-            if self.session.mouse_sgr_enabled() {
-                for _ in 0..steps {
-                    let seq = sgr_mouse_sequence(button_value, col, row, true);
-                    input.send(seq.as_bytes());
-                }
-            } else {
-                for _ in 0..steps {
-                    let seq = normal_mouse_sequence(
-                        button_value,
-                        col,
-                        row,
-                        self.session.mouse_utf8_enabled(),
-                    );
-                    if !seq.is_empty() {
-                        input.send(&seq);
-                    }
-                }
-            }
+            self.send_mouse_report(MouseReport::Press(button_value), col, row, steps);
             return;
         }
 

@@ -14,6 +14,7 @@ mod mouse;
 mod output;
 mod overlay;
 mod render;
+mod scrollbar;
 mod search;
 mod search_bar;
 pub(super) mod selection;

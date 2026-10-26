@@ -711,16 +711,12 @@ impl TerminalTextElement {
                 // 2px scrollbar should also sit flush with the pane edge
                 // rather than float `inset_x` px inside it.
                 let track_height = f32::from(full_bounds.size.height);
-                let thumb_ratio = viewport_rows as f32 / total_rows as f32;
-                let thumb_height =
-                    (track_height * thumb_ratio).max(theme::TERMINAL_SCROLLBAR_THUMB_MIN_H);
-                let scrollable = total_rows - viewport_rows;
-                let thumb_top = if scrollable > 0 {
-                    let fraction = viewport_offset as f32 / scrollable as f32;
-                    fraction * (track_height - thumb_height)
-                } else {
-                    track_height - thumb_height
-                };
+                let metrics = super::super::scrollbar::ScrollbarMetrics::new(
+                    track_height,
+                    total_rows,
+                    viewport_rows,
+                );
+                let thumb_top = metrics.thumb_top(viewport_offset);
 
                 let thumb_bounds = Bounds::new(
                     point(
@@ -728,7 +724,7 @@ impl TerminalTextElement {
                             - px(theme::TERMINAL_SCROLLBAR_W + theme::TERMINAL_SCROLLBAR_MARGIN),
                         full_bounds.top() + px(thumb_top),
                     ),
-                    size(px(theme::TERMINAL_SCROLLBAR_W), px(thumb_height)),
+                    size(px(theme::TERMINAL_SCROLLBAR_W), px(metrics.thumb_height)),
                 );
                 let thumb_color = if is_dragging {
                     theme::TERMINAL_SCROLLBAR_THUMB_ACTIVE
