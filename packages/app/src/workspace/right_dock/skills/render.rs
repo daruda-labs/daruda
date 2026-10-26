@@ -476,8 +476,6 @@ fn skill_row(
         .clone()
         .or_else(|| Some(s.body_preview.clone()))
         .unwrap_or_default();
-    let description_truncated =
-        truncate_with_ellipsis(&description_full, SKILL_DESCRIPTION_MAX_CHARS);
 
     // Stable ids for the name button + description span so GPUI's
     // hover / tooltip plumbing can attach state slots. The skill name
@@ -491,11 +489,28 @@ fn skill_row(
     // Invocation remains a button; the secondary line gets the full row width.
     let skill_for_invoke = s.clone();
     let workspace_for_invoke = workspace.clone();
-    let name_button = crate::ui::button_compact(name_btn_id, SharedString::from(display_name))
+    // The vendor label cannot shrink; a stretched child keeps text inside
+    // the button while preserving its invocation and focus behavior.
+    let name_button = crate::ui::compact_button(crate::ui::button_bare(name_btn_id))
+        .flex_1()
+        .min_w_0()
+        .flex_col()
+        .items_stretch()
+        .child(
+            div()
+                .debug_selector(|| "skill-name-text".into())
+                .w_full()
+                .min_w_0()
+                .truncate()
+                .child(SharedString::from(display_name.clone())),
+        )
         .ghost()
         .p(px(0.))
         .max_w_full()
-        .tooltip(strings::library::source(s.dir.display()))
+        .tooltip(format!(
+            "{display_name}\n{}",
+            strings::library::source(s.dir.display())
+        ))
         .on_click({
             let ws = workspace_for_invoke.clone();
             let sk = skill_for_invoke.clone();
@@ -512,16 +527,16 @@ fn skill_row(
     // Description span — single-line truncation, full text revealed
     // via a hover tooltip. The tooltip mounts only when the row is
     // hovered, so plumbing the full string is cheap.
-    let description_span = (!description_truncated.is_empty()).then(|| {
+    let description_span = (!description_full.is_empty()).then(|| {
         let full = description_full.clone();
         div()
             .id(desc_id)
             .w_full()
             .min_w_0()
-            .text_ellipsis()
+            .truncate()
             .text_size(px(theme::FONT_SIZE_SM))
             .text_color(meta_color)
-            .child(SharedString::from(description_truncated))
+            .child(SharedString::from(description_full))
             .tooltip(crate::ui::tooltip::text(SharedString::from(full)))
     });
 
@@ -627,26 +642,6 @@ fn skill_row(
     .into_any_element()
 }
 
-/// Character budget for the skill row's description line. Chosen to
-/// match the right-panel's default width at the standard font size
-/// without leaving room for the cursor / scrollbar gutter — tune if
-/// `RIGHT_PANEL_BODY_FONT_SIZE` changes meaningfully.
-const SKILL_DESCRIPTION_MAX_CHARS: usize = 80;
-
-/// Reserve one character for `…` when truncation happens.
-/// A zero limit still produces `…` for nonempty input.
-fn truncate_with_ellipsis(s: &str, max_chars: usize) -> String {
-    let (prefix, truncated) = daruda_core::text::char_prefix(s, max_chars);
-    if !truncated {
-        return s.to_string();
-    }
-    let mut out = daruda_core::text::char_prefix(prefix, max_chars.saturating_sub(1))
-        .0
-        .to_owned();
-    out.push('…');
-    out
-}
-
 fn neutral_chip(label: impl Into<SharedString>, t: &DarudaTheme) -> impl IntoElement {
     div()
         .flex_none()
@@ -675,19 +670,10 @@ fn count_unique_plugins(skills: &[Skill]) -> usize {
 mod tests {
     use super::*;
 
-    #[test]
-    fn description_truncation_keeps_its_ellipsis_budget() {
-        assert_eq!(truncate_with_ellipsis("", 0), "");
-        assert_eq!(truncate_with_ellipsis("한", 0), "…");
-        assert_eq!(truncate_with_ellipsis("한😀", 1), "…");
-        assert_eq!(truncate_with_ellipsis("한😀", 2), "한😀");
-        assert_eq!(truncate_with_ellipsis("한😀글", 2), "한…");
-    }
-
     fn check_actions(cx: &mut gpui::TestAppContext, scope: SkillScope, selectors: &[&'static str]) {
         let plugin = matches!(scope, SkillScope::Plugin);
         let skill = Skill {
-            name: "sample".into(),
+            name: "finishing-a-development-branch-with-a-long-unbroken-name".into(),
             dir: std::path::PathBuf::from("sample-skill"),
             scope,
             frontmatter: Default::default(),
@@ -701,6 +687,7 @@ mod tests {
         crate::workspace::right_dock::row_tests::assert_hover_targets_fit(
             cx,
             selectors,
+            &["skill-name-text"],
             move |workspace, cx| skill_row(&skill, false, workspace, theme::current(cx), cx),
         );
     }

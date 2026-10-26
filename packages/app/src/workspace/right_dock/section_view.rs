@@ -126,6 +126,7 @@ pub(in crate::workspace) fn library_row(
         )
         .child(
             div()
+                .debug_selector(|| "library-row-content".into())
                 .flex()
                 .flex_col()
                 .flex_1()
@@ -133,7 +134,7 @@ pub(in crate::workspace) fn library_row(
                 .child(
                     div()
                         .min_w_0()
-                        .text_ellipsis()
+                        .truncate()
                         .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
                         .text_color(t.text_body)
                         .child(name),
@@ -143,7 +144,7 @@ pub(in crate::workspace) fn library_row(
                         div()
                             .min_w_0()
                             .mt(px(theme::DOCK_LIBRARY_DESC_MT))
-                            .text_ellipsis()
+                            .truncate()
                             .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
                             .text_color(t.text_muted)
                             .child(desc),

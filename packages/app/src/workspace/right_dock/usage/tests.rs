@@ -64,6 +64,7 @@ fn restore_action_fits_the_session_row(cx: &mut gpui::TestAppContext) {
     crate::workspace::right_dock::row_tests::assert_hover_targets_fit(
         cx,
         &["usage-session-restore"],
+        &[],
         |workspace, cx| {
             let session = RestorableSession {
                 session_id: "sample-session".into(),

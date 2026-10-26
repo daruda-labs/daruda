@@ -29,9 +29,10 @@ impl Render for RowProbe {
 pub(super) fn assert_hover_targets_fit(
     cx: &mut TestAppContext,
     selectors: &[&'static str],
+    content_selectors: &[&'static str],
     render_row: impl Fn(WeakEntity<Workspace>, &App) -> AnyElement + 'static,
 ) {
-    assert_hover_targets_fit_beside(cx, selectors, None, render_row);
+    assert_hover_targets_fit_beside(cx, selectors, content_selectors, None, render_row);
 }
 
 /// As [`assert_hover_targets_fit`], and every revealed target also ends
@@ -39,6 +40,7 @@ pub(super) fn assert_hover_targets_fit(
 pub(super) fn assert_hover_targets_fit_beside(
     cx: &mut TestAppContext,
     selectors: &[&'static str],
+    content_selectors: &[&'static str],
     beside: Option<&'static str>,
     render_row: impl Fn(WeakEntity<Workspace>, &App) -> AnyElement + 'static,
 ) {
@@ -62,6 +64,17 @@ pub(super) fn assert_hover_targets_fit_beside(
     vcx.update(|window, _| window.refresh());
     vcx.run_until_parked();
     let row = vcx.debug_bounds("action-row").expect("row painted");
+    let content = vcx
+        .debug_bounds("library-row-content")
+        .expect("text column painted");
+    for selector in content_selectors {
+        let bounds = vcx.debug_bounds(selector).expect("row content painted");
+        assert!(bounds.left() >= content.left(), "{selector} covers icon");
+        assert!(
+            bounds.right() <= content.right(),
+            "{selector} past text column"
+        );
+    }
     vcx.simulate_mouse_move(row.center(), None, Default::default());
     vcx.run_until_parked();
     vcx.update(|window, _| window.refresh());

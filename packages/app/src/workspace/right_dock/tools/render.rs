@@ -195,6 +195,11 @@ fn server_row(
     };
     let summary = div().text_color(status_color).child(summary_text);
     let name = div()
+        .id(SharedString::from(format!("mcp-name-{}", s.row_dom_id())))
+        .debug_selector(|| "mcp-name".into())
+        .min_w_0()
+        .truncate()
+        .tooltip(crate::ui::tooltip::text(SharedString::from(s.name.clone())))
         .when(s.disabled, |d| d.text_color(t.text_subtle))
         .child(SharedString::from(s.name.clone()));
 
@@ -323,7 +328,7 @@ mod tests {
     #[gpui::test]
     fn hover_actions_fit_the_server_row(cx: &mut gpui::TestAppContext) {
         let server = McpServer {
-            name: "filesystem".into(),
+            name: "filesystem-with-a-long-unbroken-server-name".into(),
             scope: McpScope::User,
             transport: crate::agent::mcp::McpTransport::Stdio,
             command: Some("test-server".into()),
@@ -337,6 +342,7 @@ mod tests {
         crate::workspace::right_dock::row_tests::assert_hover_targets_fit_beside(
             cx,
             &["mcp-edit", "mcp-delete"],
+            &["mcp-name"],
             Some("mcp-toggle"),
             move |workspace, cx| server_row(&server, None, workspace, theme::current(cx), cx),
         );
