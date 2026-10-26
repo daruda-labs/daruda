@@ -29,6 +29,47 @@ fn the_last_path_assignment_is_the_childs() {
 }
 
 #[test]
+fn native_environment_lookup_preserves_empty_values_and_last_assignment() {
+    let assignments = [("HOME", "/first"), ("OTHER", "x"), ("HOME", "")];
+    assert_eq!(
+        env_value(
+            assignments.iter().map(|(key, value)| (key, value)),
+            OsStr::new("HOME")
+        ),
+        Some(OsStr::new(""))
+    );
+    assert_eq!(
+        env_value(
+            assignments.iter().map(|(key, value)| (key, value)),
+            OsStr::new("MISSING")
+        ),
+        None
+    );
+    let map = std::collections::BTreeMap::from([("HOME", "/map")]);
+    assert_eq!(
+        env_value(map.iter(), OsStr::new("HOME")),
+        Some(OsStr::new("/map"))
+    );
+}
+
+#[test]
+fn native_environment_lookup_obeys_the_hosts_name_comparison() {
+    let assignments = [("Home", "/mixed")];
+    let expected = if cfg!(windows) {
+        Some(OsStr::new("/mixed"))
+    } else {
+        None
+    };
+    assert_eq!(
+        env_value(
+            assignments.iter().map(|(key, value)| (key, value)),
+            OsStr::new("HOME")
+        ),
+        expected
+    );
+}
+
+#[test]
 fn a_path_or_an_unknown_name_resolves_to_itself() {
     let path = std::path::Path::new("some/dir/tool");
     assert_eq!(resolve_program(path.as_os_str(), None), path);

@@ -87,10 +87,23 @@ where
     K: AsRef<OsStr> + ?Sized + 'a,
     V: AsRef<OsStr> + ?Sized + 'a,
 {
+    env_value(assignments, OsStr::new("PATH"))
+}
+
+/// The last assignment to `name` in a native child environment.
+/// Empty values remain distinct from absent variables. Windows compares
+/// names case-insensitively; remote environments keep their own policy.
+pub fn env_value<'a, I, K, V>(assignments: I, name: &OsStr) -> Option<&'a OsStr>
+where
+    I: IntoIterator<Item = (&'a K, &'a V)>,
+    I::IntoIter: DoubleEndedIterator,
+    K: AsRef<OsStr> + ?Sized + 'a,
+    V: AsRef<OsStr> + ?Sized + 'a,
+{
     assignments
         .into_iter()
         .rev()
-        .find(|(name, _)| env_name_eq(name.as_ref(), OsStr::new("PATH")))
+        .find(|(key, _)| env_name_eq(key.as_ref(), name))
         .map(|(_, value)| value.as_ref())
 }
 

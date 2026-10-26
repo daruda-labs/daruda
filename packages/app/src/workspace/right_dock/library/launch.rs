@@ -37,10 +37,11 @@ impl Workspace {
             let root = account
                 .map(|a| a.config_dir.clone())
                 .or_else(|| {
-                    env.iter()
-                        .rev()
-                        .find(|(k, _)| k == key)
-                        .map(|(_, v)| PathBuf::from(v))
+                    daruda_core::process::env_value(
+                        env.iter().map(|(key, value)| (key, value)),
+                        std::ffi::OsStr::new(key),
+                    )
+                    .map(PathBuf::from)
                 })
                 .or_else(|| std::env::var_os(key).map(PathBuf::from));
             view.config = Configuration::resolve(
@@ -74,23 +75,64 @@ pub(super) fn effective_home(
     ambient: Option<PathBuf>,
 ) -> Option<PathBuf> {
     if let Some(account) = account {
-        if let Some((_, value)) = account.inject.iter().rev().find(|(key, _)| key == "HOME") {
+        if let Some(value) = daruda_core::process::env_value(
+            account.inject.iter().map(|(key, value)| (key, value)),
+            std::ffi::OsStr::new("HOME"),
+        ) {
             return Some(value.into());
         }
-        if account.strip.contains(&"HOME") {
+        if account.strip.iter().any(|key| {
+            daruda_core::process::env_name_eq(key.as_ref(), std::ffi::OsStr::new("HOME"))
+        }) {
             return None;
         }
     }
-    env.iter()
-        .rev()
-        .find(|(key, _)| key == "HOME")
-        .map(|(_, value)| PathBuf::from(value))
-        .or(ambient)
+    daruda_core::process::env_value(
+        env.iter().map(|(key, value)| (key, value)),
+        std::ffi::OsStr::new("HOME"),
+    )
+    .map(PathBuf::from)
+    .or(ambient)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn account_home_override_and_removal_precede_agent_and_ambient_values() {
+        let env = vec![("HOME".into(), "agent-home".into())];
+        let ambient = Some(PathBuf::from("ambient-home"));
+        let account = daruda_config::AccountEnv {
+            inject: vec![("HOME".into(), "account-home".into())],
+            strip: vec!["HOME"],
+        };
+        assert_eq!(
+            effective_home(&env, Some(&account), ambient.clone()),
+            Some(PathBuf::from("account-home"))
+        );
+        let removed = daruda_config::AccountEnv {
+            inject: vec![],
+            strip: vec!["HOME"],
+        };
+        assert_eq!(effective_home(&env, Some(&removed), ambient.clone()), None);
+        assert_eq!(
+            effective_home(&[("HOME".into(), String::new())], None, ambient),
+            Some(PathBuf::new())
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn local_home_lookup_and_removal_accept_windows_environment_spelling() {
+        let env = vec![("Home".into(), "agent-home".into())];
+        assert_eq!(effective_home(&env, None, None), Some("agent-home".into()));
+        let account = daruda_config::AccountEnv {
+            inject: vec![],
+            strip: vec!["hOmE"],
+        };
+        assert_eq!(effective_home(&env, Some(&account), None), None);
+    }
 
     #[test]
     fn home_follows_the_launch_environment_even_for_managed_accounts() {
