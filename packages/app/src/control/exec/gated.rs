@@ -1,6 +1,7 @@
 //! Commands that wait on the user's approval: the guards before the card,
 //! the work once approved, and the task starts and worktree creation it runs.
 
+use futures::{FutureExt as _, future::LocalBoxFuture};
 use gpui::App;
 
 use crate::control::approval::ApprovalOutcome;
@@ -19,6 +20,26 @@ use super::{Dispatch, Pending, in_lane_window, in_pane_window, in_project_window
 /// address are refusals the user has no say in, so they are answered before a
 /// card is ever put on their phone.
 pub(crate) fn run_gated(cmd: GatedCommand, origin: super::CommandOrigin, cx: &mut App) -> Dispatch {
+    run_gated_with(
+        cmd,
+        origin,
+        |cmd, origin, solicited, cx| perform_gated(cmd, origin, solicited, cx).boxed_local(),
+        cx,
+    )
+}
+
+fn run_gated_with(
+    cmd: GatedCommand,
+    origin: super::CommandOrigin,
+    perform: impl for<'a> FnOnce(
+        GatedCommand,
+        super::CommandOrigin,
+        bool,
+        &'a mut gpui::AsyncApp,
+    ) -> LocalBoxFuture<'a, ControlOutcome>
+    + 'static,
+    cx: &mut App,
+) -> Dispatch {
     if let Err(refusal) = guard_gated(&cmd, cx) {
         return Dispatch::Ready(Err(refusal));
     }
@@ -30,11 +51,17 @@ pub(crate) fn run_gated(cmd: GatedCommand, origin: super::CommandOrigin, cx: &mu
     let (tx, rx) = smol::channel::bounded(1);
     cx.spawn(async move |cx| {
         let outcome: Option<ControlOutcome> = match answer.recv().await {
-            // Re-checked here, not only before the card: the guard above ran
-            // before *this* request waited, so N cards opened together would
-            // all have passed a budget that only one of them can spend.
-            Ok(ApprovalOutcome::Approved) => Some(match cx.update(|cx| guard_gated(&cmd, cx)) {
-                Ok(()) => perform_gated(cmd, origin, solicited, cx).await,
+            // Approval may have waited while another creation spent a slot.
+            // Reserve before the first await so overlapping approvals cannot
+            // promise the same remaining worktree.
+            Ok(ApprovalOutcome::Approved) => Some(match cx.update(|cx| reserve_gated(&cmd, cx)) {
+                Ok(permit) => {
+                    let outcome = perform(cmd, origin, solicited, cx).await;
+                    if let Some(permit) = permit {
+                        cx.update(|cx| permit.finish(outcome.is_ok(), cx));
+                    }
+                    outcome
+                }
                 Err(refusal) => Err(refusal),
             }),
             // Not a refusal: the user never said no, and the caller has freed
@@ -55,6 +82,25 @@ pub(crate) fn run_gated(cmd: GatedCommand, origin: super::CommandOrigin, cx: &mu
         outcome: rx,
         pending: Pending::Approval(approval),
     }
+}
+
+/// Validate again and claim a slot only for commands that create a worktree.
+fn reserve_gated(
+    cmd: &GatedCommand,
+    cx: &mut App,
+) -> Result<Option<crate::control::guards::CreationPermit>, ControlError> {
+    guard_gated(cmd, cx)?;
+    let creates_lane = match cmd {
+        GatedCommand::LaneCreate { .. } => true,
+        GatedCommand::TaskStart { task } => cx
+            .global::<GlobalTasks>()
+            .get(task)
+            .is_some_and(task_creates_lane),
+        _ => false,
+    };
+    creates_lane
+        .then(|| crate::control::guards::reserve_agent_lane(cx))
+        .transpose()
 }
 
 /// The refusals that precede the card.
@@ -240,20 +286,9 @@ async fn start_task(
     solicited: bool,
     cx: &mut gpui::AsyncApp,
 ) -> ControlOutcome {
-    let creates_lane = cx.update(|cx| {
-        cx.global::<GlobalTasks>()
-            .get(&task)
-            .is_some_and(task_creates_lane)
-    });
-    let outcome = cx
-        .update(|cx| begin_task_start(task, origin, solicited, cx))?
+    cx.update(|cx| begin_task_start(task, origin, solicited, cx))?
         .finish(cx)
-        .await;
-    if creates_lane && outcome.is_ok() {
-        // Spent only now: a refused or failed start costs the agent nothing.
-        cx.update(crate::control::guards::note_agent_created_lane);
-    }
-    outcome
+        .await
 }
 
 /// A task start under way, in the window that holds the task's project.
@@ -409,9 +444,6 @@ async fn create_lane(
     let (target, chat) = rx.recv().await.unwrap_or(Err(ControlError::TargetGone))?;
     let target = LaneHandle::new(workspace, target);
 
-    // Spent only now: a refused or failed creation costs the agent nothing.
-    cx.update(crate::control::guards::note_agent_created_lane);
-
     if let Some(prompt) = prompt {
         // Best effort, and not its own outcome: the worktree exists either
         // way, and the caller can send the prompt again.
@@ -423,3 +455,6 @@ async fn create_lane(
     }
     Ok((target, chat))
 }
+
+#[cfg(test)]
+mod tests;

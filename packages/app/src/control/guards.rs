@@ -24,6 +24,7 @@
 //! a new adapter driving an *agent* has to apply those two itself.
 
 use gpui::{App, Global};
+use std::{cell::Cell, rc::Rc};
 
 use crate::control::result::ControlError;
 use crate::telegram::bridge::PaneRef;
@@ -44,6 +45,34 @@ pub(crate) const AGENT_LANE_BUDGET: u32 = 16;
 #[derive(Default)]
 struct AgentBudget {
     created_lanes: u32,
+    in_flight: Rc<Cell<u32>>,
+}
+
+/// A slot stays unavailable across asynchronous creation, returning on failure
+/// or cancellation even when the dispatch future is dropped.
+pub(super) struct CreationPermit {
+    in_flight: Rc<Cell<u32>>,
+}
+
+impl CreationPermit {
+    pub(super) fn finish(self, created: bool, cx: &mut App) {
+        if created {
+            note_agent_created_lane(cx);
+        }
+    }
+}
+
+impl Drop for CreationPermit {
+    fn drop(&mut self) {
+        self.in_flight.set(self.in_flight.get() - 1);
+    }
+}
+
+pub(super) fn reserve_agent_lane(cx: &mut App) -> Result<CreationPermit, ControlError> {
+    guard_agent_budget(cx)?;
+    let in_flight = cx.default_global::<AgentBudget>().in_flight.clone();
+    in_flight.set(in_flight.get() + 1);
+    Ok(CreationPermit { in_flight })
 }
 
 impl Global for AgentBudget {}
@@ -87,7 +116,8 @@ pub(crate) fn guard_queue_depth(target: PaneRef, cx: &mut App) -> Result<(), Con
 /// Refuse a creation the agent has no budget left for. Checked before the
 /// approval card, since there is nothing to ask the user about.
 pub(crate) fn guard_agent_budget(cx: &mut App) -> Result<(), ControlError> {
-    if cx.default_global::<AgentBudget>().created_lanes >= AGENT_LANE_BUDGET {
+    let budget = cx.default_global::<AgentBudget>();
+    if budget.created_lanes + budget.in_flight.get() >= AGENT_LANE_BUDGET {
         return Err(ControlError::AgentLimitReached);
     }
     Ok(())
