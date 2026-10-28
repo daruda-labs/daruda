@@ -107,6 +107,7 @@ pub(in crate::workspace) struct NodeForm {
     /// What it was built from — what dirty compares against.
     initial: NodeFields,
     source_text: String,
+    match_memo: draft::MatchMemo,
     initial_text: Vec<String>,
     id: Entity<InputState>,
     deps: Entity<InputState>,
@@ -235,6 +236,7 @@ impl NodeForm {
             node: node.clone(),
             initial,
             source_text: text.to_string(),
+            match_memo: draft::MatchMemo::default(),
             initial_text: Vec::new(),
             id,
             deps,

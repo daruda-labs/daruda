@@ -265,7 +265,7 @@ async fn expanded_prompt_buttons_are_keyboard_reachable(cx: &mut TestAppContext)
     }
 }
 
-fn set_output(
+pub(super) fn set_output(
     v: &mut crate::workspace::pages::flows::graph::FlowGraphView,
     node: &str,
     value: &str,

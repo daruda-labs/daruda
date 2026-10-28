@@ -8,6 +8,7 @@
 mod ask;
 mod authoring;
 mod authoring_edits;
+mod authoring_lifecycle;
 mod browser;
 mod control;
 mod files;

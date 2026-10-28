@@ -141,8 +141,11 @@ impl FlowGraphView {
             if !deps.iter().any(|dep| dep == value.as_ref()) {
                 deps.push(value.to_string());
             }
+            // `set_value` emits `Change`, which the deps watch turns into a
+            // links refresh; refreshing here as well would do it twice.
             form.deps
                 .update(cx, |input, cx| input.set_value(deps.join(", "), window, cx));
+            return;
         }
         self.refresh_form_links(window, cx);
     }
@@ -188,7 +191,6 @@ impl FlowGraphView {
             form.deps
                 .update(cx, |input, cx| input.set_value(deps.join(", "), window, cx));
         }
-        self.refresh_form_links(window, cx);
     }
 }
 

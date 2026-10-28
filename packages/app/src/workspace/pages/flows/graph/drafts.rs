@@ -57,6 +57,11 @@ impl FlowGraphView {
         &self.discarded
     }
 
+    pub(in crate::workspace) fn dismiss_discarded_drafts(&mut self, cx: &mut Context<Self>) {
+        self.discarded.clear();
+        cx.notify();
+    }
+
     pub(in crate::workspace) fn validate_form_drafts(
         &mut self,
         window: &mut Window,
@@ -75,9 +80,11 @@ impl FlowGraphView {
             .find(|draft| draft.invalid)
             .map(|draft| draft.node.clone())
             .or_else(|| {
+                // An untouched form is the file's own node, which the engine
+                // already accepts; its refusal must not block other edits.
                 self.form
                     .as_ref()
-                    .filter(|form| form.refusal(cx).is_some())
+                    .filter(|form| form.has_local_input(cx) && form.refusal(cx).is_some())
                     .map(|form| form.node.clone())
             });
         if let Some(node) = invalid {
@@ -141,10 +148,19 @@ impl FlowGraphView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.stash_form(cx);
         let Some(after) = self.text.clone() else {
+            self.stash_form(cx);
             return;
         };
+        // A form the edit's reload kept is already on `after`; stashing it
+        // would rebuild its boxes and lose focus and custom-entry mode.
+        if !self
+            .form
+            .as_ref()
+            .is_some_and(|form| form.is_built_from(&after))
+        {
+            self.stash_form(cx);
+        }
         let issues = self.current_issues();
         // The edit's own reload saw these drafts' nodes leave; deleting them
         // here was the person's choice, not a loss to report.

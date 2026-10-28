@@ -9,6 +9,7 @@ pub(in crate::workspace) struct NodeDraft {
     pub fields: NodeFields,
     pub invalid: bool,
     source: String,
+    memo: MatchMemo,
     inputs: Vec<String>,
     choices: Vec<String>,
     agent_open: bool,
@@ -17,7 +18,7 @@ pub(in crate::workspace) struct NodeDraft {
 
 impl NodeDraft {
     pub(in crate::workspace) fn source_matches(&self, text: &str) -> bool {
-        source_matches(&self.source, text, &self.node)
+        self.memo.check(&self.source, text, &self.node)
     }
 
     /// Adopt a reloaded file that left this node and the defaults unchanged,
@@ -44,6 +45,13 @@ impl NodeDraft {
             return self;
         }
         let (old, new) = (file_deps(before, &self.node), file_deps(after, &self.node));
+        if old == new && deleted.is_empty() {
+            // Nothing typed can refer to what changed, so only the base moves;
+            // rebuilding a form here would cost a full set of entities.
+            let mut moved = self;
+            moved.source = after.to_string();
+            return moved;
+        }
         let mut rebased = self.clone();
         rebased.source = after.to_string();
         let Some(form) = rebased.restore(issues, window, cx) else {
@@ -93,6 +101,7 @@ impl NodeForm {
             fields: self.fields(cx),
             invalid: self.refusal(cx).is_some(),
             source: self.source_text.clone(),
+            memo: MatchMemo::default(),
             inputs: self.text_snapshot(cx),
             choices: self
                 .draft_selects()
@@ -121,12 +130,42 @@ impl NodeForm {
     }
 
     pub(in crate::workspace) fn source_matches(&self, text: &str) -> bool {
-        source_matches(&self.source_text, text, &self.node)
+        self.match_memo.check(&self.source_text, text, &self.node)
+    }
+
+    /// Whether the form was built from exactly `text`.
+    pub(in crate::workspace) fn is_built_from(&self, text: &str) -> bool {
+        self.source_text == text
     }
 
     /// Adopt a reloaded file that left this node and the defaults unchanged.
     pub(in crate::workspace) fn rebase_source(&mut self, text: &str) {
         self.source_text = text.to_string();
+    }
+}
+
+/// The last conflict answer for one pair of texts. Render asks every frame,
+/// and a draft in conflict would otherwise parse both files each time.
+#[derive(Clone, Default)]
+pub(super) struct MatchMemo(std::cell::Cell<Option<(u64, bool)>>);
+
+impl MatchMemo {
+    pub(super) fn check(&self, source: &str, text: &str, node: &NodeId) -> bool {
+        use std::hash::{Hash as _, Hasher as _};
+        if source == text {
+            return true;
+        }
+        let mut hasher = std::hash::DefaultHasher::new();
+        (source, text, node.as_str()).hash(&mut hasher);
+        let key = hasher.finish();
+        if let Some((seen, answer)) = self.0.get()
+            && seen == key
+        {
+            return answer;
+        }
+        let answer = source_matches(source, text, node);
+        self.0.set(Some((key, answer)));
+        answer
     }
 }
 

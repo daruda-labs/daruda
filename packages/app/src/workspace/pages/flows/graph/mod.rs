@@ -638,7 +638,8 @@ impl FlowGraphView {
         // returns early when the bytes it read are the ones it has, so a file
         // restored exactly as it was would otherwise never redraw.
         self.text = None;
-        self.form = None;
+        // Kept as a draft: the file may come back, and the typed input with it.
+        self.stash_form(cx);
         cx.notify();
     }
 }

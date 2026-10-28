@@ -93,6 +93,7 @@ impl Render for FlowGraphView {
                             .join(", "),
                     ),
                 )
+                .on_close(cx.listener(|view, _, _, cx| view.dismiss_discarded_drafts(cx)))
             }));
         match &self.state {
             FlowGraphState::Graph { canvas, .. } => {
@@ -105,8 +106,7 @@ impl Render for FlowGraphView {
                 // just clicked — a shift-click on a second card would miss it.
                 let inspector = match self.selection(cx) {
                     Selection::One(_) => match &self.form {
-                        Some(form) => form::render(form, unsaved, status.node_revertable, cx)
-                            .into_any_element(),
+                        Some(form) => form::render(form, &status, cx).into_any_element(),
                         None => form::render_empty(cx).into_any_element(),
                     },
                     Selection::Many(nodes) => form::render_many(nodes.len(), cx).into_any_element(),

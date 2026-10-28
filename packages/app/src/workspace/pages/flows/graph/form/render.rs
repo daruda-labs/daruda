@@ -17,8 +17,7 @@ use super::{KindChoice, NodeForm, Refusal};
 /// that wrote to the file would be a second place that knows how.
 pub(in super::super) fn render(
     form: &NodeForm,
-    dirty: bool,
-    revertable: bool,
+    status: &super::super::form_bridge::FormStatus,
     cx: &mut Context<super::super::FlowGraphView>,
 ) -> impl IntoElement {
     use crate::surface::strings as s;
@@ -123,7 +122,9 @@ pub(in super::super) fn render(
         );
     }
 
-    let can_save = dirty && refusal.is_none();
+    // An untouched form's refusal is about the file as it is, which does not
+    // stop saving the title or another node.
+    let can_save = status.unsaved && (refusal.is_none() || !status.node_local);
     let footer = div()
         .flex()
         .flex_row()
@@ -141,7 +142,7 @@ pub(in super::super) fn render(
         )
         .child(
             button("flow-form-revert", s::flow::form_revert_node())
-                .disabled(!revertable)
+                .disabled(!status.node_revertable)
                 .on_click(cx.listener(|view, _, window, cx| view.revert_selected_node(window, cx))),
         )
         // Deleting the node this form is about, from the form it is about it.

@@ -10,6 +10,7 @@ use super::{FlowGraphView, form};
 
 pub(in crate::workspace) struct FormStatus {
     pub unsaved: bool,
+    pub node_local: bool,
     pub conflict: bool,
     pub node_revertable: bool,
 }
@@ -151,6 +152,7 @@ impl FlowGraphView {
         });
         FormStatus {
             unsaved: self.unsaved_with(local, cx),
+            node_local: local,
             conflict: self.draft_conflict(),
             node_revertable: local || stale,
         }
@@ -189,19 +191,36 @@ impl FlowGraphView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let has_notes =
-            |node: &daruda_flow::NodeId| !form::notes::notes_for(issues, node).is_empty();
-        let selected = self.form.as_ref().map(|form| form.node.clone());
-        if !selected.as_ref().is_some_and(has_notes)
-            && let Some(node) = self.drafts.keys().find(|node| has_notes(node)).cloned()
-        {
-            self.select_node(&node, window, cx);
-        }
-        let notes = self
+        // The engine names a renamed node by its new id; the pane knows it
+        // by the id in the file.
+        let notes_of = |node: &daruda_flow::NodeId, edited: &str| {
+            let notes = form::notes::notes_for(issues, node);
+            if notes.is_empty() && edited != node.as_str() {
+                form::notes::notes_for(issues, &daruda_flow::NodeId::from(edited))
+            } else {
+                notes
+            }
+        };
+        let selected_notes = self
             .form
             .as_ref()
-            .map(|form| form::notes::notes_for(issues, &form.node))
+            .map(|form| notes_of(&form.node, &form.fields(cx).id))
             .unwrap_or_default();
+        let notes = if selected_notes.is_empty()
+            && let Some(node) = self
+                .drafts
+                .iter()
+                .find(|(node, draft)| !notes_of(node, &draft.fields.id).is_empty())
+                .map(|(node, _)| node.clone())
+        {
+            self.select_node(&node, window, cx);
+            self.form
+                .as_ref()
+                .map(|form| notes_of(&form.node, &form.fields(cx).id))
+                .unwrap_or_default()
+        } else {
+            selected_notes
+        };
         self.save_error = Some(message.clone());
         self.set_form_refusal(Some(message), notes, cx);
     }
