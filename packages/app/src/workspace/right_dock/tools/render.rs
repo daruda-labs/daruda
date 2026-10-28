@@ -85,7 +85,11 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
             McpScope::Project => DockSection::ToolsProject,
             McpScope::Local => DockSection::ToolsLocal,
         };
-        let fold = SectionFold::toggleable(snap.sections.is_open(section));
+        let key = crate::workspace::right_dock::section::SectionKey {
+            section,
+            source: Some(target.label().into()),
+        };
+        let fold = SectionFold::toggleable(snap.sections.is_open(key.clone()));
         col = col.child(
             div()
                 .id(SharedString::from(format!(
@@ -101,7 +105,8 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
                         fold,
                         divided: index > 0,
                     }
-                    .render(
+                    .render_keyed(
+                        key,
                         fold.is_open().then(|| rows.into_any_element()),
                         &workspace,
                         cx,
@@ -267,26 +272,14 @@ fn server_row(
                 .debug_selector(|| "mcp-toggle".into())
                 .on_click(move |_, _window, cx| {
                     if let Some(ws) = workspace_toggle.upgrade() {
-                        let n = name_for_toggle.clone();
                         ws.update(cx, |ws, cx| {
-                            if let Some(target) = &toggle_target {
-                                if let Err(error) = target.toggle(&expected) {
-                                    ws.report_error(
-                                    daruda_store::observability::error_report::ErrorReport::new(
-                                        strings::error::mcp_toggle_failed(
-                                            strings::mcp::scope_display(scope),
-                                        ),
-                                    )
-                                    .from_error(&error)
-                                    .at(file!(), line!())
-                                    .build(),
-                                    cx,
-                                );
-                                }
-                                ws.refresh_library(cx);
-                            } else {
-                                ws.toggle_mcp_server(scope, &n, cx);
-                            }
+                            ws.toggle_listed_mcp_server(
+                                scope,
+                                &name_for_toggle,
+                                toggle_target.as_ref(),
+                                &expected,
+                                cx,
+                            )
                         });
                     }
                 }),
@@ -335,8 +328,7 @@ fn row_actions(
                     if let Some(ws) = workspace_edit.upgrade() {
                         let n = name_for_edit.clone();
                         ws.update(cx, |ws, cx| {
-                            ws.right_views.library.selected_target = edit_target.clone();
-                            ws.open_edit_mcp_server(scope, n, window, cx)
+                            ws.open_edit_mcp_server(scope, n, edit_target.clone(), window, cx)
                         });
                     }
                 }),
@@ -349,8 +341,7 @@ fn row_actions(
                     if let Some(ws) = workspace_delete.upgrade() {
                         let n = name_for_delete.clone();
                         ws.update(cx, |ws, cx| {
-                            ws.right_views.library.selected_target = target.clone();
-                            ws.open_delete_mcp_server_confirm(scope, n, window, cx)
+                            ws.open_delete_mcp_server_confirm(scope, n, target.clone(), window, cx)
                         });
                     }
                 }),

@@ -2,13 +2,13 @@
 
 use gpui::Context;
 
-use super::section::DockSection;
+use super::section::SectionKey;
 use crate::workspace::Workspace;
 
 impl Workspace {
     pub(in crate::workspace) fn toggle_right_dock_section(
         &mut self,
-        section: DockSection,
+        section: impl Into<SectionKey>,
         cx: &mut Context<Self>,
     ) {
         self.right_views.sections.toggle(section);
@@ -18,7 +18,7 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests {
-    use super::DockSection;
+    use crate::workspace::right_dock::section::DockSection;
     use crate::workspace::right_dock::section::DockSections;
 
     #[test]

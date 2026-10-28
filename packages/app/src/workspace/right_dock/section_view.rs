@@ -2,7 +2,7 @@
 
 use gpui::{AnyElement, App, Div, IntoElement, SharedString, WeakEntity, div, prelude::*, px};
 
-use super::section::DockSection;
+use super::section::{DockSection, SectionKey};
 use crate::ui::{Sizable as _, disclosure, icons, theme};
 use crate::workspace::Workspace;
 
@@ -45,6 +45,19 @@ impl ScopeSection {
         workspace: &WeakEntity<Workspace>,
         cx: &App,
     ) -> Div {
+        let key = self.section.into();
+        self.render_keyed(key, body, workspace, cx)
+    }
+
+    /// Like [`Self::render`], folding `key` instead of the whole section —
+    /// for sections that draw one block per source.
+    pub fn render_keyed(
+        self,
+        key: SectionKey,
+        body: Option<AnyElement>,
+        workspace: &WeakEntity<Workspace>,
+        cx: &App,
+    ) -> Div {
         let t = theme::current(cx);
         let Self {
             section,
@@ -56,8 +69,16 @@ impl ScopeSection {
         let is_open = fold.is_open();
         let workspace = workspace.clone();
         let show_disclosure = fold != SectionFold::Fixed;
+        // Source blocks share their section's variant, so their ids are
+        // scoped by the source as well.
+        let id: gpui::ElementId = match &key.source {
+            None => ("dock-section", section as usize).into(),
+            Some(source) => {
+                gpui::SharedString::from(format!("dock-section-{section:?}-{source}")).into()
+            }
+        };
         let summary = div()
-            .id(("dock-section", section as usize))
+            .id(id)
             .debug_selector(move || format!("dock-section-{section:?}"))
             .flex()
             .flex_row()
@@ -94,7 +115,7 @@ impl ScopeSection {
             .when(fold != SectionFold::Fixed, |row| {
                 row.cursor_pointer().on_click(move |_, _window, cx| {
                     if let Some(ws) = workspace.upgrade() {
-                        ws.update(cx, |ws, cx| ws.toggle_right_dock_section(section, cx));
+                        ws.update(cx, |ws, cx| ws.toggle_right_dock_section(key.clone(), cx));
                     }
                 })
             });
