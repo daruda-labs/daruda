@@ -71,9 +71,10 @@ fn field_for(kind: &ValidationKind) -> Option<FormField> {
         K::EmptyPrompt | K::MissingPromptFile { .. } | K::PromptFileOutsideFlowDir { .. } => {
             FormField::Prompt
         }
-        K::DuplicateOutput | K::OutputEscapesRunDir | K::OutputInReservedDir { .. } => {
-            FormField::Output
-        }
+        K::DuplicateOutput
+        | K::OutputEscapesRunDir
+        | K::OutputInReservedDir { .. }
+        | K::OutputAtReservedPath { .. } => FormField::Output,
         K::RepairWithoutFailureContext | K::RepairWithoutAgent => FormField::Fix,
         K::RerunNotAnAncestor { .. } => FormField::Rerun,
         // A field the schema does not have, or a pair where one silently wins:
@@ -131,6 +132,20 @@ mod tests {
             crate::surface::strings::flow::issue(&ValidationKind::AgentIdWithoutMode),
             "the wording is the one wording site's, not a second copy"
         );
+    }
+
+    #[test]
+    fn an_engine_path_collision_points_at_the_output_field() {
+        let notes = notes_for(
+            &[issue(
+                Some("design"),
+                ValidationKind::OutputAtReservedPath { reserved: "run.md" },
+            )],
+            &"design".into(),
+        );
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].field, FormField::Output);
+        assert!(notes[0].message.contains("run.md"));
     }
 
     /// The trap: `DuplicateOutput` names *one* of the two nodes, and pointing at

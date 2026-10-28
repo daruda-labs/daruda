@@ -197,6 +197,9 @@ pub(crate) fn issue(kind: &daruda_flow::error::ValidationKind) -> String {
         K::OutputInReservedDir { reserved } => {
             std::borrow::Cow::<str>::Owned(s::flow::issue_output_in_reserved_dir(reserved))
         }
+        K::OutputAtReservedPath { reserved } => {
+            std::borrow::Cow::<str>::Owned(s::flow::issue_output_at_reserved_path(reserved))
+        }
         K::DuplicateId => std::borrow::Cow::<str>::Owned(s::flow::issue_duplicate_id()),
         K::UnknownDep { dep } => std::borrow::Cow::<str>::Owned(s::flow::issue_unknown_dep(dep)),
         K::Cycle => std::borrow::Cow::<str>::Owned(s::flow::issue_cycle()),

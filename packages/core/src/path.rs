@@ -67,11 +67,17 @@ pub fn strip_root(path: &Path, root: &Path) -> Option<PathBuf> {
     if let Ok(rel) = path.strip_prefix(&root) {
         return Some(rel.to_path_buf());
     }
-    canonicalize(path)
-        .ok()?
-        .strip_prefix(&root)
-        .ok()
-        .map(Path::to_path_buf)
+    // Windows simplification can remove the verbatim prefix from a short
+    // root while retaining it on a long child. Compare OS-canonical forms
+    // without stripping prefixes or changing special filename semantics.
+    #[cfg(windows)]
+    let (path, root) = (
+        std::fs::canonicalize(path).ok()?,
+        std::fs::canonicalize(root).ok()?,
+    );
+    #[cfg(not(windows))]
+    let path = canonicalize(path).ok()?;
+    path.strip_prefix(&root).ok().map(Path::to_path_buf)
 }
 
 /// Whether `path` is `root` or lies under it — see [`strip_root`].

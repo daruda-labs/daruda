@@ -357,6 +357,8 @@ mod left_open;
 mod lifecycle;
 mod ordering;
 mod parallel;
+#[cfg(unix)]
+mod paths;
 mod prompts;
 mod quit;
 mod records;

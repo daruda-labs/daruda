@@ -1413,6 +1413,7 @@ flow:
   issue_reserved_node_id: "repair 세션이 기록되는 id를 사용하고 있습니다"
   issue_invalid_node_id: "파일명으로 쓸 수 없는 id입니다 — 영문자, 숫자, -, _ 만 사용하세요"
   issue_output_in_reserved_dir: "엔진이 자체 파일을 두는 %{reserved}/ 안에 씁니다"
+  issue_output_at_reserved_path: "엔진이 자체 파일용으로 예약한 %{reserved} 경로를 사용합니다"
   issue_duplicate_id: "다른 노드와 id가 같습니다"
   issue_unknown_dep: "어느 노드도 선언하지 않은 %{dep}에 의존합니다"
   issue_cycle: "노드들이 서로 순환 의존해서 먼저 실행할 노드가 없습니다"

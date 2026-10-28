@@ -20,8 +20,7 @@ use crate::parse::{SchemaKind, SchemaSubset};
 
 /// Whether a path reaches outside the directory it is resolved against.
 fn climbs_out(path: &Path) -> bool {
-    path.components()
-        .any(|c| matches!(c, Component::ParentDir | Component::RootDir))
+    !crate::path_rules::stays_relative(path)
 }
 
 /// This build runs one `version`, and says so rather than guessing at a file
@@ -111,21 +110,19 @@ pub(super) fn output_stays_inside_the_run_dir(
 
 /// `./logs/x.md` names the same directory, so leading `.` components are
 /// skipped rather than trusted — and so does `LOGS/x.md` on the
-/// case-insensitive filesystem macOS ships by default, which is this app's
-/// primary target. Compared exactly, that flow validates and then writes into
-/// the engine's own directory, which is the whole thing this rule exists to
-/// stop.
+/// case-insensitive filesystem macOS ships by default. Engine-owned files
+/// are reserved as parents too, so an output cannot turn `run.md` into a
+/// directory and prevent the report from being written.
 pub(super) fn output_avoids_the_engines_dir(
     node: &NodeId,
     output: &Path,
     issues: &mut Vec<ValidationIssue>,
 ) {
-    if output
+    let first = output
         .components()
         .find(|c| !matches!(c, Component::CurDir))
-        .and_then(|c| c.as_os_str().to_str())
-        .is_some_and(|c| c.eq_ignore_ascii_case(crate::schedule::LOG_DIR_NAME))
-    {
+        .and_then(|c| c.as_os_str().to_str());
+    if first.is_some_and(|c| c.eq_ignore_ascii_case(crate::schedule::LOG_DIR_NAME)) {
         issues.push(issue(
             node.clone(),
             ValidationKind::OutputInReservedDir {
@@ -135,6 +132,16 @@ pub(super) fn output_avoids_the_engines_dir(
                 "`{}` is reserved for the engine's own artifacts",
                 crate::schedule::LOG_DIR_NAME
             ),
+        ));
+    } else if let Some(reserved) = [crate::resume::RUN_SPEC_FILE, crate::record::RUN_REPORT_FILE]
+        .into_iter()
+        .chain(crate::marker::MARKER_NAMES)
+        .find(|reserved| first.is_some_and(|c| c.eq_ignore_ascii_case(reserved)))
+    {
+        issues.push(issue(
+            node.clone(),
+            ValidationKind::OutputAtReservedPath { reserved },
+            format!("`{reserved}` is reserved for the engine's own files"),
         ));
     }
 }

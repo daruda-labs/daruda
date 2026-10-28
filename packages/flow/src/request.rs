@@ -7,7 +7,7 @@ use crate::error::{ValidationIssue, ValidationKind};
 use crate::model::{AgentFail, NodeKind, PermissionPolicy, Prompt};
 use daruda_acp::LaunchSpec;
 use std::collections::{HashMap, HashSet};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 /// The surface that started a flow, preserved across resumes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -185,13 +185,16 @@ fn check_node_cwd(
         return;
     };
     let resolved = request.cwd.join(relative);
-    if !resolved.is_dir() {
+    if let Err(error) = crate::path_rules::check_cwd(&request.cwd, &resolved) {
         issues.push(ValidationIssue {
             node: Some(node.id.clone()),
-            kind: ValidationKind::CwdMissing {
-                path: resolved.display().to_string(),
+            kind: match error {
+                crate::path_rules::CwdError::Outside { .. } => ValidationKind::CwdEscapesRunCwd,
+                crate::path_rules::CwdError::Io(_) => ValidationKind::CwdMissing {
+                    path: resolved.display().to_string(),
+                },
             },
-            message: format!("`{}` is not a directory", resolved.display()),
+            message: format!("invalid `cwd` at {}: {error}", resolved.display()),
         });
     }
 }
@@ -439,14 +442,7 @@ fn check_file(
     let Prompt::File(relative) = prompt else {
         return;
     };
-    if relative.is_absolute()
-        || relative.components().any(|c| {
-            matches!(
-                c,
-                Component::ParentDir | Component::RootDir | Component::Prefix(_)
-            )
-        })
-    {
+    if !crate::path_rules::stays_relative(relative) {
         issues.push(ValidationIssue {
             node: Some(node.clone()),
             kind: ValidationKind::PromptFileOutsideFlowDir {

@@ -4,6 +4,40 @@
 
 use super::*;
 
+#[cfg(unix)]
+#[test]
+fn a_node_cwd_link_outside_the_worktree_is_rejected() {
+    let dir = tempfile::tempdir().expect("worktree");
+    let outside = tempfile::tempdir().expect("outside");
+    daruda_core::path::symlink(outside.path(), dir.path().join("linked")).expect("link");
+    let request = request_for(
+        "version: 1\nnodes:\n  - id: a\n    kind: command\n    cwd: linked\n    run: 'true'\n",
+        &[],
+        dir.path(),
+    );
+    let issues = validate_request(&request);
+    assert!(
+        issues
+            .iter()
+            .any(|i| i.kind == ValidationKind::CwdEscapesRunCwd),
+        "{issues:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_node_cwd_link_inside_the_worktree_is_allowed() {
+    let dir = tempfile::tempdir().expect("worktree");
+    std::fs::create_dir(dir.path().join("actual")).expect("directory");
+    daruda_core::path::symlink(dir.path().join("actual"), dir.path().join("linked")).expect("link");
+    let request = request_for(
+        "version: 1\nnodes:\n  - id: a\n    kind: command\n    cwd: linked\n    run: 'true'\n",
+        &[],
+        dir.path(),
+    );
+    assert!(validate_request(&request).is_empty());
+}
+
 /// `execute` blocks, so a host runs it on a thread of its own and the
 /// request has to cross. The two callbacks are the only thing that could
 /// stop it, which is why they are declared `+ Send`.
@@ -16,6 +50,26 @@ fn a_request_and_its_report_can_cross_a_thread() {
 
 use crate::error::ValidationKind;
 use crate::load::load;
+
+#[cfg(windows)]
+#[test]
+fn a_long_node_cwd_inside_the_worktree_is_allowed() {
+    use std::os::windows::ffi::OsStrExt as _;
+
+    let dir = tempfile::tempdir().expect("worktree");
+    let root = daruda_core::path::canonicalize(dir.path()).expect("worktree root");
+    let mut relative = std::path::PathBuf::new();
+    while root.join(&relative).as_os_str().encode_wide().count() <= 300 {
+        relative.push("nested-directory");
+    }
+    std::fs::create_dir_all(root.join(&relative)).expect("long directory");
+    let mut file = crate::parse::parse_flow_file(AGENT_FLOW).expect("flow");
+    file.nodes[0].cwd = Some(relative);
+    let text = yaml_serde::to_string(&file).expect("serialize path");
+    let request = request_for(&text, &["claude"], dir.path());
+
+    assert!(validate_request(&request).is_empty());
+}
 
 fn spec(command: &str) -> daruda_acp::LaunchSpec {
     daruda_acp::LaunchSpec {

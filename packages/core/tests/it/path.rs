@@ -129,6 +129,43 @@ fn two_spellings_of_one_path_canonicalize_alike() {
     assert_eq!(direct, roundabout);
 }
 
+#[cfg(windows)]
+#[test]
+fn a_long_canonical_child_is_within_a_short_regular_root() {
+    use std::os::windows::ffi::OsStrExt as _;
+
+    let temp = tempfile::tempdir().unwrap();
+    let root = canonicalize(temp.path()).unwrap();
+    assert!(!root.to_string_lossy().starts_with(r"\\?\"));
+    let extended = std::fs::canonicalize(&root).unwrap();
+    let mut relative = std::path::PathBuf::new();
+    while extended.join(&relative).as_os_str().encode_wide().count() <= 300 {
+        relative.push("nested-directory");
+    }
+    std::fs::create_dir_all(extended.join(&relative)).unwrap();
+    let child = canonicalize(extended.join(&relative)).unwrap();
+    assert!(child.to_string_lossy().starts_with(r"\\?\"));
+
+    assert!(is_within(&child, &root));
+    assert_eq!(strip_root(&child, &root), Some(relative.clone()));
+    assert_eq!(strip_root(&root.join(&relative), &root), Some(relative));
+    assert!(!is_within(&root, &child));
+}
+
+#[cfg(windows)]
+#[test]
+fn verbatim_dot_names_do_not_alias_regular_names_during_containment() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = canonicalize(temp.path()).unwrap();
+    std::fs::create_dir(root.join("repo")).unwrap();
+    let extended = std::fs::canonicalize(&root).unwrap();
+    let distinct = extended.join("repo.").join("child");
+    std::fs::create_dir_all(&distinct).unwrap();
+
+    assert!(!is_within(&distinct, &root.join("repo")));
+    assert_eq!(strip_root(&distinct, &root.join("repo")), None);
+}
+
 #[test]
 fn canonicalizing_a_missing_path_is_an_error() {
     let temp = tempfile::tempdir().unwrap();

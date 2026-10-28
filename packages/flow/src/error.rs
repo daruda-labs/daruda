@@ -94,6 +94,8 @@ pub enum ValidationKind {
     /// in. Both would then write the same names, and archiving an output
     /// onto itself leaves the failed attempt's file live.
     OutputInReservedDir { reserved: &'static str },
+    /// An output uses an engine-owned file as its leaf or a parent.
+    OutputAtReservedPath { reserved: &'static str },
     /// Two nodes share an id.
     DuplicateId,
     /// A node depends on an id no node declares.

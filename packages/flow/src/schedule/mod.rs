@@ -30,7 +30,7 @@ use std::pin::Pin;
 /// with this id would collide; `crate::validate` rejects that.
 pub const FIX_SESSION_ID: &str = "__fix__";
 
-/// The one name inside a run directory the engine owns. Archive and runner
+/// The directory for the engine's evidence. Archive and runner
 /// artifacts land here under names built from node ids, so a node writing
 /// its `output` here could collide with them; `crate::validate` rejects
 /// that, reading this same constant.
@@ -40,6 +40,7 @@ pub const LOG_DIR_NAME: &str = "logs";
 /// wording is one string per site rather than a literal at each `Err` arm.
 mod doing {
     pub const OUTPUT_PARENT: &str = "creating the output directory";
+    pub const CHECK_CWD: &str = "validating the node working directory";
     pub const READ_PROMPT: &str = "reading the prompt file";
     pub const READ_HINT: &str = "reading the hint file";
     pub const ARCHIVE: &str = "archiving the failed attempt";
@@ -343,6 +344,17 @@ impl<'a> Run<'a> {
                 // established it is inside the run's — which is what keeps
                 // the run's single lock covering everywhere it works.
                 let cwd = self.node_cwd(node);
+                // Earlier nodes can replace a directory with a link after
+                // submission, so containment must hold for every attempt.
+                if let Err(error) = crate::path_rules::check_cwd(self.cwd, &cwd) {
+                    return Err(io_at(
+                        id,
+                        self.next_attempt(id),
+                        doing::CHECK_CWD,
+                        cwd,
+                        std::io::Error::other(error),
+                    ));
+                }
                 // A local because `ctx` borrows it; when there is no output
                 // there is no contract, whatever the node's kind.
                 let contract = output.as_deref().map(|p| {
@@ -556,7 +568,7 @@ impl<'a> Run<'a> {
     /// The spelling the file used, not the resolved form — a runner shows
     /// this to a person and reports it in the record, and a canonical path
     /// with every symlink expanded is not what they wrote. Overlap safety
-    /// asks the resolved question separately, in `working_tree_of`.
+    /// asks the resolved question separately in `ready::Reachability`.
     fn node_cwd(&self, node: &Node) -> PathBuf {
         match &node.cwd {
             Some(relative) => self.cwd.join(relative),

@@ -18,6 +18,7 @@ const CANCELED: &str = "CANCELED";
 /// Written like the three above, but read like `Crashed`: the run said how
 /// it ended, and what it said is "not finished".
 const STALLED: &str = "STALLED";
+pub(crate) const MARKER_NAMES: [&str; 4] = [DONE, FAILED, CANCELED, STALLED];
 
 const WRITE_MARKER: &str = "recording how the run ended";
 const CLEAR_MARKER: &str = "clearing how the run last ended";
@@ -187,7 +188,7 @@ fn lock_status(run_dir: &Path, lock_dir: Option<&Path>, is_alive: IsAlive<'_>) -
 /// Remove every marker, so a resumed run no longer reads as how it last
 /// ended. A marker already gone is not an error.
 pub(crate) fn clear_markers(run_dir: &Path) -> Result<(), FlowIoError> {
-    for name in [DONE, FAILED, CANCELED, STALLED] {
+    for name in MARKER_NAMES {
         let path = run_dir.join(name);
         match std::fs::remove_file(&path) {
             Err(source) if source.kind() != std::io::ErrorKind::NotFound => {

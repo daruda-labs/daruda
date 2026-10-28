@@ -3,6 +3,56 @@
 //! failure names the rule rather than the parser.
 
 use super::*;
+
+#[test]
+fn engine_owned_paths_cannot_be_outputs_or_output_parents() {
+    for reserved in [
+        "run.yaml", "run.md", "DONE", "FAILED", "CANCELED", "STALLED",
+    ] {
+        for output in [
+            reserved.to_string(),
+            format!("./{reserved}/out.md"),
+            reserved.to_lowercase(),
+        ] {
+            let text = format!(
+                "version: 1\ndefaults: {{ agent: {{ id: claude }} }}\nnodes:\n  - id: a\n    kind: agent\n    prompt: write\n    output: {output}\n"
+            );
+            assert!(
+                crate::load(&text, None).is_err(),
+                "accepted engine path {output}"
+            );
+        }
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_prefixed_node_paths_are_rejected_at_load() {
+    for path in [
+        r"C:out.md",
+        r"C:\out.md",
+        r"\out.md",
+        r"\\server\share\out.md",
+        r"\\?\C:\out.md",
+    ] {
+        for field in ["output", "cwd"] {
+            let mut file = crate::parse::parse_flow_file(
+                "version: 1\ndefaults: { agent: { id: claude } }\nnodes:\n  - id: a\n    kind: agent\n    prompt: write\n    output: out.md\n"
+            ).expect("fixture");
+            if field == "cwd" {
+                file.nodes[0].cwd = Some(path.into());
+            } else if let crate::parse::NodeKindFile::Agent { output, .. } = &mut file.nodes[0].kind
+            {
+                *output = path.into();
+            }
+            let text = yaml_serde::to_string(&file).expect("serialize path");
+            assert!(
+                crate::load(&text, None).is_err(),
+                "accepted {field}: {path}"
+            );
+        }
+    }
+}
 use crate::error::{ValidationIssue, ValidationKind};
 use crate::graph::FlowGraph;
 use crate::parse::parse_flow_file;

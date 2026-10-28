@@ -36,6 +36,7 @@ pub mod model;
 pub(crate) mod archive;
 pub(crate) mod contract;
 pub mod parse;
+mod path_rules;
 pub(crate) mod resolve;
 pub(crate) mod template;
 pub(crate) mod validate;

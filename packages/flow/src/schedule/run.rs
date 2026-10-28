@@ -20,7 +20,7 @@ use std::path::Path;
 
 /// The resolved spec, left in the run directory as a flow file that would
 /// produce the same run again.
-const RUN_YAML: &str = "run.yaml";
+use crate::resume::RUN_SPEC_FILE as RUN_YAML;
 const WRITE_SPEC: &str = "recording the resolved spec";
 
 /// What the run did, left beside the marker that says it is over.
