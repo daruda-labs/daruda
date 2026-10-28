@@ -8,6 +8,12 @@ use gpui::{App, Context, Window};
 
 use super::{FlowGraphView, form};
 
+pub(in crate::workspace) struct FormStatus {
+    pub unsaved: bool,
+    pub conflict: bool,
+    pub node_revertable: bool,
+}
+
 impl FlowGraphView {
     pub(in crate::workspace) fn set_catalog(
         &mut self,
@@ -119,12 +125,35 @@ impl FlowGraphView {
 
     /// Pending title or inspector edits gate Run and the close confirmation.
     pub(in crate::workspace) fn has_unsaved_form(&self, cx: &App) -> bool {
-        self.name_is_dirty(cx)
-            || !self.drafts.is_empty()
-            || self
-                .form
-                .as_ref()
-                .is_some_and(|form| form.has_local_input(cx))
+        let local = self
+            .form
+            .as_ref()
+            .is_some_and(|form| form.has_local_input(cx));
+        self.unsaved_with(local, cx)
+    }
+
+    fn unsaved_with(&self, local: bool, cx: &App) -> bool {
+        local || self.name_is_dirty(cx) || !self.drafts.is_empty()
+    }
+
+    /// What the Save and Revert buttons need, read once per frame. A form
+    /// built from an older file can be reverted even with its boxes back at
+    /// their original values: the conflict banner asks for exactly that.
+    pub(in crate::workspace) fn form_status(&self, cx: &App) -> FormStatus {
+        let local = self
+            .form
+            .as_ref()
+            .is_some_and(|form| form.has_local_input(cx));
+        let stale = self.form.as_ref().is_some_and(|form| {
+            self.text
+                .as_deref()
+                .is_none_or(|text| !form.source_matches(text))
+        });
+        FormStatus {
+            unsaved: self.unsaved_with(local, cx),
+            conflict: self.draft_conflict(),
+            node_revertable: local || stale,
+        }
     }
 
     /// Open or close the inspector's agent-override block.
@@ -150,6 +179,33 @@ impl FlowGraphView {
         }
     }
 
+    /// Put a refused save on the pane. Save writes every draft, so when the
+    /// issues name another drafted node rather than the selected one, that node
+    /// is selected and its boxes say why.
+    pub(in crate::workspace) fn show_save_refusal(
+        &mut self,
+        message: String,
+        issues: &[daruda_flow::error::ValidationIssue],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let has_notes =
+            |node: &daruda_flow::NodeId| !form::notes::notes_for(issues, node).is_empty();
+        let selected = self.form.as_ref().map(|form| form.node.clone());
+        if !selected.as_ref().is_some_and(has_notes)
+            && let Some(node) = self.drafts.keys().find(|node| has_notes(node)).cloned()
+        {
+            self.select_node(&node, window, cx);
+        }
+        let notes = self
+            .form
+            .as_ref()
+            .map(|form| form::notes::notes_for(issues, &form.node))
+            .unwrap_or_default();
+        self.save_error = Some(message.clone());
+        self.set_form_refusal(Some(message), notes, cx);
+    }
+
     /// Discard every pending edit — the title and all node drafts — and build
     /// the selected node's form again from the file. The header's Revert.
     pub(in crate::workspace) fn rebuild_form(
@@ -158,6 +214,7 @@ impl FlowGraphView {
         cx: &mut Context<Self>,
     ) {
         self.drafts.clear();
+        self.discarded.clear();
         self.name_input.update(cx, |input, cx| {
             input.set_value(self.saved_name.clone(), window, cx)
         });

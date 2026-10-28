@@ -1338,9 +1338,10 @@ async fn adding_a_node_keeps_the_previous_draft(cx: &mut TestAppContext) {
     );
 }
 
-/// A draft whose node disappeared still gates Run and can be discarded.
+/// A draft whose node left the file cannot be shown or saved, so it is dropped
+/// and named instead of blocking every Save as a conflict.
 #[gpui::test]
-async fn a_removed_node_keeps_its_draft_until_revert(cx: &mut TestAppContext) {
+async fn a_removed_node_discards_its_draft_and_says_so(cx: &mut TestAppContext) {
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
@@ -1373,9 +1374,13 @@ async fn a_removed_node_keeps_its_draft_until_revert(cx: &mut TestAppContext) {
         view.read_with(&vcx, |v, _| v.form().is_none()),
         "the node it was about is gone, so the inspector has nothing to show"
     );
-    assert!(view.read_with(&vcx, |v, cx| v.has_unsaved_form(cx) && v.draft_conflict()));
+    view.read_with(&vcx, |v, cx| {
+        assert!(!v.has_unsaved_form(cx));
+        assert!(!v.draft_conflict());
+        assert_eq!(v.discarded_drafts(), [daruda_flow::NodeId::from("design")]);
+    });
     view.update_in(&mut vcx, |v, window, cx| v.rebuild_form(window, cx));
-    assert!(!view.read_with(&vcx, |v, cx| v.has_unsaved_form(cx)));
+    assert!(view.read_with(&vcx, |v, _| v.discarded_drafts().is_empty()));
 }
 
 /// A marquee catches several nodes, and one Delete takes all of them — with the

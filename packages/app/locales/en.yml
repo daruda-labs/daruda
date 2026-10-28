@@ -1664,7 +1664,10 @@ session_host:
 flow:
   form_prompt_conflict: "The node changed while this editor was open. Your text is kept here. Copy it before canceling and reopening the editor."
   form_file_picker_conflict: "The node changed while choosing a file. Select the file again for the current node."
+  form_file_picker_failed: "The file picker could not be opened."
+  form_drafts_discarded: "Unsaved edits to %{nodes} were discarded because the node was removed or renamed outside this editor."
   form_saved_choice: "%{value} (saved; not in available choices)"
+  form_custom_value: "%{value} (custom)"
   form_custom_choice: "Custom value…"
   form_follow_defaults: "Use defaults"
   form_execution_settings: "Execution settings"
@@ -1680,6 +1683,7 @@ flow:
   form_no_deps: "Starts immediately"
   form_remove_dep: "Remove %{node}"
   form_dep_chip: "%{node} ×"
+  form_agent_choice: "%{name} (%{id})"
   runs_tab: "Run history"
   scope_current: "%{name} (Current)"
   scope_hint: "Browse and run flows in a worktree without switching the active terminal"
@@ -1855,6 +1859,8 @@ flow:
   form_timeout_unreadable: "%{text} is not a length of time — try 30s or 5m."
   form_save: "Save all"
   form_revert: "Revert all"
+  # Inspector footer: discards only the selected node's edits.
+  form_revert_node: "Revert this node"
   # What the inspector says when a marquee took several cards.
   form_many_selected: "%{n} nodes selected — fields show for one at a time."
   # What the inspector says with nothing selected.

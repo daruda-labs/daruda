@@ -3,6 +3,7 @@ use super::super::FlowGraphView;
 use crate::surface::strings as s;
 use daruda_store::observability::{error_report::ErrorReport, log_writer::LogWriter};
 use gpui::{Context, Window};
+use std::path::Path;
 
 impl FlowGraphView {
     pub(in crate::workspace) fn pick_prompt_file(
@@ -27,12 +28,7 @@ impl FlowGraphView {
                     if let Some(path) = paths.first() {
                         match daruda_core::path::strip_root(path, &root) {
                             Some(relative) => {
-                                if !view.apply_prompt_edit(
-                                    &edit,
-                                    relative.to_string_lossy().into_owned(),
-                                    window,
-                                    cx,
-                                ) {
+                                if !view.apply_prompt_edit(&edit, portable(&relative), window, cx) {
                                     view.set_save_error(
                                         Some(s::flow::form_file_picker_conflict()),
                                         cx,
@@ -43,17 +39,12 @@ impl FlowGraphView {
                         }
                     }
                 }
-                Ok(Err(error)) => {
-                    LogWriter::log(
-                        ErrorReport::new("Flow prompt file picker failed")
-                            .from_error(error.root_cause())
-                            .at(file!(), line!())
-                            .build(),
-                    );
-                    view.set_save_error(Some(error.to_string()), cx);
-                }
+                Ok(Err(error)) => cx.emit(super::super::FlowGraphEvent::PromptPickerFailed {
+                    detail: format!("{error:#}"),
+                }),
                 _ => {}
             }) {
+                // The view is gone, so there is no workspace path to report on.
                 LogWriter::log(
                     ErrorReport::new("Flow prompt picker lost its window")
                         .from_error(error.root_cause())
@@ -66,5 +57,23 @@ impl FlowGraphView {
     }
 }
 
+/// The path as the flow file stores it: `/`-separated on every OS, so a flow
+/// authored on Windows resolves the same file on macOS and Linux.
+fn portable(relative: &Path) -> String {
+    relative
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stored_paths_use_forward_slashes() {
+        let relative: std::path::PathBuf = ["prompts", "nested", "plan.md"].iter().collect();
+        assert_eq!(portable(&relative), "prompts/nested/plan.md");
+    }
+}

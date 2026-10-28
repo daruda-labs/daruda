@@ -75,8 +75,6 @@ impl Workspace {
             });
             return false;
         }
-        // The name the notes are filtered by — `node` moves into the closure.
-        let node_id = view.read(cx).form().map(|form| form.node.clone());
         // Cleared before the attempt so what the banner shows is always about the
         // save the person just asked for.
         view.update(cx, |view, cx| {
@@ -110,19 +108,14 @@ impl Workspace {
             }
             Err(refusal) => {
                 let message = refusal.message();
-                // The boxes the issues name, for the node this form is about.
-                let notes = match &refusal {
+                let issues = match &refusal {
                     crate::workspace::flow_file_ops::EditRefusal::WouldNotLoad {
                         issues, ..
-                    } => node_id
-                        .as_ref()
-                        .map(|node| super::graph::form::notes::notes_for(issues, node))
-                        .unwrap_or_default(),
+                    } => issues.clone(),
                     _ => Vec::new(),
                 };
                 view.update(cx, |view, cx| {
-                    view.set_save_error(Some(message.clone()), cx);
-                    view.set_form_refusal(Some(message), notes, cx)
+                    view.show_save_refusal(message, &issues, window, cx)
                 });
             }
         }
@@ -379,6 +372,22 @@ impl Workspace {
             .and_then(|text| daruda_flow::parse::parse_flow_file(text).ok())
             .map(|file| super::graph::form::apply::dependents_outside(&file, going))
             .unwrap_or(0)
+    }
+
+    pub(in crate::workspace) fn report_prompt_picker_failure(
+        &mut self,
+        detail: &str,
+        cx: &mut Context<Self>,
+    ) {
+        use daruda_store::observability::error_report::ErrorReport;
+        self.report_error(
+            ErrorReport::new(s::flow::form_file_picker_failed())
+                .with_context("error", detail)
+                .dedup("flow.prompt_picker")
+                .at(file!(), line!())
+                .build(),
+            cx,
+        );
     }
 
     /// Throw the form's edits away and read the node again from the file.

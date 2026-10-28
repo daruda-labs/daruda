@@ -282,6 +282,9 @@ impl Workspace {
                 }
             }
             FlowGraphEvent::TogglePins => self.toggle_flow_pins(id, cx),
+            FlowGraphEvent::PromptPickerFailed { detail } => {
+                self.report_prompt_picker_failure(detail, cx)
+            }
             FlowGraphEvent::Validate => {
                 // Same as the ▶ above: a refused validate has already said so
                 // on screen, to the person who pressed the button.

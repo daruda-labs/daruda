@@ -220,7 +220,9 @@ impl NodeForm {
                     choice::Choice::new(
                         input,
                         vec![catalog::inherited_option(None)],
-                        6 + index as isize * 2,
+                        // The id picker sits above the overrides toggle (6);
+                        // model and mode sit below it.
+                        [4, 7, 9][index],
                         window,
                         cx,
                     )

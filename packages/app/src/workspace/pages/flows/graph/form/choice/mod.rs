@@ -15,6 +15,9 @@ pub(in crate::workspace) struct Choice {
     pub(super) input: Entity<InputState>,
     pub(super) select: Entity<SelectState>,
     options: Vec<SelectOption>,
+    /// The file's value when the form was built; any other unlisted value
+    /// is the person's own entry, not something saved.
+    saved: String,
     tab: isize,
     _subscriptions: Vec<Subscription>,
 }
@@ -28,7 +31,8 @@ impl Choice {
         cx: &mut Context<Self>,
     ) -> Self {
         let value = input.read(cx).value().trim().to_string();
-        let items = with_saved(&options, &value);
+        let items = with_saved(&options, &value, &value);
+        let value_of_saved = value.clone();
         let selected = value.into();
         let select =
             cx.new(|cx| state_with_options(items, Some(&selected), window, cx).searchable(true));
@@ -44,6 +48,7 @@ impl Choice {
             input,
             select,
             options,
+            saved: value_of_saved,
             tab,
             _subscriptions: subscriptions,
         }
@@ -89,7 +94,7 @@ impl Choice {
             .selected_value()
             .is_some_and(|value| value.as_ref() == CUSTOM);
         let value = self.input.read(cx).value().trim().to_string();
-        let items = with_saved(&self.options, &value);
+        let items = with_saved(&self.options, &value, &self.saved);
         let selected = if custom { CUSTOM.to_string() } else { value }.into();
         self.select.update(cx, |select, cx| {
             select.set_items(items, window, cx);
@@ -100,13 +105,15 @@ impl Choice {
     }
 }
 
-fn with_saved(options: &[SelectOption], saved: &str) -> Vec<SelectOption> {
+fn with_saved(options: &[SelectOption], value: &str, saved: &str) -> Vec<SelectOption> {
     let mut items = options.to_vec();
-    if !items.iter().any(|item| item.value.as_ref() == saved) {
-        items.push(SelectOption::new(
-            saved.to_string(),
-            s::flow::form_saved_choice(saved),
-        ));
+    if !items.iter().any(|item| item.value.as_ref() == value) {
+        let label = if value == saved {
+            s::flow::form_saved_choice(value)
+        } else {
+            s::flow::form_custom_value(value)
+        };
+        items.push(SelectOption::new(value.to_string(), label));
     }
     items.push(SelectOption::new(CUSTOM, s::flow::form_custom_choice()));
     items

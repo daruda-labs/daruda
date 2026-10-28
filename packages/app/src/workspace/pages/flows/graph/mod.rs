@@ -124,6 +124,11 @@ pub(in crate::workspace) enum FlowGraphEvent {
         out_of: NodeId,
         into: NodeId,
     },
+    /// The native prompt-file picker failed. A failure belongs to the
+    /// workspace's toast and log, which the view cannot reach.
+    PromptPickerFailed {
+        detail: String,
+    },
 }
 
 pub(in crate::workspace) struct FlowGraphView {
@@ -154,6 +159,9 @@ pub(in crate::workspace) struct FlowGraphView {
     /// which must not create entities.
     form: Option<form::NodeForm>,
     drafts: std::collections::BTreeMap<NodeId, form::NodeDraft>,
+    /// Nodes whose drafts a reload dropped because the node left the file.
+    /// Shown until the next save or full revert so the loss is not silent.
+    discarded: Vec<NodeId>,
     catalog: form::catalog::Catalog,
     _agent_watch: Option<gpui::Subscription>,
     _link_watches: Vec<gpui::Subscription>,
@@ -268,6 +276,7 @@ impl FlowGraphView {
             pins: PinSet::default(),
             form: None,
             drafts: Default::default(),
+            discarded: Vec::new(),
             catalog: form::catalog::Catalog::default(),
             _agent_watch: None,
             _link_watches: Vec::new(),
@@ -505,7 +514,18 @@ impl FlowGraphView {
         if matches!(decision, policy::Reload::Unchanged) {
             return;
         }
-        self.stash_form(cx);
+        // A form whose node and defaults did not change keeps its live boxes —
+        // focus, caret, and custom-entry mode — instead of a snapshot round trip.
+        let keep_form = match &decision {
+            policy::Reload::Restamp { text, .. } | policy::Reload::Rebuild { text, .. } => self
+                .form
+                .as_ref()
+                .is_some_and(|form| form.source_matches(text)),
+            policy::Reload::Unchanged | policy::Reload::Unreadable { .. } => false,
+        };
+        if !keep_form {
+            self.stash_form(cx);
+        }
         match decision {
             policy::Reload::Unchanged => return,
             policy::Reload::Restamp { text, model } => {
@@ -538,7 +558,9 @@ impl FlowGraphView {
                     cx,
                 );
                 self.text = Some(text);
-                self.form = None;
+                if !keep_form {
+                    self.form = None;
+                }
                 self.watch_canvas(window, cx);
                 if let Some(node) = was_selected {
                     self.select_node(&node, window, cx);
@@ -561,7 +583,15 @@ impl FlowGraphView {
                 input.set_value(self.saved_name.clone(), window, cx)
             });
         }
+        if keep_form && let (Some(form), Some(text)) = (&mut self.form, &self.text) {
+            form.rebase_source(text);
+        }
         self.restore_form_drafts(window, cx);
+        if keep_form {
+            // Other nodes may have changed, so the dependency and result
+            // candidates are recomputed even though the form stayed.
+            self.refresh_form_links(window, cx);
+        }
         cx.notify();
     }
 

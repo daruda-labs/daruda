@@ -12,6 +12,12 @@ impl FlowGraphView {
     }
 
     pub(super) fn restore_form_drafts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.discard_orphaned_drafts();
+        if let Some(text) = self.text.as_deref() {
+            for draft in self.drafts.values_mut() {
+                draft.adopt_if_unchanged(text);
+            }
+        }
         self.reconcile_selection(window, cx);
         let conflict = crate::surface::strings::flow::form_draft_conflict();
         if self.draft_conflict() {
@@ -21,6 +27,34 @@ impl FlowGraphView {
             // save's message stays until the next save attempt.
             self.save_error = None;
         }
+    }
+
+    /// A draft for a node the file no longer has can neither be shown nor
+    /// saved, and would block every Save as a conflict. Dropped, and named.
+    fn discard_orphaned_drafts(&mut self) {
+        let Some(file) = self
+            .text
+            .as_deref()
+            .and_then(|text| daruda_flow::parse::parse_flow_file(text).ok())
+        else {
+            return;
+        };
+        let orphaned: Vec<NodeId> = self
+            .drafts
+            .keys()
+            .filter(|node| !file.nodes.iter().any(|entry| &entry.id == *node))
+            .cloned()
+            .collect();
+        for node in orphaned {
+            self.drafts.remove(&node);
+            if !self.discarded.contains(&node) {
+                self.discarded.push(node);
+            }
+        }
+    }
+
+    pub(in crate::workspace) fn discarded_drafts(&self) -> &[NodeId] {
+        &self.discarded
     }
 
     pub(in crate::workspace) fn validate_form_drafts(
@@ -112,6 +146,9 @@ impl FlowGraphView {
             return;
         };
         let issues = self.current_issues();
+        // The edit's own reload saw these drafts' nodes leave; deleting them
+        // here was the person's choice, not a loss to report.
+        self.discarded.retain(|node| !deleted.contains(node));
         self.drafts = std::mem::take(&mut self.drafts)
             .into_iter()
             .filter(|(node, _)| !deleted.contains(node))
@@ -133,6 +170,7 @@ impl FlowGraphView {
         cx: &mut Context<Self>,
     ) {
         self.drafts.clear();
+        self.discarded.clear();
         self.form = None;
         if let Some(node) = selected {
             self.select_node(&node, window, cx);

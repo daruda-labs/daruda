@@ -15,6 +15,7 @@ use crate::surface::strings as s;
 use crate::ui::cursor::CursorReachExt as _;
 use crate::ui::theme::palette;
 use crate::ui::{Disableable as _, button_icon, icons, input};
+use daruda_flow::NodeId;
 
 pub(super) mod toolbar;
 
@@ -22,8 +23,9 @@ use self::toolbar::{ToolbarState, toolbar};
 
 impl Render for FlowGraphView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Read once: it compares every inspector box, and four places need it.
-        let unsaved = self.has_unsaved_form(cx);
+        // Read once: it compares every inspector box, and several places need it.
+        let status = self.form_status(cx);
+        let unsaved = status.unsaved;
         let body = div()
             .size_full()
             .flex()
@@ -69,7 +71,7 @@ impl Render for FlowGraphView {
                     )
                     .child(
                         crate::ui::button("flow-revert-all", s::flow::form_revert())
-                            .disabled(!unsaved)
+                            .disabled(!unsaved && !status.conflict)
                             .on_click(
                                 cx.listener(|_, _, _, cx| cx.emit(super::FlowGraphEvent::Revert)),
                             ),
@@ -79,7 +81,19 @@ impl Render for FlowGraphView {
                 self.save_error
                     .as_ref()
                     .map(|message| crate::ui::alert::error("flow-save-error", message.clone())),
-            );
+            )
+            .children((!self.discarded_drafts().is_empty()).then(|| {
+                crate::ui::alert::warning(
+                    "flow-drafts-discarded",
+                    s::flow::form_drafts_discarded(
+                        self.discarded_drafts()
+                            .iter()
+                            .map(NodeId::as_str)
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    ),
+                )
+            }));
         match &self.state {
             FlowGraphState::Graph { canvas, .. } => {
                 // A row rather than an overlay: floating the inspector over the
@@ -91,7 +105,8 @@ impl Render for FlowGraphView {
                 // just clicked — a shift-click on a second card would miss it.
                 let inspector = match self.selection(cx) {
                     Selection::One(_) => match &self.form {
-                        Some(form) => form::render(form, unsaved, cx).into_any_element(),
+                        Some(form) => form::render(form, unsaved, status.node_revertable, cx)
+                            .into_any_element(),
                         None => form::render_empty(cx).into_any_element(),
                     },
                     Selection::Many(nodes) => form::render_many(nodes.len(), cx).into_any_element(),

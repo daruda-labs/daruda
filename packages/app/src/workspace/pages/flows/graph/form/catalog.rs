@@ -14,7 +14,10 @@ impl Catalog {
     pub(super) fn agents(&self, inherited: Option<&str>) -> Vec<SelectOption> {
         let mut items = vec![inherited_option(inherited)];
         items.extend(self.agents.iter().map(|agent| {
-            SelectOption::new(agent.id.clone(), format!("{} ({})", agent.name, agent.id))
+            SelectOption::new(
+                agent.id.clone(),
+                s::flow::form_agent_choice(&agent.name, &agent.id),
+            )
         }));
         items
     }

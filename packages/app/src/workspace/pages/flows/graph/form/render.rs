@@ -18,6 +18,7 @@ use super::{KindChoice, NodeForm, Refusal};
 pub(in super::super) fn render(
     form: &NodeForm,
     dirty: bool,
+    revertable: bool,
     cx: &mut Context<super::super::FlowGraphView>,
 ) -> impl IntoElement {
     use crate::surface::strings as s;
@@ -139,8 +140,8 @@ pub(in super::super) fn render(
                 })),
         )
         .child(
-            button("flow-form-revert", s::flow::form_revert())
-                .disabled(!form.has_local_input(cx))
+            button("flow-form-revert", s::flow::form_revert_node())
+                .disabled(!revertable)
                 .on_click(cx.listener(|view, _, window, cx| view.revert_selected_node(window, cx))),
         )
         // Deleting the node this form is about, from the form it is about it.
@@ -386,7 +387,7 @@ fn agent_section(
         .ghost()
         .justify_start()
         .tab_stop(true)
-        .tab_index(5)
+        .tab_index(6)
         .icon(crate::ui::icons::icon(if open {
             crate::ui::icons::EXPAND_MORE
         } else {

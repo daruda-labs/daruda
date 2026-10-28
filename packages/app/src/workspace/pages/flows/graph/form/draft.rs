@@ -20,6 +20,14 @@ impl NodeDraft {
         source_matches(&self.source, text, &self.node)
     }
 
+    /// Adopt a reloaded file that left this node and the defaults unchanged,
+    /// so later checks take the no-parse path.
+    pub(in crate::workspace) fn adopt_if_unchanged(&mut self, text: &str) {
+        if self.source != text && self.source_matches(text) {
+            self.source = text.to_string();
+        }
+    }
+
     /// Carry a draft across an edit this pane made to the file. Typed values
     /// stay; the node's `deps` take the edit's added and removed edges, and
     /// references to deleted nodes go.
@@ -115,6 +123,11 @@ impl NodeForm {
     pub(in crate::workspace) fn source_matches(&self, text: &str) -> bool {
         source_matches(&self.source_text, text, &self.node)
     }
+
+    /// Adopt a reloaded file that left this node and the defaults unchanged.
+    pub(in crate::workspace) fn rebase_source(&mut self, text: &str) {
+        self.source_text = text.to_string();
+    }
 }
 
 fn file_deps(text: &str, node: &NodeId) -> Vec<String> {
@@ -151,6 +164,11 @@ fn rebase_deps(
 }
 
 pub(super) fn source_matches(before: &str, after: &str, node: &NodeId) -> bool {
+    // The common case — nothing reloaded since the form was built — needs no
+    // parse; render asks this every frame.
+    if before == after {
+        return true;
+    }
     let parse = daruda_flow::parse::parse_flow_file;
     match (parse(before), parse(after)) {
         (Ok(before), Ok(after)) => {
