@@ -653,44 +653,56 @@ pub fn open_add_mcp_server_modal(
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) {
+    open_add(ws, prefill_scope, None, window, cx);
+}
+
+pub(super) fn open_add_mcp_server_in_target(
+    ws: &mut Workspace,
+    target: crate::agent::configuration::library::Target,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    open_add(ws, Some(target.scope), Some(target), window, cx);
+}
+
+fn open_add(
+    ws: &mut Workspace,
+    prefill_scope: Option<McpScope>,
+    target: Option<crate::agent::configuration::library::Target>,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
     let workspace = cx.weak_entity();
     let Some(config) = ws.pin_library() else {
         return;
     };
+    // A target rendered for an earlier library snapshot no longer names a
+    // writable file; the click still opens the form for the scope it showed.
+    let target = target.filter(|target| target.config == *config && target.owner.is_none());
     let snapshot = ws.right_views.library.view.inventory.mcp.clone();
-    let existing_names = ws
+    let existing_names = creation_names(
+        &ws.right_views.library.view.inventory.groups,
+        &config,
+        target.as_ref(),
+    );
+    let mut targets: Vec<_> = ws
         .right_views
         .library
         .view
         .inventory
         .groups
         .iter()
-        .filter(|group| {
-            group.target.owner.is_none()
-                && (group.target.scope != McpScope::Project
-                    || config
-                        .cwd
-                        .as_ref()
-                        .is_some_and(|cwd| group.target.path == config.project_file(cwd)))
-        })
-        .flat_map(|group| {
-            group
-                .servers
-                .iter()
-                .map(|server| (server.scope, server.name.clone()))
-        })
+        .filter(|g| g.target.owner.is_none())
+        .map(|g| g.target.clone())
         .collect();
+    // The first target of a scope is the form's save destination. Preserve
+    // the clicked source when several project configuration files exist.
+    if let Some(target) = target {
+        targets.retain(|candidate| *candidate != target);
+        targets.insert(0, target);
+    }
     let initial = AddMcpInitial {
-        targets: ws
-            .right_views
-            .library
-            .view
-            .inventory
-            .groups
-            .iter()
-            .filter(|g| g.target.owner.is_none())
-            .map(|g| g.target.clone())
-            .collect(),
+        targets,
         config: Some(config),
         default_scope: prefill_scope.unwrap_or(McpScope::User),
         project_root: snapshot.project_root.clone(),
@@ -703,6 +715,31 @@ pub fn open_add_mcp_server_modal(
         window,
         cx,
     );
+}
+
+fn creation_names(
+    groups: &[crate::agent::configuration::library::Group],
+    config: &crate::agent::configuration::Configuration,
+    selected: Option<&crate::agent::configuration::library::Target>,
+) -> Vec<(McpScope, String)> {
+    let project_file = selected
+        .filter(|target| target.scope == McpScope::Project)
+        .map(|target| target.path.clone())
+        .or_else(|| config.cwd.as_ref().map(|cwd| config.project_file(cwd)));
+    groups
+        .iter()
+        .filter(|group| {
+            group.target.owner.is_none()
+                && (group.target.scope != McpScope::Project
+                    || project_file.as_ref() == Some(&group.target.path))
+        })
+        .flat_map(|group| {
+            group
+                .servers
+                .iter()
+                .map(|server| (server.scope, server.name.clone()))
+        })
+        .collect()
 }
 
 impl AddMcpServerModal {

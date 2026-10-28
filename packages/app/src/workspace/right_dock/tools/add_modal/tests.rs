@@ -1,6 +1,52 @@
 use super::*;
 use gpui::{TestAppContext, VisualTestContext};
 
+#[test]
+fn creation_names_follow_the_selected_project_source() {
+    use crate::agent::configuration::{
+        Configuration, Provider,
+        library::{Group, Target},
+    };
+    let temp = tempfile::tempdir().unwrap();
+    let cwd = temp.path().join("repo/nested");
+    let config =
+        Configuration::resolve(Provider::Claude, Some(temp.path().into()), None, Some(cwd))
+            .unwrap();
+    let primary = Target::new(&config, McpScope::Project, None).unwrap();
+    let ancestor =
+        Target::new(&config, McpScope::Project, Some(&temp.path().join("repo"))).unwrap();
+    let server = |name: &str| crate::agent::mcp::McpServer {
+        name: name.into(),
+        scope: McpScope::Project,
+        transport: McpTransport::Stdio,
+        command: Some("example".into()),
+        args: Vec::new(),
+        url: None,
+        env: Default::default(),
+        headers: Default::default(),
+        disabled: false,
+        extra: Default::default(),
+    };
+    let groups = vec![
+        Group {
+            target: primary,
+            servers: vec![server("nested-only")],
+        },
+        Group {
+            target: ancestor.clone(),
+            servers: vec![server("ancestor-only")],
+        },
+    ];
+    assert_eq!(
+        creation_names(&groups, &config, Some(&ancestor)),
+        vec![(McpScope::Project, "ancestor-only".into())]
+    );
+    assert_eq!(
+        creation_names(&groups, &config, None),
+        vec![(McpScope::Project, "nested-only".into())]
+    );
+}
+
 #[gpui::test]
 fn only_a_successful_save_opens_the_connection_receipt(cx: &mut TestAppContext) {
     use crate::agent::configuration::{Configuration, Provider};

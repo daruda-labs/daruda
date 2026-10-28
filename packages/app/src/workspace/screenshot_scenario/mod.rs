@@ -63,6 +63,7 @@ pub(crate) enum ScreenshotScenario {
     AgentChatDiff,
     StatusBar(super::status_bar::screenshot::StatusBarShot),
     QuickEntry(super::right_dock::quick_entry_shot::QuickEntryShot),
+    LibraryLayout(super::right_dock::library_shot::LibraryShot),
     FlowBrowser(super::flow_browser::screenshot::FlowBrowserShot),
     Tasks,
     TasksAll,
@@ -318,6 +319,9 @@ pub(crate) fn drive(
             workspace.update(cx, |ws, cx| ws.open_agent_chat_diff_for_shot(window, cx));
         }
         ScreenshotScenario::StatusBar(shot) => cx.set_global(shot),
+        ScreenshotScenario::LibraryLayout(shot) => {
+            super::right_dock::library_shot::drive(shot, workspace, window, cx);
+        }
         ScreenshotScenario::QuickEntry(shot) => {
             super::right_dock::quick_entry_shot::drive(shot, workspace, window, cx)
         }

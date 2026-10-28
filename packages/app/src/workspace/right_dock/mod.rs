@@ -12,6 +12,8 @@ mod delete_modal;
 mod form_layout;
 mod form_state;
 pub(in crate::workspace) mod library;
+#[cfg(feature = "screenshot")]
+pub(in crate::workspace) mod library_shot;
 mod library_view;
 pub(in crate::workspace) mod mcp_ops;
 #[cfg(feature = "screenshot")]

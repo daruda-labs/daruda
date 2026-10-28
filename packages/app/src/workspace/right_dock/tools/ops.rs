@@ -13,6 +13,15 @@ impl Workspace {
         super::open_add_mcp_server_modal(self, None, window, cx);
     }
 
+    pub(super) fn open_add_mcp_server_in_target(
+        &mut self,
+        target: crate::agent::configuration::library::Target,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        super::add_modal::open_add_mcp_server_in_target(self, target, window, cx);
+    }
+
     pub(super) fn open_edit_mcp_server(
         &mut self,
         scope: McpScope,

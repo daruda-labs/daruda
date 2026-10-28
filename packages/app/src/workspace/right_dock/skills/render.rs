@@ -29,7 +29,7 @@ use crate::surface::strings;
 use crate::workspace::Workspace;
 use crate::workspace::right_dock::section::DockSection;
 use crate::workspace::right_dock::section_view::{
-    ScopeSection, SectionFold, hover_actions, library_row, panel_footer,
+    ScopeSection, SectionFold, empty_scope_action, hover_actions, library_row, panel_footer,
 };
 
 /// Render the Skills tab body.
@@ -59,9 +59,14 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
     let any_match = !project.is_empty() || !personal.is_empty() || !plugin.is_empty();
     let searching = !query.is_empty();
 
+    let has_skills = !skills.project.is_empty()
+        || !skills.personal.is_empty()
+        || !installed_plugin_skills.is_empty();
     let mut col = crate::workspace::right_dock::right_panel_body()
         .child(header_row(workspace.clone(), cx))
-        .child(search_row(snap, cx));
+        .when(has_skills || searching, |col| {
+            col.child(search_row(snap, cx))
+        });
 
     if searching && !any_match {
         col = col.child(search_empty_hint(snap.skill_search_query.clone(), &t));
@@ -104,7 +109,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
     ];
     let mut divided = false;
     for (section, label, scope, list, enabled) in scopes {
-        if searching && list.is_empty() {
+        if !enabled || (searching && list.is_empty()) {
             continue;
         }
         let fold = if searching {
@@ -115,7 +120,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
         let header = ScopeSection {
             section,
             label: label.into(),
-            count: Some(scope_count(scope, list)),
+            count: (!list.is_empty()).then(|| scope_count(scope, list)),
             fold,
             divided,
         };
@@ -133,6 +138,9 @@ pub(in crate::workspace) fn footer(snap: &RightDockSnapshot, cx: &gpui::App) -> 
     let skills = &snap.skills;
     let installed = skills.plugin.iter().filter(|s| is_installed(s)).count();
     let total = skills.project.len() + skills.personal.len() + installed;
+    if total == 0 {
+        return div().into_any_element();
+    }
     panel_footer(
         crate::ui::icons::SKILL,
         strings::skills::footer_available(total),
@@ -278,38 +286,18 @@ fn scope_body(
     t: &DarudaTheme,
     cx: &gpui::App,
 ) -> AnyElement {
-    if !enabled {
-        // Project scope without a project root — explain why.
-        return empty_hint(strings::skills::no_project_hint(), t);
-    }
+    debug_assert!(enabled);
     if skills.is_empty() {
-        // Empty at rest — show only the text hint. Inline action
-        // buttons are intentionally absent: the panel header already
-        // carries `[+ New skill]` and `[Manage…]`, and surfacing the
-        // same action again as an inline chip muddies the empty
-        // state. A search never lands here: the caller drops the scope.
-        let msg = match scope {
-            SkillScope::Project => strings::skills::empty_project(),
-            SkillScope::Personal => strings::skills::empty_personal(),
-            SkillScope::Plugin => strings::skills::empty_plugin(),
-        };
-        return empty_hint(msg, t);
+        return empty_scope(scope, ctx.workspace.clone(), cx);
     }
     if matches!(scope, SkillScope::Plugin) {
         // Plugin scope groups by owning plugin id under disclosure rows.
         return plugin_groups(skills, ctx, t, cx).into_any_element();
     }
     let mut col = div().flex().flex_col();
-    let mut previous_source = None;
     let mut sorted: Vec<_> = skills.iter().collect();
     sorted.sort_by_key(|s| s.dir.parent());
     for s in sorted {
-        if previous_source != s.dir.parent() {
-            previous_source = s.dir.parent();
-            if let Some(path) = previous_source {
-                col = col.child(empty_hint(strings::library::source(path.display()), t));
-            }
-        }
         let overrides =
             matches!(scope, SkillScope::Project) && ctx.state.project_overrides_personal(&s.name);
         col = col.child(skill_row(s, overrides, ctx.workspace.clone(), t, cx));
@@ -317,11 +305,27 @@ fn scope_body(
     col.into_any_element()
 }
 
-/// Quiet one-line explanation for a scope with nothing to list.
-fn empty_hint(msg: impl Into<SharedString>, t: &DarudaTheme) -> AnyElement {
-    crate::ui::message_line(msg, t)
-        .pb(px(theme::DOCK_SECTION_HEADER_PAD_Y))
-        .into_any_element()
+fn empty_scope(
+    scope: SkillScope,
+    workspace: gpui::WeakEntity<Workspace>,
+    cx: &gpui::App,
+) -> AnyElement {
+    let label = match scope {
+        SkillScope::Project => strings::skills::create_project(),
+        SkillScope::Personal => strings::skills::create_personal(),
+        SkillScope::Plugin => strings::skills::manage_plugins(),
+    };
+    empty_scope_action(
+        SharedString::from(format!("skill-empty-{}", scope.slug())),
+        label,
+        cx,
+    )
+    .on_click(move |_, window, cx| {
+        if let Some(ws) = workspace.upgrade() {
+            ws.update(cx, |ws, cx| ws.open_skill_scope_action(scope, window, cx));
+        }
+    })
+    .into_any_element()
 }
 
 /// One plugin's worth of skills: a disclosure row over indented skill rows.
@@ -430,12 +434,6 @@ fn plugin_groups(
                 }),
         );
         if is_open {
-            col = col.child(
-                div()
-                    .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-                    .text_color(t.text_muted)
-                    .child(strings::library::read_only(&group.plugin_id)),
-            );
             for s in &group.skills {
                 col = col.child(skill_row(s, false, ctx.workspace.clone(), t, cx));
             }
@@ -492,6 +490,7 @@ fn skill_row(
     // The vendor label cannot shrink; a stretched child keeps text inside
     // the button while preserving its invocation and focus behavior.
     let name_button = crate::ui::compact_button(crate::ui::button_bare(name_btn_id))
+        .h(px(theme::CONTROL_TARGET_SIZE))
         .flex_1()
         .min_w_0()
         .flex_col()
@@ -632,6 +631,7 @@ fn skill_row(
         cx,
     )
     .id(row_id)
+    .py(px(theme::PAD_SM))
     .group("skill-row")
     .relative()
     .overflow_hidden()

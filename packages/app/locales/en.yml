@@ -1205,10 +1205,10 @@ skills:
   invoke_no_input_target: "The selected pane can't accept this input."
   search_placeholder: "Search skills…"
   search_empty_prefix: "No skills match "
-  # Body shown when both scopes are empty.
-  empty_project: "No project skills — create one to teach Claude a project-specific workflow."
-  empty_personal: "No personal skills yet."
-  empty_plugin: "No plugin skills installed. Install a plugin via Claude Code's `/plugin` command."
+  # Action shown in place of an empty scope's rows.
+  create_project: "Create project skill"
+  create_personal: "Create personal skill"
+  manage_plugins: "Manage plugins"
   # Tooltip / chip text when a project skill shadows a personal one.
   overrides_personal: "overrides personal"
   # Title strings for the CRUD modals.
@@ -1230,7 +1230,6 @@ skills:
   name_leading: "Name cannot start with a hyphen or underscore."
   name_too_long: "Name must be 64 characters or fewer."
   name_duplicate: "A skill with this name already exists in this scope."
-  no_project_hint: "Project skills require an active worktree. Open a project to enable this scope."
   # Title of the skill-invocation modal (`open_form_modal`).
   invoke_title: "Run skill"
   # Empty-state hint in the skill picker when a plugin group exposes no
@@ -1272,19 +1271,17 @@ mcp:
   args_invalid: "Close every quote in the arguments."
   # Header button — opens AddMcpServerModal.
   new_button: "Add server"
-  # Body when project scope has no servers and there is an active lane.
-  empty_project: "No project MCP servers — `+ Add server` to create `.mcp.json`."
+  # Action shown when project scope has no servers and there is an active lane.
+  add_project: "Add project server"
   # Body when project scope has no active lane (an empty workspace).
   no_project_hint: "Project and Local MCP servers require an active worktree. Open a project to enable these scopes."
-  # Body when user scope is empty.
-  empty_user: "No user MCP servers configured."
-  # Body when local scope is empty (active lane, no `projects[<lane>]`
+  # Action shown when user scope is empty.
+  add_user: "Add personal server"
+  # Action shown when local scope is empty (active lane, no `projects[<lane>]`
   # servers in `~/.claude.json`).
-  empty_local: "No local MCP servers for this project."
+  add_local: "Add local server"
   # Tooltip on the server row's enable switch.
   toggle_tooltip: "Enable or disable this server"
-  # Server row's second line when the config is malformed: that label beside its transport.
-  row_summary: "%{status} · %{transport}"
   # Tools tab footer: servers configured across every scope.
   footer_servers: "%{n} MCP servers"
   # Row status label — required fields for the chosen transport are missing.

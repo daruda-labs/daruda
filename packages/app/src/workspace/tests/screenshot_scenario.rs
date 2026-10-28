@@ -8,6 +8,64 @@ use crate::ui::WindowExt as _;
 use crate::workspace::screenshot_scenario::{ScreenshotScenario, drive};
 
 #[gpui::test]
+fn empty_library_scopes_can_be_folded_and_reopened(cx: &mut TestAppContext) {
+    use crate::workspace::right_dock::library_shot::LibraryShot;
+    use gpui::VisualTestContext;
+    let (window, workspace) = build_workspace(cx);
+    let mut vcx = VisualTestContext::from_window(window.into(), cx);
+    for (shot, sections) in [
+        (
+            LibraryShot::SkillsEmpty,
+            [
+                "dock-section-SkillsProject",
+                "dock-section-SkillsPersonal",
+                "dock-section-SkillsPlugins",
+            ],
+        ),
+        (
+            LibraryShot::ToolsEmpty,
+            [
+                "dock-section-ToolsProject",
+                "dock-section-ToolsUser",
+                "dock-section-ToolsLocal",
+            ],
+        ),
+    ] {
+        vcx.update(|window, cx| {
+            drive(
+                ScreenshotScenario::LibraryLayout(shot),
+                &workspace,
+                window,
+                cx,
+            )
+        });
+        vcx.run_until_parked();
+        vcx.update(|window, _| window.refresh());
+        vcx.run_until_parked();
+        assert!(
+            vcx.debug_bounds("library-empty-action").is_some(),
+            "empty actions initially visible"
+        );
+        for section in sections {
+            let header = vcx.debug_bounds(section).expect("scope header painted");
+            vcx.simulate_click(header.center(), gpui::Modifiers::default());
+            vcx.run_until_parked();
+        }
+        assert!(
+            vcx.debug_bounds("library-empty-action").is_none(),
+            "folding empty scopes hides their actions"
+        );
+        let header = vcx.debug_bounds(sections[0]).unwrap();
+        vcx.simulate_click(header.center(), gpui::Modifiers::default());
+        vcx.run_until_parked();
+        assert!(
+            vcx.debug_bounds("library-empty-action").is_some(),
+            "reopening restores the action"
+        );
+    }
+}
+
+#[gpui::test]
 async fn drive_command_palette_opens_palette(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
 

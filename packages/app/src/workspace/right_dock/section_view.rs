@@ -11,8 +11,8 @@ use crate::workspace::Workspace;
 pub(in crate::workspace) enum SectionFold {
     Open,
     Folded,
-    /// Shown open and not toggleable: a search forces it open, or there
-    /// is nothing to fold. A click would flip state the user cannot see.
+    /// Shown open and not toggleable when a search forces matching content
+    /// open. A click would flip state the user cannot see.
     Fixed,
 }
 
@@ -55,6 +55,7 @@ impl ScopeSection {
         } = self;
         let is_open = fold.is_open();
         let workspace = workspace.clone();
+        let show_disclosure = fold != SectionFold::Fixed;
         let summary = div()
             .id(("dock-section", section as usize))
             .debug_selector(move || format!("dock-section-{section:?}"))
@@ -67,11 +68,21 @@ impl ScopeSection {
             .font_weight(gpui::FontWeight::SEMIBOLD)
             .text_color(t.text_muted)
             .child(
-                disclosure(("dock-section-chevron", section as usize), is_open)
-                    .size(theme::DOCK_SECTION_CHEVRON_SIZE),
+                div()
+                    .debug_selector(|| "dock-section-leading".into())
+                    .flex_none()
+                    .w(px(theme::DISCLOSURE_CHEVRON_W))
+                    .h(px(theme::DOCK_SECTION_CHEVRON_SIZE))
+                    .when(show_disclosure, |slot| {
+                        slot.child(
+                            disclosure(("dock-section-chevron", section as usize), is_open)
+                                .size(theme::DOCK_SECTION_CHEVRON_SIZE),
+                        )
+                    }),
             )
             .child(
                 div()
+                    .debug_selector(|| "dock-section-label".into())
                     .flex_1()
                     .min_w_0()
                     .text_ellipsis()
@@ -119,10 +130,19 @@ pub(in crate::workspace) fn library_row(
         .gap(px(theme::DOCK_LIBRARY_ROW_GAP))
         .py(px(theme::DOCK_LIBRARY_ROW_PAD_Y))
         .child(
-            icons::icon(icon)
-                .with_size(px(theme::DOCK_LIBRARY_ICON_SIZE))
-                .text_color(t.text_muted)
-                .mt(px(theme::DOCK_LIBRARY_ICON_MT)),
+            div()
+                .debug_selector(|| "library-row-icon".into())
+                .flex()
+                .flex_none()
+                .items_center()
+                .justify_center()
+                .w(px(theme::DOCK_LIBRARY_ICON_SIZE))
+                .h(px(theme::CONTROL_TARGET_SIZE))
+                .child(
+                    icons::icon(icon)
+                        .with_size(px(theme::DOCK_LIBRARY_ICON_SIZE))
+                        .text_color(t.text_muted),
+                ),
         )
         .child(
             div()
@@ -133,6 +153,9 @@ pub(in crate::workspace) fn library_row(
                 .min_w_0()
                 .child(
                     div()
+                        .flex()
+                        .items_center()
+                        .min_h(px(theme::CONTROL_TARGET_SIZE))
                         .min_w_0()
                         .truncate()
                         .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
@@ -151,6 +174,31 @@ pub(in crate::workspace) fn library_row(
                     )
                 }),
         )
+}
+
+/// One quiet, scope-specific starting action aligned with library row icons.
+pub(super) fn empty_scope_action(
+    id: impl Into<gpui::ElementId>,
+    label: impl Into<SharedString>,
+    cx: &App,
+) -> crate::ui::Button {
+    use crate::ui::ButtonVariants as _;
+    crate::ui::compact_button(crate::ui::button_bare(id))
+        .debug_selector(|| "library-empty-action".into())
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(theme::DOCK_LIBRARY_ROW_GAP))
+                .child(icons::icon(icons::ADD).with_size(px(theme::DOCK_LIBRARY_ICON_SIZE)))
+                .child(label.into()),
+        )
+        .h(px(theme::CONTROL_TARGET_SIZE))
+        .ghost()
+        .w_full()
+        .justify_start()
+        .px(px(theme::LIST_ROW_PAD_X))
+        .text_color(theme::current(cx).text_muted)
 }
 
 /// Actions a row reveals on hover, laid over its trailing edge on the row's
@@ -202,6 +250,46 @@ mod tests {
 
     use super::*;
 
+    struct LibraryProbe;
+
+    impl Render for LibraryProbe {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div().w(px(220.)).child(library_row(
+                icons::SKILL,
+                div()
+                    .debug_selector(|| "probe-name".into())
+                    .h(px(theme::CONTROL_TARGET_SIZE))
+                    .child("A long skill name"),
+                Some(
+                    div()
+                        .debug_selector(|| "probe-description".into())
+                        .child("Description")
+                        .into_any_element(),
+                ),
+                cx,
+            ))
+        }
+    }
+
+    #[gpui::test]
+    fn library_icon_aligns_with_name_and_description_has_one_gap(cx: &mut TestAppContext) {
+        crate::test_support::init_gpui_component(cx);
+        let window = cx.add_window(|_, _| LibraryProbe);
+        let mut vcx = VisualTestContext::from_window(window.into(), cx);
+        vcx.run_until_parked();
+        let icon = vcx.debug_bounds("library-row-icon").expect("icon painted");
+        let name = vcx.debug_bounds("probe-name").expect("name painted");
+        let description = vcx
+            .debug_bounds("probe-description")
+            .expect("description painted");
+        assert_eq!(icon.center().y, name.center().y);
+        assert_eq!(description.left(), name.left());
+        assert_eq!(
+            description.top() - name.bottom(),
+            px(theme::DOCK_LIBRARY_DESC_MT)
+        );
+    }
+
     struct Probe {
         fold: SectionFold,
     }
@@ -236,6 +324,24 @@ mod tests {
                 .is_some()
         );
         vcx.debug_bounds("section-body").is_some()
+    }
+
+    #[gpui::test]
+    fn section_label_reserves_the_disclosure_target_width(cx: &mut TestAppContext) {
+        crate::test_support::init_gpui_component(cx);
+        let window = cx.add_window(|_, _| Probe {
+            fold: SectionFold::Open,
+        });
+        let mut vcx = VisualTestContext::from_window(window.into(), cx);
+        vcx.run_until_parked();
+        let leading = vcx
+            .debug_bounds("dock-section-leading")
+            .expect("leading slot painted");
+        let label = vcx
+            .debug_bounds("dock-section-label")
+            .expect("label painted");
+        assert_eq!(leading.size.width, px(theme::DISCLOSURE_CHEVRON_W));
+        assert_eq!(label.left() - leading.right(), px(theme::LANE_LABEL_GAP));
     }
 
     #[gpui::test]

@@ -33,6 +33,11 @@ pub(in crate::workspace) struct RightDockViews {
 }
 
 impl RightDockViews {
+    #[cfg(feature = "screenshot")]
+    pub(super) fn pause_library_for_shot(&mut self) {
+        self._library_pump = gpui::Task::ready(());
+    }
+
     pub(in crate::workspace) fn new(window: &mut Window, cx: &mut Context<Workspace>) -> Self {
         Self {
             library: super::library::Library::default(),

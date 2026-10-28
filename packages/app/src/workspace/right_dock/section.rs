@@ -17,9 +17,9 @@ pub(in crate::workspace) enum DockSection {
 }
 
 impl DockSection {
-    /// History and the plugin catalogue are secondary, so they start folded.
+    /// History starts folded; configured tools and skills are visible at rest.
     fn opens_by_default(self) -> bool {
-        !matches!(self, Self::UsageRecentSessions | Self::SkillsPlugins)
+        !matches!(self, Self::UsageRecentSessions)
     }
 }
 
@@ -49,6 +49,7 @@ mod tests {
     fn defaults_follow_the_section() {
         let sections = DockSections::default();
         assert!(sections.is_open(DockSection::UsageTurns));
+        assert!(sections.is_open(DockSection::SkillsPlugins));
         assert!(!sections.is_open(DockSection::UsageRecentSessions));
     }
 

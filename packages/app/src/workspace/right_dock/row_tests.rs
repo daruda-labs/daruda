@@ -69,6 +69,10 @@ pub(super) fn assert_hover_targets_fit_beside(
         .expect("text column painted");
     for selector in content_selectors {
         let bounds = vcx.debug_bounds(selector).expect("row content painted");
+        assert!(
+            bounds.size.width > px(theme::CONTROL_TARGET_SIZE),
+            "{selector} collapsed horizontally"
+        );
         assert!(bounds.left() >= content.left(), "{selector} covers icon");
         assert!(
             bounds.size.height <= px(theme::CONTROL_TARGET_SIZE),

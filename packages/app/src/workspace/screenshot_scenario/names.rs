@@ -140,8 +140,24 @@ impl ScreenshotScenario {
     /// default section.
     pub(crate) fn from_cli_name(name: &str) -> Option<Self> {
         use super::super::pages::flows::graph::form::screenshot::FlowFormShot;
+        use super::super::right_dock::library_shot::LibraryShot;
         use super::super::right_dock::quick_entry_shot::QuickEntryShot;
         match name {
+            "library-layout-skills" => Some(Self::LibraryLayout(LibraryShot::Skills)),
+            "library-layout-skills-project-empty" => {
+                Some(Self::LibraryLayout(LibraryShot::SkillsProjectEmpty))
+            }
+            "library-layout-skills-personal-empty" => {
+                Some(Self::LibraryLayout(LibraryShot::SkillsPersonalEmpty))
+            }
+            "library-layout-skills-plugin-empty" => {
+                Some(Self::LibraryLayout(LibraryShot::SkillsPluginEmpty))
+            }
+            "library-layout-skills-empty" => Some(Self::LibraryLayout(LibraryShot::SkillsEmpty)),
+            "library-layout-skills-mixed" => Some(Self::LibraryLayout(LibraryShot::SkillsMixed)),
+            "library-layout-skills-search" => Some(Self::LibraryLayout(LibraryShot::SkillsSearch)),
+            "library-layout-tools" => Some(Self::LibraryLayout(LibraryShot::Tools)),
+            "library-layout-tools-empty" => Some(Self::LibraryLayout(LibraryShot::ToolsEmpty)),
             "agent-chat-diff" => Some(Self::AgentChatDiff),
             "status-ports" => Some(Self::StatusBar(
                 super::super::status_bar::screenshot::StatusBarShot::Ports,

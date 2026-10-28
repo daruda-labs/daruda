@@ -15,6 +15,24 @@ impl Workspace {
         super::open_create_skill_modal(self, None, window, cx);
     }
 
+    pub(super) fn open_skill_scope_action(
+        &mut self,
+        scope: SkillScope,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if scope == SkillScope::Plugin {
+            window.dispatch_action(
+                Box::new(crate::workspace::OpenSettings(
+                    daruda_config::BuiltinSection::Plugin,
+                )),
+                cx,
+            );
+        } else {
+            super::open_create_skill_modal(self, Some(scope), window, cx);
+        }
+    }
+
     pub(super) fn open_edit_skill(
         &mut self,
         dir: PathBuf,
