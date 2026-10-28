@@ -38,6 +38,7 @@ impl Render for FlowGraphView {
                     .items_center()
                     .gap(px(palette::PAD_STANDARD))
                     .flex_none()
+                    .bg(crate::ui::theme::current(cx).modal_panel_bg)
                     .px(px(palette::PAD_STANDARD))
                     .py(px(palette::PAD_XS))
                     .child(
@@ -63,6 +64,13 @@ impl Render for FlowGraphView {
                             .on_click(
                                 cx.listener(|_, _, _, cx| cx.emit(super::FlowGraphEvent::Save)),
                             ),
+                    )
+                    .child(
+                        crate::ui::button("flow-revert-all", s::flow::form_revert())
+                            .disabled(!self.has_unsaved_form(cx))
+                            .on_click(
+                                cx.listener(|_, _, _, cx| cx.emit(super::FlowGraphEvent::Revert)),
+                            ),
                     ),
             )
             .children(
@@ -81,7 +89,9 @@ impl Render for FlowGraphView {
                 // just clicked — a shift-click on a second card would miss it.
                 let inspector = match self.selection(cx) {
                     Selection::One(_) => match &self.form {
-                        Some(form) => form::render(form, cx).into_any_element(),
+                        Some(form) => {
+                            form::render(form, self.has_unsaved_form(cx), cx).into_any_element()
+                        }
                         None => form::render_empty(cx).into_any_element(),
                     },
                     Selection::Many(nodes) => form::render_many(nodes.len(), cx).into_any_element(),

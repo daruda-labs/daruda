@@ -1229,12 +1229,9 @@ async fn a_refusal_points_at_the_field_it_is_about(cx: &mut TestAppContext) {
     );
 }
 
-/// A reload replaces what the inspector shows. When that throws away something
-/// the person typed and had not saved, it says so — and only then: the pane
-/// that pressed Save is mid-edit too when its own write comes back, and a
-/// banner on every successful save would be noise.
+/// Reload preserves local text and prevents overwriting a changed node.
 #[gpui::test]
-async fn typing_lost_to_a_reload_is_reported(cx: &mut TestAppContext) {
+async fn a_reload_keeps_the_draft_and_refuses_a_conflicting_save(cx: &mut TestAppContext) {
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
@@ -1278,19 +1275,34 @@ async fn typing_lost_to_a_reload_is_reported(cx: &mut TestAppContext) {
             .read(cx)
             .value()
             .to_string()),
-        "theirs.md",
-        "the file wins"
+        "mine.md",
+        "the draft survives"
+    );
+    assert!(view.read_with(&vcx, |v, _| v.draft_conflict()));
+    assert!(
+        !ws.update_in(&mut vcx, |ws, window, cx| ws.save_flow_editor(
+            &flow_path,
+            view.clone(),
+            window,
+            cx
+        ))
     );
     assert!(
-        told_about_dropped_typing(&ws, &vcx),
-        "and the typing that went with it is reported"
+        std::fs::read_to_string(&flow_path)
+            .unwrap()
+            .contains("theirs.md")
+    );
+    view.update_in(&mut vcx, |v, window, cx| v.rebuild_form(window, cx));
+    assert!(!view.read_with(&vcx, |v, cx| v.has_unsaved_form(cx)));
+    assert_eq!(
+        view.read_with(&vcx, |v, cx| v.form().unwrap().fields(cx).body.output),
+        "theirs.md"
     );
 }
 
-/// Adding a node throws the same typing away, and rebuilds the inspector for
-/// the node it just made — so a banner would be gone before it was read.
+/// Adding a node preserves the previous node’s unsaved fields.
 #[gpui::test]
-async fn typing_lost_to_adding_a_node_is_reported(cx: &mut TestAppContext) {
+async fn adding_a_node_keeps_the_previous_draft(cx: &mut TestAppContext) {
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
@@ -1316,16 +1328,19 @@ async fn typing_lost_to_adding_a_node_is_reported(cx: &mut TestAppContext) {
     });
     vcx.run_until_parked();
 
-    assert!(
-        told_about_dropped_typing(&ws, &vcx),
-        "the typed output went nowhere and nothing said so"
+    assert!(view.read_with(&vcx, |v, cx| v.has_unsaved_form(cx)));
+    view.update_in(&mut vcx, |v, window, cx| {
+        v.select_node_for_test(&"design".into(), window, cx)
+    });
+    assert_eq!(
+        view.read_with(&vcx, |v, cx| v.form().unwrap().fields(cx).body.output),
+        "mine.md"
     );
 }
 
-/// The node being edited is renamed out from under the inspector. Nothing comes
-/// back to compare against, and that is the case most worth saying.
+/// A draft whose node disappeared still gates Run and can be discarded.
 #[gpui::test]
-async fn typing_lost_with_the_node_itself_is_reported(cx: &mut TestAppContext) {
+async fn a_removed_node_keeps_its_draft_until_revert(cx: &mut TestAppContext) {
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
@@ -1358,10 +1373,9 @@ async fn typing_lost_with_the_node_itself_is_reported(cx: &mut TestAppContext) {
         view.read_with(&vcx, |v, _| v.form().is_none()),
         "the node it was about is gone, so the inspector has nothing to show"
     );
-    assert!(
-        told_about_dropped_typing(&ws, &vcx),
-        "and that is exactly when it has to be said"
-    );
+    assert!(view.read_with(&vcx, |v, cx| v.has_unsaved_form(cx) && v.draft_conflict()));
+    view.update_in(&mut vcx, |v, window, cx| v.rebuild_form(window, cx));
+    assert!(!view.read_with(&vcx, |v, cx| v.has_unsaved_form(cx)));
 }
 
 /// A marquee catches several nodes, and one Delete takes all of them — with the

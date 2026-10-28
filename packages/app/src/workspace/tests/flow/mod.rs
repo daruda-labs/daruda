@@ -6,6 +6,8 @@
 //! a workspace with a flow in it, and the flow texts — is here.
 
 mod ask;
+mod authoring;
+mod authoring_edits;
 mod browser;
 mod control;
 mod files;
@@ -456,21 +458,6 @@ nodes:
       mode: danger-full-access
       model: gpt
 ";
-
-/// Whether the workspace has said that unsaved typing was dropped.
-///
-/// A toast rather than a banner in the inspector: the two cases below replace
-/// or remove the very form a banner would have sat on.
-fn told_about_dropped_typing(
-    ws: &gpui::Entity<crate::workspace::Workspace>,
-    vcx: &gpui::VisualTestContext,
-) -> bool {
-    ws.read_with(vcx, |ws, _| {
-        ws.error_history()
-            .iter()
-            .any(|report| report.dedup_key.as_deref() == Some("flow.edit_dropped_typing"))
-    })
-}
 
 /// A second worktree in the same project, holding its own flows directory,
 /// and *not* activated. What a targeted run has to be able to reach.

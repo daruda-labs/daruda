@@ -139,6 +139,7 @@ impl ScreenshotScenario {
     /// `settings:<slug>` selects a Settings section; bare `settings` uses the
     /// default section.
     pub(crate) fn from_cli_name(name: &str) -> Option<Self> {
+        use super::super::pages::flows::graph::form::screenshot::FlowFormShot;
         use super::super::right_dock::quick_entry_shot::QuickEntryShot;
         match name {
             "agent-chat-diff" => Some(Self::AgentChatDiff),
@@ -241,6 +242,10 @@ impl ScreenshotScenario {
             NAME_FLOW_GRAPH_FORM => Some(Self::FlowGraphForm),
             NAME_FLOW_GRAPH_FORM_REFUSED => Some(Self::FlowGraphFormRefused),
             NAME_FLOW_GRAPH_PINNED => Some(Self::FlowGraphPinned),
+            "flow-form-english" => Some(Self::FlowForm(FlowFormShot::English)),
+            "flow-form-basic" => Some(Self::FlowForm(FlowFormShot::Basic)),
+            "flow-form-expanded" => Some(Self::FlowForm(FlowFormShot::Expanded)),
+            "flow-form-command" => Some(Self::FlowForm(FlowFormShot::Command)),
             NAME_FLOW_GRAPH_AUTHORING => Some(Self::FlowGraphAuthoring),
             NAME_FLOW_RUN_DETAIL => Some(Self::FlowRunDetail),
             NAME_AGENT_CHAT_FAILURE => Some(Self::AgentChatFailure),

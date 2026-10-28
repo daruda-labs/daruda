@@ -4,12 +4,73 @@
 //! build it, put a refusal on it, and say so when a reload took away something
 //! that had been typed.
 
-use daruda_flow::NodeId;
 use gpui::{App, Context, Window};
 
-use super::{FlowGraphEvent, FlowGraphView, form, policy};
+use super::{FlowGraphView, form};
 
 impl FlowGraphView {
+    pub(in crate::workspace) fn set_catalog(
+        &mut self,
+        catalog: form::catalog::Catalog,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.catalog = catalog;
+        self.refresh_form_choices(window, cx);
+    }
+
+    pub(super) fn refresh_form_choices(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(form) = &mut self.form {
+            form.refresh_choices(&self.catalog, window, cx);
+        }
+        cx.notify();
+    }
+
+    pub(super) fn watch_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self._agent_watch = self.form.as_ref().map(|form| {
+            cx.subscribe_in(
+                &form.agent_states().id,
+                window,
+                |view, _, event, window, cx| {
+                    if matches!(event, crate::ui::InputEvent::Change) {
+                        view.refresh_form_choices(window, cx);
+                    }
+                },
+            )
+        });
+        self._link_watches.clear();
+        if let Some(form) = &self.form {
+            self._link_watches.push(cx.subscribe_in(
+                &form.dep_picker,
+                window,
+                |view, _, event, window, cx| view.choose_form_link(false, event, window, cx),
+            ));
+            self._link_watches.push(cx.subscribe_in(
+                &form.result_picker,
+                window,
+                |view, _, event, window, cx| view.choose_form_link(true, event, window, cx),
+            ));
+            self._link_watches.push(cx.subscribe_in(
+                form.deps_state(),
+                window,
+                |view, _, event, window, cx| {
+                    if matches!(event, crate::ui::InputEvent::Change) {
+                        view.refresh_form_links(window, cx);
+                    }
+                },
+            ));
+        }
+        self.refresh_form_choices(window, cx);
+        self.refresh_form_links(window, cx);
+    }
+
+    pub(super) fn toggle_execution_section(&mut self, cx: &mut Context<Self>) {
+        if let Some(form) = &mut self.form {
+            form.settings_open = !form.settings_open;
+            cx.notify();
+        }
+    }
+
     pub(in crate::workspace) fn name(&self) -> &str {
         &self.saved_name
     }
@@ -47,7 +108,12 @@ impl FlowGraphView {
 
     /// Pending title or inspector edits gate Run and the close confirmation.
     pub(in crate::workspace) fn has_unsaved_form(&self, cx: &App) -> bool {
-        self.name_is_dirty(cx) || self.form.as_ref().is_some_and(|form| form.is_dirty(cx))
+        self.name_is_dirty(cx)
+            || !self.drafts.is_empty()
+            || self
+                .form
+                .as_ref()
+                .is_some_and(|form| form.has_local_input(cx))
     }
 
     /// Open or close the inspector's agent-override block.
@@ -80,44 +146,19 @@ impl FlowGraphView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.drafts.clear();
+        self.save_error = None;
+        self.name_input.update(cx, |input, cx| {
+            input.set_value(self.saved_name.clone(), window, cx)
+        });
+        cx.notify();
         let Some(node) = self.form.as_ref().map(|form| form.node.clone()) else {
             return;
         };
         let text = self.text.clone();
         let issues = self.current_issues();
         self.form = text.and_then(|text| form::NodeForm::build(&text, &node, &issues, window, cx));
+        self.watch_form(window, cx);
         cx.notify();
-    }
-
-    /// Say so when a reload replaced something the person had typed.
-    ///
-    /// Not "was the form dirty": the pane that pressed Save is dirty too at the
-    /// moment its own write comes back, and saying it on every successful save
-    /// would be noise. What is actually lost is the difference between what they
-    /// had and what the file now says — zero for the pane that wrote it, and the
-    /// typing itself for a pane that did not. A node that is gone after the
-    /// reload counts too: nothing came back to compare against.
-    ///
-    /// Emitted rather than written onto the form, because the form is the thing
-    /// being replaced. Adding a node rebuilds it for the new one, and a node
-    /// renamed out from under the inspector leaves no form at all — either way a
-    /// banner would be gone before it was read.
-    pub(super) fn say_if_typing_was_dropped(
-        &mut self,
-        typed: Option<(NodeId, form::NodeFields)>,
-        cx: &mut Context<Self>,
-    ) {
-        let Some((node, fields)) = typed else {
-            return;
-        };
-        let rebuilt = self
-            .form
-            .as_ref()
-            .map(|form| (form.node.clone(), form.fields(cx)));
-        let rebuilt = rebuilt.as_ref().map(|(node, fields)| (node, fields));
-        if policy::typing_survived(&node, &fields, rebuilt) {
-            return;
-        }
-        cx.emit(FlowGraphEvent::TypingDropped);
     }
 }

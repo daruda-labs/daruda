@@ -270,6 +270,7 @@ impl Workspace {
                 }),
                 cx.observe_global::<agent_vocabulary_global::AgentVocabularyGlobal>(|ws, cx| {
                     ws.agent_vocabulary = agent_vocabulary_global::snapshot(cx, &ws.data_dir);
+                    ws.refresh_flow_form_catalog(cx);
                     cx.notify();
                 }),
                 cx.observe_global::<crate::agent::mcp::McpState>(|_ws, cx| {

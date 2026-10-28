@@ -82,6 +82,7 @@ impl Workspace {
         let (delta, mirrors) = self.config_delta(config, cx);
         let previous_agents = self.mirrors.agents.clone();
         self.store_mirrors(mirrors);
+        self.refresh_flow_form_catalog(cx);
         self.apply_config_to_left_dock(cx);
         self.apply_config_to_agent_chat_defaults(delta.telegram_recipient, cx);
         self.apply_config_to_agent_sessions(&previous_agents, cx);

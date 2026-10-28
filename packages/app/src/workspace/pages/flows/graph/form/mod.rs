@@ -18,9 +18,19 @@
 //! mapping and not the view.
 
 pub(in crate::workspace) mod apply;
+pub(in crate::workspace) mod catalog;
+mod choice;
+mod draft;
+mod editor;
+pub(super) use draft::NodeDraft;
 pub(in crate::workspace) mod fields;
+mod file_picker;
+mod links;
 pub(in crate::workspace) mod notes;
+pub(in crate::workspace) mod prompt_edit;
 mod render;
+#[cfg(feature = "screenshot")]
+pub(in crate::workspace) mod screenshot;
 
 pub(super) use render::{render, render_empty, render_many, render_no_nodes};
 // Re-exported so every caller keeps saying `form::NodeFields`: which file a
@@ -96,12 +106,21 @@ pub(in crate::workspace) struct NodeForm {
     pub(in crate::workspace) node: NodeId,
     /// What it was built from — what dirty compares against.
     initial: NodeFields,
+    source_text: String,
+    initial_text: Vec<String>,
     id: Entity<InputState>,
     deps: Entity<InputState>,
+    pub(super) dep_picker: Entity<crate::ui::select::SelectState>,
+    pub(super) result_picker: Entity<crate::ui::select::SelectState>,
     timeout: Entity<InputState>,
     max_turns: Entity<InputState>,
     cwd: Entity<InputState>,
     agent: AgentStates,
+    pub(super) agent_choices: Vec<Entity<choice::Choice>>,
+    pub(super) timeout_choice: Entity<choice::Choice>,
+    pub(super) turns_choice: Entity<choice::Choice>,
+    inherited: daruda_flow::parse::AgentOverride,
+    pub(super) settings_open: bool,
     body: Body,
     /// Whether the override block is open. Closed by default — most nodes take
     /// `defaults` and have nothing here to look at.
@@ -189,22 +208,121 @@ impl NodeForm {
                 cx,
             ),
         };
-        Some(Self {
+        let agent_choices = [&agent.id, &agent.model, &agent.mode]
+            .iter()
+            .enumerate()
+            .map(|(index, input)| {
+                let input = (*input).clone();
+                cx.new(|cx| {
+                    choice::Choice::new(
+                        input,
+                        vec![catalog::inherited_option(None)],
+                        4 + index as isize * 2,
+                        window,
+                        cx,
+                    )
+                })
+            })
+            .collect();
+        let timeout_choice = suggested(&timeout, &["5m", "10m", "30m", "1h"], 20, window, cx);
+        let turns_choice = suggested(&max_turns, &["1", "3", "5", "10"], 22, window, cx);
+        let mut form = Self {
             node: node.clone(),
             initial,
+            source_text: text.to_string(),
+            initial_text: Vec::new(),
             id,
             deps,
+            dep_picker: cx.new(|cx| {
+                crate::ui::select::state_with_options(vec![], None, window, cx).searchable(true)
+            }),
+            result_picker: cx.new(|cx| {
+                crate::ui::select::state_with_options(vec![], None, window, cx).searchable(true)
+            }),
             timeout,
             max_turns,
             cwd,
             agent,
+            agent_choices,
+            timeout_choice,
+            turns_choice,
+            inherited,
+            settings_open: false,
             body,
             // Opened when the node already overrides something — there is
             // something to see — and closed when it does not.
             agent_open,
             banner: None,
             notes,
-        })
+        };
+        form.initial_text = form.text_snapshot(cx);
+        form.set_notes(form.notes.clone());
+        Some(form)
+    }
+
+    pub(super) fn refresh_choices(
+        &mut self,
+        catalog: &catalog::Catalog,
+        window: &mut Window,
+        cx: &mut Context<super::FlowGraphView>,
+    ) {
+        let id = some_if_filled(read(&self.agent.id, cx).trim())
+            .or_else(|| self.inherited.id.clone())
+            .unwrap_or_default();
+        let options = [
+            catalog.agents(self.inherited.id.as_deref()),
+            catalog.axis(&id, true, self.inherited.model.as_deref()),
+            catalog.axis(&id, false, self.inherited.mode.as_deref()),
+        ];
+        for (choice, options) in self.agent_choices.iter().zip(options) {
+            choice.update(cx, |choice, cx| choice.set_options(options, window, cx));
+        }
+    }
+
+    #[cfg(test)]
+    pub(in crate::workspace) fn agent_picker(
+        &self,
+        axis: usize,
+        cx: &App,
+    ) -> Entity<crate::ui::select::SelectState> {
+        self.agent_choices[axis].read(cx).select.clone()
+    }
+
+    /// Inactive source and failure-policy fields remain drafts too.
+    pub(in crate::workspace) fn has_local_input(&self, cx: &App) -> bool {
+        self.is_dirty(cx) || self.text_snapshot(cx) != self.initial_text
+    }
+
+    fn text_snapshot(&self, cx: &App) -> Vec<String> {
+        self.text_inputs()
+            .iter()
+            .map(|input| read(input, cx))
+            .collect()
+    }
+
+    fn text_inputs(&self) -> [&Entity<InputState>; 19] {
+        let fail = &self.body.on_fail;
+        [
+            &self.id,
+            &self.deps,
+            &self.timeout,
+            &self.max_turns,
+            &self.cwd,
+            &self.agent.id,
+            &self.agent.model,
+            &self.agent.mode,
+            &self.agent.effort,
+            &self.body.prompt.inline,
+            &self.body.prompt.file,
+            &self.body.output,
+            &self.body.run,
+            &fail.hint.inline,
+            &fail.hint.file,
+            &fail.fix,
+            &fail.rerun,
+            &fail.max_attempts,
+            &fail.wait,
+        ]
     }
 
     /// What the boxes say now.
@@ -321,6 +439,14 @@ impl NodeForm {
         {
             self.agent_open = true;
         }
+        if notes.iter().any(|note| {
+            matches!(
+                note.field,
+                notes::FormField::Cwd | notes::FormField::Fix | notes::FormField::Rerun
+            )
+        }) {
+            self.settings_open = true;
+        }
         self.notes = notes;
     }
 
@@ -363,10 +489,12 @@ impl NodeForm {
         &self.deps
     }
 
+    #[cfg(test)]
     pub(in crate::workspace) fn timeout_state(&self) -> &Entity<InputState> {
         &self.timeout
     }
 
+    #[cfg(test)]
     pub(in crate::workspace) fn turns_state(&self) -> &Entity<InputState> {
         &self.max_turns
     }
@@ -694,4 +822,21 @@ fn multi_line<T: 'static>(
 
 fn read(state: &Entity<InputState>, cx: &App) -> String {
     state.read(cx).value().to_string()
+}
+
+fn suggested<T: 'static>(
+    input: &Entity<InputState>,
+    values: &[&str],
+    tab: isize,
+    window: &mut Window,
+    cx: &mut Context<T>,
+) -> Entity<choice::Choice> {
+    let mut options = vec![catalog::inherited_option(None)];
+    options.extend(
+        values
+            .iter()
+            .map(|value| crate::ui::select::SelectOption::simple((*value).to_string())),
+    );
+    let input = input.clone();
+    cx.new(|cx| choice::Choice::new(input, options, tab, window, cx))
 }

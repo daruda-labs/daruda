@@ -16,7 +16,6 @@ use gpui::{AppContext as _, Context, Entity, Focusable as _, Window};
 
 use super::detail::{FlowDetail, FlowDetailBody, FlowDetailId};
 use super::graph::{FlowGraphEvent, FlowGraphView};
-use crate::surface::strings as s;
 use crate::workspace::Workspace;
 use crate::workspace::command::flow_picker::FlowPurpose;
 use crate::workspace::pages::Page;
@@ -179,6 +178,36 @@ impl Workspace {
         cx.notify();
     }
 
+    fn flow_form_catalog(&self) -> super::graph::form::catalog::Catalog {
+        super::graph::form::catalog::Catalog {
+            agents: self.mirrors.agents.clone(),
+            vocabulary: self.agent_vocabulary.clone(),
+        }
+    }
+
+    pub(in crate::workspace) fn refresh_flow_form_catalog(&self, cx: &mut Context<Self>) {
+        let Some(FlowDetail {
+            body: FlowDetailBody::Graph(view),
+            ..
+        }) = &self.pages.flows.detail
+        else {
+            return;
+        };
+        let view = view.clone();
+        let catalog = self.flow_form_catalog();
+        let handle = self.window_runtime.handle;
+        cx.defer(move |cx| {
+            crate::windows::try_update_workspace_window(
+                handle,
+                cx,
+                "flow_form_catalog",
+                move |window, cx| {
+                    view.update(cx, |view, cx| view.set_catalog(catalog, window, cx));
+                },
+            );
+        });
+    }
+
     /// Make a new graph of `path` the page's detail. Shared by opening and
     /// restoring, which agree on how a graph is built and what its gestures
     /// reach; the caller has left the old one and saves if this is news.
@@ -192,6 +221,8 @@ impl Workspace {
         let id = FlowDetailId(self.alloc_id());
         let owned = path.to_path_buf();
         let view = cx.new(|cx| FlowGraphView::new(&owned, window, cx));
+        let catalog = self.flow_form_catalog();
+        view.update(cx, |view, cx| view.set_catalog(catalog, window, cx));
         // Detached: the subscription's life is the view's, which ends when the
         // detail is dropped. Every handler goes through `id`, so one that
         // arrives after the graph was replaced does nothing.
@@ -269,11 +300,6 @@ impl Workspace {
             FlowGraphEvent::Disconnect { out_of, into } => {
                 self.disconnect_nodes(&path, view, out_of, into, window, cx)
             }
-            FlowGraphEvent::TypingDropped => self.report_own_flow_refusal(
-                s::flow::edit_dropped_typing(),
-                "flow.edit_dropped_typing",
-                cx,
-            ),
         }
     }
 

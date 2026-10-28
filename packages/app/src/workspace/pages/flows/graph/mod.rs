@@ -11,6 +11,7 @@ mod commands;
 mod connect;
 mod delete_key;
 mod disconnect;
+mod drafts;
 pub(in crate::workspace) mod form;
 mod form_bridge;
 mod frame;
@@ -97,9 +98,6 @@ pub(in crate::workspace) enum FlowGraphEvent {
     Revert,
     /// Delete the selected node. Asks first — the workspace owns the dialog.
     Delete,
-    /// A reload replaced what the inspector held, and the person had typed
-    /// something into it that was not saved.
-    TypingDropped,
     /// Add a node, chained after the selected one when there is one.
     AddNode,
     /// Run this flow, or report what is wrong with it without running.
@@ -155,6 +153,10 @@ pub(in crate::workspace) struct FlowGraphView {
     /// [`Self::reconcile_selection`] — a handler — rather than in `render`,
     /// which must not create entities.
     form: Option<form::NodeForm>,
+    drafts: std::collections::BTreeMap<NodeId, form::NodeDraft>,
+    catalog: form::catalog::Catalog,
+    _agent_watch: Option<gpui::Subscription>,
+    _link_watches: Vec<gpui::Subscription>,
     /// Pins this pane has just let go of, and why.
     ///
     /// Kept until the next edit or the next run — an edit replaces the answer
@@ -263,6 +265,10 @@ impl FlowGraphView {
             text,
             pins: PinSet::default(),
             form: None,
+            drafts: Default::default(),
+            catalog: form::catalog::Catalog::default(),
+            _agent_watch: None,
+            _link_watches: Vec::new(),
             _canvas_watch: None,
             _focus_watch: None,
             _theme_watch: theme_watch,
@@ -350,7 +356,6 @@ impl FlowGraphView {
             window,
             cx,
         );
-        self.form = None;
         self.watch_canvas(window, cx);
         if let Some(node) = was_selected {
             self.select_node(&node, window, cx);
@@ -493,13 +498,13 @@ impl FlowGraphView {
         // every save would be unusable. What was *typed* is taken for the same
         // reason from the other side — the rebuild is about to replace it.
         let was_selected = self.form.as_ref().map(|form| form.node.clone());
-        let typed = self
-            .form
-            .as_ref()
-            .filter(|form| form.is_dirty(cx))
-            .map(|form| (form.node.clone(), form.fields(cx)));
 
-        match policy::decide(read_flow(&self.path), self.text.as_deref(), self.drawn()) {
+        let decision = policy::decide(read_flow(&self.path), self.text.as_deref(), self.drawn());
+        if matches!(decision, policy::Reload::Unchanged) {
+            return;
+        }
+        self.stash_form(cx);
+        match decision {
             policy::Reload::Unchanged => return,
             policy::Reload::Restamp { text, model } => {
                 let metadata_only = self.text.as_deref().is_some_and(|before| {
@@ -516,8 +521,8 @@ impl FlowGraphView {
                 self.absorb_surviving(pins::surviving(&self.pins, self.text.as_deref(), &text));
                 self.restamp(&model, cx);
                 self.text = Some(text);
-                if !metadata_only {
-                    self.rebuild_form(window, cx);
+                if !metadata_only && let Some(node) = was_selected.as_ref() {
+                    self.select_node(node, window, cx);
                 }
             }
             policy::Reload::Rebuild { text, model } => {
@@ -554,7 +559,7 @@ impl FlowGraphView {
                 input.set_value(self.saved_name.clone(), window, cx)
             });
         }
-        self.say_if_typing_was_dropped(typed, cx);
+        self.restore_form_drafts(window, cx);
         cx.notify();
     }
 

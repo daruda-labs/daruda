@@ -52,16 +52,19 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some((base, name, rename, node)) = view.read_with(cx, |view, cx| {
-            let node = view
-                .form()
-                .filter(|form| form.is_dirty(cx))
-                .map(|form| (form.node.clone(), form.fields(cx)));
+        if !view.update(cx, |view, cx| view.validate_form_drafts(window, cx)) {
+            return false;
+        }
+        let selected = view
+            .read(cx)
+            .form()
+            .map(|form| NodeId::from(form.fields(cx).id));
+        let Some((base, name, rename, nodes)) = view.read_with(cx, |view, cx| {
             Some((
                 view.text()?.to_string(),
                 view.edited_name(cx),
                 view.name_is_dirty(cx),
-                node,
+                view.pending_node_fields(cx),
             ))
         }) else {
             return false;
@@ -73,7 +76,7 @@ impl Workspace {
             return false;
         }
         // The name the notes are filtered by — `node` moves into the closure.
-        let node_id = node.as_ref().map(|(node, _)| node.clone());
+        let node_id = view.read(cx).form().map(|form| form.node.clone());
         // Cleared before the attempt so what the banner shows is always about the
         // save the person just asked for.
         view.update(cx, |view, cx| {
@@ -87,15 +90,16 @@ impl Workspace {
                 if rename {
                     file.name = Some(name);
                 }
-                if let Some((node, fields)) = node {
-                    super::graph::form::apply::node_fields(file, &node, &fields);
-                }
+                super::graph::form::apply::draft_fields(file, &nodes);
             },
             window,
             cx,
         );
         match outcome {
-            Ok(()) | Err(crate::workspace::flow_file_ops::EditRefusal::NothingToDo) => return true,
+            Ok(()) | Err(crate::workspace::flow_file_ops::EditRefusal::NothingToDo) => {
+                view.update(cx, |view, cx| view.finish_form_save(selected, window, cx));
+                return true;
+            }
             // Not about the edit: a permission or a disk failure is the same thing
             // wherever it happens, and the toast is where the app says it.
             Err(refusal @ crate::workspace::flow_file_ops::EditRefusal::Io(_)) => {
@@ -310,8 +314,11 @@ impl Workspace {
             window,
             cx,
         );
-        if let Err(refusal) = outcome {
-            self.report_edit_refusal(&refusal, cx);
+        match outcome {
+            Ok(()) => view.update(cx, |view, cx| {
+                view.finish_node_deletion(&nodes, &base, window, cx)
+            }),
+            Err(refusal) => self.report_edit_refusal(&refusal, cx),
         }
     }
 

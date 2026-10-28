@@ -90,6 +90,43 @@ pub(in crate::workspace) fn node_fields(file: &mut FlowFile, node: &NodeId, fiel
     }
 }
 
+/// Apply every draft before sweeping renames, so later drafts cannot restore
+/// references to an earlier node's old name. Temporary IDs also support swaps.
+pub(in crate::workspace) fn draft_fields(file: &mut FlowFile, drafts: &[(NodeId, NodeFields)]) {
+    for (node, fields) in drafts {
+        let mut same_id = fields.clone();
+        same_id.id = node.to_string();
+        node_fields(file, node, &same_id);
+    }
+    let mut renames = Vec::new();
+    for (node, fields) in drafts
+        .iter()
+        .filter(|(node, fields)| node.as_str() != fields.id)
+    {
+        let temporary = (0..)
+            .map(|n| NodeId::from(format!("draft-rename-{n}")))
+            .find(|id| {
+                !file.nodes.iter().any(|node| &node.id == id)
+                    && !drafts.iter().any(|(_, fields)| fields.id == id.as_str())
+            })
+            .expect("finite nodes leave a temporary ID available");
+        let Some(current) = file.nodes.iter().find(|n| &n.id == node) else {
+            continue;
+        };
+        let mut intermediate = super::fields::fields_of(current);
+        intermediate.id = temporary.to_string();
+        node_fields(file, node, &intermediate);
+        renames.push((temporary, fields.id.clone()));
+    }
+    for (temporary, final_id) in renames {
+        if let Some(current) = file.nodes.iter().find(|n| n.id == temporary) {
+            let mut fields = super::fields::fields_of(current);
+            fields.id = final_id;
+            node_fields(file, &temporary, &fields);
+        }
+    }
+}
+
 /// A node the file does not have yet, chained after `after` when there is one.
 ///
 /// Named `node-N` for the first `N` the file has no node for. Not asked for: the
@@ -392,6 +429,32 @@ nodes:
         rerun: [build]
         max_attempts: 2
 ";
+
+    #[test]
+    fn batch_renames_keep_references_in_other_drafts_and_support_swaps() {
+        let mut file = daruda_flow::parse::parse_flow_file(GATE_FLOW).unwrap();
+        let mut build = super::super::fields::fields_of(&file.nodes[0]);
+        build.id = "check".into();
+        let mut check = super::super::fields::fields_of(&file.nodes[1]);
+        check.id = "build".into();
+        check.body.run = "cat {{node.build.output}}".into();
+        draft_fields(
+            &mut file,
+            &[("build".into(), build), ("check".into(), check)],
+        );
+        assert_eq!(file.nodes[0].id.as_str(), "check");
+        assert_eq!(file.nodes[1].id.as_str(), "build");
+        assert_eq!(file.nodes[1].deps, [NodeId::from("check")]);
+        let NodeKindFile::Command {
+            run,
+            on_fail: GateFailFile::Repair { rerun, .. },
+        } = &file.nodes[1].kind
+        else {
+            panic!("command repair");
+        };
+        assert_eq!(run, "cat {{node.check.output}}");
+        assert_eq!(rerun, &[NodeId::from("check")]);
+    }
 
     fn fields_renaming(to: &str) -> NodeFields {
         NodeFields {

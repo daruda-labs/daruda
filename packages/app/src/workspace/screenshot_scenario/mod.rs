@@ -167,6 +167,7 @@ pub(crate) enum ScreenshotScenario {
     /// A flow the engine refuses, with a pin that has just gone — the only way
     /// to see the card header carrying three things at once.
     FlowGraphAuthoring,
+    FlowForm(super::pages::flows::graph::form::screenshot::FlowFormShot),
     /// A past run's report as the Flows page's detail. Reached only by a row
     /// click on a run that wrote one, which no restored state holds.
     FlowRunDetail,
@@ -540,6 +541,9 @@ pub(crate) fn drive(
             workspace.update(cx, |ws, cx| {
                 ws.open_first_flow_graph_pinned_for_shot(window, cx)
             });
+        }
+        ScreenshotScenario::FlowForm(shot) => {
+            workspace.update(cx, |ws, cx| ws.open_flow_form_for_shot(shot, window, cx));
         }
         ScreenshotScenario::FlowGraphAuthoring => {
             workspace.update(cx, |ws, cx| {

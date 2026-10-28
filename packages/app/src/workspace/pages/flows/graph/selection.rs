@@ -102,11 +102,16 @@ impl FlowGraphView {
         if wanted == self.form.as_ref().map(|form| form.node.clone()) {
             return;
         }
+        self.stash_form(cx);
         let text = self.text.clone();
         let issues = self.current_issues();
-        self.form = wanted
-            .zip(text)
-            .and_then(|(node, text)| form::NodeForm::build(&text, &node, &issues, window, cx));
+        self.form = wanted.zip(text).and_then(|(node, text)| {
+            self.drafts
+                .remove(&node)
+                .and_then(|draft| draft.restore(&issues, window, cx))
+                .or_else(|| form::NodeForm::build(&text, &node, &issues, window, cx))
+        });
+        self.watch_form(window, cx);
         cx.notify();
     }
 

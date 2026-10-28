@@ -5,6 +5,7 @@
 //! [`super::super::FlowGraphEvent`] and the workspace does the work, because a
 //! view that wrote to the file would be a second place that knows how.
 
+use crate::ui::ButtonVariants as _;
 use gpui::{Context, IntoElement};
 
 use super::{KindChoice, NodeForm, Refusal};
@@ -16,20 +17,23 @@ use super::{KindChoice, NodeForm, Refusal};
 /// that wrote to the file would be a second place that knows how.
 pub(in super::super) fn render(
     form: &NodeForm,
+    dirty: bool,
     cx: &mut Context<super::super::FlowGraphView>,
 ) -> impl IntoElement {
     use crate::surface::strings as s;
-    use crate::ui::select::select;
+    use crate::ui::select::form_select as select;
     use crate::ui::theme::{current, palette};
-    use crate::ui::{Disableable as _, button, button_danger, button_primary};
-    use gpui::{ParentElement as _, Styled as _, div, px};
+    use crate::ui::{Disableable as _, button, button_icon, button_primary};
+    use gpui::{
+        InteractiveElement as _, ParentElement as _, StatefulInteractiveElement as _, Styled as _,
+        div, px,
+    };
 
     // Status hues stay the UI theme's — an error is an error on any surface.
     let (primary, error) = (
-        crate::ui::theme::PaneSurfaceTokens::flow_graph(cx).foreground,
+        crate::ui::theme::current(cx).text_primary,
         current(cx).banner_error_text,
     );
-    let dirty = form.is_dirty(cx);
     let refusal = form.refusal(cx);
 
     let mut rows = div()
@@ -41,7 +45,7 @@ pub(in super::super) fn render(
             super::notes::FormField::Id,
             s::flow::form_id_label(),
             None,
-            field(form.id_state(), cx, 0),
+            field(form.id_state(), cx, 1),
             cx,
         ))
         .child(field_with_note(
@@ -49,7 +53,7 @@ pub(in super::super) fn render(
             super::notes::FormField::Deps,
             s::flow::form_deps_label(),
             None,
-            field(form.deps_state(), cx, 1),
+            dependency_picker(form, cx),
             cx,
         ));
 
@@ -59,63 +63,46 @@ pub(in super::super) fn render(
     let body = form.body_states(cx);
     rows = rows.child(field_column(
         s::flow::form_kind_label(),
-        select(body.kind_select, cx, 2),
+        select(body.kind_select, cx, 3),
         cx,
     ));
+    rows = rows.children((body.kind == KindChoice::Agent).then(|| agent_section(form, cx)));
     rows = match body.kind {
         KindChoice::Agent => rows
             .child(source_row(
                 body.prompt,
                 s::flow::form_prompt_label(),
                 s::flow::form_prompt_file_label(),
-                3,
+                14,
                 cx,
             ))
+            .children(super::is_file_source(body.prompt, cx).then(|| {
+                button("flow-prompt-file", s::flow::form_pick_prompt())
+                    .on_click(cx.listener(|view, _, window, cx| view.pick_prompt_file(window, cx)))
+            }))
+            .children((!super::is_file_source(body.prompt, cx)).then(|| {
+                button("flow-prompt-expand", s::flow::form_expand_prompt())
+                    .on_click(cx.listener(|view, _, window, cx| view.expand_prompt(window, cx)))
+            }))
+            .children((!super::is_file_source(body.prompt, cx)).then(|| result_picker(form, cx)))
             .child(field_with_note(
                 form,
                 super::notes::FormField::Output,
                 s::flow::form_output_label(),
                 Some(s::flow::form_output_help()),
-                field(body.output, cx, 5),
+                field(body.output, cx, 18),
                 cx,
-            ))
-            .child(fail_section(body.on_fail, FailShape::Retry, cx)),
+            )),
         KindChoice::Command => rows
             .child(field_column(
                 s::flow::form_run_label(),
-                field(body.run, cx, 3),
+                field(body.run, cx, 14),
                 cx,
             ))
-            .child(fail_section(body.on_fail, FailShape::Repair, cx)),
+            .child(result_picker(form, cx)),
     };
 
-    rows = rows
-        .child(field_column(
-            s::flow::form_timeout_label(),
-            field(form.timeout_state(), cx, 4),
-            cx,
-        ))
-        // Beside the timeout because both are ceilings on one attempt — one on
-        // its clock, one on how many times it may be prompted.
-        .child(field_column(
-            s::flow::form_turns_label(),
-            field(form.turns_state(), cx, 4),
-            cx,
-        ))
-        .child(field_with_note(
-            form,
-            super::notes::FormField::Cwd,
-            s::flow::form_cwd_label(),
-            None,
-            field(form.cwd_state(), cx, 5),
-            cx,
-        ))
-        // Agent nodes only: `agent:` lives inside the file's `Agent` variant, so
-        // a command node cannot carry one — offering the boxes there is
-        // offering fields no save could keep. Nothing is hidden by this: the
-        // rules that point at this block all name agent nodes, and a repair's
-        // missing agent points at the `fix` box instead.
-        .children((body.kind == KindChoice::Agent).then(|| agent_section(form, cx)));
+    rows = rows.child(execution_section(form, cx));
 
     if let Some(refusal) = &refusal {
         let message = match refusal {
@@ -139,7 +126,11 @@ pub(in super::super) fn render(
     let footer = div()
         .flex()
         .flex_row()
-        .gap(px(palette::FLOW_INSPECTOR_GAP))
+        .flex_none()
+        .p(px(palette::FLOW_INSPECTOR_PAD))
+        .border_t_1()
+        .border_color(crate::ui::theme::current(cx).border)
+        .gap(px(palette::GAP_SM))
         .child(
             button_primary("flow-form-save", s::flow::form_save())
                 .disabled(!can_save)
@@ -158,21 +149,23 @@ pub(in super::super) fn render(
         // Also on the pane's menu, which is where a person who has not selected
         // anything looks.
         .child(
-            button_danger("flow-form-delete", s::flow::delete_node()).on_click(cx.listener(
-                |_, _, _window, cx| {
+            button_icon("flow-form-delete", crate::ui::icons::DELETE, cx)
+                .tooltip(s::flow::delete_node())
+                .on_click(cx.listener(|_, _, _window, cx| {
                     cx.emit(super::super::FlowGraphEvent::Delete);
-                },
-            )),
+                })),
         );
 
     column(cx)
         .flex()
         .flex_col()
-        .gap(px(palette::FLOW_INSPECTOR_GAP))
+        .overflow_hidden()
         .child(
             // The node's own name, as a heading: without an explicit colour it
             // inherits the panel's muted body tone and reads as another label.
             div()
+                .flex_none()
+                .p(px(palette::FLOW_INSPECTOR_PAD))
                 .text_size(px(palette::FLOW_GRAPH_ID_FONT_SIZE))
                 .text_color(primary)
                 .child(form.node.clone().into_string()),
@@ -186,8 +179,64 @@ pub(in super::super) fn render(
                 .text_color(error)
                 .child(banner.to_string())
         }))
-        .child(rows)
+        .child(
+            div()
+                .id("flow-inspector-fields")
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .overflow_y_scroll()
+                .p(px(palette::FLOW_INSPECTOR_PAD))
+                .child(rows),
+        )
         .child(footer)
+}
+
+fn dependency_picker(form: &NodeForm, cx: &mut Context<super::super::FlowGraphView>) -> gpui::Div {
+    use crate::surface::strings as s;
+    use crate::ui::{button, select::form_select, theme};
+    use gpui::{ParentElement as _, Styled as _, div, px};
+    let deps = form.fields(cx).deps;
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(theme::GAP_SM))
+        .child(div().flex().flex_wrap().gap(px(theme::GAP_SM)).children(
+            deps.iter().enumerate().map(|(index, dep)| {
+                let dep = dep.clone();
+                button(("flow-dep", index), format!("{dep} ×"))
+                    .tooltip(s::flow::form_remove_dep(&dep))
+                    .on_click(cx.listener(move |view, _, window, cx| {
+                        view.remove_form_dep(&dep, window, cx)
+                    }))
+            }),
+        ))
+        .children(deps.is_empty().then(|| {
+            div()
+                .text_color(theme::current(cx).text_muted)
+                .child(s::flow::form_no_deps())
+        }))
+        .child(form_select(&form.dep_picker, cx, 2))
+}
+
+fn result_picker(
+    form: &NodeForm,
+    cx: &mut Context<super::super::FlowGraphView>,
+) -> impl IntoElement {
+    use crate::ui::{select::form_select, theme};
+    use gpui::{ParentElement as _, Styled as _, div, px};
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(theme::GAP_SM))
+        .child(form_select(&form.result_picker, cx, 17))
+        .child(
+            div()
+                .text_size(px(theme::FLOW_GRAPH_META_FONT_SIZE))
+                .text_color(theme::current(cx).text_muted)
+                .child(crate::surface::strings::flow::form_result_help()),
+        )
 }
 
 /// A labelled box, with a standing description of the field and the engine's
@@ -206,7 +255,7 @@ fn field_with_note(
     use gpui::{ParentElement as _, Styled as _, div, px};
 
     let error = current(cx).banner_error_text;
-    let muted = crate::ui::theme::PaneSurfaceTokens::flow_graph(cx).foreground_muted;
+    let muted = crate::ui::theme::current(cx).text_muted;
     div()
         .flex()
         .flex_col()
@@ -216,6 +265,7 @@ fn field_with_note(
             div()
                 .text_size(px(palette::FLOW_GRAPH_META_FONT_SIZE))
                 .text_color(muted)
+                .whitespace_normal()
                 .child(help)
         }))
         .children(form.note_for(field).map(|note| {
@@ -236,7 +286,7 @@ fn source_row(
     tab: isize,
     cx: &mut Context<super::super::FlowGraphView>,
 ) -> impl IntoElement {
-    use crate::ui::select::select;
+    use crate::ui::select::form_select as select;
     use crate::ui::theme::palette;
     use gpui::{ParentElement as _, Styled as _, div, px};
 
@@ -272,7 +322,7 @@ fn fail_section(
     cx: &mut Context<super::super::FlowGraphView>,
 ) -> impl IntoElement {
     use crate::surface::strings as s;
-    use crate::ui::select::select;
+    use crate::ui::select::form_select as select;
     use crate::ui::theme::palette;
     use gpui::{ParentElement as _, Styled as _, div, px};
 
@@ -283,7 +333,7 @@ fn fail_section(
         .gap(px(palette::FLOW_INSPECTOR_GAP))
         .child(field_column(
             s::flow::form_fail_label(),
-            select(&states.policy, cx, 11),
+            select(&states.policy, cx, 25),
             cx,
         ));
     if !acting {
@@ -294,75 +344,68 @@ fn fail_section(
             &states.hint,
             s::flow::form_hint_label(),
             s::flow::form_hint_file_label(),
-            12,
+            26,
             cx,
         )),
         FailShape::Repair => section
             .child(field_column(
                 s::flow::form_fix_label(),
-                field(&states.fix, cx, 12),
+                field(&states.fix, cx, 26),
                 cx,
             ))
             .child(field_column(
                 s::flow::form_rerun_label(),
-                field(&states.rerun, cx, 13),
+                field(&states.rerun, cx, 27),
                 cx,
             )),
     };
     section
         .child(field_column(
             s::flow::form_attempts_label(),
-            field(&states.max_attempts, cx, 14),
+            field(&states.max_attempts, cx, 28),
             cx,
         ))
         .child(field_column(
             s::flow::form_wait_label(),
-            field(&states.wait, cx, 15),
+            field(&states.wait, cx, 29),
             cx,
         ))
 }
 
-/// The node's own agent, behind a disclosure.
-///
-/// Closed unless the node already overrides something: most nodes take
-/// `defaults`, and five empty boxes above the save button is five rows of
-/// nothing. Tab indices continue the same pool — a closed block simply has no
-/// slots in it.
+/// The agent picker stays visible; optional overrides share one disclosure.
 fn agent_section(
     form: &NodeForm,
     cx: &mut Context<super::super::FlowGraphView>,
 ) -> impl IntoElement {
     use crate::surface::strings as s;
-    use crate::ui::disclosure;
-    use crate::ui::select::select;
+    use crate::ui::select::form_select as select;
     use crate::ui::theme::{current, palette};
-    use gpui::{InteractiveElement as _, ParentElement as _, Styled as _, div, px};
+    use gpui::{ParentElement as _, Styled as _, div, px};
 
-    let muted = crate::ui::theme::PaneSurfaceTokens::flow_graph(cx).foreground_muted;
+    let muted = crate::ui::theme::current(cx).text_muted;
     let open = form.agent_open();
-    let header = div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap(px(palette::FLOW_GRAPH_CARD_ROW_GAP))
-        .cursor_pointer()
-        .on_mouse_down(
-            gpui::MouseButton::Left,
-            cx.listener(|view, _, _window, cx| view.toggle_agent_section(cx)),
-        )
-        .child(disclosure("flow-form-agent", open).color(muted))
-        .child(
-            div()
-                .text_size(px(palette::FLOW_GRAPH_META_FONT_SIZE))
-                .text_color(muted)
-                .child(s::flow::form_agent_section()),
-        );
+    let header = crate::ui::button("flow-form-agent", s::flow::form_agent_section())
+        .ghost()
+        .justify_start()
+        .tab_stop(true)
+        .tab_index(5)
+        .icon(crate::ui::icons::icon(if open {
+            crate::ui::icons::EXPAND_MORE
+        } else {
+            crate::ui::icons::CHEVRON_RIGHT
+        }))
+        .on_click(cx.listener(|view, _, _, cx| view.toggle_agent_section(cx)));
 
     let error = current(cx).banner_error_text;
     let mut section = div()
         .flex()
         .flex_col()
         .gap(px(palette::FLOW_INSPECTOR_GAP))
+        .child(field_column(
+            s::flow::form_agent_id_label(),
+            form.agent_choices[0].clone(),
+            cx,
+        ))
         .child(header)
         .children(form.note_for(super::notes::FormField::Agent).map(|note| {
             div()
@@ -374,30 +417,91 @@ fn agent_section(
         let states = form.agent_states();
         section = section
             .child(field_column(
-                s::flow::form_agent_id_label(),
-                field(&states.id, cx, 6),
+                s::flow::form_agent_model_label(),
+                form.agent_choices[1].clone(),
                 cx,
             ))
             .child(field_column(
                 s::flow::form_agent_mode_label(),
-                field(&states.mode, cx, 7),
-                cx,
-            ))
-            .child(field_column(
-                s::flow::form_agent_model_label(),
-                field(&states.model, cx, 8),
+                form.agent_choices[2].clone(),
                 cx,
             ))
             .child(field_column(
                 s::flow::form_agent_effort_label(),
-                field(&states.effort, cx, 9),
+                field(&states.effort, cx, 12),
                 cx,
             ))
+            .child(
+                div()
+                    .text_size(px(palette::FLOW_GRAPH_META_FONT_SIZE))
+                    .text_color(muted)
+                    .child(s::flow::form_effort_help()),
+            )
             .child(field_column(
                 s::flow::form_agent_permission_label(),
-                select(&states.permission, cx, 10),
+                select(&states.permission, cx, 13),
                 cx,
             ));
+    }
+    section
+}
+
+fn execution_section(
+    form: &NodeForm,
+    cx: &mut Context<super::super::FlowGraphView>,
+) -> impl IntoElement {
+    use crate::surface::strings as s;
+    use crate::ui::{button, theme};
+    use gpui::{ParentElement as _, Styled as _, div, px};
+    let mut section = div()
+        .flex()
+        .flex_col()
+        .gap(px(theme::FLOW_INSPECTOR_GAP))
+        .child(
+            button(
+                "flow-execution-settings",
+                s::flow::form_execution_settings(),
+            )
+            .ghost()
+            .justify_start()
+            .tab_stop(true)
+            .tab_index(19)
+            .icon(crate::ui::icons::icon(if form.settings_open {
+                crate::ui::icons::EXPAND_MORE
+            } else {
+                crate::ui::icons::CHEVRON_RIGHT
+            }))
+            .on_click(cx.listener(|view, _, _, cx| view.toggle_execution_section(cx))),
+        );
+    if form.settings_open {
+        let body = form.body_states(cx);
+        section =
+            section
+                .child(field_column(
+                    s::flow::form_timeout_label(),
+                    form.timeout_choice.clone(),
+                    cx,
+                ))
+                .children((body.kind == KindChoice::Agent).then(|| {
+                    field_column(s::flow::form_turns_label(), form.turns_choice.clone(), cx)
+                }))
+                .child(field_with_note(
+                    form,
+                    super::notes::FormField::Cwd,
+                    s::flow::form_cwd_label(),
+                    None,
+                    field(form.cwd_state(), cx, 24),
+                    cx,
+                ))
+                .child(fail_section(
+                    body.on_fail,
+                    if body.kind == KindChoice::Agent {
+                        FailShape::Retry
+                    } else {
+                        FailShape::Repair
+                    },
+                    cx,
+                ));
     }
     section
 }
@@ -425,17 +529,7 @@ pub(in super::super) fn render_empty(
     note(crate::surface::strings::flow::form_no_selection(), cx)
 }
 
-/// A labelled field on the pane's own surface, not the modal one.
-///
-/// `crate::ui::field_column` draws its label with `crate::ui::Label`, whose own
-/// doc says to prefer it "whenever the surrounding widget's natural foreground
-/// colour is what you want" — and here it is not: `Label` takes the UI theme's
-/// foreground while this pane's background is mirrored from the terminal, so a
-/// light UI theme put dark text on a dark pane. Same reasoning as `field`
-/// below, one step further out.
-///
-/// The modal font and gap tokens are kept deliberately: what was wrong is the
-/// colour, and re-picking the geometry here would move every row.
+/// A label and field on the UI theme’s authoring surface.
 fn field_column(
     label: impl Into<gpui::SharedString>,
     body: impl gpui::IntoElement,
@@ -450,27 +544,19 @@ fn field_column(
         .child(
             div()
                 .text_size(px(palette::MODAL_BODY_FONT_SIZE))
-                .text_color(crate::ui::theme::PaneSurfaceTokens::flow_graph(cx).foreground)
+                .text_color(crate::ui::theme::current(cx).text_primary)
                 .child(label.into()),
         )
         .child(div().w_full().child(body))
 }
 
-/// A text box on the pane's own surface, not the modal one.
-///
-/// One place so the boxes cannot drift apart: [`crate::ui::input`]'s default
-/// background is a workspace-chrome tone, and this pane follows the terminal.
+/// Shared 36px authoring geometry, including multi-line inputs.
 fn field<T: crate::ui::input::InputTabSpec>(
     state: &gpui::Entity<crate::ui::InputState>,
     cx: &gpui::App,
     tab: T,
 ) -> impl gpui::IntoElement {
-    crate::ui::input_on(
-        state,
-        crate::ui::theme::PaneSurfaceTokens::flow_graph(cx).tint,
-        cx,
-        tab,
-    )
+    crate::ui::form_input(state, cx, tab)
 }
 
 /// The inspector column holding one line of muted prose.
@@ -478,8 +564,9 @@ fn note(text: String, cx: &mut Context<super::super::FlowGraphView>) -> impl Int
     use crate::ui::theme::palette;
     use gpui::{ParentElement as _, Styled as _, px};
 
-    let muted = crate::ui::theme::PaneSurfaceTokens::flow_graph(cx).foreground_muted;
+    let muted = crate::ui::theme::current(cx).text_muted;
     column(cx)
+        .p(px(palette::FLOW_INSPECTOR_PAD))
         .text_size(px(palette::FLOW_GRAPH_META_FONT_SIZE))
         .text_color(muted)
         .child(text)
@@ -488,9 +575,9 @@ fn note(text: String, cx: &mut Context<super::super::FlowGraphView>) -> impl Int
 /// The column every inspector state shares: one width, one border, one inset.
 fn column(cx: &mut Context<super::super::FlowGraphView>) -> gpui::Stateful<gpui::Div> {
     use crate::ui::theme::palette;
-    use gpui::{InteractiveElement as _, StatefulInteractiveElement as _, Styled as _, div, px};
+    use gpui::{InteractiveElement as _, Styled as _, div, px};
 
-    let tokens = crate::ui::theme::PaneSurfaceTokens::flow_graph(cx);
+    let tokens = crate::ui::theme::current(cx);
     div()
         .id("flow-inspector")
         .w(px(palette::FLOW_INSPECTOR_W))
@@ -499,9 +586,8 @@ fn column(cx: &mut Context<super::super::FlowGraphView>) -> gpui::Stateful<gpui:
         // A short pane cannot show five fields and a prompt box at once, and a
         // form whose Save button is off the bottom edge is unusable — the same
         // reason the right dock's views scroll their bodies.
-        .overflow_y_scroll()
-        .p(px(palette::FLOW_INSPECTOR_PAD))
+        .overflow_hidden()
         .border_l_1()
-        .border_color(tokens.border_tint)
-        .bg(tokens.background)
+        .border_color(tokens.border)
+        .bg(tokens.modal_panel_bg)
 }
