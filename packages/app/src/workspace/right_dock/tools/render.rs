@@ -95,11 +95,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
                 .child(
                     ScopeSection {
                         section,
-                        label: target
-                            .owner
-                            .clone()
-                            .unwrap_or_else(|| strings::mcp::scope_display(target.scope))
-                            .into(),
+                        label: group_label(&snap.library.inventory.groups, &target).into(),
                         count: (!group.servers.is_empty())
                             .then(|| group.servers.len().to_string().into()),
                         fold,
@@ -114,6 +110,28 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
         );
     }
     col.into_any_element()
+}
+
+/// The scope name, or the plugin that owns the group. Several files in one
+/// scope (nested project configurations) also name their source, or their
+/// sections would read identically.
+fn group_label(
+    groups: &[crate::agent::configuration::library::Group],
+    target: &crate::agent::configuration::library::Target,
+) -> String {
+    if let Some(owner) = &target.owner {
+        return owner.clone();
+    }
+    let scope = strings::mcp::scope_display(target.scope);
+    let shared = groups
+        .iter()
+        .filter(|group| group.target.owner.is_none() && group.target.scope == target.scope)
+        .count();
+    if shared > 1 {
+        strings::mcp::group_label(scope, target.label())
+    } else {
+        scope
+    }
 }
 
 /// Servers configured across every scope.
@@ -342,6 +360,34 @@ fn row_actions(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_scope_sections_name_their_source() {
+        use crate::agent::configuration::{
+            Configuration, Provider,
+            library::{Group, Target},
+        };
+        let temp = tempfile::tempdir().unwrap();
+        let cwd = temp.path().join("repo/nested");
+        let config =
+            Configuration::resolve(Provider::Claude, Some(temp.path().into()), None, Some(cwd))
+                .unwrap();
+        let primary = Target::new(&config, McpScope::Project, None).unwrap();
+        let ancestor =
+            Target::new(&config, McpScope::Project, Some(&temp.path().join("repo"))).unwrap();
+        let group = |target: &Target| Group {
+            target: target.clone(),
+            servers: Vec::new(),
+        };
+        let scope = strings::mcp::scope_display(McpScope::Project);
+        assert_eq!(group_label(&[group(&primary)], &primary), scope);
+        let both = [group(&primary), group(&ancestor)];
+        assert_ne!(group_label(&both, &primary), group_label(&both, &ancestor));
+        assert_eq!(
+            group_label(&both, &ancestor),
+            strings::mcp::group_label(&scope, ancestor.label())
+        );
+    }
 
     #[gpui::test]
     fn hover_actions_fit_the_server_row(cx: &mut gpui::TestAppContext) {

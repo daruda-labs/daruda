@@ -1280,6 +1280,8 @@ mcp:
   # Action shown when local scope is empty (active lane, no `projects[<lane>]`
   # servers in `~/.claude.json`).
   add_local: "Add local server"
+  # Section title when several configuration files share one scope.
+  group_label: "%{scope} · %{source}"
   # Tooltip on the server row's enable switch.
   toggle_tooltip: "Enable or disable this server"
   # Tools tab footer: servers configured across every scope.

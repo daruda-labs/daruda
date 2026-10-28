@@ -896,6 +896,7 @@ mcp:
   no_project_hint: "프로젝트 및 로컬 MCP 서버는 활성 Worktree가 필요합니다. 프로젝트를 열어 이 범위를 활성화하세요."
   add_user: "개인 서버 추가"
   add_local: "로컬 서버 추가"
+  group_label: "%{scope} · %{source}"
   toggle_tooltip: "이 서버 사용 여부 전환"
   footer_servers: "MCP 서버 %{n}개"
   status_malformed: "형식 오류"
