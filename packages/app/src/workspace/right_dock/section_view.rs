@@ -69,17 +69,19 @@ impl ScopeSection {
         let is_open = fold.is_open();
         let workspace = workspace.clone();
         let show_disclosure = fold != SectionFold::Fixed;
-        // Source blocks share their section's variant, so their ids are
-        // scoped by the source as well.
+        // Source blocks share their section's variant, so their id and
+        // selector are scoped by the source as well.
+        let name: gpui::SharedString = match &key.source {
+            None => format!("dock-section-{section:?}").into(),
+            Some(source) => format!("dock-section-{section:?}-{source}").into(),
+        };
         let id: gpui::ElementId = match &key.source {
             None => ("dock-section", section as usize).into(),
-            Some(source) => {
-                gpui::SharedString::from(format!("dock-section-{section:?}-{source}")).into()
-            }
+            Some(_) => name.clone().into(),
         };
         let summary = div()
             .id(id)
-            .debug_selector(move || format!("dock-section-{section:?}"))
+            .debug_selector(move || name.to_string())
             .flex()
             .flex_row()
             .items_center()

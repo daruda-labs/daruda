@@ -280,6 +280,7 @@ pub(in crate::workspace) fn spawn(cx: &mut Context<Workspace>) -> Task<()> {
                         ws.report_error(daruda_store::observability::error_report::ErrorReport::new(crate::surface::strings::error::mcp_reload_failed(config.user_file.display())).severity(daruda_store::observability::error_report::ErrorSeverity::Warning).at(file!(), line!()).dedup("library.reload").build(), cx);
                     }
                     ws.right_views.library.view = view;
+                    ws.prune_tools_folds();
                     cx.notify();
                 }).is_err() { return; }
             }

@@ -52,6 +52,14 @@ impl DockSections {
         key.section.opens_by_default() != self.toggled.contains(&key)
     }
 
+    /// Forget source folds in `sections` that no longer name a live source.
+    /// Keys follow configuration files, which come and go with projects.
+    pub fn retain_sources(&mut self, sections: &[DockSection], live: &HashSet<SectionKey>) {
+        self.toggled.retain(|key| {
+            key.source.is_none() || !sections.contains(&key.section) || live.contains(key)
+        });
+    }
+
     pub fn toggle(&mut self, key: impl Into<SectionKey>) {
         let key = key.into();
         if !self.toggled.remove(&key) {
@@ -92,5 +100,7 @@ mod tests {
         assert!(!sections.is_open(key("a")));
         assert!(sections.is_open(key("b")));
         assert!(sections.is_open(DockSection::ToolsProject));
+        sections.retain_sources(&[DockSection::ToolsProject], &HashSet::new());
+        assert!(sections.is_open(key("a")));
     }
 }

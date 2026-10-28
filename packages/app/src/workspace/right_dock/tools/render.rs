@@ -79,16 +79,8 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
                 }),
             );
         }
-        use crate::workspace::right_dock::section::DockSection;
-        let section = match target.scope {
-            McpScope::User => DockSection::ToolsUser,
-            McpScope::Project => DockSection::ToolsProject,
-            McpScope::Local => DockSection::ToolsLocal,
-        };
-        let key = crate::workspace::right_dock::section::SectionKey {
-            section,
-            source: Some(target.label().into()),
-        };
+        let section = tools_section(target.scope);
+        let key = fold_key(&snap.library.inventory.groups, &target);
         let fold = SectionFold::toggleable(snap.sections.is_open(key.clone()));
         col = col.child(
             div()
@@ -128,15 +120,49 @@ fn group_label(
         return owner.clone();
     }
     let scope = strings::mcp::scope_display(target.scope);
-    let shared = groups
-        .iter()
-        .filter(|group| group.target.owner.is_none() && group.target.scope == target.scope)
-        .count();
-    if shared > 1 {
+    if shares_scope(groups, target) {
         strings::mcp::group_label(scope, target.label())
     } else {
         scope
     }
+}
+
+/// What a group's fold click toggles. A scope with one plain file folds as the
+/// scope, so the choice carries across projects; plugin groups and sibling
+/// files in one scope fold by their own source.
+pub(in crate::workspace) fn fold_key(
+    groups: &[crate::agent::configuration::library::Group],
+    target: &crate::agent::configuration::library::Target,
+) -> crate::workspace::right_dock::section::SectionKey {
+    let source = match &target.owner {
+        Some(owner) => Some(owner.clone().into()),
+        None if shares_scope(groups, target) => Some(target.label().into()),
+        None => None,
+    };
+    crate::workspace::right_dock::section::SectionKey {
+        section: tools_section(target.scope),
+        source,
+    }
+}
+
+fn tools_section(scope: McpScope) -> crate::workspace::right_dock::section::DockSection {
+    use crate::workspace::right_dock::section::DockSection;
+    match scope {
+        McpScope::User => DockSection::ToolsUser,
+        McpScope::Project => DockSection::ToolsProject,
+        McpScope::Local => DockSection::ToolsLocal,
+    }
+}
+
+fn shares_scope(
+    groups: &[crate::agent::configuration::library::Group],
+    target: &crate::agent::configuration::library::Target,
+) -> bool {
+    groups
+        .iter()
+        .filter(|group| group.target.owner.is_none() && group.target.scope == target.scope)
+        .count()
+        > 1
 }
 
 /// Servers configured across every scope.
@@ -378,6 +404,9 @@ mod tests {
             group_label(&both, &ancestor),
             strings::mcp::group_label(&scope, ancestor.label())
         );
+        // One file folds as the scope, so the choice carries across projects.
+        assert_eq!(fold_key(&[group(&primary)], &primary).source, None);
+        assert_ne!(fold_key(&both, &primary), fold_key(&both, &ancestor));
     }
 
     #[gpui::test]
