@@ -147,7 +147,7 @@ pub(in crate::workspace) struct FlowGraphView {
     /// tell "the file changed" from "something touched the file": a watcher
     /// reports our own writes back to us, and fsevents reports more than
     /// writes. `None` when the file could not be read at all.
-    text: Option<String>,
+    text: Option<std::sync::Arc<str>>,
     /// Nodes whose finished output this pane will reuse rather than run.
     ///
     /// Here and nowhere else: a pin is this machine at this moment, and the
@@ -162,6 +162,9 @@ pub(in crate::workspace) struct FlowGraphView {
     /// Nodes whose drafts a reload dropped because the node left the file.
     /// Shown until the next save or full revert so the loss is not silent.
     discarded: Vec<NodeId>,
+    /// The node selected when the file stopped loading. Its input waits as a
+    /// draft, and the selection comes back with the file so that draft shows.
+    lost_selection: Option<NodeId>,
     catalog: form::catalog::Catalog,
     _agent_watch: Option<gpui::Subscription>,
     _link_watches: Vec<gpui::Subscription>,
@@ -272,11 +275,12 @@ impl FlowGraphView {
             holds_the_pointer: false,
             path: path.to_path_buf(),
             state,
-            text,
+            text: text.map(Into::into),
             pins: PinSet::default(),
             form: None,
             drafts: Default::default(),
             discarded: Vec::new(),
+            lost_selection: None,
             catalog: form::catalog::Catalog::default(),
             _agent_watch: None,
             _link_watches: Vec::new(),
@@ -514,6 +518,7 @@ impl FlowGraphView {
         if matches!(decision, policy::Reload::Unchanged) {
             return;
         }
+        let was_selected = was_selected.or_else(|| self.lost_selection.take());
         // A form whose node and defaults did not change keeps its live boxes —
         // focus, caret, and custom-entry mode — instead of a snapshot round trip.
         let keep_form = match &decision {
@@ -542,7 +547,7 @@ impl FlowGraphView {
                 });
                 self.absorb_surviving(pins::surviving(&self.pins, self.text.as_deref(), &text));
                 self.restamp(&model, cx);
-                self.text = Some(text);
+                self.text = Some(text.into());
                 if !metadata_only && let Some(node) = was_selected.as_ref() {
                     self.select_node(node, window, cx);
                 }
@@ -557,7 +562,7 @@ impl FlowGraphView {
                     window,
                     cx,
                 );
-                self.text = Some(text);
+                self.text = Some(text.into());
                 if !keep_form {
                     self.form = None;
                 }
@@ -571,8 +576,9 @@ impl FlowGraphView {
                 // is gone off the screen with it.
                 self.pins.clear();
                 self.state = FlowGraphState::Unreadable(error);
-                self.text = text;
+                self.text = text.map(Into::into);
                 self.form = None;
+                self.lost_selection = was_selected;
                 self.watch_canvas(window, cx);
             }
         }
@@ -638,7 +644,11 @@ impl FlowGraphView {
         // returns early when the bytes it read are the ones it has, so a file
         // restored exactly as it was would otherwise never redraw.
         self.text = None;
-        // Kept as a draft: the file may come back, and the typed input with it.
+        // Kept as a draft, with the selection to show it again: the file may
+        // come back, and the typed input with it.
+        if let Some(form) = &self.form {
+            self.lost_selection = Some(form.node.clone());
+        }
         self.stash_form(cx);
         cx.notify();
     }

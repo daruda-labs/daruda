@@ -2,6 +2,7 @@
 use super::{NodeFields, NodeForm};
 use daruda_flow::NodeId;
 use gpui::{App, Context, Window};
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub(in crate::workspace) struct NodeDraft {
@@ -18,14 +19,24 @@ pub(in crate::workspace) struct NodeDraft {
 
 impl NodeDraft {
     pub(in crate::workspace) fn source_matches(&self, text: &str) -> bool {
+        source_matches(&self.source, text, &self.node)
+    }
+
+    /// [`Self::source_matches`] against the pane's current text, memoized for
+    /// render.
+    pub(in crate::workspace) fn matches_current(&self, text: &Arc<str>) -> bool {
         self.memo.check(&self.source, text, &self.node)
     }
 
-    /// Adopt a reloaded file that left this node and the defaults unchanged,
-    /// so later checks take the no-parse path.
+    fn set_source(&mut self, text: &str) {
+        self.source = text.to_string();
+        self.memo = MatchMemo::default();
+    }
+
+    /// Adopt a reloaded file that left this node and the defaults unchanged.
     pub(in crate::workspace) fn adopt_if_unchanged(&mut self, text: &str) {
         if self.source != text && self.source_matches(text) {
-            self.source = text.to_string();
+            self.set_source(text);
         }
     }
 
@@ -34,42 +45,32 @@ impl NodeDraft {
     /// references to deleted nodes go.
     pub(in crate::workspace) fn rebase(
         self,
-        deleted: &[NodeId],
-        before: &str,
-        after: &str,
+        edit: &CanvasEdit<'_>,
         issues: &[daruda_flow::error::ValidationIssue],
         window: &mut Window,
         cx: &mut Context<super::super::FlowGraphView>,
     ) -> Self {
-        if !self.source_matches(before) {
+        if !self.source_matches(edit.before) {
             return self;
         }
-        let (old, new) = (file_deps(before, &self.node), file_deps(after, &self.node));
-        if old == new && deleted.is_empty() {
+        let (old, new) = (edit.deps_before(&self.node), edit.deps_after(&self.node));
+        if old == new && edit.deleted.is_empty() {
             // Nothing typed can refer to what changed, so only the base moves;
             // rebuilding a form here would cost a full set of entities.
             let mut moved = self;
-            moved.source = after.to_string();
+            moved.set_source(edit.after);
             return moved;
         }
         let mut rebased = self.clone();
-        rebased.source = after.to_string();
+        rebased.set_source(edit.after);
         let Some(form) = rebased.restore(issues, window, cx) else {
             return self;
         };
         let typed = super::fields::parse_deps(&form.deps.read(cx).value());
-        let deps = rebase_deps(&typed, &old, &new, deleted).join(", ");
+        let deps = rebase_deps(&typed, &old, &new, edit.deleted).join(", ");
         form.deps
             .update(cx, |input, cx| input.set_value(deps, window, cx));
-        let rerun = super::fields::parse_deps(&form.body.on_fail.rerun.read(cx).value())
-            .into_iter()
-            .filter(|id| !is_deleted(deleted, id))
-            .collect::<Vec<_>>()
-            .join(", ");
-        form.body
-            .on_fail
-            .rerun
-            .update(cx, |input, cx| input.set_value(rerun, window, cx));
+        form.drop_references(edit.deleted, window, cx);
         form.snapshot(cx)
     }
 
@@ -99,7 +100,7 @@ impl NodeForm {
         NodeDraft {
             node: self.node.clone(),
             fields: self.fields(cx),
-            invalid: self.refusal(cx).is_some(),
+            invalid: self.introduced_refusal(cx).is_some(),
             source: self.source_text.clone(),
             memo: MatchMemo::default(),
             inputs: self.text_snapshot(cx),
@@ -130,7 +131,37 @@ impl NodeForm {
     }
 
     pub(in crate::workspace) fn source_matches(&self, text: &str) -> bool {
+        source_matches(&self.source_text, text, &self.node)
+    }
+
+    /// [`Self::source_matches`] against the pane's current text, memoized for
+    /// render.
+    pub(in crate::workspace) fn matches_current(&self, text: &Arc<str>) -> bool {
         self.match_memo.check(&self.source_text, text, &self.node)
+    }
+
+    /// Take deleted nodes out of the typed dependency and rerun lists.
+    pub(in crate::workspace) fn drop_references(
+        &self,
+        deleted: &[NodeId],
+        window: &mut Window,
+        cx: &mut Context<super::super::FlowGraphView>,
+    ) {
+        if deleted.is_empty() {
+            return;
+        }
+        for input in [&self.deps, &self.body.on_fail.rerun] {
+            let typed = super::fields::parse_deps(&input.read(cx).value());
+            if !typed.iter().any(|id| is_deleted(deleted, id)) {
+                continue;
+            }
+            let kept = typed
+                .into_iter()
+                .filter(|id| !is_deleted(deleted, id))
+                .collect::<Vec<_>>()
+                .join(", ");
+            input.update(cx, |input, cx| input.set_value(kept, window, cx));
+        }
     }
 
     /// Whether the form was built from exactly `text`.
@@ -141,38 +172,66 @@ impl NodeForm {
     /// Adopt a reloaded file that left this node and the defaults unchanged.
     pub(in crate::workspace) fn rebase_source(&mut self, text: &str) {
         self.source_text = text.to_string();
+        self.match_memo = MatchMemo::default();
     }
 }
 
-/// The last conflict answer for one pair of texts. Render asks every frame,
-/// and a draft in conflict would otherwise parse both files each time.
+/// The last answer against the pane's current text. Render asks every frame;
+/// keyed by the text's allocation, a repeat costs a pointer compare. Holding
+/// the `Arc` keeps that allocation from being reused for different bytes.
+/// Owners reset it whenever their own source changes.
 #[derive(Clone, Default)]
-pub(super) struct MatchMemo(std::cell::Cell<Option<(u64, bool)>>);
+pub(super) struct MatchMemo(std::cell::RefCell<Option<(Arc<str>, bool)>>);
 
 impl MatchMemo {
-    pub(super) fn check(&self, source: &str, text: &str, node: &NodeId) -> bool {
-        use std::hash::{Hash as _, Hasher as _};
-        if source == text {
-            return true;
-        }
-        let mut hasher = std::hash::DefaultHasher::new();
-        (source, text, node.as_str()).hash(&mut hasher);
-        let key = hasher.finish();
-        if let Some((seen, answer)) = self.0.get()
-            && seen == key
+    pub(super) fn check(&self, source: &str, text: &Arc<str>, node: &NodeId) -> bool {
+        if let Some((seen, answer)) = &*self.0.borrow()
+            && Arc::ptr_eq(seen, text)
         {
-            return answer;
+            return *answer;
         }
         let answer = source_matches(source, text, node);
-        self.0.set(Some((key, answer)));
+        *self.0.borrow_mut() = Some((text.clone(), answer));
         answer
     }
 }
 
-fn file_deps(text: &str, node: &NodeId) -> Vec<String> {
-    daruda_flow::parse::parse_flow_file(text)
-        .ok()
-        .and_then(|file| file.nodes.into_iter().find(|n| &n.id == node))
+/// One pane-made edit, parsed once for every draft it rebases.
+pub(in crate::workspace) struct CanvasEdit<'a> {
+    deleted: &'a [NodeId],
+    before: &'a str,
+    after: &'a str,
+    before_file: Option<daruda_flow::parse::FlowFile>,
+    after_file: Option<daruda_flow::parse::FlowFile>,
+}
+
+impl<'a> CanvasEdit<'a> {
+    pub(in crate::workspace) fn new(
+        deleted: &'a [NodeId],
+        before: &'a str,
+        after: &'a str,
+    ) -> Self {
+        let parse = |text| daruda_flow::parse::parse_flow_file(text).ok();
+        Self {
+            deleted,
+            before,
+            after,
+            before_file: parse(before),
+            after_file: parse(after),
+        }
+    }
+
+    fn deps_before(&self, node: &NodeId) -> Vec<String> {
+        file_deps(self.before_file.as_ref(), node)
+    }
+
+    fn deps_after(&self, node: &NodeId) -> Vec<String> {
+        file_deps(self.after_file.as_ref(), node)
+    }
+}
+
+fn file_deps(file: Option<&daruda_flow::parse::FlowFile>, node: &NodeId) -> Vec<String> {
+    file.and_then(|file| file.nodes.iter().find(|n| &n.id == node))
         .map(|n| n.deps.iter().map(ToString::to_string).collect())
         .unwrap_or_default()
 }

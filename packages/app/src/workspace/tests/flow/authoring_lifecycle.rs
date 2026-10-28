@@ -102,10 +102,9 @@ async fn a_lost_file_keeps_the_selected_input(cx: &mut TestAppContext) {
     view.update_in(&mut vcx, |v, _, cx| v.report_file_gone(cx));
     assert!(view.read_with(&vcx, |v, cx| v.has_unsaved_form(cx)));
     std::fs::write(&path, text).unwrap();
-    view.update_in(&mut vcx, |v, window, cx| {
-        v.reload(window, cx);
-        v.select_node_for_test(&"design".into(), window, cx);
-    });
+    // The selection comes back with the file, so the kept input is visible
+    // rather than pending behind a node nobody has clicked.
+    view.update_in(&mut vcx, |v, window, cx| v.reload(window, cx));
     assert_eq!(
         view.read_with(&vcx, |v, cx| v.form().unwrap().fields(cx).body.output),
         "mine.md"
@@ -136,4 +135,50 @@ async fn a_rename_refusal_stays_on_the_renamed_node(cx: &mut TestAppContext) {
         assert_eq!(form.node, daruda_flow::NodeId::from("design"));
         assert!(form.note_for_test(FormField::Id).is_some());
     });
+}
+
+#[gpui::test]
+async fn deleting_a_node_clears_it_from_a_kept_form(cx: &mut TestAppContext) {
+    let (_lane, ws, path, view, mut vcx) = open(LONG_CHAIN, cx);
+    view.update_in(&mut vcx, |v, window, cx| {
+        v.select_node_for_test(&"n1".into(), window, cx);
+        v.form()
+            .unwrap()
+            .deps_state()
+            .clone()
+            .update(cx, |input, cx| input.set_value("n3", window, cx));
+    });
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.delete_nodes(&path, view.clone(), vec!["n3".into()], window, cx)
+    });
+    view.read_with(&vcx, |v, cx| {
+        let form = v.form().unwrap();
+        assert_eq!(form.node, daruda_flow::NodeId::from("n1"));
+        assert!(form.fields(cx).deps.is_empty());
+    });
+}
+
+#[gpui::test]
+async fn inactive_typing_does_not_revive_an_untouched_refusal(cx: &mut TestAppContext) {
+    let (_lane, ws, path, view, mut vcx) = open(EMPTY_RUN, cx);
+    view.update_in(&mut vcx, |v, window, cx| {
+        set_output(v, "design", "mine.md", window, cx);
+        v.select_node_for_test(&"check".into(), window, cx);
+        v.form()
+            .unwrap()
+            .body_states(cx)
+            .prompt
+            .inline
+            .clone()
+            .update(cx, |input, cx| {
+                input.set_value("not for a command", window, cx)
+            });
+    });
+    assert!(ws.update_in(&mut vcx, |ws, window, cx| ws.save_flow_editor(
+        &path,
+        view.clone(),
+        window,
+        cx
+    )));
+    assert!(std::fs::read_to_string(&path).unwrap().contains("mine.md"));
 }

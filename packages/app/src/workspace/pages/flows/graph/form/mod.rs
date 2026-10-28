@@ -22,7 +22,7 @@ pub(in crate::workspace) mod catalog;
 mod choice;
 mod draft;
 mod editor;
-pub(super) use draft::NodeDraft;
+pub(super) use draft::{CanvasEdit, NodeDraft};
 pub(in crate::workspace) mod fields;
 mod file_picker;
 mod links;
@@ -383,53 +383,14 @@ impl NodeForm {
     /// cannot become one. Every other rule stays the engine's, so the form
     /// and a run never disagree about what is valid.
     pub(in crate::workspace) fn refusal(&self, cx: &App) -> Option<Refusal> {
-        let fields = self.fields(cx);
-        if fields.id.is_empty() {
-            return Some(Refusal::EmptyId);
-        }
-        // The engine's own rule, asked a beat earlier: it refuses the same
-        // name after a save round-trip, which is too late to be useful.
-        if !daruda_flow::node_id_is_wellformed(&fields.id) {
-            return Some(Refusal::InvalidId);
-        }
-        if let TurnsField::Unreadable(text) = fields.max_turns {
-            return Some(Refusal::Turns(text));
-        }
-        if let TimeoutField::Unreadable(text) = fields.timeout {
-            return Some(Refusal::Timeout(text));
-        }
-        // The acting policy's two numbers, for the same reason: neither can
-        // become what the file needs, so the engine never sees them.
-        // An agent has to write somewhere and a command has to run something.
-        // Neither is the engine's rule — it loads an empty `output` and an empty
-        // `run` without complaint — and neither is a node.
-        match fields.body.kind {
-            KindChoice::Agent if fields.body.output.is_empty() => {
-                return Some(Refusal::OutputRequired);
-            }
-            KindChoice::Command if fields.body.run.is_empty() => {
-                return Some(Refusal::RunRequired);
-            }
-            _ => {}
-        }
-        let on_fail = &fields.body.on_fail;
-        match on_fail {
-            FailFields::Halt => None,
-            FailFields::Retry {
-                max_attempts, wait, ..
-            }
-            | FailFields::Repair {
-                max_attempts, wait, ..
-            } => {
-                if let AttemptsField::Unreadable(text) = max_attempts {
-                    return Some(Refusal::Attempts(text.clone()));
-                }
-                if let TimeoutField::Unreadable(text) = wait {
-                    return Some(Refusal::Timeout(text.clone()));
-                }
-                None
-            }
-        }
+        refusal_of(&self.fields(cx))
+    }
+
+    /// A refusal the edits brought in. One the file's node already has is the
+    /// engine's to accept, and must not block saving the title or other nodes.
+    pub(in crate::workspace) fn introduced_refusal(&self, cx: &App) -> Option<Refusal> {
+        let refusal = self.refusal(cx)?;
+        (refusal_of(&self.initial).as_ref() != Some(&refusal)).then_some(refusal)
     }
 
     /// What to say about the last save, if it was refused.
@@ -523,6 +484,55 @@ impl NodeForm {
             output: &self.body.output,
             run: &self.body.run,
             on_fail: &self.body.on_fail,
+        }
+    }
+}
+
+fn refusal_of(fields: &NodeFields) -> Option<Refusal> {
+    if fields.id.is_empty() {
+        return Some(Refusal::EmptyId);
+    }
+    // The engine's own rule, asked a beat earlier: it refuses the same
+    // name after a save round-trip, which is too late to be useful.
+    if !daruda_flow::node_id_is_wellformed(&fields.id) {
+        return Some(Refusal::InvalidId);
+    }
+    if let TurnsField::Unreadable(text) = &fields.max_turns {
+        return Some(Refusal::Turns(text.clone()));
+    }
+    if let TimeoutField::Unreadable(text) = &fields.timeout {
+        return Some(Refusal::Timeout(text.clone()));
+    }
+    // The acting policy's two numbers, for the same reason: neither can
+    // become what the file needs, so the engine never sees them.
+    // An agent has to write somewhere and a command has to run something.
+    // Neither is the engine's rule — it loads an empty `output` and an empty
+    // `run` without complaint — and neither is a node.
+    match fields.body.kind {
+        KindChoice::Agent if fields.body.output.is_empty() => {
+            return Some(Refusal::OutputRequired);
+        }
+        KindChoice::Command if fields.body.run.is_empty() => {
+            return Some(Refusal::RunRequired);
+        }
+        _ => {}
+    }
+    let on_fail = &fields.body.on_fail;
+    match on_fail {
+        FailFields::Halt => None,
+        FailFields::Retry {
+            max_attempts, wait, ..
+        }
+        | FailFields::Repair {
+            max_attempts, wait, ..
+        } => {
+            if let AttemptsField::Unreadable(text) = max_attempts {
+                return Some(Refusal::Attempts(text.clone()));
+            }
+            if let TimeoutField::Unreadable(text) = wait {
+                return Some(Refusal::Timeout(text.clone()));
+            }
+            None
         }
     }
 }

@@ -80,18 +80,18 @@ impl FlowGraphView {
             .find(|draft| draft.invalid)
             .map(|draft| draft.node.clone())
             .or_else(|| {
-                // An untouched form is the file's own node, which the engine
-                // already accepts; its refusal must not block other edits.
+                // A refusal the file's node already had is the engine's to
+                // accept; only one the edits brought in blocks the save.
                 self.form
                     .as_ref()
-                    .filter(|form| form.has_local_input(cx) && form.refusal(cx).is_some())
+                    .filter(|form| form.introduced_refusal(cx).is_some())
                     .map(|form| form.node.clone())
             });
         if let Some(node) = invalid {
             self.select_node(&node, window, cx);
             if let Some(form) = &mut self.form
                 && matches!(
-                    form.refusal(cx),
+                    form.introduced_refusal(cx),
                     Some(
                         form::Refusal::Timeout(_)
                             | form::Refusal::Attempts(_)
@@ -111,16 +111,16 @@ impl FlowGraphView {
     }
 
     pub(in crate::workspace) fn draft_conflict(&self) -> bool {
-        let Some(text) = self.text.as_deref() else {
+        let Some(text) = &self.text else {
             return !self.drafts.is_empty() || self.form.is_some();
         };
         self.drafts
             .values()
-            .any(|draft| !draft.source_matches(text))
+            .any(|draft| !draft.matches_current(text))
             || self
                 .form
                 .as_ref()
-                .is_some_and(|form| !form.source_matches(text))
+                .is_some_and(|form| !form.matches_current(text))
     }
 
     pub(in crate::workspace) fn pending_node_fields(
@@ -153,27 +153,21 @@ impl FlowGraphView {
             return;
         };
         // A form the edit's reload kept is already on `after`; stashing it
-        // would rebuild its boxes and lose focus and custom-entry mode.
-        if !self
-            .form
-            .as_ref()
-            .is_some_and(|form| form.is_built_from(&after))
-        {
-            self.stash_form(cx);
+        // would rebuild its boxes and lose focus and custom-entry mode. Its
+        // typed references to deleted nodes still have to go.
+        match &self.form {
+            Some(form) if form.is_built_from(&after) => form.drop_references(deleted, window, cx),
+            _ => self.stash_form(cx),
         }
         let issues = self.current_issues();
+        let edit = form::CanvasEdit::new(deleted, before, &after);
         // The edit's own reload saw these drafts' nodes leave; deleting them
         // here was the person's choice, not a loss to report.
         self.discarded.retain(|node| !deleted.contains(node));
         self.drafts = std::mem::take(&mut self.drafts)
             .into_iter()
             .filter(|(node, _)| !deleted.contains(node))
-            .map(|(node, draft)| {
-                (
-                    node,
-                    draft.rebase(deleted, before, &after, &issues, window, cx),
-                )
-            })
+            .map(|(node, draft)| (node, draft.rebase(&edit, &issues, window, cx)))
             .collect();
         self.restore_form_drafts(window, cx);
         cx.notify();

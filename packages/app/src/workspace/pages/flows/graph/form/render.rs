@@ -124,7 +124,7 @@ pub(in super::super) fn render(
 
     // An untouched form's refusal is about the file as it is, which does not
     // stop saving the title or another node.
-    let can_save = status.unsaved && (refusal.is_none() || !status.node_local);
+    let can_save = status.unsaved && !status.node_refused;
     let footer = div()
         .flex()
         .flex_row()

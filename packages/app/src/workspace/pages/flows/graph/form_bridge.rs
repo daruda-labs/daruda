@@ -10,7 +10,9 @@ use super::{FlowGraphView, form};
 
 pub(in crate::workspace) struct FormStatus {
     pub unsaved: bool,
-    pub node_local: bool,
+    /// Whether the selected form's edits brought in a refusal; one the file
+    /// already had does not stop saving the title or other nodes.
+    pub node_refused: bool,
     pub conflict: bool,
     pub node_revertable: bool,
 }
@@ -147,12 +149,15 @@ impl FlowGraphView {
             .is_some_and(|form| form.has_local_input(cx));
         let stale = self.form.as_ref().is_some_and(|form| {
             self.text
-                .as_deref()
-                .is_none_or(|text| !form.source_matches(text))
+                .as_ref()
+                .is_none_or(|text| !form.matches_current(text))
         });
         FormStatus {
             unsaved: self.unsaved_with(local, cx),
-            node_local: local,
+            node_refused: self
+                .form
+                .as_ref()
+                .is_some_and(|form| form.introduced_refusal(cx).is_some()),
             conflict: self.draft_conflict(),
             node_revertable: local || stale,
         }
