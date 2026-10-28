@@ -13,8 +13,13 @@ impl FlowGraphView {
 
     pub(super) fn restore_form_drafts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.reconcile_selection(window, cx);
+        let conflict = crate::surface::strings::flow::form_draft_conflict();
         if self.draft_conflict() {
-            self.save_error = Some(crate::surface::strings::flow::form_draft_conflict());
+            self.save_error = Some(conflict);
+        } else if self.save_error.as_ref() == Some(&conflict) {
+            // Only the conflict banner is this reload's to retract; a refused
+            // save's message stays until the next save attempt.
+            self.save_error = None;
         }
     }
 
@@ -93,7 +98,9 @@ impl FlowGraphView {
             .collect()
     }
 
-    pub(in crate::workspace) fn finish_node_deletion(
+    /// Rebase drafts onto an edit this pane wrote — a deletion, connect, or
+    /// disconnect — so the pane's own change does not read as a conflict.
+    pub(in crate::workspace) fn finish_canvas_edit(
         &mut self,
         deleted: &[NodeId],
         before: &str,
@@ -111,14 +118,11 @@ impl FlowGraphView {
             .map(|(node, draft)| {
                 (
                     node,
-                    draft.after_deletion(deleted, before, &after, &issues, window, cx),
+                    draft.rebase(deleted, before, &after, &issues, window, cx),
                 )
             })
             .collect();
-        self.reconcile_selection(window, cx);
-        if !self.draft_conflict() {
-            self.save_error = None;
-        }
+        self.restore_form_drafts(window, cx);
         cx.notify();
     }
 

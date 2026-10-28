@@ -264,3 +264,147 @@ async fn expanded_prompt_buttons_are_keyboard_reachable(cx: &mut TestAppContext)
         );
     }
 }
+
+fn set_output(
+    v: &mut crate::workspace::pages::flows::graph::FlowGraphView,
+    node: &str,
+    value: &str,
+    window: &mut gpui::Window,
+    cx: &mut gpui::Context<crate::workspace::pages::flows::graph::FlowGraphView>,
+) {
+    v.select_node_for_test(&node.into(), window, cx);
+    v.form()
+        .unwrap()
+        .body_states(cx)
+        .output
+        .clone()
+        .update(cx, |input, cx| {
+            input.set_value(value.to_string(), window, cx)
+        });
+}
+
+#[gpui::test]
+async fn node_revert_keeps_other_drafts_and_the_title(cx: &mut TestAppContext) {
+    let (_lane, ws, path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(ws.active, &path, window, cx)
+    });
+    vcx.run_until_parked();
+    let view = ws.read_with(&vcx, |ws, _| ws.open_graph().unwrap().2);
+    view.update_in(&mut vcx, |v, window, cx| {
+        set_output(v, "design", "design-draft.md", window, cx);
+        set_output(v, "build", "build-draft.md", window, cx);
+        v.name_input_for_test()
+            .update(cx, |input, cx| input.set_value("Renamed", window, cx));
+        v.revert_selected_node(window, cx);
+    });
+    view.read_with(&vcx, |v, cx| {
+        assert_eq!(v.form().unwrap().fields(cx).body.output, "build.md");
+        assert_eq!(v.edited_name(cx), "Renamed");
+    });
+    view.update_in(&mut vcx, |v, window, cx| {
+        v.select_node_for_test(&"design".into(), window, cx)
+    });
+    assert_eq!(
+        view.read_with(&vcx, |v, cx| v.form().unwrap().fields(cx).body.output),
+        "design-draft.md"
+    );
+}
+
+#[gpui::test]
+async fn disconnecting_a_drafted_node_rebases_its_dependencies(cx: &mut TestAppContext) {
+    let (_lane, ws, path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(ws.active, &path, window, cx)
+    });
+    vcx.run_until_parked();
+    let view = ws.read_with(&vcx, |ws, _| ws.open_graph().unwrap().2);
+    view.update_in(&mut vcx, |v, window, cx| {
+        set_output(v, "build", "build-draft.md", window, cx)
+    });
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.disconnect_nodes(
+            &path,
+            view.clone(),
+            &"design".into(),
+            &"build".into(),
+            window,
+            cx,
+        )
+    });
+    view.read_with(&vcx, |v, cx| {
+        assert!(!v.draft_conflict());
+        assert!(v.save_error_for_test().is_none());
+        let fields = v.form().unwrap().fields(cx);
+        assert!(fields.deps.is_empty());
+        assert_eq!(fields.body.output, "build-draft.md");
+    });
+    assert!(ws.update_in(&mut vcx, |ws, window, cx| ws.save_flow_editor(
+        &path,
+        view.clone(),
+        window,
+        cx
+    )));
+    let file =
+        daruda_flow::parse::parse_flow_file(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let build = file
+        .nodes
+        .iter()
+        .find(|n| n.id.as_str() == "build")
+        .unwrap();
+    assert!(build.deps.is_empty());
+}
+
+#[gpui::test]
+async fn restored_drafts_show_their_suggested_values(cx: &mut TestAppContext) {
+    let (_lane, ws, path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(ws.active, &path, window, cx)
+    });
+    vcx.run_until_parked();
+    let view = ws.read_with(&vcx, |ws, _| ws.open_graph().unwrap().2);
+    view.update_in(&mut vcx, |v, window, cx| {
+        v.select_node_for_test(&"design".into(), window, cx);
+        v.form()
+            .unwrap()
+            .timeout_state()
+            .clone()
+            .update(cx, |input, cx| input.set_value("30m", window, cx));
+        v.select_node_for_test(&"build".into(), window, cx);
+        v.select_node_for_test(&"design".into(), window, cx);
+    });
+    let picker = view.read_with(&vcx, |v, cx| v.form().unwrap().timeout_picker(cx));
+    assert_eq!(
+        picker
+            .read_with(&vcx, |state, _| state.selected_value().cloned())
+            .as_deref(),
+        Some("30m")
+    );
+}
+
+#[gpui::test]
+async fn resolving_a_conflict_retracts_its_banner(cx: &mut TestAppContext) {
+    let (_lane, ws, path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(ws.active, &path, window, cx)
+    });
+    vcx.run_until_parked();
+    let view = ws.read_with(&vcx, |ws, _| ws.open_graph().unwrap().2);
+    view.update_in(&mut vcx, |v, window, cx| {
+        set_output(v, "design", "mine.md", window, cx)
+    });
+    let original = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, original.replace("write a line", "theirs")).unwrap();
+    view.update_in(&mut vcx, |v, window, cx| v.reload(window, cx));
+    assert!(view.read_with(&vcx, |v, _| v.save_error_for_test().is_some()));
+    std::fs::write(&path, &original).unwrap();
+    view.update_in(&mut vcx, |v, window, cx| v.reload(window, cx));
+    view.read_with(&vcx, |v, _| {
+        assert!(!v.draft_conflict());
+        assert!(v.save_error_for_test().is_none());
+    });
+}

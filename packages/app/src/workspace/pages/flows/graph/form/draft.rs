@@ -20,7 +20,10 @@ impl NodeDraft {
         source_matches(&self.source, text, &self.node)
     }
 
-    pub(in crate::workspace) fn after_deletion(
+    /// Carry a draft across an edit this pane made to the file. Typed values
+    /// stay; the node's `deps` take the edit's added and removed edges, and
+    /// references to deleted nodes go.
+    pub(in crate::workspace) fn rebase(
         self,
         deleted: &[NodeId],
         before: &str,
@@ -32,19 +35,25 @@ impl NodeDraft {
         if !self.source_matches(before) {
             return self;
         }
+        let (old, new) = (file_deps(before, &self.node), file_deps(after, &self.node));
         let mut rebased = self.clone();
         rebased.source = after.to_string();
         let Some(form) = rebased.restore(issues, window, cx) else {
             return self;
         };
-        for input in [&form.deps, &form.body.on_fail.rerun] {
-            let value = super::fields::parse_deps(&input.read(cx).value())
-                .into_iter()
-                .filter(|id| !deleted.iter().any(|node| node.as_str() == id))
-                .collect::<Vec<_>>()
-                .join(", ");
-            input.update(cx, |input, cx| input.set_value(value, window, cx));
-        }
+        let typed = super::fields::parse_deps(&form.deps.read(cx).value());
+        let deps = rebase_deps(&typed, &old, &new, deleted).join(", ");
+        form.deps
+            .update(cx, |input, cx| input.set_value(deps, window, cx));
+        let rerun = super::fields::parse_deps(&form.body.on_fail.rerun.read(cx).value())
+            .into_iter()
+            .filter(|id| !is_deleted(deleted, id))
+            .collect::<Vec<_>>()
+            .join(", ");
+        form.body
+            .on_fail
+            .rerun
+            .update(cx, |input, cx| input.set_value(rerun, window, cx));
         form.snapshot(cx)
     }
 
@@ -108,6 +117,39 @@ impl NodeForm {
     }
 }
 
+fn file_deps(text: &str, node: &NodeId) -> Vec<String> {
+    daruda_flow::parse::parse_flow_file(text)
+        .ok()
+        .and_then(|file| file.nodes.into_iter().find(|n| &n.id == node))
+        .map(|n| n.deps.iter().map(ToString::to_string).collect())
+        .unwrap_or_default()
+}
+
+fn is_deleted(deleted: &[NodeId], id: &str) -> bool {
+    deleted.iter().any(|node| node.as_str() == id)
+}
+
+/// Typed dependencies, minus edges the edit removed and nodes it deleted,
+/// plus edges it added.
+fn rebase_deps(
+    typed: &[String],
+    before: &[String],
+    after: &[String],
+    deleted: &[NodeId],
+) -> Vec<String> {
+    let mut deps: Vec<String> = typed
+        .iter()
+        .filter(|dep| (!before.contains(dep) || after.contains(dep)) && !is_deleted(deleted, dep))
+        .cloned()
+        .collect();
+    for dep in after {
+        if !before.contains(dep) && !deps.contains(dep) {
+            deps.push(dep.clone());
+        }
+    }
+    deps
+}
+
 pub(super) fn source_matches(before: &str, after: &str, node: &NodeId) -> bool {
     let parse = daruda_flow::parse::parse_flow_file;
     match (parse(before), parse(after)) {
@@ -136,5 +178,32 @@ mod tests {
             &text.replace("echo ok", "echo changed"),
             &"build".into()
         ));
+    }
+
+    #[test]
+    fn rebased_deps_keep_typed_edges_and_take_the_edit() {
+        let strings = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            rebase_deps(
+                &strings(&["a", "typed"]),
+                &strings(&["a"]),
+                &strings(&["new"]),
+                &[]
+            ),
+            strings(&["typed", "new"])
+        );
+        assert_eq!(
+            rebase_deps(
+                &strings(&["a", "b"]),
+                &strings(&["a", "b"]),
+                &strings(&["b"]),
+                &["a".into()]
+            ),
+            strings(&["b"])
+        );
+        assert_eq!(
+            rebase_deps(&strings(&["new"]), &[], &strings(&["new"]), &[]),
+            strings(&["new"])
+        );
     }
 }

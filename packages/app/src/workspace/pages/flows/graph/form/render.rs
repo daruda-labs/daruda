@@ -140,10 +140,8 @@ pub(in super::super) fn render(
         )
         .child(
             button("flow-form-revert", s::flow::form_revert())
-                .disabled(!dirty)
-                .on_click(cx.listener(|_, _, _window, cx| {
-                    cx.emit(super::super::FlowGraphEvent::Revert);
-                })),
+                .disabled(!form.has_local_input(cx))
+                .on_click(cx.listener(|view, _, window, cx| view.revert_selected_node(window, cx))),
         )
         // Deleting the node this form is about, from the form it is about it.
         // Also on the pane's menu, which is where a person who has not selected
@@ -205,7 +203,7 @@ fn dependency_picker(form: &NodeForm, cx: &mut Context<super::super::FlowGraphVi
         .child(div().flex().flex_wrap().gap(px(theme::GAP_SM)).children(
             deps.iter().enumerate().map(|(index, dep)| {
                 let dep = dep.clone();
-                button(("flow-dep", index), format!("{dep} ×"))
+                button(("flow-dep", index), s::flow::form_dep_chip(&dep))
                     .tooltip(s::flow::form_remove_dep(&dep))
                     .on_click(cx.listener(move |view, _, window, cx| {
                         view.remove_form_dep(&dep, window, cx)

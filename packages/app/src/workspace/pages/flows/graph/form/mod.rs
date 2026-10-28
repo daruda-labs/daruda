@@ -121,6 +121,9 @@ pub(in crate::workspace) struct NodeForm {
     pub(super) turns_choice: Entity<choice::Choice>,
     inherited: daruda_flow::parse::AgentOverride,
     pub(super) settings_open: bool,
+    /// Result targets focused since the form was built. Until then the caret
+    /// is the one `set_value` left at the start, not one the person placed.
+    placed_carets: Vec<gpui::EntityId>,
     body: Body,
     /// Whether the override block is open. Closed by default — most nodes take
     /// `defaults` and have nothing here to look at.
@@ -217,7 +220,7 @@ impl NodeForm {
                     choice::Choice::new(
                         input,
                         vec![catalog::inherited_option(None)],
-                        4 + index as isize * 2,
+                        6 + index as isize * 2,
                         window,
                         cx,
                     )
@@ -248,6 +251,7 @@ impl NodeForm {
             turns_choice,
             inherited,
             settings_open: false,
+            placed_carets: Vec::new(),
             body,
             // Opened when the node already overrides something — there is
             // something to see — and closed when it does not.
@@ -286,6 +290,14 @@ impl NodeForm {
         cx: &App,
     ) -> Entity<crate::ui::select::SelectState> {
         self.agent_choices[axis].read(cx).select.clone()
+    }
+
+    #[cfg(test)]
+    pub(in crate::workspace) fn timeout_picker(
+        &self,
+        cx: &App,
+    ) -> Entity<crate::ui::select::SelectState> {
+        self.timeout_choice.read(cx).select.clone()
     }
 
     /// Inactive source and failure-policy fields remain drafts too.

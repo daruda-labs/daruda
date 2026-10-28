@@ -225,8 +225,11 @@ impl Workspace {
             window,
             cx,
         );
-        if let Err(refusal) = outcome {
-            self.report_edit_refusal(&refusal, cx);
+        match outcome {
+            Ok(()) => view.update(cx, |view, cx| {
+                view.finish_canvas_edit(&[], &base, window, cx)
+            }),
+            Err(refusal) => self.report_edit_refusal(&refusal, cx),
         }
     }
 
@@ -256,8 +259,11 @@ impl Workspace {
             window,
             cx,
         );
-        if let Err(refusal) = outcome {
-            self.report_edit_refusal(&refusal, cx);
+        match outcome {
+            Ok(()) => view.update(cx, |view, cx| {
+                view.finish_canvas_edit(&[], &base, window, cx)
+            }),
+            Err(refusal) => self.report_edit_refusal(&refusal, cx),
         }
     }
 
@@ -316,7 +322,7 @@ impl Workspace {
         );
         match outcome {
             Ok(()) => view.update(cx, |view, cx| {
-                view.finish_node_deletion(&nodes, &base, window, cx)
+                view.finish_canvas_edit(&nodes, &base, window, cx)
             }),
             Err(refusal) => self.report_edit_refusal(&refusal, cx),
         }

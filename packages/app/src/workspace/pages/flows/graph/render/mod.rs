@@ -22,6 +22,8 @@ use self::toolbar::{ToolbarState, toolbar};
 
 impl Render for FlowGraphView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Read once: it compares every inspector box, and four places need it.
+        let unsaved = self.has_unsaved_form(cx);
         let body = div()
             .size_full()
             .flex()
@@ -60,14 +62,14 @@ impl Render for FlowGraphView {
                     .child(
                         button_icon("flow-save", icons::SAVE, cx)
                             .tooltip(s::common::btn_save())
-                            .disabled(!self.has_unsaved_form(cx))
+                            .disabled(!unsaved)
                             .on_click(
                                 cx.listener(|_, _, _, cx| cx.emit(super::FlowGraphEvent::Save)),
                             ),
                     )
                     .child(
                         crate::ui::button("flow-revert-all", s::flow::form_revert())
-                            .disabled(!self.has_unsaved_form(cx))
+                            .disabled(!unsaved)
                             .on_click(
                                 cx.listener(|_, _, _, cx| cx.emit(super::FlowGraphEvent::Revert)),
                             ),
@@ -89,9 +91,7 @@ impl Render for FlowGraphView {
                 // just clicked — a shift-click on a second card would miss it.
                 let inspector = match self.selection(cx) {
                     Selection::One(_) => match &self.form {
-                        Some(form) => {
-                            form::render(form, self.has_unsaved_form(cx), cx).into_any_element()
-                        }
+                        Some(form) => form::render(form, unsaved, cx).into_any_element(),
                         None => form::render_empty(cx).into_any_element(),
                     },
                     Selection::Many(nodes) => form::render_many(nodes.len(), cx).into_any_element(),
@@ -105,7 +105,7 @@ impl Render for FlowGraphView {
                 // pane it would sit on the inspector column instead of the graph.
                 let state = ToolbarState {
                     has_selection: !self.selected_nodes(cx).is_empty(),
-                    unsaved_form: self.has_unsaved_form(cx),
+                    unsaved_form: unsaved,
                     until: self.selected_node(cx),
                     pin: self.pin_action(cx),
                 };

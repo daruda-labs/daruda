@@ -3,6 +3,7 @@
 use super::super::FlowGraphView;
 use crate::surface::strings as s;
 use crate::ui::select::{SelectEvent, SelectOption};
+use crate::ui::{InputEvent, RopeExt as _};
 use daruda_flow::{
     NodeId,
     parse::{FlowFile, NodeKindFile},
@@ -125,7 +126,12 @@ impl FlowGraphView {
             } else {
                 &form.body.run
             };
+            let placed = form.placed_carets.contains(&target.entity_id());
             target.update(cx, |input, cx| {
+                if !placed {
+                    let end = input.text().offset_to_position(input.text().len());
+                    input.set_cursor_position(end, window, cx);
+                }
                 input.replace(format!("{{{{node.{value}.output}}}}"), window, cx);
                 input.focus(window, cx);
                 cx.notify();
@@ -139,6 +145,35 @@ impl FlowGraphView {
                 .update(cx, |input, cx| input.set_value(deps.join(", "), window, cx));
         }
         self.refresh_form_links(window, cx);
+    }
+
+    pub(in crate::workspace) fn watch_result_targets(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(form) = &self.form else {
+            return;
+        };
+        for target in [form.body.prompt.inline.clone(), form.body.run.clone()] {
+            self._link_watches.push(cx.subscribe_in(
+                &target,
+                window,
+                |view, input, event, _, _| {
+                    if matches!(event, InputEvent::Focus) {
+                        view.note_placed_caret(input.entity_id());
+                    }
+                },
+            ));
+        }
+    }
+
+    fn note_placed_caret(&mut self, input: gpui::EntityId) {
+        if let Some(form) = &mut self.form
+            && !form.placed_carets.contains(&input)
+        {
+            form.placed_carets.push(input);
+        }
     }
 
     pub(in crate::workspace) fn remove_form_dep(

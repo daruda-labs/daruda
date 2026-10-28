@@ -146,7 +146,9 @@ async fn selecting_a_result_inserts_a_reference_without_changing_dependencies(
     else {
         panic!("inline prompt");
     };
-    assert!(prompt.contains("{{node.design.output}}"));
+    // The prompt was never focused, so the reference follows its text rather
+    // than landing at the caret `set_value` left at the start.
+    assert_eq!(prompt, "build it{{node.design.output}}");
 }
 
 #[cfg(feature = "screenshot")]

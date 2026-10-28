@@ -1170,6 +1170,7 @@ flow:
   form_draft_conflict: "파일이 변경되었습니다. 초안은 유지됩니다. 되돌리기로 다시 불러온 후 저장하세요."
   form_no_deps: "즉시 시작"
   form_remove_dep: "%{node} 제거"
+  form_dep_chip: "%{node} ×"
   runs_tab: "실행 기록"
   scope_current: "%{name} (현재)"
   scope_hint: "활성 터미널을 바꾸지 않고 Worktree의 Flow를 조회하고 실행합니다"

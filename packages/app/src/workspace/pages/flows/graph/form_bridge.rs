@@ -60,6 +60,7 @@ impl FlowGraphView {
                 },
             ));
         }
+        self.watch_result_targets(window, cx);
         self.refresh_form_choices(window, cx);
         self.refresh_form_links(window, cx);
     }
@@ -101,6 +102,16 @@ impl FlowGraphView {
         cx.notify();
     }
 
+    #[cfg(test)]
+    pub(in crate::workspace) fn name_input_for_test(&self) -> gpui::Entity<crate::ui::InputState> {
+        self.name_input.clone()
+    }
+
+    #[cfg(test)]
+    pub(in crate::workspace) fn save_error_for_test(&self) -> Option<&str> {
+        self.save_error.as_deref()
+    }
+
     /// The form for the selected node, when there is one.
     pub(in crate::workspace) fn form(&self) -> Option<&form::NodeForm> {
         self.form.as_ref()
@@ -139,26 +150,37 @@ impl FlowGraphView {
         }
     }
 
-    /// Build the form again from what the file says now — the Revert path.
-    /// Keeps the same node selected; only the boxes go back.
+    /// Discard every pending edit — the title and all node drafts — and build
+    /// the selected node's form again from the file. The header's Revert.
     pub(in crate::workspace) fn rebuild_form(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.drafts.clear();
-        self.save_error = None;
         self.name_input.update(cx, |input, cx| {
             input.set_value(self.saved_name.clone(), window, cx)
         });
-        cx.notify();
-        let Some(node) = self.form.as_ref().map(|form| form.node.clone()) else {
-            return;
-        };
-        let text = self.text.clone();
-        let issues = self.current_issues();
-        self.form = text.and_then(|text| form::NodeForm::build(&text, &node, &issues, window, cx));
-        self.watch_form(window, cx);
+        self.revert_selected_node(window, cx);
+    }
+
+    /// Build only the selected node's form again from the file. The inspector
+    /// footer's Revert: other nodes' drafts and the title are not its to drop.
+    pub(in crate::workspace) fn revert_selected_node(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(node) = self.form.as_ref().map(|form| form.node.clone()) {
+            let text = self.text.clone();
+            let issues = self.current_issues();
+            self.form =
+                text.and_then(|text| form::NodeForm::build(&text, &node, &issues, window, cx));
+            self.watch_form(window, cx);
+        }
+        if !self.draft_conflict() {
+            self.save_error = None;
+        }
         cx.notify();
     }
 }

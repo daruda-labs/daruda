@@ -1677,6 +1677,7 @@ flow:
   form_draft_conflict: "The file changed. Your draft is kept. Revert to reload before saving."
   form_no_deps: "Starts immediately"
   form_remove_dep: "Remove %{node}"
+  form_dep_chip: "%{node} ×"
   runs_tab: "Run history"
   scope_current: "%{name} (Current)"
   scope_hint: "Browse and run flows in a worktree without switching the active terminal"

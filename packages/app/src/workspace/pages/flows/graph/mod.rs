@@ -237,7 +237,9 @@ impl FlowGraphView {
         let name_watch =
             cx.subscribe_in(&name_input, window, |view, _, event, _, cx| match event {
                 crate::ui::InputEvent::PressEnter { .. } => cx.emit(FlowGraphEvent::Save),
-                crate::ui::InputEvent::Change => {
+                // Programmatic resets to the saved title also emit `Change`;
+                // only an edit is a reason to drop the banner.
+                crate::ui::InputEvent::Change if view.name_is_dirty(cx) => {
                     view.save_error = None;
                     cx.notify();
                 }
