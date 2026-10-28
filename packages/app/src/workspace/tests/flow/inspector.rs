@@ -242,7 +242,7 @@ async fn the_inspector_saves_one_field_and_keeps_its_place(cx: &mut TestAppConte
         state.set_value("spec.md".to_string(), window, cx)
     });
     assert!(
-        view.read_with(&vcx, |v, cx| v.form().expect("form").is_dirty(cx)),
+        view.read_with(&vcx, |v, cx| v.form_status(cx).node_revertable),
         "an edited box is dirty"
     );
     view.update(&mut vcx, |_, cx| cx.emit(FlowGraphEvent::Save));
@@ -259,7 +259,7 @@ async fn the_inspector_saves_one_field_and_keeps_its_place(cx: &mut TestAppConte
     assert!(
         view.read_with(&vcx, |v, cx| {
             v.form()
-                .is_some_and(|form| form.node == "design" && !form.is_dirty(cx))
+                .is_some_and(|form| form.node == "design" && !v.form_status(cx).node_revertable)
         }),
         "the inspector stayed put and reads the file again"
     );

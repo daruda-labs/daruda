@@ -52,34 +52,28 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !view.update(cx, |view, cx| view.validate_form_drafts(window, cx)) {
+        let Some(plan) = view.update(cx, |view, cx| view.prepare_form_save(window, cx)) else {
             return false;
-        }
-        let selected = view
-            .read(cx)
-            .form()
-            .map(|form| NodeId::from(form.fields(cx).id));
-        let Some((base, name, rename, nodes)) = view.read_with(cx, |view, cx| {
+        };
+        let selected = plan.selected;
+        let nodes = plan.nodes;
+        let Some((base, name, rename)) = view.read_with(cx, |view, cx| {
             Some((
                 view.text()?.to_string(),
                 view.edited_name(cx),
                 view.name_is_dirty(cx),
-                view.pending_node_fields(cx),
             ))
         }) else {
             return false;
         };
         if name.is_empty() {
-            view.update(cx, |view, cx| {
-                view.set_save_error(Some(s::flow::name_empty()), cx)
-            });
+            view.update(cx, |view, cx| view.name_empty(cx));
             return false;
         }
         // Cleared before the attempt so what the banner shows is always about the
         // save the person just asked for.
         view.update(cx, |view, cx| {
-            view.set_save_error(None, cx);
-            view.set_form_refusal(None, Vec::new(), cx);
+            view.begin_form_save(cx);
         });
         let outcome = self.edit_flow(
             path,
@@ -101,9 +95,7 @@ impl Workspace {
             // Not about the edit: a permission or a disk failure is the same thing
             // wherever it happens, and the toast is where the app says it.
             Err(refusal @ crate::workspace::flow_file_ops::EditRefusal::Io(_)) => {
-                view.update(cx, |view, cx| {
-                    view.set_save_error(Some(refusal.message()), cx)
-                });
+                view.update(cx, |view, cx| view.save_io_failed(refusal.message(), cx));
                 self.report_edit_refusal(&refusal, cx);
             }
             Err(refusal) => {

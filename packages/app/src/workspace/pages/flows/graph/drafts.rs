@@ -1,146 +1,115 @@
-//! Draft lifetime and optimistic conflict checks, outside the render walk.
-
-use super::{FlowGraphView, form};
+//! Inspector commands at the GPUI boundary.
+use super::{
+    FlowGraphView,
+    inspector::{Effects, Notice, SaveBlock, SavePlan},
+};
 use daruda_flow::NodeId;
 use gpui::{App, Context, Window};
 
 impl FlowGraphView {
-    pub(super) fn stash_form(&mut self, cx: &App) {
-        if let Some(form) = self.form.take().filter(|form| form.has_local_input(cx)) {
-            self.drafts.insert(form.node.clone(), form.snapshot(cx));
+    /// The sole input-to-model synchronization point, also used before commands
+    /// that can run in the same update before queued Change events are delivered.
+    pub(super) fn sync_form(&mut self, cx: &App) -> Effects {
+        if let Some(form) = &self.form {
+            return self
+                .inspector
+                .edit(&form.node, form.read(cx), form.hints(cx));
+        }
+        Effects::default()
+    }
+
+    pub(super) fn project_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let (Some(form), Some(draft)) = (&mut self.form, self.inspector.draft()) {
+            form.write(draft.raw(), draft.ui(), window, cx);
         }
     }
 
-    pub(super) fn restore_form_drafts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.discard_orphaned_drafts();
-        if let Some(text) = self.text.as_deref() {
-            for draft in self.drafts.values_mut() {
-                draft.adopt_if_unchanged(text);
-            }
+    pub(super) fn apply_inspector_effects(
+        &mut self,
+        effects: Effects,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if effects.rebind {
+            let issues = self.current_issues();
+            self._form_watches.clear();
+            self.form = self
+                .inspector
+                .draft()
+                .map(|draft| super::form::FormBinding::bind(draft, &issues, window, cx));
+            self.watch_form(window, cx);
         }
-        self.reconcile_selection(window, cx);
-        let conflict = crate::surface::strings::flow::form_draft_conflict();
-        if self.draft_conflict() {
-            self.save_error = Some(conflict);
-        } else if self.save_error.as_ref() == Some(&conflict) {
-            // Only the conflict banner is this reload's to retract; a refused
-            // save's message stays until the next save attempt.
-            self.save_error = None;
+        if let Some(node) = effects.select_on_canvas {
+            self.select_node(&node, window, cx);
         }
+        if effects.refresh_choices && !effects.rebind {
+            self.refresh_form_choices(window, cx);
+        }
+        if effects.refresh_links && !effects.rebind {
+            self.refresh_form_links(window, cx);
+        }
+        #[cfg(test)]
+        self.assert_binding(cx);
+        cx.notify();
     }
 
-    /// A draft for a node the file no longer has can neither be shown nor
-    /// saved, and would block every Save as a conflict. Dropped, and named.
-    fn discard_orphaned_drafts(&mut self) {
-        let Some(file) = self
-            .text
-            .as_deref()
-            .and_then(|text| daruda_flow::parse::parse_flow_file(text).ok())
-        else {
-            return;
-        };
-        let orphaned: Vec<NodeId> = self
-            .drafts
-            .keys()
-            .filter(|node| !file.nodes.iter().any(|entry| &entry.id == *node))
-            .cloned()
-            .collect();
-        for node in orphaned {
-            self.drafts.remove(&node);
-            if !self.discarded.contains(&node) {
-                self.discarded.push(node);
+    #[cfg(test)]
+    fn assert_binding(&self, cx: &App) {
+        match (&self.form, self.inspector.draft()) {
+            (Some(binding), Some(draft)) => {
+                assert_eq!(&binding.node, draft.node());
+                assert_eq!(&binding.read(cx), draft.raw());
             }
+            (None, None) => {}
+            _ => panic!("selected draft and form binding must exist together"),
         }
     }
 
     pub(in crate::workspace) fn discarded_drafts(&self) -> &[NodeId] {
-        &self.discarded
+        match self.inspector.notice() {
+            Some(Notice::Discarded(ids)) => ids,
+            _ => &[],
+        }
     }
-
     pub(in crate::workspace) fn dismiss_discarded_drafts(&mut self, cx: &mut Context<Self>) {
-        self.discarded.clear();
+        self.inspector.dismiss_discarded();
         cx.notify();
     }
-
-    pub(in crate::workspace) fn validate_form_drafts(
+    pub(in crate::workspace) fn prepare_form_save(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> bool {
-        if self.draft_conflict() {
-            self.set_save_error(
-                Some(crate::surface::strings::flow::form_draft_conflict()),
-                cx,
-            );
-            return false;
-        }
-        let invalid = self
-            .drafts
-            .values()
-            .find(|draft| draft.invalid)
-            .map(|draft| draft.node.clone())
-            .or_else(|| {
-                // A refusal the file's node already had is the engine's to
-                // accept; only one the edits brought in blocks the save.
-                self.form
-                    .as_ref()
-                    .filter(|form| form.introduced_refusal(cx).is_some())
-                    .map(|form| form.node.clone())
-            });
-        if let Some(node) = invalid {
-            self.select_node(&node, window, cx);
-            if let Some(form) = &mut self.form
-                && matches!(
-                    form.introduced_refusal(cx),
-                    Some(
-                        form::Refusal::Timeout(_)
-                            | form::Refusal::Attempts(_)
-                            | form::Refusal::Turns(_)
-                    )
-                )
-            {
-                form.settings_open = true;
+    ) -> Option<SavePlan> {
+        self.sync_form(cx);
+        match self.inspector.save_plan() {
+            Ok(plan) => Some(plan),
+            Err(SaveBlock::Conflict) => {
+                self.inspector.set_notice(Some(Notice::Conflict));
+                cx.notify();
+                None
             }
-            self.set_save_error(
-                Some(crate::surface::strings::flow::form_invalid_draft(node)),
-                cx,
-            );
-            return false;
+            Err(SaveBlock::Invalid(node, refusal)) => {
+                self.select_node(&node, window, cx);
+                if let Some(form) = &mut self.form
+                    && matches!(
+                        refusal,
+                        super::form::Refusal::Timeout(_)
+                            | super::form::Refusal::Attempts(_)
+                            | super::form::Refusal::Turns(_)
+                    )
+                {
+                    form.settings_open = true;
+                }
+                self.inspector.set_notice(Some(Notice::InvalidDraft(node)));
+                cx.notify();
+                None
+            }
         }
-        true
     }
-
+    #[cfg(test)]
     pub(in crate::workspace) fn draft_conflict(&self) -> bool {
-        let Some(text) = &self.text else {
-            return !self.drafts.is_empty() || self.form.is_some();
-        };
-        self.drafts
-            .values()
-            .any(|draft| !draft.matches_current(text))
-            || self
-                .form
-                .as_ref()
-                .is_some_and(|form| !form.matches_current(text))
+        self.inspector.status().conflict
     }
-
-    pub(in crate::workspace) fn pending_node_fields(
-        &self,
-        cx: &App,
-    ) -> Vec<(NodeId, form::NodeFields)> {
-        self.drafts
-            .values()
-            .map(|draft| (draft.node.clone(), draft.fields.clone()))
-            .chain(
-                self.form
-                    .iter()
-                    .filter(|form| form.is_dirty(cx))
-                    .map(|form| (form.node.clone(), form.fields(cx))),
-            )
-            .collect()
-    }
-
-    /// Rebase drafts onto an edit this pane wrote — a deletion, connect, or
-    /// disconnect — so the pane's own change does not read as a conflict.
     pub(in crate::workspace) fn finish_canvas_edit(
         &mut self,
         deleted: &[NodeId],
@@ -148,50 +117,21 @@ impl FlowGraphView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(after) = self.text.clone() else {
-            self.stash_form(cx);
-            return;
-        };
-        // A form the edit's reload kept is already on `after`; stashing it
-        // would rebuild its boxes and lose focus and custom-entry mode. Its
-        // typed references to deleted nodes still have to go.
-        match &self.form {
-            Some(form) if form.is_built_from(&after) => form.drop_references(deleted, window, cx),
-            _ => self.stash_form(cx),
-        }
-        let issues = self.current_issues();
-        let edit = form::CanvasEdit::new(deleted, before, &after);
-        // The edit's own reload saw these drafts' nodes leave; deleting them
-        // here was the person's choice, not a loss to report.
-        self.discarded.retain(|node| !deleted.contains(node));
-        self.drafts = std::mem::take(&mut self.drafts)
-            .into_iter()
-            .filter(|(node, _)| !deleted.contains(node))
-            .map(|(node, draft)| (node, draft.rebase(&edit, &issues, window, cx)))
-            .collect();
-        self.restore_form_drafts(window, cx);
-        cx.notify();
+        self.sync_form(cx);
+        let effects = self.inspector.canvas_edit(deleted, before);
+        self.project_form(window, cx);
+        self.apply_inspector_effects(effects, window, cx);
     }
-
     pub(in crate::workspace) fn finish_form_save(
         &mut self,
         selected: Option<NodeId>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.drafts.clear();
-        self.discarded.clear();
-        self.form = None;
-        if let Some(node) = selected {
-            self.select_node(&node, window, cx);
-        }
-        self.save_error = None;
-        cx.notify();
+        let effects = self.inspector.save_succeeded(selected);
+        self.apply_inspector_effects(effects, window, cx);
     }
 }
 
 #[cfg(test)]
-mod tests {
-    // Entity-backed draft switching and conflict behavior are covered by the
-    // workspace flow inspector tests, where file reloads use the real host.
-}
+mod tests {}

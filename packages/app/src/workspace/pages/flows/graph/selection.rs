@@ -9,7 +9,7 @@ use daruda_flow::NodeId;
 use gpui::{App, Context, Window};
 
 use super::commands::SelectNode;
-use super::{FlowGraphState, FlowGraphView, form};
+use super::{FlowGraphState, FlowGraphView};
 
 /// What the canvas has selected, in the flow's own terms.
 ///
@@ -102,16 +102,9 @@ impl FlowGraphView {
         if wanted == self.form.as_ref().map(|form| form.node.clone()) {
             return;
         }
-        self.stash_form(cx);
-        let text = self.text.clone();
-        let issues = self.current_issues();
-        self.form = wanted.zip(text).and_then(|(node, text)| {
-            self.drafts
-                .remove(&node)
-                .and_then(|draft| draft.restore(&issues, window, cx))
-                .or_else(|| form::NodeForm::build(&text, &node, &issues, window, cx))
-        });
-        self.watch_form(window, cx);
+        self.sync_form(cx);
+        let effects = self.inspector.select(wanted);
+        self.apply_inspector_effects(effects, window, cx);
         cx.notify();
     }
 

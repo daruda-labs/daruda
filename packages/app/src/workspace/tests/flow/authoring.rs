@@ -208,4 +208,90 @@ async fn inactive_prompt_sources_survive_selection_and_reload(cx: &mut TestAppCo
         "prompts/draft.md"
     );
     assert!(view.read_with(&vcx, |v, cx| v.has_unsaved_form(cx)));
+    assert!(view.read_with(&vcx, |v, cx| v.form_status(cx).node_revertable));
+    view.update_in(&mut vcx, |v, window, cx| v.revert_selected_node(window, cx));
+    view.read_with(&vcx, |v, cx| {
+        assert!(
+            v.form()
+                .unwrap()
+                .body_states(cx)
+                .prompt
+                .file
+                .read(cx)
+                .value()
+                .is_empty()
+        );
+        assert!(!v.has_unsaved_form(cx));
+        assert!(!v.form_status(cx).node_revertable);
+    });
+}
+
+#[gpui::test]
+async fn changing_the_agent_refreshes_its_model_and_mode_choices(cx: &mut TestAppContext) {
+    use crate::workspace::pages::flows::graph::form::catalog::Catalog;
+    use daruda_store::agent_vocabulary::{AgentVocabularyCache, VocabEntry};
+    let (_lane, ws, path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(ws.active, &path, window, cx)
+    });
+    vcx.run_until_parked();
+    let view = ws.read_with(&vcx, |ws, _| ws.open_graph().unwrap().2);
+    let mut vocabulary = AgentVocabularyCache::default();
+    vocabulary.record_models(
+        "second",
+        "second-adapter",
+        vec![VocabEntry::new("second-model", "Second model")],
+    );
+    vocabulary.record_modes(
+        "second",
+        "second-adapter",
+        vec![VocabEntry::new("second-mode", "Second mode")],
+    );
+    let agents = [
+        daruda_config::AgentDefinition::new(
+            "claude",
+            "First",
+            daruda_config::AgentLaunch::Raw("first-adapter".into()),
+        ),
+        daruda_config::AgentDefinition::new(
+            "second",
+            "Second",
+            daruda_config::AgentLaunch::Raw("second-adapter".into()),
+        ),
+    ];
+    view.update_in(&mut vcx, |v, window, cx| {
+        v.select_node_for_test(&"design".into(), window, cx);
+        v.set_catalog(
+            Catalog {
+                agents: agents.into(),
+                vocabulary,
+            },
+            window,
+            cx,
+        );
+    });
+    let (agent, model, mode) = view.read_with(&vcx, |v, cx| {
+        let form = v.form().unwrap();
+        (
+            form.agent_states().id.clone(),
+            form.agent_picker(1, cx),
+            form.agent_picker(2, cx),
+        )
+    });
+    agent.update_in(&mut vcx, |state, window, cx| {
+        state.set_value("second", window, cx)
+    });
+    vcx.run_until_parked();
+    for (picker, value) in [(model, "second-model"), (mode, "second-mode")] {
+        picker.update_in(&mut vcx, |state, window, cx| {
+            state.set_selected_value(&value.into(), window, cx)
+        });
+        assert_eq!(
+            picker
+                .read_with(&vcx, |state, _| state.selected_value().cloned())
+                .as_deref(),
+            Some(value)
+        );
+    }
 }

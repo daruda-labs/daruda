@@ -1,12 +1,5 @@
-//! One node's fields as plain values, and the conversions either way.
-//!
-//! GPUI-free on purpose: everything here is `NodeFile` in, values out, or the
-//! reverse. That is what lets the parsing and formatting be tested without a
-//! window — `mod.rs` next door needs one for every line it holds, because a
-//! text box is an entity.
-//!
-//! What a *box* holds is `mod.rs`'s ([`super::NodeForm`]); this is what its
-//! contents mean.
+//! Editable file values, parsing and local save refusals, without GPUI.
+//! `apply` owns their mapping onto FlowFile; raw input retains inactive text.
 
 use std::time::Duration;
 
@@ -14,7 +7,7 @@ use daruda_flow::parse::PermissionPolicyFile;
 
 /// One node's editable fields, as the form currently holds them.
 ///
-/// The `id` a save has to act on is [`NodeForm::node`] — the *original* one —
+/// The `id` a save has to act on is the original file id — the *original* one —
 /// because this `id` may be the new name.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::workspace) struct NodeFields {
@@ -48,7 +41,9 @@ pub(in crate::workspace) struct AgentFields {
 
 impl AgentFields {
     /// The file's shape, or nothing when the node overrides no axis.
-    pub(super) fn to_override(&self) -> Option<daruda_flow::parse::AgentOverride> {
+    pub(in crate::workspace::pages::flows::graph) fn to_override(
+        &self,
+    ) -> Option<daruda_flow::parse::AgentOverride> {
         if self.is_empty() {
             return None;
         }
@@ -61,7 +56,7 @@ impl AgentFields {
         })
     }
 
-    pub(super) fn is_empty(&self) -> bool {
+    pub(in crate::workspace::pages::flows::graph) fn is_empty(&self) -> bool {
         self.id.is_none()
             && self.model.is_none()
             && self.effort.is_none()
@@ -172,7 +167,9 @@ pub(in crate::workspace) enum Refusal {
     RunRequired,
 }
 
-pub(super) fn fields_of(node: &daruda_flow::parse::NodeFile) -> NodeFields {
+pub(in crate::workspace::pages::flows::graph) fn fields_of(
+    node: &daruda_flow::parse::NodeFile,
+) -> NodeFields {
     NodeFields {
         id: node.id.clone().into_string(),
         deps: node.deps.iter().map(|d| d.as_str().to_string()).collect(),
@@ -185,7 +182,9 @@ pub(super) fn fields_of(node: &daruda_flow::parse::NodeFile) -> NodeFields {
 }
 
 /// The node's body as the file holds it, with the other kind's boxes empty.
-pub(super) fn body_fields_of(node: &daruda_flow::parse::NodeFile) -> BodyFields {
+pub(in crate::workspace::pages::flows::graph) fn body_fields_of(
+    node: &daruda_flow::parse::NodeFile,
+) -> BodyFields {
     use daruda_flow::parse::{NodeKindFile, PromptSource};
     match &node.kind {
         NodeKindFile::Agent {
@@ -214,7 +213,7 @@ pub(super) fn body_fields_of(node: &daruda_flow::parse::NodeFile) -> BodyFields 
 }
 
 /// Which policy a kind allows.
-pub(super) fn fail_kind_of(kind: KindChoice) -> FailKind {
+pub(in crate::workspace::pages::flows::graph) fn fail_kind_of(kind: KindChoice) -> FailKind {
     match kind {
         KindChoice::Agent => FailKind::Retry,
         KindChoice::Command => FailKind::Repair,
@@ -234,7 +233,9 @@ fn turns_of(node: &daruda_flow::parse::NodeFile) -> TurnsField {
     }
 }
 
-pub(super) fn agent_fields_of(node: &daruda_flow::parse::NodeFile) -> AgentFields {
+pub(in crate::workspace::pages::flows::graph) fn agent_fields_of(
+    node: &daruda_flow::parse::NodeFile,
+) -> AgentFields {
     use daruda_flow::parse::NodeKindFile;
     let NodeKindFile::Agent {
         agent: Some(agent), ..
@@ -253,12 +254,14 @@ pub(super) fn agent_fields_of(node: &daruda_flow::parse::NodeFile) -> AgentField
 
 /// Which policy a kind's `act` option means.
 #[derive(Copy, Clone)]
-pub(super) enum FailKind {
+pub(in crate::workspace::pages::flows::graph) enum FailKind {
     Retry,
     Repair,
 }
 
-pub(super) fn retry_fields_of(policy: &daruda_flow::parse::AgentFailFile) -> FailFields {
+pub(in crate::workspace::pages::flows::graph) fn retry_fields_of(
+    policy: &daruda_flow::parse::AgentFailFile,
+) -> FailFields {
     use daruda_flow::parse::{AgentFailFile, HintSource};
     match policy {
         AgentFailFile::Halt => FailFields::Halt,
@@ -277,7 +280,9 @@ pub(super) fn retry_fields_of(policy: &daruda_flow::parse::AgentFailFile) -> Fai
     }
 }
 
-pub(super) fn repair_fields_of(policy: &daruda_flow::parse::GateFailFile) -> FailFields {
+pub(in crate::workspace::pages::flows::graph) fn repair_fields_of(
+    policy: &daruda_flow::parse::GateFailFile,
+) -> FailFields {
     use daruda_flow::parse::GateFailFile;
     match policy {
         GateFailFile::Halt => FailFields::Halt,
@@ -295,14 +300,14 @@ pub(super) fn repair_fields_of(policy: &daruda_flow::parse::GateFailFile) -> Fai
     }
 }
 
-pub(super) fn parse_attempts(text: &str) -> AttemptsField {
+pub(in crate::workspace::pages::flows::graph) fn parse_attempts(text: &str) -> AttemptsField {
     match text.parse::<u32>() {
         Ok(n) => AttemptsField::Set(n),
         Err(_) => AttemptsField::Unreadable(text.to_string()),
     }
 }
 
-pub(super) fn attempts_text(field: &AttemptsField) -> String {
+pub(in crate::workspace::pages::flows::graph) fn attempts_text(field: &AttemptsField) -> String {
     match field {
         AttemptsField::Set(n) => n.to_string(),
         AttemptsField::Unreadable(text) => text.clone(),
@@ -311,14 +316,14 @@ pub(super) fn attempts_text(field: &AttemptsField) -> String {
 
 /// Empty text is an absent key, not an empty value: a `model: ""` would be a
 /// model named nothing.
-pub(super) fn some_if_filled(text: &str) -> Option<String> {
+pub(in crate::workspace::pages::flows::graph) fn some_if_filled(text: &str) -> Option<String> {
     (!text.is_empty()).then(|| text.to_string())
 }
 
 /// Comma-separated, because a dependency is a node id and ids have no commas
 /// (`daruda_flow` validates them as plain names). Empty entries are dropped so
 /// a trailing comma while typing is not a dependency on nothing.
-pub(super) fn parse_deps(text: &str) -> Vec<String> {
+pub(in crate::workspace::pages::flows::graph) fn parse_deps(text: &str) -> Vec<String> {
     text.split(',')
         .map(str::trim)
         .filter(|part| !part.is_empty())
@@ -326,7 +331,7 @@ pub(super) fn parse_deps(text: &str) -> Vec<String> {
         .collect()
 }
 
-pub(super) fn parse_timeout(text: &str) -> TimeoutField {
+pub(in crate::workspace::pages::flows::graph) fn parse_timeout(text: &str) -> TimeoutField {
     if text.is_empty() {
         return TimeoutField::Absent;
     }
@@ -338,11 +343,62 @@ pub(super) fn parse_timeout(text: &str) -> TimeoutField {
 
 /// The same spelling the engine writes with, so a value that is only read and
 /// written back does not change the file.
-pub(super) fn timeout_text(field: &TimeoutField) -> String {
+pub(in crate::workspace::pages::flows::graph) fn timeout_text(field: &TimeoutField) -> String {
     match field {
         TimeoutField::Absent => String::new(),
         TimeoutField::Set(duration) => humantime::format_duration(*duration).to_string(),
         TimeoutField::Unreadable(text) => text.clone(),
+    }
+}
+
+pub(in crate::workspace::pages::flows::graph) fn refusal_of(
+    fields: &NodeFields,
+) -> Option<Refusal> {
+    if fields.id.is_empty() {
+        return Some(Refusal::EmptyId);
+    }
+    // The engine's own rule, asked a beat earlier: it refuses the same
+    // name after a save round-trip, which is too late to be useful.
+    if !daruda_flow::node_id_is_wellformed(&fields.id) {
+        return Some(Refusal::InvalidId);
+    }
+    if let TurnsField::Unreadable(text) = &fields.max_turns {
+        return Some(Refusal::Turns(text.clone()));
+    }
+    if let TimeoutField::Unreadable(text) = &fields.timeout {
+        return Some(Refusal::Timeout(text.clone()));
+    }
+    // The acting policy's two numbers, for the same reason: neither can
+    // become what the file needs, so the engine never sees them.
+    // An agent has to write somewhere and a command has to run something.
+    // Neither is the engine's rule — it loads an empty `output` and an empty
+    // `run` without complaint — and neither is a node.
+    match fields.body.kind {
+        KindChoice::Agent if fields.body.output.is_empty() => {
+            return Some(Refusal::OutputRequired);
+        }
+        KindChoice::Command if fields.body.run.is_empty() => {
+            return Some(Refusal::RunRequired);
+        }
+        _ => {}
+    }
+    let on_fail = &fields.body.on_fail;
+    match on_fail {
+        FailFields::Halt => None,
+        FailFields::Retry {
+            max_attempts, wait, ..
+        }
+        | FailFields::Repair {
+            max_attempts, wait, ..
+        } => {
+            if let AttemptsField::Unreadable(text) = max_attempts {
+                return Some(Refusal::Attempts(text.clone()));
+            }
+            if let TimeoutField::Unreadable(text) = wait {
+                return Some(Refusal::Timeout(text.clone()));
+            }
+            None
+        }
     }
 }
 

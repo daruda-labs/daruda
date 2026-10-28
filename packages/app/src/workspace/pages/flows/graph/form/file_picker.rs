@@ -29,13 +29,18 @@ impl FlowGraphView {
                         match daruda_core::path::strip_root(path, &root) {
                             Some(relative) => {
                                 if !view.apply_prompt_edit(&edit, portable(&relative), window, cx) {
-                                    view.set_save_error(
-                                        Some(s::flow::form_file_picker_conflict()),
-                                        cx,
-                                    );
+                                    view.inspector.set_notice(Some(
+                                        super::super::inspector::Notice::PromptStale,
+                                    ));
+                                    cx.notify();
                                 }
                             }
-                            None => view.set_save_error(Some(s::flow::form_file_outside()), cx),
+                            None => {
+                                view.inspector.set_notice(Some(
+                                    super::super::inspector::Notice::PromptOutside,
+                                ));
+                                cx.notify();
+                            }
                         }
                     }
                 }

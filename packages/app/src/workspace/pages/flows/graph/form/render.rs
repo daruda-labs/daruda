@@ -8,7 +8,7 @@
 use crate::ui::ButtonVariants as _;
 use gpui::{Context, IntoElement};
 
-use super::{KindChoice, NodeForm, Refusal};
+use super::{FormBinding, KindChoice, Refusal};
 
 /// The inspector: the selected node's fields, a save and a revert.
 ///
@@ -16,7 +16,7 @@ use super::{KindChoice, NodeForm, Refusal};
 /// [`super::FlowGraphEvent`] and the workspace does the work, because a view
 /// that wrote to the file would be a second place that knows how.
 pub(in super::super) fn render(
-    form: &NodeForm,
+    form: &FormBinding,
     status: &super::super::form_bridge::FormStatus,
     cx: &mut Context<super::super::FlowGraphView>,
 ) -> impl IntoElement {
@@ -193,7 +193,10 @@ pub(in super::super) fn render(
         .child(footer)
 }
 
-fn dependency_picker(form: &NodeForm, cx: &mut Context<super::super::FlowGraphView>) -> gpui::Div {
+fn dependency_picker(
+    form: &FormBinding,
+    cx: &mut Context<super::super::FlowGraphView>,
+) -> gpui::Div {
     use crate::surface::strings as s;
     use crate::ui::{button, select::form_select, theme};
     use gpui::{ParentElement as _, Styled as _, div, px};
@@ -221,7 +224,7 @@ fn dependency_picker(form: &NodeForm, cx: &mut Context<super::super::FlowGraphVi
 }
 
 fn result_picker(
-    form: &NodeForm,
+    form: &FormBinding,
     cx: &mut Context<super::super::FlowGraphView>,
 ) -> impl IntoElement {
     use crate::ui::{select::form_select, theme};
@@ -244,7 +247,7 @@ fn result_picker(
 /// flow would not load" into "this field"; the help is the rule that holds even
 /// when nothing is wrong, which is the only place an author meets it.
 fn field_with_note(
-    form: &NodeForm,
+    form: &FormBinding,
     field: super::notes::FormField,
     label: String,
     help: Option<String>,
@@ -374,7 +377,7 @@ fn fail_section(
 
 /// The agent picker stays visible; optional overrides share one disclosure.
 fn agent_section(
-    form: &NodeForm,
+    form: &FormBinding,
     cx: &mut Context<super::super::FlowGraphView>,
 ) -> impl IntoElement {
     use crate::surface::strings as s;
@@ -447,7 +450,7 @@ fn agent_section(
 }
 
 fn execution_section(
-    form: &NodeForm,
+    form: &FormBinding,
     cx: &mut Context<super::super::FlowGraphView>,
 ) -> impl IntoElement {
     use crate::surface::strings as s;

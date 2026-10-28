@@ -87,6 +87,27 @@ impl Choice {
         self.refresh(window, cx);
     }
 
+    pub(super) fn is_custom(&self, cx: &gpui::App) -> bool {
+        self.select
+            .read(cx)
+            .selected_value()
+            .is_some_and(|v| v.as_ref() == CUSTOM)
+    }
+
+    pub(super) fn set_custom(&mut self, custom: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if custom {
+            self.select.update(cx, |select, cx| {
+                select.set_selected_value(&CUSTOM.into(), window, cx)
+            });
+        } else {
+            let value = self.input.read(cx).value().trim().to_string();
+            self.select.update(cx, |select, cx| {
+                select.set_selected_value(&value.into(), window, cx)
+            });
+        }
+        self.refresh(window, cx);
+    }
+
     fn refresh(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let custom = self
             .select

@@ -15,6 +15,7 @@ mod drafts;
 pub(in crate::workspace) mod form;
 mod form_bridge;
 mod frame;
+mod inspector;
 pub(in crate::workspace) mod model;
 mod node_ids;
 mod overlay;
@@ -134,7 +135,6 @@ pub(in crate::workspace) enum FlowGraphEvent {
 pub(in crate::workspace) struct FlowGraphView {
     name_input: Entity<crate::ui::InputState>,
     saved_name: String,
-    save_error: Option<String>,
     _name_watch: gpui::Subscription,
     /// The flow file this view is of.
     ///
@@ -157,16 +157,10 @@ pub(in crate::workspace) struct FlowGraphView {
     /// The selected node's fields, when exactly one node is selected. Built in
     /// [`Self::reconcile_selection`] — a handler — rather than in `render`,
     /// which must not create entities.
-    form: Option<form::NodeForm>,
-    drafts: std::collections::BTreeMap<NodeId, form::NodeDraft>,
-    /// Nodes whose drafts a reload dropped because the node left the file.
-    /// Shown until the next save or full revert so the loss is not silent.
-    discarded: Vec<NodeId>,
-    /// The node selected when the file stopped loading. Its input waits as a
-    /// draft, and the selection comes back with the file so that draft shows.
-    lost_selection: Option<NodeId>,
+    form: Option<form::FormBinding>,
+    inspector: inspector::InspectorModel,
+    _form_watches: Vec<gpui::Subscription>,
     catalog: form::catalog::Catalog,
-    _agent_watch: Option<gpui::Subscription>,
     _link_watches: Vec<gpui::Subscription>,
     /// Pins this pane has just let go of, and why.
     ///
@@ -251,7 +245,7 @@ impl FlowGraphView {
                 // Programmatic resets to the saved title also emit `Change`;
                 // only an edit is a reason to drop the banner.
                 crate::ui::InputEvent::Change if view.name_is_dirty(cx) => {
-                    view.save_error = None;
+                    view.inspector.title_edited();
                     cx.notify();
                 }
                 _ => {}
@@ -266,7 +260,6 @@ impl FlowGraphView {
         let mut view = Self {
             name_input,
             saved_name,
-            save_error: None,
             _name_watch: name_watch,
             unpinned: Vec::new(),
             delete_request,
@@ -275,14 +268,12 @@ impl FlowGraphView {
             holds_the_pointer: false,
             path: path.to_path_buf(),
             state,
+            inspector: inspector::InspectorModel::new(text.clone().map(Into::into)),
             text: text.map(Into::into),
             pins: PinSet::default(),
             form: None,
-            drafts: Default::default(),
-            discarded: Vec::new(),
-            lost_selection: None,
+            _form_watches: Vec::new(),
             catalog: form::catalog::Catalog::default(),
-            _agent_watch: None,
             _link_watches: Vec::new(),
             _canvas_watch: None,
             _focus_watch: None,
@@ -508,49 +499,17 @@ impl FlowGraphView {
     /// something that is no longer true.
     pub(in crate::workspace) fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let pending_name = self.name_is_dirty(cx);
-        // What was selected has to survive the rebuild: a save writes the file,
-        // the watcher reads it back, and an inspector that closed itself on
-        // every save would be unusable. What was *typed* is taken for the same
-        // reason from the other side — the rebuild is about to replace it.
-        let was_selected = self.form.as_ref().map(|form| form.node.clone());
-
         let decision = policy::decide(read_flow(&self.path), self.text.as_deref(), self.drawn());
         if matches!(decision, policy::Reload::Unchanged) {
             return;
         }
-        let was_selected = was_selected.or_else(|| self.lost_selection.take());
-        // A form whose node and defaults did not change keeps its live boxes —
-        // focus, caret, and custom-entry mode — instead of a snapshot round trip.
-        let keep_form = match &decision {
-            policy::Reload::Restamp { text, .. } | policy::Reload::Rebuild { text, .. } => self
-                .form
-                .as_ref()
-                .is_some_and(|form| form.source_matches(text)),
-            policy::Reload::Unchanged | policy::Reload::Unreadable { .. } => false,
-        };
-        if !keep_form {
-            self.stash_form(cx);
-        }
+        self.sync_form(cx);
         match decision {
             policy::Reload::Unchanged => return,
             policy::Reload::Restamp { text, model } => {
-                let metadata_only = self.text.as_deref().is_some_and(|before| {
-                    let parse = daruda_flow::parse::parse_flow_file;
-                    match (parse(before), parse(&text)) {
-                        (Ok(mut before), Ok(mut after)) => {
-                            before.name = None;
-                            after.name = None;
-                            before == after
-                        }
-                        _ => false,
-                    }
-                });
                 self.absorb_surviving(pins::surviving(&self.pins, self.text.as_deref(), &text));
                 self.restamp(&model, cx);
                 self.text = Some(text.into());
-                if !metadata_only && let Some(node) = was_selected.as_ref() {
-                    self.select_node(node, window, cx);
-                }
             }
             policy::Reload::Rebuild { text, model } => {
                 self.absorb_surviving(pins::surviving(&self.pins, self.text.as_deref(), &text));
@@ -563,13 +522,7 @@ impl FlowGraphView {
                     cx,
                 );
                 self.text = Some(text.into());
-                if !keep_form {
-                    self.form = None;
-                }
                 self.watch_canvas(window, cx);
-                if let Some(node) = was_selected {
-                    self.select_node(&node, window, cx);
-                }
             }
             policy::Reload::Unreadable { text, error } => {
                 // Nothing left to compare a pin against, and the graph it named
@@ -577,8 +530,6 @@ impl FlowGraphView {
                 self.pins.clear();
                 self.state = FlowGraphState::Unreadable(error);
                 self.text = text.map(Into::into);
-                self.form = None;
-                self.lost_selection = was_selected;
                 self.watch_canvas(window, cx);
             }
         }
@@ -589,15 +540,8 @@ impl FlowGraphView {
                 input.set_value(self.saved_name.clone(), window, cx)
             });
         }
-        if keep_form && let (Some(form), Some(text)) = (&mut self.form, &self.text) {
-            form.rebase_source(text);
-        }
-        self.restore_form_drafts(window, cx);
-        if keep_form {
-            // Other nodes may have changed, so the dependency and result
-            // candidates are recomputed even though the form stayed.
-            self.refresh_form_links(window, cx);
-        }
+        let effects = self.inspector.reload(self.text.clone());
+        self.apply_inspector_effects(effects, window, cx);
         cx.notify();
     }
 
@@ -644,12 +588,10 @@ impl FlowGraphView {
         // returns early when the bytes it read are the ones it has, so a file
         // restored exactly as it was would otherwise never redraw.
         self.text = None;
-        // Kept as a draft, with the selection to show it again: the file may
-        // come back, and the typed input with it.
-        if let Some(form) = &self.form {
-            self.lost_selection = Some(form.node.clone());
-        }
-        self.stash_form(cx);
+        self.sync_form(cx);
+        self.inspector.file_lost();
+        self.form = None;
+        self._form_watches.clear();
         cx.notify();
     }
 }

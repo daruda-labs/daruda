@@ -1,29 +1,15 @@
-//! The selected node's fields, as text boxes and as plain values.
+//! Widgets for the selected node. InspectorModel owns input and draft lifetime.
 //!
-//! Built from the **file's** node (`daruda_flow::parse::NodeFile`) rather than
-//! from the resolved model the graph draws: what is saved goes back through
-//! `FlowFile`, so what is shown has to be the same shape. The resolved model has
-//! already merged `defaults` in, and showing that would put values into the file
-//! that the file deliberately does not repeat.
-//!
-//! Nothing here knows YAML. A save hands [`NodeFields`] to
-//! `Workspace::save_node_form`, which turns it into a `FlowFile` mutation and
-//! lets `flow_edit` work out the text edits.
-//!
-//! Four files, because there are four jobs: what a field's contents *mean*
-//! ([`fields`], GPUI-free), the boxes holding them (here — every one is an
-//! entity, so every line here needs a window), the column that draws them
-//! ([`render`]), and the mapping onto a `FlowFile` ([`apply`]) — which is where
-//! a rename's and a deletion's reference sweeps live, since both are that
-//! mapping and not the view.
+//! `binding` projects named raw values onto widgets and reads user input back;
+//! `render` builds the inspector column. The GPUI-free `apply` module retains
+//! the existing mapping from editable values to the flow file.
 
 pub(in crate::workspace) mod apply;
+mod binding;
 pub(in crate::workspace) mod catalog;
 mod choice;
-mod draft;
 mod editor;
-pub(super) use draft::{CanvasEdit, NodeDraft};
-pub(in crate::workspace) mod fields;
+pub(in crate::workspace) use super::inspector::fields;
 mod file_picker;
 mod links;
 pub(in crate::workspace) mod notes;
@@ -100,15 +86,11 @@ pub(in crate::workspace) struct FailStates {
 const FAIL_HALT: &str = "halt";
 const FAIL_ACT: &str = "act";
 
-pub(in crate::workspace) struct NodeForm {
+pub(in crate::workspace) struct FormBinding {
     /// The node this form was built for, by the id the **file** holds. The
     /// rename case is why this is kept separately from the `id` field.
     pub(in crate::workspace) node: NodeId,
-    /// What it was built from — what dirty compares against.
-    initial: NodeFields,
-    source_text: String,
-    match_memo: draft::MatchMemo,
-    initial_text: Vec<String>,
+    applying: std::rc::Rc<std::cell::Cell<usize>>,
     id: Entity<InputState>,
     deps: Entity<InputState>,
     pub(super) dep_picker: Entity<crate::ui::select::SelectState>,
@@ -138,25 +120,16 @@ pub(in crate::workspace) struct NodeForm {
     banner: Option<String>,
 }
 
-impl NodeForm {
-    /// Build a form for `node` out of the file's own text. `None` when the text
-    /// does not parse or holds no such node — both mean there is nothing to
-    /// show, and the pane is already saying why.
-    /// `issues` is what the engine already refuses about the file on disk, as
-    /// opposed to what it would refuse about an edit. Both end up in the same
-    /// boxes: a person opening a node the canvas marked has to be told which
-    /// field it is about, and being told only after pressing Save is being
-    /// told too late.
+impl FormBinding {
+    /// Construct widgets from the draft's cached baseline and its standing issues.
     pub(super) fn build<T: 'static>(
-        text: &str,
-        node: &NodeId,
+        draft: &super::inspector::NodeDraft,
         issues: &[daruda_flow::error::ValidationIssue],
         window: &mut Window,
         cx: &mut Context<T>,
-    ) -> Option<Self> {
-        let file = daruda_flow::parse::parse_flow_file(text).ok()?;
-        let found = file.nodes.iter().find(|n| &n.id == node)?;
-        let initial = fields_of(found);
+    ) -> Self {
+        let node = draft.node();
+        let initial = draft.initial_fields();
         let notes = notes::notes_for(issues, node);
         // Same rule `set_notes` follows: a note about the override block is no
         // note at all while the block is closed, which is how it opens by
@@ -172,7 +145,7 @@ impl NodeForm {
         let max_turns = single_line(&turns_text(&initial.max_turns), window, cx);
         let cwd = single_line(initial.cwd.as_deref().unwrap_or_default(), window, cx);
         // What an unstated axis resolves to, read off the file's own `defaults`.
-        let inherited = file.defaults.agent.clone().unwrap_or_default();
+        let inherited = draft.inherited_agent();
         let agent = AgentStates {
             id: single_line_inheriting(
                 initial.agent.id.as_deref().unwrap_or_default(),
@@ -234,10 +207,7 @@ impl NodeForm {
         let turns_choice = suggested(&max_turns, &["1", "3", "5", "10"], 22, window, cx);
         let mut form = Self {
             node: node.clone(),
-            initial,
-            source_text: text.to_string(),
-            match_memo: draft::MatchMemo::default(),
-            initial_text: Vec::new(),
+            applying: Default::default(),
             id,
             deps,
             dep_picker: cx.new(|cx| {
@@ -263,9 +233,8 @@ impl NodeForm {
             banner: None,
             notes,
         };
-        form.initial_text = form.text_snapshot(cx);
         form.set_notes(form.notes.clone());
-        Some(form)
+        form
     }
 
     pub(super) fn refresh_choices(
@@ -304,93 +273,13 @@ impl NodeForm {
         self.timeout_choice.read(cx).select.clone()
     }
 
-    /// Inactive source and failure-policy fields remain drafts too.
-    pub(in crate::workspace) fn has_local_input(&self, cx: &App) -> bool {
-        self.is_dirty(cx) || self.text_snapshot(cx) != self.initial_text
-    }
-
-    fn text_snapshot(&self, cx: &App) -> Vec<String> {
-        self.text_inputs()
-            .iter()
-            .map(|input| read(input, cx))
-            .collect()
-    }
-
-    fn text_inputs(&self) -> [&Entity<InputState>; 19] {
-        let fail = &self.body.on_fail;
-        [
-            &self.id,
-            &self.deps,
-            &self.timeout,
-            &self.max_turns,
-            &self.cwd,
-            &self.agent.id,
-            &self.agent.model,
-            &self.agent.mode,
-            &self.agent.effort,
-            &self.body.prompt.inline,
-            &self.body.prompt.file,
-            &self.body.output,
-            &self.body.run,
-            &fail.hint.inline,
-            &fail.hint.file,
-            &fail.fix,
-            &fail.rerun,
-            &fail.max_attempts,
-            &fail.wait,
-        ]
-    }
-
-    /// What the boxes say now.
+    /// Values currently displayed by this binding.
     pub(in crate::workspace) fn fields(&self, cx: &App) -> NodeFields {
-        NodeFields {
-            id: read(&self.id, cx).trim().to_string(),
-            deps: parse_deps(&read(&self.deps, cx)),
-            timeout: parse_timeout(read(&self.timeout, cx).trim()),
-            max_turns: parse_turns(read(&self.max_turns, cx).trim()),
-            cwd: some_if_filled(read(&self.cwd, cx).trim()),
-            agent: AgentFields {
-                id: some_if_filled(read(&self.agent.id, cx).trim()),
-                model: some_if_filled(read(&self.agent.model, cx).trim()),
-                effort: some_if_filled(read(&self.agent.effort, cx).trim()),
-                mode: some_if_filled(read(&self.agent.mode, cx).trim()),
-                permission: selected_permission(&self.agent.permission, cx),
-            },
-            body: {
-                let kind = selected_kind(&self.body.kind, cx);
-                BodyFields {
-                    kind,
-                    prompt: read_source(&self.body.prompt, cx),
-                    output: read(&self.body.output, cx).trim().to_string(),
-                    run: read(&self.body.run, cx).trim().to_string(),
-                    on_fail: read_fail(&self.body.on_fail, fail_kind_of(kind), cx),
-                }
-            },
-        }
+        self.read(cx).effective().into_fields()
     }
 
-    /// Is there anything to save? Compared against the values the form was built
-    /// from rather than tracked as a flag: a person who types and then types the
-    /// value back has changed nothing.
-    pub(in crate::workspace) fn is_dirty(&self, cx: &App) -> bool {
-        self.fields(cx) != self.initial
-    }
-
-    /// Why the form cannot be saved as it stands, if it cannot.
-    ///
-    /// Two things only, and both are things `daruda_flow::load` never gets to
-    /// see: a node with no id cannot be written, and text that is not a duration
-    /// cannot become one. Every other rule stays the engine's, so the form
-    /// and a run never disagree about what is valid.
     pub(in crate::workspace) fn refusal(&self, cx: &App) -> Option<Refusal> {
-        refusal_of(&self.fields(cx))
-    }
-
-    /// A refusal the edits brought in. One the file's node already has is the
-    /// engine's to accept, and must not block saving the title or other nodes.
-    pub(in crate::workspace) fn introduced_refusal(&self, cx: &App) -> Option<Refusal> {
-        let refusal = self.refusal(cx)?;
-        (refusal_of(&self.initial).as_ref() != Some(&refusal)).then_some(refusal)
+        super::inspector::fields::refusal_of(&self.fields(cx))
     }
 
     /// What to say about the last save, if it was refused.
@@ -462,6 +351,7 @@ impl NodeForm {
         &self.id
     }
 
+    #[cfg(test)]
     pub(in crate::workspace) fn deps_state(&self) -> &Entity<InputState> {
         &self.deps
     }
@@ -484,55 +374,6 @@ impl NodeForm {
             output: &self.body.output,
             run: &self.body.run,
             on_fail: &self.body.on_fail,
-        }
-    }
-}
-
-fn refusal_of(fields: &NodeFields) -> Option<Refusal> {
-    if fields.id.is_empty() {
-        return Some(Refusal::EmptyId);
-    }
-    // The engine's own rule, asked a beat earlier: it refuses the same
-    // name after a save round-trip, which is too late to be useful.
-    if !daruda_flow::node_id_is_wellformed(&fields.id) {
-        return Some(Refusal::InvalidId);
-    }
-    if let TurnsField::Unreadable(text) = &fields.max_turns {
-        return Some(Refusal::Turns(text.clone()));
-    }
-    if let TimeoutField::Unreadable(text) = &fields.timeout {
-        return Some(Refusal::Timeout(text.clone()));
-    }
-    // The acting policy's two numbers, for the same reason: neither can
-    // become what the file needs, so the engine never sees them.
-    // An agent has to write somewhere and a command has to run something.
-    // Neither is the engine's rule — it loads an empty `output` and an empty
-    // `run` without complaint — and neither is a node.
-    match fields.body.kind {
-        KindChoice::Agent if fields.body.output.is_empty() => {
-            return Some(Refusal::OutputRequired);
-        }
-        KindChoice::Command if fields.body.run.is_empty() => {
-            return Some(Refusal::RunRequired);
-        }
-        _ => {}
-    }
-    let on_fail = &fields.body.on_fail;
-    match on_fail {
-        FailFields::Halt => None,
-        FailFields::Retry {
-            max_attempts, wait, ..
-        }
-        | FailFields::Repair {
-            max_attempts, wait, ..
-        } => {
-            if let AttemptsField::Unreadable(text) = max_attempts {
-                return Some(Refusal::Attempts(text.clone()));
-            }
-            if let TimeoutField::Unreadable(text) = wait {
-                return Some(Refusal::Timeout(text.clone()));
-            }
-            None
         }
     }
 }
@@ -608,14 +449,6 @@ fn source_states<T: 'static>(
 
 /// Whichever half the select names. The other box keeps what was typed in it,
 /// and the file never sees both.
-fn read_source(states: &SourceStates, cx: &App) -> SourceField {
-    if is_file_source(states, cx) {
-        SourceField::File(read(&states.file, cx).trim().to_string())
-    } else {
-        SourceField::Inline(read(&states.inline, cx))
-    }
-}
-
 /// Is the file half selected?
 pub(super) fn is_file_source(states: &SourceStates, cx: &App) -> bool {
     states
@@ -701,27 +534,6 @@ pub(super) fn acting(states: &FailStates, cx: &App) -> bool {
         .is_some_and(|v| v.as_ref() == FAIL_ACT)
 }
 
-fn read_fail(states: &FailStates, kind: FailKind, cx: &App) -> FailFields {
-    if !acting(states, cx) {
-        return FailFields::Halt;
-    }
-    let max_attempts = parse_attempts(read(&states.max_attempts, cx).trim());
-    let wait = parse_timeout(read(&states.wait, cx).trim());
-    match kind {
-        FailKind::Retry => FailFields::Retry {
-            hint: read_source(&states.hint, cx),
-            max_attempts,
-            wait,
-        },
-        FailKind::Repair => FailFields::Repair {
-            fix: read(&states.fix, cx),
-            rerun: parse_deps(&read(&states.rerun, cx)),
-            max_attempts,
-            wait,
-        },
-    }
-}
-
 /// The permission select's options: absent first, then the three the engine
 /// knows. Values are the serde spellings, so the option a file already names
 /// selects itself.
@@ -789,16 +601,6 @@ fn turns_text(field: &TurnsField) -> String {
         TurnsField::Set(n) => n.to_string(),
         TurnsField::Unreadable(text) => text.clone(),
     }
-}
-
-fn parse_turns(text: &str) -> TurnsField {
-    if text.is_empty() {
-        return TurnsField::Absent;
-    }
-    text.parse().map_or_else(
-        |_| TurnsField::Unreadable(text.to_string()),
-        TurnsField::Set,
-    )
 }
 
 fn single_line_inheriting<T: 'static>(

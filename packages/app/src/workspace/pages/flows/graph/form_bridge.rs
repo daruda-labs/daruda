@@ -6,16 +6,12 @@
 
 use gpui::{App, Context, Window};
 
-use super::{FlowGraphView, form};
+use super::{
+    FlowGraphView, form,
+    inspector::{InspectorStatus, Notice},
+};
 
-pub(in crate::workspace) struct FormStatus {
-    pub unsaved: bool,
-    /// Whether the selected form's edits brought in a refusal; one the file
-    /// already had does not stop saving the title or other nodes.
-    pub node_refused: bool,
-    pub conflict: bool,
-    pub node_revertable: bool,
-}
+pub(in crate::workspace) type FormStatus = InspectorStatus;
 
 impl FlowGraphView {
     pub(in crate::workspace) fn set_catalog(
@@ -36,17 +32,34 @@ impl FlowGraphView {
     }
 
     pub(super) fn watch_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self._agent_watch = self.form.as_ref().map(|form| {
-            cx.subscribe_in(
-                &form.agent_states().id,
-                window,
-                |view, _, event, window, cx| {
-                    if matches!(event, crate::ui::InputEvent::Change) {
-                        view.refresh_form_choices(window, cx);
-                    }
-                },
-            )
-        });
+        self._form_watches.clear();
+        if let Some(form) = &self.form {
+            let guard = form.applying();
+            let node = form.node.clone();
+            for input in form.watch_inputs() {
+                let guard = guard.clone();
+                let node = node.clone();
+                self._form_watches.push(cx.subscribe_in(
+                    &input,
+                    window,
+                    move |view, _, event, window, cx| {
+                        view.on_bound_input(&guard, &node, event, window, cx)
+                    },
+                ));
+            }
+            let selects = form.watch_selects(cx);
+            for select in selects {
+                let guard = guard.clone();
+                let node = node.clone();
+                self._form_watches.push(cx.subscribe_in(
+                    &select,
+                    window,
+                    move |view, _, _: &crate::ui::select::ConfirmEvent, window, cx| {
+                        view.on_bound_select(&guard, &node, window, cx)
+                    },
+                ));
+            }
+        }
         self._link_watches.clear();
         if let Some(form) = &self.form {
             self._link_watches.push(cx.subscribe_in(
@@ -58,15 +71,6 @@ impl FlowGraphView {
                 &form.result_picker,
                 window,
                 |view, _, event, window, cx| view.choose_form_link(true, event, window, cx),
-            ));
-            self._link_watches.push(cx.subscribe_in(
-                form.deps_state(),
-                window,
-                |view, _, event, window, cx| {
-                    if matches!(event, crate::ui::InputEvent::Change) {
-                        view.refresh_form_links(window, cx);
-                    }
-                },
             ));
         }
         self.watch_result_targets(window, cx);
@@ -102,13 +106,14 @@ impl FlowGraphView {
             .update(cx, |input, cx| input.focus(window, cx));
     }
 
-    pub(in crate::workspace) fn set_save_error(
-        &mut self,
-        message: Option<String>,
-        cx: &mut Context<Self>,
-    ) {
-        self.save_error = message;
+    pub(in crate::workspace) fn save_io_failed(&mut self, message: String, cx: &mut Context<Self>) {
+        self.inspector.set_notice(Some(Notice::Io(message)));
         cx.notify();
+    }
+
+    pub(in crate::workspace) fn begin_form_save(&mut self, cx: &mut Context<Self>) {
+        self.inspector.set_notice(None);
+        self.set_form_refusal(None, Vec::new(), cx);
     }
 
     #[cfg(test)]
@@ -117,50 +122,72 @@ impl FlowGraphView {
     }
 
     #[cfg(test)]
-    pub(in crate::workspace) fn save_error_for_test(&self) -> Option<&str> {
-        self.save_error.as_deref()
+    pub(in crate::workspace) fn save_error_for_test(&self) -> Option<String> {
+        self.notice_message()
     }
 
     /// The form for the selected node, when there is one.
-    pub(in crate::workspace) fn form(&self) -> Option<&form::NodeForm> {
+    #[cfg(any(test, feature = "screenshot"))]
+    pub(in crate::workspace) fn form(&self) -> Option<&form::FormBinding> {
         self.form.as_ref()
     }
 
-    /// Pending title or inspector edits gate Run and the close confirmation.
     pub(in crate::workspace) fn has_unsaved_form(&self, cx: &App) -> bool {
-        let local = self
-            .form
-            .as_ref()
-            .is_some_and(|form| form.has_local_input(cx));
-        self.unsaved_with(local, cx)
+        self.inspector.status().unsaved || self.name_is_dirty(cx)
     }
 
-    fn unsaved_with(&self, local: bool, cx: &App) -> bool {
-        local || self.name_is_dirty(cx) || !self.drafts.is_empty()
-    }
-
-    /// What the Save and Revert buttons need, read once per frame. A form
-    /// built from an older file can be reverted even with its boxes back at
-    /// their original values: the conflict banner asks for exactly that.
     pub(in crate::workspace) fn form_status(&self, cx: &App) -> FormStatus {
-        let local = self
-            .form
-            .as_ref()
-            .is_some_and(|form| form.has_local_input(cx));
-        let stale = self.form.as_ref().is_some_and(|form| {
-            self.text
-                .as_ref()
-                .is_none_or(|text| !form.matches_current(text))
-        });
-        FormStatus {
-            unsaved: self.unsaved_with(local, cx),
-            node_refused: self
-                .form
-                .as_ref()
-                .is_some_and(|form| form.introduced_refusal(cx).is_some()),
-            conflict: self.draft_conflict(),
-            node_revertable: local || stale,
+        let mut status = self.inspector.status();
+        status.unsaved |= self.name_is_dirty(cx);
+        status
+    }
+
+    fn on_bound_input(
+        &mut self,
+        guard: &std::cell::Cell<usize>,
+        node: &daruda_flow::NodeId,
+        event: &crate::ui::InputEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if matches!(event, crate::ui::InputEvent::Change) {
+            self.on_bound_select(guard, node, window, cx);
         }
+    }
+
+    fn on_bound_select(
+        &mut self,
+        guard: &std::cell::Cell<usize>,
+        node: &daruda_flow::NodeId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if guard.get() == 0 && self.inspector.selected() == Some(node) {
+            self.on_form_changed(window, cx);
+        }
+    }
+
+    pub(super) fn on_form_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let effects = self.sync_form(cx);
+        self.apply_inspector_effects(effects, window, cx);
+    }
+
+    pub(super) fn notice_message(&self) -> Option<String> {
+        use crate::surface::strings::flow as s;
+        Some(match self.inspector.notice()? {
+            Notice::Conflict => s::form_draft_conflict(),
+            Notice::Refused { message, .. } | Notice::Io(message) => message.clone(),
+            Notice::InvalidDraft(node) => s::form_invalid_draft(node),
+            Notice::NameEmpty => s::name_empty(),
+            Notice::PromptStale => s::form_file_picker_conflict(),
+            Notice::PromptOutside => s::form_file_outside(),
+            Notice::Discarded(_) => return None,
+        })
+    }
+
+    pub(in crate::workspace) fn name_empty(&mut self, cx: &mut Context<Self>) {
+        self.inspector.set_notice(Some(Notice::NameEmpty));
+        cx.notify();
     }
 
     /// Open or close the inspector's agent-override block.
@@ -173,7 +200,7 @@ impl FlowGraphView {
 
     /// Put a refused save's reason on the form — the sentence, and the boxes it
     /// names — or clear both.
-    pub(in crate::workspace) fn set_form_refusal(
+    fn set_form_refusal(
         &mut self,
         message: Option<String>,
         notes: Vec<form::notes::FieldNote>,
@@ -196,37 +223,28 @@ impl FlowGraphView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // The engine names a renamed node by its new id; the pane knows it
-        // by the id in the file.
-        let notes_of = |node: &daruda_flow::NodeId, edited: &str| {
-            let notes = form::notes::notes_for(issues, node);
-            if notes.is_empty() && edited != node.as_str() {
-                form::notes::notes_for(issues, &daruda_flow::NodeId::from(edited))
-            } else {
-                notes
-            }
+        self.sync_form(cx);
+        let effects = self.inspector.save_refused(message.clone(), issues);
+        self.apply_inspector_effects(effects, window, cx);
+        let issues = match self.inspector.notice() {
+            Some(Notice::Refused { issues, .. }) => issues.as_slice(),
+            _ => &[],
         };
-        let selected_notes = self
-            .form
-            .as_ref()
-            .map(|form| notes_of(&form.node, &form.fields(cx).id))
+        let notes = self
+            .inspector
+            .draft()
+            .map(|draft| {
+                let notes = form::notes::notes_for(issues, draft.node());
+                if notes.is_empty() {
+                    form::notes::notes_for(
+                        issues,
+                        &daruda_flow::NodeId::from(draft.raw().id.trim()),
+                    )
+                } else {
+                    notes
+                }
+            })
             .unwrap_or_default();
-        let notes = if selected_notes.is_empty()
-            && let Some(node) = self
-                .drafts
-                .iter()
-                .find(|(node, draft)| !notes_of(node, &draft.fields.id).is_empty())
-                .map(|(node, _)| node.clone())
-        {
-            self.select_node(&node, window, cx);
-            self.form
-                .as_ref()
-                .map(|form| notes_of(&form.node, &form.fields(cx).id))
-                .unwrap_or_default()
-        } else {
-            selected_notes
-        };
-        self.save_error = Some(message.clone());
         self.set_form_refusal(Some(message), notes, cx);
     }
 
@@ -237,12 +255,11 @@ impl FlowGraphView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.drafts.clear();
-        self.discarded.clear();
+        let effects = self.inspector.revert_all();
         self.name_input.update(cx, |input, cx| {
             input.set_value(self.saved_name.clone(), window, cx)
         });
-        self.revert_selected_node(window, cx);
+        self.apply_inspector_effects(effects, window, cx);
     }
 
     /// Build only the selected node's form again from the file. The inspector
@@ -252,16 +269,8 @@ impl FlowGraphView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(node) = self.form.as_ref().map(|form| form.node.clone()) {
-            let text = self.text.clone();
-            let issues = self.current_issues();
-            self.form =
-                text.and_then(|text| form::NodeForm::build(&text, &node, &issues, window, cx));
-            self.watch_form(window, cx);
-        }
-        if !self.draft_conflict() {
-            self.save_error = None;
-        }
-        cx.notify();
+        self.sync_form(cx);
+        let effects = self.inspector.revert_node();
+        self.apply_inspector_effects(effects, window, cx);
     }
 }

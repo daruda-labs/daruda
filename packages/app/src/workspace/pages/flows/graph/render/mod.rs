@@ -78,8 +78,7 @@ impl Render for FlowGraphView {
                     ),
             )
             .children(
-                self.save_error
-                    .as_ref()
+                self.notice_message()
                     .map(|message| crate::ui::alert::error("flow-save-error", message.clone())),
             )
             .children((!self.discarded_drafts().is_empty()).then(|| {
