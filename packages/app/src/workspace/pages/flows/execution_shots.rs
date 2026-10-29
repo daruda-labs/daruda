@@ -42,9 +42,9 @@ impl Workspace {
                 ..
             }) = &mut self.pages.flows.detail
         {
-            run.execution.selection = Some(super::execution_selection::ExecutionSelection::Node(
-                "review".into(),
-            ));
+            run.execution.inspector.restore_selection(
+                super::execution_selection::ExecutionSelection::Node("review".into()),
+            );
         }
         if let Some(detail) = &self.pages.flows.detail {
             let id = detail.id;

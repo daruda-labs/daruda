@@ -27,7 +27,6 @@ pub(crate) mod watch;
 pub(crate) use cli::sessions_dir as cli_sessions_dir;
 pub(crate) use delivery::{DeliveryFailure, RunPane, TerminalDispatchError};
 pub(crate) use effects::RunsEffects;
-pub(crate) use flows::states_from_log as flow_states_from_log;
 pub(crate) use flows::{
     AlreadyRunning, AnswerRefused, FlowAskOutcome, FlowChange, FlowChanged, FlowEnded, FlowRun,
     FlowSource, FlowStart, Lull, NodeRunState, ParkedAsk, RunColouring, RunView,

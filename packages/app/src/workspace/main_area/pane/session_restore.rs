@@ -1,6 +1,6 @@
 //! Host restore policy survives cold restore without persisting navigation state.
 
-use crate::workspace::pages::flows::execution_detail::RunOrigin;
+use crate::workspace::flow_navigation::RunOrigin;
 
 #[derive(Default)]
 pub(in crate::workspace) enum SessionRestore {

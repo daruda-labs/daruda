@@ -213,7 +213,18 @@ fn command_evidence_remains_available_when_the_snapshot_is_missing() {
     )
     .unwrap();
     let store = crate::run_log::testing::started_store(dir.path(), &loaded, None, Vec::new());
+    let waiting = RunHistory::read(dir.path()).unwrap();
+    assert!(waiting.flow().is_none());
+    assert_eq!(waiting.nodes(), vec![NodeId::from("check")]);
+    assert!(waiting.latest_selection().is_none());
     smol::block_on(store.commit(E::attempt_started("check".into(), 0))).unwrap();
+    let running = RunHistory::read(dir.path()).unwrap();
+    assert_eq!(running.nodes(), vec![NodeId::from("check")]);
+    assert_eq!(running.latest_selection(), Some((NodeId::from("check"), 1)));
+    assert_eq!(
+        running.node_status(&"check".into()),
+        super::NodeStatus::Running { attempt: 1 }
+    );
     smol::block_on(store.commit(E::AttemptPassed {
         node: "check".into(),
         record: Box::new(AttemptLine::new(&record(1, 1), &Default::default())),

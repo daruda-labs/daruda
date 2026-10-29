@@ -112,7 +112,7 @@ fn continuation_preserves_identity_reuses_exact_panes_and_returns_to_evidence(
         };
         assert_eq!(run.dir, origin.dir);
         assert_eq!(
-            run.execution.selection,
+            run.execution.inspector.selection().cloned(),
             Some(ExecutionSelection::Attempt(origin.node, origin.evidence))
         );
     });
@@ -185,4 +185,48 @@ fn exact_loading_survives_workspace_restore_without_persisting_navigation(cx: &m
         })
     })
     .unwrap();
+}
+
+#[gpui::test]
+fn continuation_rechecks_binding_and_rejects_a_result_after_navigation(cx: &mut TestAppContext) {
+    use super::super::execution_fixture::{ExecutionShot, seed};
+    let root = tempfile::tempdir().unwrap();
+    let dir = seed(root.path(), ExecutionShot::Completed);
+    let project = daruda_store::project::Project::from_path(root.path());
+    let (window, workspace) =
+        build_workspace_with(cx, &daruda_config::Config::default(), Some(project));
+    cx.update(Workspace::fake_agent_connections_for_test);
+    let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
+    workspace.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_page(crate::workspace::pages::Page::Flows, window, cx);
+        ws.open_run_detail(ws.active, &dir, window, cx);
+    });
+    vcx.run_until_parked();
+    workspace.update_in(&mut vcx, |ws, window, cx| {
+        let id = ws.pages.flows.detail.as_ref().unwrap().id;
+        let request = ws.prepare_flow_session(id).unwrap();
+        let origin = request.origin.clone();
+        let binding = request
+            .revalidate()
+            .expect("recorded binding still matches");
+        let mut changed = binding.clone();
+        changed.session_id = "different-session".into();
+        assert!(
+            ContinuationRequest {
+                origin: origin.clone(),
+                binding: changed
+            }
+            .revalidate()
+            .is_none()
+        );
+        let panes = ws.active_runtime().panes.len();
+        ws.select_execution_node(id, "review".into(), cx);
+        ws.complete_flow_session(id, origin.clone(), Some(binding.clone()), window, cx);
+        assert_eq!(ws.active_runtime().panes.len(), panes);
+        assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Flows));
+        ws.install_run_detail(ws.active, dir.clone(), cx);
+        ws.complete_flow_session(id, origin, Some(binding), window, cx);
+        assert_eq!(ws.active_runtime().panes.len(), panes);
+        assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Flows));
+    });
 }

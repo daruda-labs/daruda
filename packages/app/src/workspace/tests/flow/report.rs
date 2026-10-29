@@ -26,7 +26,7 @@ fn shown_run(ws: &Workspace) -> (std::path::PathBuf, Option<String>) {
     let FlowDetailBody::Run(run) = &detail.body else {
         panic!("the detail is a run");
     };
-    let text = match &run.report {
+    let text = match run.report() {
         RunReport::Loaded(text) => Some(text.to_string()),
         RunReport::Missing => None,
         RunReport::Loading => panic!("the report was read"),

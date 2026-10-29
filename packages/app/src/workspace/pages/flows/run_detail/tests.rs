@@ -1,4 +1,5 @@
 use super::*;
+use crate::workspace::pages::flows::detail::RunReport;
 use crate::workspace::pages::flows::execution_fixture::{ExecutionShot, seed};
 use crate::workspace::tests::build_workspace_with;
 
@@ -17,7 +18,7 @@ fn older_report_reads_cannot_replace_a_newer_request(cx: &mut gpui::TestAppConte
             let FlowDetailBody::Run(run) = &ws.pages.flows.detail.as_ref().unwrap().body else {
                 panic!("run");
             };
-            run.execution.report_epoch
+            run.report.epoch()
         };
         let initial = epoch(ws);
         ws.show_execution_report(id, cx);
@@ -29,14 +30,14 @@ fn older_report_reads_cannot_replace_a_newer_request(cx: &mut gpui::TestAppConte
         let FlowDetailBody::Run(run) = &ws.pages.flows.detail.as_ref().unwrap().body else {
             panic!("run");
         };
-        assert!(matches!(run.report, RunReport::Loading));
+        assert!(matches!(run.report(), RunReport::Loading));
         ws.land_run_report(id, refreshed, Some("latest content".into()), cx);
         ws.land_run_report(id, initial, None, cx);
         ws.land_run_report(id, opened, Some("stale content".into()), cx);
         let FlowDetailBody::Run(run) = &ws.pages.flows.detail.as_ref().unwrap().body else {
             panic!("run");
         };
-        let RunReport::Loaded(text) = &run.report else {
+        let RunReport::Loaded(text) = run.report() else {
             panic!("loaded report");
         };
         assert_eq!(text.as_ref(), "latest content");

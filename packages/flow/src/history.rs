@@ -14,15 +14,15 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
 pub struct RunHistory {
-    pub flow: Option<Flow>,
-    pub records: Vec<NodeRecord>,
-    pub sessions: Vec<SessionBinding>,
-    pub source: Option<PathBuf>,
-    pub phase: Option<RunPhase>,
-    pub torn: bool,
-    pub started_at: Option<std::time::SystemTime>,
-    pub elapsed: Option<std::time::Duration>,
-    pub spent: reader::Spent,
+    flow: Option<Flow>,
+    records: Vec<NodeRecord>,
+    sessions: Vec<SessionBinding>,
+    source: Option<PathBuf>,
+    phase: Option<RunPhase>,
+    torn: bool,
+    started_at: Option<std::time::SystemTime>,
+    elapsed: Option<std::time::Duration>,
+    spent: reader::Spent,
     state: Option<crate::run_log::machine::FlowRunState>,
     evidence_paths: std::collections::BTreeMap<(NodeId, u32), PathBuf>,
     attempt_order: Vec<(NodeId, u32)>,
@@ -39,121 +39,50 @@ impl std::fmt::Display for HistoryError {
 }
 impl std::error::Error for HistoryError {}
 
+mod load;
+mod status;
+pub use status::NodeStatus;
+
 impl RunHistory {
-    pub fn read(dir: &Path) -> Result<Self, HistoryError> {
-        let inspected = reader::inspect(dir).map_err(HistoryError)?;
-        let state = inspected.as_ref().map(|i| i.state.clone());
-        let started_at = inspected.as_ref().and_then(|i| i.started_at);
-        let elapsed = inspected.as_ref().and_then(|i| i.elapsed);
-        let in_flight = inspected
-            .as_ref()
-            .map(|i| {
-                i.state
-                    .node_states()
-                    .filter_map(|(node, state)| match state.last() {
-                        crate::run_log::machine::AttemptState::Started {
-                            attempt,
-                            evidence,
-                            ..
-                        } => Some((node.clone(), *attempt, *evidence)),
-                        _ => None,
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        let (replay, phase, sessions, source, current_outputs) = match inspected {
-            Some(i) => (
-                i.replay,
-                Some(i.state.phase()),
-                i.state.sessions().cloned().collect(),
-                i.state.source().map(Path::to_path_buf),
-                i.state.finished(),
-            ),
-            None => {
-                let replay = reader::read(dir);
-                let current = replay.passed.iter().cloned().collect();
-                (replay, None, Vec::new(), None, current)
-            }
-        };
-        let flow = std::fs::read_to_string(dir.join(crate::resume::RUN_SPEC_FILE))
-            .ok()
-            .and_then(|text| crate::load(&text, None).ok())
-            .map(|loaded| loaded.flow().clone());
-        let mut result = Self {
-            flow,
-            started_at,
-            elapsed,
-            spent: replay.spent,
-            records: replay.records,
-            sessions,
-            source,
-            phase,
-            in_flight,
-            current_outputs,
-            state,
-            evidence_paths: Default::default(),
-            attempt_order: replay.attempt_order,
-            torn: replay.torn,
-        };
-        let nodes: std::collections::BTreeSet<_> = result
-            .records
-            .iter()
-            .map(|r| r.id.clone())
-            .chain(result.sessions.iter().map(|s| s.node.clone()))
-            .chain(result.in_flight.iter().map(|(node, _, _)| node.clone()))
-            .collect();
-        for node in nodes {
-            for (attempt, evidence) in result.attempts(&node) {
-                let logs = dir.join(crate::schedule::LOG_DIR_NAME);
-                let command = result.is_command(&node);
-                let path = if command {
-                    logs.join(format!("{node}.attempt-{attempt}.evidence-{evidence}.log"))
-                } else {
-                    let [modern, legacy] =
-                        crate::runner::acp::transcript_paths(&logs, &node, attempt, evidence);
-                    if !modern.exists()
-                        && legacy.exists()
-                        && !result.legacy_transcript_is_output(&node, &legacy)
-                    {
-                        legacy
-                    } else {
-                        modern
-                    }
-                };
-                result.evidence_paths.insert((node.clone(), evidence), path);
-            }
-        }
-        Ok(result)
+    pub fn flow(&self) -> Option<&Flow> {
+        self.flow.as_ref()
+    }
+    pub fn source(&self) -> Option<&Path> {
+        self.source.as_deref()
+    }
+    pub fn started_at(&self) -> Option<std::time::SystemTime> {
+        self.started_at
+    }
+    pub fn elapsed(&self) -> Option<std::time::Duration> {
+        self.elapsed
+    }
+    pub fn spent(&self) -> &reader::Spent {
+        &self.spent
     }
 
-    fn legacy_transcript_is_output(&self, node: &NodeId, path: &Path) -> bool {
-        let output = self
+    /// Snapshot order first, then evidence and nodes known only to the durable log.
+    pub fn nodes(&self) -> Vec<NodeId> {
+        let mut nodes: Vec<_> = self
             .flow
             .as_ref()
-            .and_then(|flow| flow.nodes.iter().find(|n| &n.id == node))
-            .and_then(|n| n.kind.agent_body())
-            .map(|body| body.output.as_path());
-        if output.is_some_and(|p| p.extension().is_none_or(|ext| ext != "md")) {
-            return false;
-        }
-        // Old Markdown archives shared the transcript name. Without a snapshot,
-        // an invalidation naming that path is ambiguous and cannot prove a conversation.
-        self.records
+            .map(|f| f.nodes.iter().map(|n| n.id.clone()).collect())
+            .unwrap_or_default();
+        for node in self
+            .records
             .iter()
-            .flat_map(|r| &r.attempts)
-            .any(|attempt| {
-                attempt.invalidated.nodes.contains(node)
-                    && path.file_name()
-                        == Some(std::ffi::OsStr::new(&crate::archive::archive_name(
-                            node,
-                            &format!(
-                                "attempt-{}.evidence-{}",
-                                attempt.attempt, attempt.evidence_seq
-                            ),
-                            output.unwrap_or(Path::new("output.md")),
-                        )))
-                    && attempt.invalidated.archived.iter().any(|p| p == path)
-            })
+            .map(|r| &r.id)
+            .chain(self.sessions.iter().map(|s| &s.node))
+            .chain(
+                self.state
+                    .iter()
+                    .flat_map(|state| state.node_states().map(|(id, _)| id)),
+            )
+        {
+            if !nodes.contains(node) {
+                nodes.push(node.clone());
+            }
+        }
+        nodes
     }
 
     /// Stalled runs can be resumed by the engine and still own their sessions.
@@ -192,18 +121,10 @@ impl RunHistory {
     }
 
     pub fn latest_selection(&self) -> Option<(NodeId, u32)> {
-        let nodes = self
-            .flow
-            .as_ref()
-            .into_iter()
-            .flat_map(|flow| &flow.nodes)
-            .map(|n| &n.id)
-            .chain(self.records.iter().map(|r| &r.id))
-            .chain(self.sessions.iter().map(|s| &s.node));
-        nodes.into_iter().find_map(|node| {
-            self.attempts(node)
+        self.nodes().into_iter().find_map(|node| {
+            self.attempts(&node)
                 .last()
-                .map(|(_, evidence)| (node.clone(), *evidence))
+                .map(|(_, evidence)| (node, *evidence))
         })
     }
 

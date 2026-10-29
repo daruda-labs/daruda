@@ -1,5 +1,6 @@
 //! Serialize refreshes and keep progress reads local to the selected run.
 
+use super::super::detail::FlowDetail;
 use super::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -54,11 +55,7 @@ impl Workspace {
         id: FlowDetailId,
         cx: &mut Context<Self>,
     ) {
-        if let Some(FlowDetail {
-            body: FlowDetailBody::Run(run),
-            ..
-        }) = self.pages.flows.detail.as_ref().filter(|d| d.id == id)
-        {
+        if let Some(run) = self.pages.flows.run(id) {
             self.request_execution_read(id, run.dir.clone(), Scope::Detail, cx);
         }
     }
@@ -82,7 +79,7 @@ impl Workspace {
             return;
         }
         let lane = *lane;
-        let sources: std::collections::HashMap<_, _> = run
+        let cached_history: std::collections::HashMap<_, _> = run
             .execution
             .rail
             .iter()
@@ -112,7 +109,7 @@ impl Workspace {
                             )
                             .runs()
                             .iter()
-                            .map(|entry| history_entry(entry, sources.get(&entry.dir)))
+                            .map(|entry| history_entry(entry, cached_history.get(&entry.dir)))
                             .collect::<Vec<_>>()
                         })
                         .unwrap_or_default()
@@ -120,11 +117,7 @@ impl Workspace {
                 (result, status, rail)
             },
             move |ws, (result, status, rail), cx| {
-                let Some(FlowDetail {
-                    body: FlowDetailBody::Run(run),
-                    ..
-                }) = ws.pages.flows.detail.as_mut().filter(|d| d.id == id)
-                else {
+                let Some(run) = ws.pages.flows.run_mut(id) else {
                     return;
                 };
                 let pending = run.execution.read.finish();
@@ -139,9 +132,9 @@ impl Workspace {
                 {
                     row.entry.status = status;
                     if let Ok(history) = &result {
-                        row.source = history.source.clone();
-                        row.started_at = history.started_at;
-                        row.elapsed = history.elapsed;
+                        row.source = history.source().map(std::path::Path::to_path_buf);
+                        row.started_at = history.started_at();
+                        row.elapsed = history.elapsed();
                     }
                 }
                 ws.land_run_execution(id, result, cx);

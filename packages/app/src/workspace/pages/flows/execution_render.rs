@@ -11,7 +11,7 @@ use crate::{
     ui::{ButtonVariants as _, Disableable as _, button, theme},
     workspace::Workspace,
 };
-use daruda_flow::{NodeId, history::RunHistory};
+use daruda_flow::history::RunHistory;
 use gpui::{AnyElement, Context, div, prelude::*, px};
 use theme::palette;
 
@@ -19,25 +19,6 @@ mod evidence;
 mod inspector;
 mod overview;
 pub(super) mod presentation;
-
-pub(super) fn nodes(history: &RunHistory) -> Vec<NodeId> {
-    let mut nodes: Vec<_> = history
-        .flow
-        .as_ref()
-        .map(|f| f.nodes.iter().map(|n| n.id.clone()).collect())
-        .unwrap_or_default();
-    for node in history
-        .records
-        .iter()
-        .map(|r| &r.id)
-        .chain(history.sessions.iter().map(|s| &s.node))
-    {
-        if !nodes.contains(node) {
-            nodes.push(node.clone());
-        }
-    }
-    nodes
-}
 
 pub(super) fn body(
     id: FlowDetailId,
@@ -148,7 +129,7 @@ fn rail(
         {
             continue;
         }
-        if run.execution.source_only && source != &history.source {
+        if run.execution.source_only && source.as_deref() != history.source() {
             continue;
         }
         visible += 1;
@@ -220,7 +201,7 @@ fn rail(
                 )
                 .ghost()
                 .w_full()
-                .disabled(history.source.is_none())
+                .disabled(history.source().is_none())
                 .on_click(cx.listener(move |ws, _, _, cx| ws.toggle_execution_source(id, cx))),
             ),
         )

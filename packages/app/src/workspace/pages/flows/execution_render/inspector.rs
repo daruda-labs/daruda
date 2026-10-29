@@ -22,7 +22,7 @@ pub(super) fn render(
         .p(px(theme::PAD_XL));
     if !wide {
         let mut choices = div().flex().flex_wrap().gap(px(theme::GAP_SM));
-        for node in nodes(history) {
+        for node in history.nodes() {
             let node_id = node.clone();
             choices = choices.child(
                 button(
@@ -32,8 +32,8 @@ pub(super) fn render(
                 .ghost()
                 .when(
                     run.execution
-                        .selection
-                        .as_ref()
+                        .inspector
+                        .selection()
                         .is_some_and(|selection| selection.node() == &node),
                     |b| b.bg(t.lane_card_active_bg),
                 )
@@ -53,13 +53,18 @@ pub(super) fn render(
         .p(px(theme::PAD_XL))
         .border_t_1()
         .border_color(t.border);
-    if let Some(selection) = &run.execution.selection {
+    if let Some(selection) = run.execution.inspector.selection() {
         header = header.child(div().child(selection.node().to_string()));
         if selection.attempt().is_none() {
             header = header.child(presentation::node_badge(history, selection.node(), cx));
         }
     }
-    if let Some((node, evidence)) = run.execution.selection.as_ref().and_then(|s| s.attempt()) {
+    if let Some((node, evidence)) = run
+        .execution
+        .inspector
+        .selection()
+        .and_then(|s| s.attempt())
+    {
         if let Some(binding) = history.binding(node, *evidence) {
             header = header.child(
                 div()
@@ -147,7 +152,7 @@ pub(super) fn render(
                 );
         }
     }
-    let selected = match run.execution.tab {
+    let selected = match run.execution.inspector.tab() {
         EvidenceTab::Conversation => 0,
         EvidenceTab::Output => 1,
         EvidenceTab::Metadata => 2,
@@ -161,21 +166,21 @@ pub(super) fn render(
         .on_click(
             cx.listener(move |ws, index, _, cx| ws.select_execution_tab_index(id, *index, cx)),
         );
-    let content = if run.execution.selection.is_none() {
+    let content = if run.execution.inspector.selection().is_none() {
         div()
-            .child(if nodes(history).is_empty() {
+            .child(if history.nodes().is_empty() {
                 s::flow::session_legacy()
             } else {
                 s::flow::run_select_node()
             })
             .child(super::super::detail_render::run_body(id, run, cx))
             .into_any_element()
-    } else if run.execution.tab == EvidenceTab::Metadata {
+    } else if run.execution.inspector.tab() == EvidenceTab::Metadata {
         metadata(run, history, cx)
     } else if run
         .execution
-        .selection
-        .as_ref()
+        .inspector
+        .selection()
         .is_some_and(|s| s.attempt().is_none())
     {
         div().child(s::flow::run_no_attempt()).into_any_element()

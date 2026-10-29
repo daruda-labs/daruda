@@ -26,6 +26,7 @@ mod node_ops;
 mod past;
 mod rows;
 mod run_detail;
+mod run_report;
 mod session_ops;
 mod toolbar;
 

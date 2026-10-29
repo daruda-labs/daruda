@@ -88,7 +88,7 @@ fn run_header(id: FlowDetailId, run: &RunDetail, cx: &mut Context<Workspace>) ->
                 .child(
                     div().child(match &run.execution.inspection {
                         super::execution_detail::Inspection::Ready(h) => h
-                            .source
+                            .source()
                             .as_ref()
                             .and_then(|p| p.file_stem())
                             .map(|n| n.to_string_lossy().into_owned())
@@ -110,7 +110,7 @@ fn run_header(id: FlowDetailId, run: &RunDetail, cx: &mut Context<Workspace>) ->
                 .text_color(t.text_muted)
                 .child(match &run.execution.inspection {
                     super::execution_detail::Inspection::Ready(history) => {
-                        super::execution_render::presentation::started(history.started_at)
+                        super::execution_render::presentation::started(history.started_at())
                     }
                     _ => run.started.to_string(),
                 }),
@@ -130,7 +130,7 @@ fn run_header(id: FlowDetailId, run: &RunDetail, cx: &mut Context<Workspace>) ->
 
 pub(super) fn run_body(id: FlowDetailId, run: &RunDetail, cx: &gpui::App) -> AnyElement {
     let muted = theme::current(cx).text_muted;
-    match &run.report {
+    match run.report() {
         RunReport::Loading => div()
             .text_color(muted)
             .child(s::common::loading())

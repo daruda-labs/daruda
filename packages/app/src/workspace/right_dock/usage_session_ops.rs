@@ -34,7 +34,7 @@ impl Workspace {
     pub(in crate::workspace) fn restore_session_with_flow_origin(
         &mut self,
         session: RestorableSession,
-        origin: Option<crate::workspace::pages::flows::execution_detail::RunOrigin>,
+        origin: Option<crate::workspace::flow_navigation::RunOrigin>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {

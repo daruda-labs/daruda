@@ -50,6 +50,7 @@ mod flow_context;
 mod flow_events;
 mod flow_file_ops;
 pub(in crate::workspace) mod flow_history;
+mod flow_navigation;
 mod flow_ops;
 mod flow_paths;
 mod flow_pins;

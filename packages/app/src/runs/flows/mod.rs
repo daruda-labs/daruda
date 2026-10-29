@@ -28,7 +28,6 @@ use daruda_flow::runner::{CancelToken, OverageStop, PendingAsk, Runners};
 
 #[cfg(test)]
 pub(crate) use colour::apply_run_event;
-pub(crate) use colour::states_from_log;
 pub(crate) use colour::{NodeRunState, NodeRunStates, RunColouring};
 #[cfg(test)]
 use pump::pump;

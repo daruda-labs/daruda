@@ -29,17 +29,11 @@ pub(in crate::workspace) struct RunDetail {
     /// When it started, as the history worded it. Empty when the history no
     /// longer lists it.
     pub started: SharedString,
-    pub report: RunReport,
+    pub(super) report: super::run_report::ReportState,
     pub execution: Box<super::execution_detail::ExecutionDetail>,
 }
 
-/// The run's `run.md`, read off the main thread.
-pub(in crate::workspace) enum RunReport {
-    Loading,
-    Loaded(SharedString),
-    /// Not there, or not readable.
-    Missing,
-}
+pub(in crate::workspace) use super::run_report::RunReport;
 
 pub(in crate::workspace) struct FlowDetail {
     pub id: FlowDetailId,
@@ -169,5 +163,26 @@ impl Workspace {
         {
             detail.lane = to;
         }
+    }
+}
+
+impl FlowsPage {
+    pub(super) fn run(&self, id: FlowDetailId) -> Option<&RunDetail> {
+        match &self.detail.as_ref().filter(|d| d.id == id)?.body {
+            FlowDetailBody::Run(run) => Some(run),
+            FlowDetailBody::Graph(_) => None,
+        }
+    }
+    pub(super) fn run_mut(&mut self, id: FlowDetailId) -> Option<&mut RunDetail> {
+        match &mut self.detail.as_mut().filter(|d| d.id == id)?.body {
+            FlowDetailBody::Run(run) => Some(run),
+            FlowDetailBody::Graph(_) => None,
+        }
+    }
+}
+
+impl RunDetail {
+    pub(in crate::workspace) fn report(&self) -> &RunReport {
+        self.report.content()
     }
 }

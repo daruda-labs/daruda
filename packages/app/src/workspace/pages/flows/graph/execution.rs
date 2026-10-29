@@ -27,7 +27,7 @@ impl ExecutionGraph {
         window: &mut Window,
         cx: &mut Context<Workspace>,
     ) -> Option<Self> {
-        let model = FlowGraphModel::from_flow(history.flow.as_ref()?, Vec::new());
+        let model = FlowGraphModel::from_flow(history.flow()?, Vec::new());
         let (mut graph, ids) = build_canvas_graph(&model, &PinSet::default());
         for (id, data) in Self::cards(history, &ids) {
             if let Some(card) = graph.get_node_mut(&id) {
@@ -63,17 +63,23 @@ impl ExecutionGraph {
         history: &RunHistory,
         ids: &NodeIds,
     ) -> Vec<(crate::ui::flow_canvas::CanvasNodeId, serde_json::Value)> {
-        let Some(flow) = &history.flow else {
+        let Some(flow) = history.flow() else {
             return Vec::new();
         };
         let model = FlowGraphModel::from_flow(flow, Vec::new());
-        let states = history
-            .state()
-            .map(crate::runs::flow_states_from_log)
-            .unwrap_or_default();
         let mut cards = Vec::new();
         for node in &model.nodes {
-            let run = states.get(&node.id).copied().unwrap_or_default();
+            use crate::runs::NodeRunState;
+            use daruda_flow::history::NodeStatus;
+            let run = match history.node_status(&node.id) {
+                NodeStatus::Running { attempt } => NodeRunState::Running { attempt },
+                NodeStatus::Passed | NodeStatus::Pinned => NodeRunState::Passed,
+                NodeStatus::Failed => NodeRunState::Failed,
+                NodeStatus::Fixing => NodeRunState::Fixing,
+                NodeStatus::Pending | NodeStatus::Canceled | NodeStatus::Interrupted => {
+                    NodeRunState::Pending
+                }
+            };
             if let Some(id) = ids.canvas(&node.id) {
                 let mut data = card_for(
                     node,
@@ -203,7 +209,7 @@ mod tests {
             let FlowDetailBody::Run(run) = &ws.pages.flows.detail.as_ref().unwrap().body else {
                 panic!("run");
             };
-            run.execution.graph.as_ref().unwrap().canvas.clone()
+            run.execution.graph.view().unwrap().canvas.clone()
         });
         let (bounds, offset, zoom) = canvas.read_with(&vcx, |canvas, _| {
             (

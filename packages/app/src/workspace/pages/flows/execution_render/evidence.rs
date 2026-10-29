@@ -9,7 +9,7 @@ pub(super) fn evidence(
     cx: &mut Context<Workspace>,
 ) -> AnyElement {
     let t = theme::current(cx).clone();
-    let output = run.execution.tab == EvidenceTab::Output;
+    let output = run.execution.inspector.tab() == EvidenceTab::Output;
     let mut body = div()
         .debug_selector(|| "execution-evidence-body".into())
         .flex()
@@ -29,7 +29,7 @@ pub(super) fn evidence(
             cx.listener(move |ws, _, window, cx| ws.open_selected_execution_file(id, window, cx)),
         ),
     );
-    match &run.execution.evidence {
+    match run.execution.inspector.evidence() {
         Evidence::Ready { text, truncated } => {
             body = body
                 .when(*truncated, |d| d.child(s::flow::run_evidence_truncated()))
@@ -69,10 +69,15 @@ pub(super) fn metadata(run: &RunDetail, history: &RunHistory, cx: &gpui::App) ->
             .to_string_lossy()
             .into_owned(),
     )];
-    if let Some(selection) = &run.execution.selection {
+    if let Some(selection) = run.execution.inspector.selection() {
         rows.push((s::flow::run_nodes(), selection.node().to_string()));
     }
-    if let Some((node, seq)) = run.execution.selection.as_ref().and_then(|s| s.attempt()) {
+    if let Some((node, seq)) = run
+        .execution
+        .inspector
+        .selection()
+        .and_then(|s| s.attempt())
+    {
         if let Some((attempt, _)) = history
             .attempts(node)
             .iter()

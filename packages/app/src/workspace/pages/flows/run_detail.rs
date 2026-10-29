@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use daruda_store::project::LaneRef;
 use gpui::{Context, Window};
 
-use super::detail::{FlowDetail, FlowDetailBody, FlowDetailId, RunDetail, RunReport};
+use super::detail::{FlowDetail, FlowDetailBody, FlowDetailId, RunDetail};
 use crate::workspace::Workspace;
 use crate::workspace::pages::Page;
 
@@ -77,7 +77,7 @@ impl Workspace {
             body: FlowDetailBody::Run(RunDetail {
                 dir,
                 started,
-                report: RunReport::Loading,
+                report: Default::default(),
                 execution: Default::default(),
             }),
         });
@@ -94,20 +94,12 @@ impl Workspace {
         text: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        let Some(FlowDetail {
-            body: FlowDetailBody::Run(run),
-            ..
-        }) = self.pages.flows.detail.as_mut().filter(|d| d.id == id)
-        else {
+        let Some(run) = self.pages.flows.run_mut(id) else {
             return;
         };
-        if run.execution.report_epoch != epoch {
+        if !run.report.accept(epoch, text) {
             return;
         }
-        run.report = match text {
-            Some(text) => RunReport::Loaded(text.into()),
-            None => RunReport::Missing,
-        };
         cx.notify();
     }
 
@@ -116,11 +108,7 @@ impl Workspace {
         id: FlowDetailId,
         cx: &mut Context<Self>,
     ) {
-        let Some(FlowDetail {
-            body: FlowDetailBody::Run(run),
-            ..
-        }) = self.pages.flows.detail.as_mut().filter(|d| d.id == id)
-        else {
+        let Some(run) = self.pages.flows.run_mut(id) else {
             return;
         };
         run.execution.content = super::execution_detail::ExecutionContent::Report;
@@ -128,16 +116,10 @@ impl Workspace {
     }
 
     fn read_run_report(&mut self, id: FlowDetailId, cx: &mut Context<Self>) {
-        let Some(FlowDetail {
-            body: FlowDetailBody::Run(run),
-            ..
-        }) = self.pages.flows.detail.as_mut().filter(|d| d.id == id)
-        else {
+        let Some(run) = self.pages.flows.run_mut(id) else {
             return;
         };
-        run.execution.report_epoch += 1;
-        let epoch = run.execution.report_epoch;
-        run.report = RunReport::Loading;
+        let epoch = run.report.begin_read();
         let path = run.dir.join(daruda_flow::record::RUN_REPORT_FILE);
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
             cx,
@@ -174,11 +156,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(FlowDetail {
-            body: FlowDetailBody::Run(run),
-            ..
-        }) = self.pages.flows.detail.as_ref().filter(|d| d.id == id)
-        else {
+        let Some(run) = self.pages.flows.run(id) else {
             return;
         };
         let report = run.dir.join(daruda_flow::record::RUN_REPORT_FILE);

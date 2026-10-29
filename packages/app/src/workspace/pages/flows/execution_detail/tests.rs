@@ -40,19 +40,19 @@ fn stale_details_and_attempt_reads_cannot_replace_the_current_selection(cx: &mut
         };
         assert_eq!(run.dir, second);
         assert_eq!(
-            run.execution.selection,
+            run.execution.inspector.selection().cloned(),
             Some(
                 super::super::execution_selection::ExecutionSelection::Attempt("prepare".into(), 2)
             )
         );
-        let Evidence::Ready { text, .. } = &run.execution.evidence else {
+        let Evidence::Ready { text, .. } = run.execution.inspector.evidence() else {
             panic!("evidence loaded");
         };
         assert!(text.contains("second attempt content"));
         assert_eq!(
             run.execution
                 .graph
-                .as_ref()
+                .view()
                 .unwrap()
                 .canvas
                 .read(cx)
@@ -88,8 +88,8 @@ fn tab_changes_drop_in_flight_transcript_reads_and_load_the_selected_output(
         let FlowDetailBody::Run(run) = &ws.pages.flows.detail.as_ref().unwrap().body else {
             panic!("run");
         };
-        assert!(run.execution.tab == EvidenceTab::Output);
-        let Evidence::Ready { text, .. } = &run.execution.evidence else {
+        assert!(run.execution.inspector.tab() == EvidenceTab::Output);
+        let Evidence::Ready { text, .. } = run.execution.inspector.evidence() else {
             panic!("output");
         };
         assert!(text.contains("# Release notes"));
@@ -121,10 +121,13 @@ fn selecting_an_unstarted_node_settles_without_an_attempt(cx: &mut TestAppContex
             panic!("run");
         };
         assert_eq!(
-            run.execution.selection,
+            run.execution.inspector.selection().cloned(),
             Some(ExecutionSelection::Node(node))
         );
-        assert!(matches!(run.execution.evidence, Evidence::Empty));
+        assert!(matches!(
+            run.execution.inspector.evidence(),
+            Evidence::Empty
+        ));
     });
 }
 
@@ -161,7 +164,7 @@ fn refresh_preserves_navigation_and_returning_reads_hidden_changes(cx: &mut Test
         let FlowDetailBody::Run(run) = &detail.body else {
             panic!("run");
         };
-        let canvas = run.execution.graph.as_ref().unwrap().canvas.clone();
+        let canvas = run.execution.graph.view().unwrap().canvas.clone();
         canvas.update(cx, |canvas, cx| canvas.dispatch_command(PanAndZoom, cx));
         (detail.id, canvas)
     });
@@ -179,7 +182,7 @@ fn refresh_preserves_navigation_and_returning_reads_hidden_changes(cx: &mut Test
             panic!("run");
         };
         assert_eq!(
-            run.execution.graph.as_ref().unwrap().canvas.entity_id(),
+            run.execution.graph.view().unwrap().canvas.entity_id(),
             canvas.entity_id()
         );
         assert_eq!(canvas.read(cx).viewport().zoom(), 0.6);
@@ -199,13 +202,13 @@ fn refresh_preserves_navigation_and_returning_reads_hidden_changes(cx: &mut Test
         let FlowDetailBody::Run(run) = &ws.pages.flows.detail.as_ref().unwrap().body else {
             panic!("run");
         };
-        let Evidence::Ready { text, .. } = &run.execution.evidence else {
+        let Evidence::Ready { text, .. } = run.execution.inspector.evidence() else {
             panic!("evidence");
         };
         assert!(text.contains("conversation changed while hidden"));
         assert!(run.execution.rail.iter().any(|row| row.entry.dir == added));
         assert_eq!(
-            run.execution.selection,
+            run.execution.inspector.selection().cloned(),
             Some(ExecutionSelection::Attempt("prepare".into(), 1))
         );
     });
@@ -239,7 +242,7 @@ fn report_navigation_keeps_the_run_attempt_and_evidence_tab(cx: &mut TestAppCont
         };
         assert!(run.execution.content == ExecutionContent::Report);
         assert!(matches!(
-            run.report,
+            run.report(),
             super::super::detail::RunReport::Loaded(_)
         ));
         assert_eq!(detail.id, id);
@@ -256,7 +259,7 @@ fn report_navigation_keeps_the_run_attempt_and_evidence_tab(cx: &mut TestAppCont
         let FlowDetailBody::Run(run) = &ws.pages.flows.detail.as_ref().unwrap().body else {
             panic!("run");
         };
-        let super::super::detail::RunReport::Loaded(text) = &run.report else {
+        let super::super::detail::RunReport::Loaded(text) = run.report() else {
             panic!("report");
         };
         assert!(text.contains("Updated report"));
@@ -271,9 +274,9 @@ fn report_navigation_keeps_the_run_attempt_and_evidence_tab(cx: &mut TestAppCont
             panic!("run");
         };
         assert!(run.execution.content == ExecutionContent::Attempts);
-        assert!(run.execution.tab == EvidenceTab::Output);
+        assert!(run.execution.inspector.tab() == EvidenceTab::Output);
         assert_eq!(
-            run.execution.selection,
+            run.execution.inspector.selection().cloned(),
             Some(ExecutionSelection::Attempt("prepare".into(), 1))
         );
         assert_eq!(detail.id, id);

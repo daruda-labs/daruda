@@ -1,47 +1,28 @@
 //! Labels derived from the durable run projection.
 use super::*;
-use daruda_flow::{record::AttemptOutcome, run_log::machine::AttemptState};
+use daruda_flow::NodeId;
+use daruda_flow::{history::NodeStatus, record::AttemptOutcome};
 
-pub(super) fn node_status(history: &RunHistory, node: &NodeId) -> String {
-    if let Some(state) = history.state().and_then(|state| {
-        state
-            .node_states()
-            .find(|(id, _)| *id == node)
-            .map(|(_, state)| state)
-    }) {
-        if state.is_invalidated() {
-            return s::flow::run_pending();
-        }
-        return match state.last() {
-            AttemptState::NotRun => s::flow::run_pending(),
-            AttemptState::Pinned => s::flow::graph_status_pinned(),
-            AttemptState::Started { .. } => s::flow::graph_status_running(),
-            AttemptState::Passed { .. } => s::flow::graph_status_passed(),
-            AttemptState::Canceled { .. } => s::flow::status_canceled(),
-            _ => s::flow::graph_status_failed(),
-        };
+fn node_label(status: NodeStatus) -> String {
+    match status {
+        NodeStatus::Pending => s::flow::run_pending(),
+        NodeStatus::Pinned => s::flow::graph_status_pinned(),
+        NodeStatus::Running { .. } | NodeStatus::Fixing => s::flow::graph_status_running(),
+        NodeStatus::Passed => s::flow::graph_status_passed(),
+        NodeStatus::Canceled => s::flow::status_canceled(),
+        NodeStatus::Failed | NodeStatus::Interrupted => s::flow::graph_status_failed(),
     }
-    history
-        .attempts(node)
-        .last()
-        .and_then(|(_, seq)| history.attempt(node, *seq))
-        .map(|a| outcome(&a.outcome))
-        .unwrap_or_else(s::flow::run_pending)
 }
 
 fn outcome(outcome: &AttemptOutcome) -> String {
-    match outcome {
-        AttemptOutcome::Passed => s::flow::graph_status_passed(),
-        AttemptOutcome::Canceled => s::flow::status_canceled(),
-        _ => s::flow::graph_status_failed(),
-    }
+    node_label(NodeStatus::from_outcome(outcome))
 }
 
 pub(super) fn attempt_label(history: &RunHistory, node: &NodeId, attempt: u32, seq: u32) -> String {
     let record = history.attempt(node, seq);
     let status = record
         .map(|r| outcome(&r.outcome))
-        .unwrap_or_else(|| node_status(history, node));
+        .unwrap_or_else(|| node_label(history.node_status(node)));
     let duration = record
         .map(|r| format!("{:.1}s", r.took.as_secs_f64()))
         .unwrap_or_else(s::flow::run_not_recorded);
@@ -129,11 +110,14 @@ pub(super) fn run_badge(value: daruda_flow::marker::RunStatus, cx: &gpui::App) -
     status(s::flow::run_status(value), tone, true, cx)
 }
 
-fn attempt_tone(outcome: &AttemptOutcome) -> Tone {
-    match outcome {
-        AttemptOutcome::Passed => Tone::Passed,
-        AttemptOutcome::Canceled => Tone::Canceled,
-        _ => Tone::Failed,
+fn node_tone(status: NodeStatus) -> Tone {
+    match status {
+        NodeStatus::Pending => Tone::Pending,
+        NodeStatus::Running { .. } | NodeStatus::Fixing => Tone::Running,
+        NodeStatus::Passed => Tone::Passed,
+        NodeStatus::Failed | NodeStatus::Interrupted => Tone::Failed,
+        NodeStatus::Canceled => Tone::Canceled,
+        NodeStatus::Pinned => Tone::Pinned,
     }
 }
 
@@ -143,42 +127,15 @@ pub(super) fn attempt_badge(
 ) -> AnyElement {
     status(
         outcome(&attempt.outcome),
-        attempt_tone(&attempt.outcome),
+        node_tone(NodeStatus::from_outcome(&attempt.outcome)),
         false,
         cx,
     )
 }
 
 pub(super) fn node_badge(history: &RunHistory, node: &NodeId, cx: &gpui::App) -> AnyElement {
-    let tone = history
-        .state()
-        .and_then(|state| {
-            state
-                .node_states()
-                .find(|(id, _)| *id == node)
-                .map(|(_, state)| {
-                    if state.is_invalidated() {
-                        return Tone::Pending;
-                    }
-                    match state.last() {
-                        AttemptState::NotRun => Tone::Pending,
-                        AttemptState::Pinned => Tone::Pinned,
-                        AttemptState::Started { .. } => Tone::Running,
-                        AttemptState::Passed { .. } => Tone::Passed,
-                        AttemptState::Canceled { .. } => Tone::Canceled,
-                        _ => Tone::Failed,
-                    }
-                })
-        })
-        .or_else(|| {
-            history
-                .attempts(node)
-                .last()
-                .and_then(|(_, seq)| history.attempt(node, *seq))
-                .map(|a| attempt_tone(&a.outcome))
-        })
-        .unwrap_or(Tone::Pending);
-    status(node_status(history, node), tone, false, cx)
+    let value = history.node_status(node);
+    status(node_label(value), node_tone(value), false, cx)
 }
 
 pub(in crate::workspace::pages::flows) fn started(at: Option<std::time::SystemTime>) -> String {

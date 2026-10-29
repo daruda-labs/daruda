@@ -10,26 +10,14 @@ pub(super) fn render(
     cx: &mut Context<Workspace>,
 ) -> AnyElement {
     let t = theme::current(cx).clone();
-    let nodes = nodes(history);
+    let nodes = history.nodes();
     let attempts: usize = nodes.iter().map(|n| history.attempts(n).len()).sum();
     let completed = nodes
         .iter()
-        .filter(|node| {
-            history.state().is_some_and(|state| {
-                state.node_states().any(|(id, state)| {
-                    id == *node
-                        && !state.is_invalidated()
-                        && matches!(
-                            state.last(),
-                            daruda_flow::run_log::machine::AttemptState::Passed { .. }
-                                | daruda_flow::run_log::machine::AttemptState::Pinned
-                        )
-                })
-            })
-        })
+        .filter(|node| history.state().is_some() && history.node_status(node).is_complete())
         .count();
     let title = history
-        .source
+        .source()
         .as_ref()
         .and_then(|p| p.file_stem())
         .map(|n| n.to_string_lossy().into_owned())
@@ -70,16 +58,16 @@ pub(super) fn render(
                 ))
                 .child(metric(
                     s::flow::run_elapsed(),
-                    presentation::duration(history.elapsed),
+                    presentation::duration(history.elapsed()),
                     cx,
                 ))
                 .child(metric(
                     s::flow::run_cost(),
-                    if history.spent.cost_mixed {
+                    if history.spent().cost_mixed {
                         s::flow::run_mixed_cost()
                     } else {
                         history
-                            .spent
+                            .spent()
                             .cost
                             .as_ref()
                             .map(|cost| format!("{:.4} {}", cost.amount, cost.currency))
@@ -103,13 +91,13 @@ pub(super) fn render(
         .overflow_hidden()
         .cursor(gpui::CursorStyle::OpenHand)
         .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
-        .when_some(run.execution.graph.as_ref(), |d, graph| {
+        .when_some(run.execution.graph.view(), |d, graph| {
             d.child(
                 AnyView::from(graph.canvas.clone())
                     .cached(StyleRefinement::default().size_full().flex()),
             )
         })
-        .when(history.flow.is_none(), |d| {
+        .when(history.flow().is_none(), |d| {
             d.p(px(theme::PAD_XL))
                 .child(s::flow::run_snapshot_missing())
         });
@@ -119,8 +107,8 @@ pub(super) fn render(
         let attempts = history.attempts(&node);
         let selected = run
             .execution
-            .selection
-            .as_ref()
+            .inspector
+            .selection()
             .is_some_and(|selection| selection.node() == &node);
         let result = attempts
             .last()
