@@ -32,7 +32,7 @@ impl Workspace {
         // registers the dependency that makes a view's `cx.notify()` dirty
         // this snapshot, the same pattern the bottom-dock snapshot uses for
         // `is_busy()`.
-        let acp_statuses = self.agent_chat_statuses(cx);
+        let acp_statuses = self.agent_chat_badge_statuses(cx);
         let (agent_status_per_lane, agent_per_session_per_lane) =
             crate::workspace::claude_status_aggregate::aggregate_over_panes(
                 &pane_lane,

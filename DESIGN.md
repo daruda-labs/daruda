@@ -1524,3 +1524,27 @@ Git action buttons and the commit composer follow the dock presentation size.
 A live change reflows the existing input, preserving its draft and focus.
 Project marks and lane status artwork share a leading slot so names and nested
 session rows stay aligned at every size.
+
+### Left dock status icon themes
+
+Settings → Workspace → Left dock offers Dots (default) and Icons. The choice
+applies live to lane, session, and compact-rail status artwork and persists in
+`left_dock.status_icon_theme`. It does not change activity or completion rules.
+Normal-size artwork remains 16px for leading indicators and 12px for badges.
+Both themes share the existing 250ms status clock.
+
+The icon theme uses a gray plug with blinking gray lightning for Connecting, a
+blue speech bubble with advancing dots for Working, and an ice-colored terminal
+with a blinking cursor for tool execution. Attention is a static yellow bubble
+with an exclamation mark; Idle is an empty gray bubble. An unseen completion is
+a green circled check, an unseen execution error a red warning triangle, and a
+failed session a red disconnected plug. These distinct shapes also carry meaning
+without color. The dot theme retains its existing status patterns, with three
+dots moving clockwise around the outer eight cells for Working.
+
+Status icon packages can inherit Dots or Icons and override individual states.
+The profile-scoped user directory and installed user plugins feed one watched
+catalog; Settings selects a stable namespaced ID. Missing packages fall back to
+Icons without changing the saved choice. Disconnected agent panes use a static
+gray plug, distinct from connected Idle speech bubbles. See the
+[status icon theme format](examples/status-icon-themes/README.md) for authoring and limits.

@@ -6,7 +6,7 @@ fn empty_editor_preserves_the_system_default_selection(cx: &mut gpui::TestAppCon
     cx.add_window(|window, cx| {
         let mut config = Config::default();
         config.editor.preferred.clear();
-        let selects = WorkspaceSelects::new(&config, window, cx);
+        let selects = WorkspaceSelects::new(&config, &[], window, cx);
         assert_eq!(
             selects
                 .editor_select

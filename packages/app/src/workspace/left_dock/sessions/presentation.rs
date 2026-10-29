@@ -1,14 +1,11 @@
 //! Expanded-sidebar pane summaries and shallow, single-line pane rows.
 
-use daruda_agent::SessionStatus;
 use daruda_store::project::LaneRef;
 use gpui::{AnyElement, App, IntoElement, SharedString, div, prelude::*, px};
 
 use super::RowTarget;
-use crate::ui::{AgentStatusBadge, IndicatorSize, Sizable as _, theme};
-use crate::workspace::{
-    layout::LeftDockSnapshot, left_dock::rail::PaneSnapshot, tab_indicator::TabIndicator,
-};
+use crate::ui::{IndicatorSize, Sizable as _, theme};
+use crate::workspace::{layout::LeftDockSnapshot, left_dock::rail::PaneSnapshot};
 
 pub(in crate::workspace) fn lane_panes(
     lane: LaneRef,
@@ -137,16 +134,18 @@ fn badge(lane: LaneRef, pane: &PaneSnapshot, snap: &LeftDockSnapshot, cx: &App) 
     let metrics = snap.metrics;
     let t = theme::current(cx);
     let current = snap.active == lane && snap.focused_pane == pane.pane;
-    let status = match TabIndicator::resolve(pane.status, pane.outcome) {
-        Some(TabIndicator::Done) => Some((SessionStatus::Idle, t.status_idle_dark)),
-        Some(TabIndicator::Errored) => Some((SessionStatus::Failed, t.status_failed_dark)),
-        _ => pane
-            .status
-            .map(|status| (status, crate::ui::color_for_status(status, cx))),
-    };
-    let indicator = if let Some((status, color)) = status {
-        let status_badge =
-            AgentStatusBadge::new(status, IndicatorSize::Badge, color).with_metrics(metrics);
+    let badge = super::super::projects::agent_badges::resolved_badge(
+        pane.status,
+        pane.outcome,
+        IndicatorSize::Badge,
+        cx,
+    );
+    let badge = badge.or_else(|| {
+        (pane.neutral_icon == crate::ui::icons::SESSION)
+            .then(|| crate::ui::AgentStatusBadge::disconnected(IndicatorSize::Badge, cx))
+    });
+    let indicator = if let Some(status_badge) = badge {
+        let status_badge = status_badge.with_metrics(metrics);
         if current {
             status_badge.active()
         } else {

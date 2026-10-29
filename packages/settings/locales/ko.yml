@@ -11,6 +11,14 @@ agent_chat:
   source_agent_set: "에이전트 기본값 지정됨"
 
 settings:
+  label_status_icon_theme_folder: "사용자 상태 테마"
+  hint_status_icon_theme_folder: "테마 패키지를 추가하면 저장한 변경 사항이 자동으로 반영됩니다."
+  button_open_status_icon_theme_folder: "테마 폴더 열기"
+  label_status_icon_theme: "상태 아이콘 테마"
+  hint_status_icon_theme: "기본·사용자·설치된 플러그인의 상태 아이콘 테마를 선택합니다."
+  status_icon_theme_dots: "점"
+  status_icon_theme_icons: "아이콘"
+  status_icon_theme_unavailable: "사용 불가 (아이콘으로 표시)"
   label_left_dock_size: "표시 크기"
   hint_left_dock_size: "왼쪽 독의 글자, 아이콘, 행 간격을 조절합니다."
   ui_size_small: "작게"

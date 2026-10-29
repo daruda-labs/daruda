@@ -141,6 +141,14 @@ pub(super) const SELECT_SETTINGS: &[SelectSpec] = &[
         load: SelectLoad::Value,
     },
     SelectSpec {
+        setting: SelectSetting::StatusIconTheme,
+        field: |w| &w.status_icon_theme_select,
+        read: |v| daruda_config::StatusIconTheme::from_value(v).map(SettingsPatch::StatusIconTheme),
+        current: |c| SettingsPatch::StatusIconTheme(c.left_dock.status_icon_theme.clone()),
+        show: |c| c.left_dock.status_icon_theme.as_str().into(),
+        load: SelectLoad::Value,
+    },
+    SelectSpec {
         setting: SelectSetting::FileIconColorMode,
         field: |w| &w.file_icon_color_select,
         read: |v| super::icon_color_from_value(v).map(SettingsPatch::FileIconColorMode),

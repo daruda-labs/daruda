@@ -194,7 +194,7 @@ impl Workspace {
         // ACP pane statuses across every lane (see `agent_chat_statuses`),
         // so a parked lane with a live agent turn still keeps the pulse
         // running.
-        let acp_statuses = self.agent_chat_statuses(cx);
+        let acp_statuses = self.agent_chat_badge_statuses(cx);
         if self.claude_sessions.pty_bindings.is_empty() && acp_statuses.is_empty() {
             return false;
         }
@@ -210,6 +210,8 @@ impl Workspace {
             &self.claude_sessions.pty_bindings,
             &self.claude_sessions.status,
             &acp_statuses,
+            &crate::ui::agent_status_badge::icon_theme(cx),
+            crate::status_icon_themes::current(cx),
         )
     }
 

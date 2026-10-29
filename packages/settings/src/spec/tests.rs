@@ -165,6 +165,7 @@ fn coverage_of(patch: &SettingsPatch) -> Coverage {
         | SettingsPatch::ClipboardStreamingMaxBytes(_)
         | SettingsPatch::PreferredEditor(_)
         | SettingsPatch::LeftDockSize(_)
+        | SettingsPatch::StatusIconTheme(_)
         | SettingsPatch::FileIconColorMode(_)
         | SettingsPatch::PanelsGridColumns(_)
         | SettingsPatch::ClaudeStatusEnabled(_)

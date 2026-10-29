@@ -11,6 +11,48 @@ pub enum IconColorMode {
     Monochrome,
 }
 
+/// Stable theme identifier; custom providers do not add enum variants.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(from = "String", into = "String")]
+pub enum StatusIconTheme {
+    #[default]
+    Dots,
+    Icons,
+    Custom(String),
+}
+
+impl StatusIconTheme {
+    pub const ALL: [Self; 2] = [Self::Dots, Self::Icons];
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Dots => "dots",
+            Self::Icons => "icons",
+            Self::Custom(id) => id,
+        }
+    }
+
+    pub fn from_value(value: &str) -> Option<Self> {
+        (!value.trim().is_empty()).then(|| Self::from(value.to_owned()))
+    }
+}
+
+impl From<String> for StatusIconTheme {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "dots" => Self::Dots,
+            "icons" => Self::Icons,
+            _ => Self::Custom(value),
+        }
+    }
+}
+
+impl From<StatusIconTheme> for String {
+    fn from(value: StatusIconTheme) -> Self {
+        value.as_str().to_owned()
+    }
+}
+
 /// Dock (left dock) startup configuration.
 ///
 /// Defaults mirror `daruda_terminal::ux::theme::DOCK_LEFT_*`; duplicated
@@ -21,6 +63,7 @@ pub enum IconColorMode {
 pub struct LeftDockConfig {
     /// Presentation size for dock text, artwork, and row geometry.
     pub size: crate::UiSize,
+    pub status_icon_theme: StatusIconTheme,
     /// Left dock width in pixels on fresh launch. Clamped to
     /// `[LEFT_MIN_W, LEFT_MAX_W]` at load time.
     pub left_default_width: f32,
@@ -49,6 +92,7 @@ impl Default for LeftDockConfig {
     fn default() -> Self {
         Self {
             size: crate::UiSize::Normal,
+            status_icon_theme: StatusIconTheme::Dots,
             left_default_width: LEFT_DEFAULT_W,
             left_collapsed_by_default: false,
             files_show_hidden: true,

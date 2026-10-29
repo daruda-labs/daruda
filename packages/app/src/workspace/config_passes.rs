@@ -90,6 +90,9 @@ impl Workspace {
     }
 
     pub(super) fn apply_config_to_left_dock(&mut self, cx: &mut Context<Self>) {
+        // Badge artwork reads the live settings store, outside the dock snapshot.
+        // Invalidate even idle docks when settings are changed or reloaded.
+        self.notify_left_dock(cx);
         let metrics = crate::ui::theme::UiMetrics(self.mirrors.left_dock_size);
         self.git
             .commit_input

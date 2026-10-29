@@ -361,6 +361,10 @@ pub const STATUS_NEEDS_ATTENTION_DARK: Hsla = hsla(0.0, 0.84, 0.60, 1.0);
 pub const STATUS_IDLE_DARK: Hsla = hsla(160.0, 0.64, 0.52, 1.0);
 pub const STATUS_FAILED_DARK: Hsla = ERROR;
 pub const STATUS_CONNECTING_DARK: Hsla = hsla(220.0, 0.09, 0.65, 1.0);
+// Semantic icon palette; the dot theme retains its existing status colors.
+pub const STATUS_ICON_TOOL_DARK: Hsla = hsla(197.027, 0.6607143, 0.7803922, 1.0);
+pub const STATUS_ICON_TOOL_LIGHT: Hsla = hsla(196.04651, 0.4526316, 0.372549, 1.0);
+pub const STATUS_ICON_ATTENTION_LIGHT: Hsla = hsla(40.15748, 0.8300654, 0.3, 1.0);
 pub const STATUS_BADGES_ROW_GAP: f32 = 5.0;
 pub const STATUS_BADGES_ROW_TOP_MARGIN: f32 = 3.0;
 pub const STATUS_BADGES_LABEL_FONT_SIZE: f32 = FONT_SIZE_XS;

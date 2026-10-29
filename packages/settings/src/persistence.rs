@@ -221,6 +221,10 @@ impl SettingsView {
             .iter()
             .find(|spec| spec::select_field_id(spec) == field)
         {
+            if spec.setting == crate::setting_kind::SelectSetting::StatusIconTheme {
+                self.refresh_status_icon_themes(&live.left_dock.status_icon_theme, window, cx);
+                return;
+            }
             let select = (spec.field)(self).clone();
             match spec.load {
                 spec::SelectLoad::Value => {

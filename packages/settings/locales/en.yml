@@ -9,6 +9,14 @@ agent_chat:
   source_agent_set: "Set for this agent"
 
 settings:
+  label_status_icon_theme_folder: "Custom status themes"
+  hint_status_icon_theme_folder: "Add a theme package here; saved changes appear automatically."
+  button_open_status_icon_theme_folder: "Open theme folder"
+  label_status_icon_theme: "Status icon theme"
+  hint_status_icon_theme: "Choose built-in, user, or installed-plugin status artwork."
+  status_icon_theme_dots: "Dots"
+  status_icon_theme_icons: "Icons"
+  status_icon_theme_unavailable: "Unavailable (using Icons)"
   label_left_dock_size: "Display size"
   hint_left_dock_size: "Adjust text, icons, and row spacing in the left dock."
   ui_size_small: "Small"

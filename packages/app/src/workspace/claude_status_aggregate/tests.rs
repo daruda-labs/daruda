@@ -230,7 +230,9 @@ fn animating_when_a_connecting_session_hides_behind_idle_aggregate() {
         &pane_lane,
         &bindings,
         &store,
-        &[]
+        &[],
+        &daruda_config::StatusIconTheme::Dots,
+        &crate::status_icon_themes::Catalog::default()
     ));
 }
 
@@ -248,7 +250,9 @@ fn not_animating_when_every_bound_session_is_idle() {
         &pane_lane,
         &bindings,
         &store,
-        &[]
+        &[],
+        &daruda_config::StatusIconTheme::Dots,
+        &crate::status_icon_themes::Catalog::default()
     ));
 }
 
@@ -264,7 +268,9 @@ fn not_animating_for_unbound_panes_or_missing_store_entries() {
         &pane_lane,
         &bindings,
         &store,
-        &[]
+        &[],
+        &daruda_config::StatusIconTheme::Dots,
+        &crate::status_icon_themes::Catalog::default()
     ));
 }
 
@@ -390,4 +396,40 @@ fn aggregate_report_marks_unbound_lane() {
         report.context.get("cwd").map(String::as_str),
         Some("/tmp/wt")
     );
+}
+
+#[test]
+fn icon_attention_is_static_but_does_not_hide_a_busy_sibling() {
+    let lane = lane_ref(1, 1);
+    let panes = [(10, lane), (20, lane)];
+    let bindings = HashMap::new();
+    let store = daruda_agent::ClaudeStatusStore::new();
+    let attention = [(10, SessionStatus::NeedsAttention)];
+    assert!(!any_pane_session_animating(
+        &panes,
+        &bindings,
+        &store,
+        &attention,
+        &daruda_config::StatusIconTheme::Icons,
+        &crate::status_icon_themes::Catalog::default()
+    ));
+    assert!(any_pane_session_animating(
+        &panes,
+        &bindings,
+        &store,
+        &attention,
+        &daruda_config::StatusIconTheme::Dots,
+        &crate::status_icon_themes::Catalog::default()
+    ));
+    assert!(any_pane_session_animating(
+        &panes,
+        &bindings,
+        &store,
+        &[
+            (10, SessionStatus::NeedsAttention),
+            (20, SessionStatus::Working)
+        ],
+        &daruda_config::StatusIconTheme::Icons,
+        &crate::status_icon_themes::Catalog::default()
+    ));
 }

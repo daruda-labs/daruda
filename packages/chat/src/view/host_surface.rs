@@ -44,6 +44,12 @@ impl AgentChatView {
         self.cwd.as_ref()
     }
 
+    /// Display detail only; activity and completion still use `activity_state`.
+    /// Pending calls and subagent launch records do not prove tool execution.
+    pub fn has_running_tool(&self) -> bool {
+        self.is_busy() && running_tool_in_current_run(&self.items)
+    }
+
     pub fn items(&self) -> &[ChatItem] {
         &self.items
     }
@@ -117,46 +123,16 @@ impl PromptQueue {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::super::tests::make_test_view;
-
-    /// The readers answer from the constructor's arguments, which is the
-    /// one state a host sees before any ACP event arrives.
-    #[gpui::test]
-    fn a_fresh_pane_reads_back_what_it_was_built_with(cx: &mut gpui::TestAppContext) {
-        let view = make_test_view(cx);
-        view.read_with(cx, |v, _| {
-            assert_eq!(v.agent_id(), "claude");
-            assert_eq!(v.agent_name(), "Claude");
-            assert_eq!(v.session_id(), None);
-            assert!(v.cwd().is_none());
-            assert!(v.items().is_empty());
-            assert!(!v.last_reconciled_busy());
+fn running_tool_in_current_run(items: &[ChatItem]) -> bool {
+    items
+        .iter()
+        .rev()
+        .take_while(|item| !matches!(item, ChatItem::UserText(_)))
+        .any(|item| {
+            matches!(item, ChatItem::ToolCall(tool)
+            if tool.status == daruda_acp::ToolStatusView::InProgress && !tool.is_subagent_launch())
         })
-        .unwrap();
-    }
-
-    #[test]
-    fn parked_prompts_lead_the_strip_and_the_live_queue_ends_it() {
-        use super::super::tests::queued;
-        let mut queue = super::PromptQueue {
-            paused_prompts: vec![queued(1, "parked")],
-            pending_prompts: vec![queued(2, "live")],
-            ..super::PromptQueue::default()
-        };
-        let order: Vec<_> = queue
-            .in_strip_order()
-            .map(|(q, parked)| (q.text.as_str(), parked))
-            .collect();
-        assert_eq!(order, [("parked", true), ("live", false)]);
-        assert_eq!(queue.last_prompt_id(), Some(queued(2, "").id));
-        assert_eq!(
-            queue.find(queued(1, "").id).map(|q| q.text.as_str()),
-            Some("parked")
-        );
-        assert!(queue.has_pending());
-        queue.pending_prompts.clear();
-        assert_eq!(queue.last_prompt_id(), Some(queued(1, "").id));
-    }
 }
+
+#[cfg(test)]
+mod tests;

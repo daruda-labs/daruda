@@ -280,6 +280,10 @@ impl Workspace {
                 cx.observe_global::<crate::settings_store::SettingsStore>(|ws, cx| {
                     ws.apply_store_config(cx);
                 }),
+                cx.observe_global::<crate::status_icon_themes::StatusIconThemes>(|ws, cx| {
+                    ws.notify_left_dock(cx);
+                    cx.notify();
+                }),
                 cx.observe_global::<crate::agent::skills::global::GlobalSkills>(|_ws, cx| {
                     // Right dock re-stages + diffs on this notify.
                     cx.notify();

@@ -1431,6 +1431,7 @@ error_modal:
   button_open_log: "Open log file"
 
 error:
+  status_icon_theme_folder: "Could not open status theme folder"
   workspace_recovery_failed: "Could not restore the workspace. Existing state was preserved."
   acp_connect_failed: "ACP session connect failed"
   cannot_read_directory: "Cannot read directory"

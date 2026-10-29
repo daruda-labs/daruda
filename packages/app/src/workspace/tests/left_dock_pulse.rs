@@ -113,3 +113,53 @@ async fn status_pulse_repaints_the_left_dock_only_where_a_badge_lives(cx: &mut T
          the pulse gate would then be hiding a badge that never animates"
     );
 }
+
+#[gpui::test]
+async fn changing_status_artwork_repaints_an_idle_dock(cx: &mut TestAppContext) {
+    use crate::settings_store::SettingsStore;
+    use daruda_config::{SettingsPatch, StatusIconTheme};
+    use gpui::BorrowAppContext as _;
+
+    let (_, ws) = workspace_with_project(cx);
+    cx.update(SettingsStore::init);
+    cx.run_until_parked();
+    for theme in [StatusIconTheme::Icons, StatusIconTheme::Dots] {
+        let before = ws.read_with(cx, |ws, cx| ws.docks.left.read(cx).render_count.get());
+        cx.update(|cx| {
+            cx.update_global::<SettingsStore, _>(|store, _| {
+                store
+                    .apply_patch(SettingsPatch::StatusIconTheme(theme.clone()))
+                    .unwrap();
+            });
+        });
+        cx.run_until_parked();
+        let after = ws.read_with(cx, |ws, cx| {
+            assert_eq!(crate::ui::agent_status_badge::icon_theme(cx), theme);
+            ws.docks.left.read(cx).render_count.get()
+        });
+        assert!(
+            after > before,
+            "an idle dock must repaint on a theme switch"
+        );
+    }
+}
+
+#[gpui::test]
+async fn catalog_reload_repaints_an_idle_dock(cx: &mut TestAppContext) {
+    use gpui::BorrowAppContext as _;
+    let (_, ws) = workspace_with_project(cx);
+    cx.update(crate::status_icon_themes::init);
+    cx.run_until_parked();
+    let before = ws.read_with(cx, |ws, cx| ws.docks.left.read(cx).render_count.get());
+    cx.update(|cx| {
+        cx.update_global::<crate::status_icon_themes::StatusIconThemes, _>(|catalog, _| {
+            catalog.0 = crate::status_icon_themes::Catalog::default();
+        });
+    });
+    cx.run_until_parked();
+    let after = ws.read_with(cx, |ws, cx| ws.docks.left.read(cx).render_count.get());
+    assert!(
+        after > before,
+        "catalog changes must invalidate cached dock artwork"
+    );
+}

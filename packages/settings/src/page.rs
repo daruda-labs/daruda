@@ -114,6 +114,14 @@ impl SettingsView {
                 "colors",
                 cx,
             ),
+            CustomRow::StatusIconThemes => self.event_row(
+                "settings-open-status-icon-themes",
+                s::settings::label_status_icon_theme_folder(),
+                s::settings::hint_status_icon_theme_folder(),
+                s::settings::button_open_status_icon_theme_folder(),
+                Some((|| SettingsEvent::OpenStatusIconThemes) as fn() -> SettingsEvent),
+                cx,
+            ),
             CustomRow::ProjectShell => self.event_row(
                 "settings-open-project-config",
                 s::settings::label_project_shell(),

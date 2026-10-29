@@ -214,6 +214,18 @@ pub(in crate::workspace::left_dock) fn pane_indicator(
     cx: &gpui::App,
 ) -> AnyElement {
     match pane.unconnected_icon() {
+        Some(ui::icons::SESSION) => div()
+            .flex_none()
+            .w(px(metrics.icon(theme::STATUS_INDICATOR_CELL_WIDTH)))
+            .h(px(metrics.icon(theme::CONTROL_ICON_SIZE)))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                ui::AgentStatusBadge::disconnected(ui::IndicatorSize::Leading, cx)
+                    .with_metrics(metrics),
+            )
+            .into_any_element(),
         Some(icon) => neutral_indicator(icon, metrics, cx),
         None => lane_indicator(pane.status, pane.outcome, metrics, cx),
     }

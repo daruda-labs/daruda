@@ -92,7 +92,7 @@ pub use file_viewer::FileViewerConfig;
 pub use font::{FontConfig, SYSTEM_UI_FONT_FAMILY};
 pub use general::{GeneralConfig, SUPPORTED_LOCALES};
 pub use keybindings::KeybindingConfig;
-pub use left_dock::{IconColorMode, LeftDockConfig};
+pub use left_dock::{IconColorMode, LeftDockConfig, StatusIconTheme};
 pub use logs::LogsConfig;
 pub use notifications::NotificationsConfig;
 pub use orchestrator::OrchestratorConfig;

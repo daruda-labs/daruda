@@ -86,6 +86,10 @@ impl StorageLayout {
         self
     }
 
+    pub(crate) fn status_icon_themes(&self) -> PathBuf {
+        self.data.join("status-icon-themes")
+    }
+
     pub(crate) fn data(&self) -> PathBuf {
         self.data.clone()
     }

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "id": "soft-ice",
+  "name": "Soft Ice",
+  "extends": "icons",
+  "states": {
+    "executing_tool": {
+      "frames": ["tool-0.svg", "tool-1.svg"],
+      "ticks_per_frame": 2,
+      "colors": { "dark": "#81cfe6", "light": "#256780" }
+    }
+  }
+}

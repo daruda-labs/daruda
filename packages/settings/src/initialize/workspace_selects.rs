@@ -3,11 +3,17 @@ use super::*;
 pub(super) struct WorkspaceSelects {
     pub(super) editor_select: Entity<SelectState>,
     pub(super) left_dock_size_select: Entity<SelectState>,
+    pub(super) status_icon_theme_select: Entity<SelectState>,
     pub(super) file_icon_color_select: Entity<SelectState>,
 }
 
 impl WorkspaceSelects {
-    pub(super) fn new(config: &Config, window: &mut Window, cx: &mut gpui::App) -> Self {
+    pub(super) fn new(
+        config: &Config,
+        themes: &[(String, String)],
+        window: &mut Window,
+        cx: &mut gpui::App,
+    ) -> Self {
         // External editor select — "" (empty, the config default) means the
         // OS default handler; every other value is a `daruda_config::editor`
         // preset name.
@@ -39,6 +45,13 @@ impl WorkspaceSelects {
             let current = SharedString::new_static(config.left_dock.size.as_str());
             select::state_with_options(opts, Some(&current), window, cx)
         });
+        let status_icon_theme_select = cx.new(|cx| {
+            let opts =
+                crate::status_icon_themes::options(themes, &config.left_dock.status_icon_theme);
+            let current =
+                SharedString::from(config.left_dock.status_icon_theme.as_str().to_owned());
+            select::state_with_options(opts, Some(&current), window, cx)
+        });
         let file_icon_color_select = cx.new(|cx| {
             let opts = vec![
                 select::SelectOption::new(ICON_COLOR, s::settings::icon_color_color()),
@@ -51,6 +64,7 @@ impl WorkspaceSelects {
         Self {
             editor_select,
             left_dock_size_select,
+            status_icon_theme_select,
             file_icon_color_select,
         }
     }

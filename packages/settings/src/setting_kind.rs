@@ -71,6 +71,7 @@ pub(crate) enum SelectSetting {
     SyntaxTheme,
     PreferredEditor,
     LeftDockSize,
+    StatusIconTheme,
     FileIconColorMode,
     OrchestratorAgent,
     OrchestratorAccount,
@@ -197,7 +198,7 @@ impl TextSetting {
 
 impl SelectSetting {
     #[cfg(test)]
-    pub(crate) const ALL: [Self; 15] = [
+    pub(crate) const ALL: [Self; 16] = [
         Self::Language,
         Self::TerminalPreset,
         Self::UiPreset,
@@ -209,6 +210,7 @@ impl SelectSetting {
         Self::SyntaxTheme,
         Self::PreferredEditor,
         Self::LeftDockSize,
+        Self::StatusIconTheme,
         Self::FileIconColorMode,
         Self::OrchestratorAgent,
         Self::OrchestratorAccount,
@@ -230,7 +232,7 @@ impl SelectSetting {
             Self::RenderMaxFps => (),
             Self::SyntaxTheme => (),
             Self::PreferredEditor => (),
-            Self::LeftDockSize => (),
+            Self::LeftDockSize | Self::StatusIconTheme => (),
             Self::FileIconColorMode => (),
             Self::OrchestratorAgent => (),
             Self::OrchestratorAccount => (),

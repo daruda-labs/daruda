@@ -45,6 +45,7 @@ impl Workspace {
                     auth_statuses: auth_status_global::snapshot(cx),
                     agent_vocabulary: agent_vocabulary_global::snapshot(cx, &self.data_dir),
                     plugin_skills: plugin_skills(cx),
+                    status_icon_themes: crate::status_icon_themes::current(cx).choices(),
                     update_state: settings_update::update_state(cx),
                 };
                 let remote_integrations: gpui::AnyView = cx
@@ -74,6 +75,9 @@ impl Workspace {
                         SettingsEvent::AccountsChanged(state) => {
                             accounts_global::replace(cx, state.clone())
                         }
+                        SettingsEvent::OpenStatusIconThemes => {
+                            this.open_status_icon_theme_folder(cx)
+                        }
                         SettingsEvent::PluginsChanged => rescan_plugins(cx),
                         SettingsEvent::Update(command) => settings_update::run(*command, cx),
                     },
@@ -95,6 +99,10 @@ impl Workspace {
                             Self::push_settings_vocabulary,
                         ),
                         cx.observe_global::<GlobalSkills>(Self::push_settings_plugin_skills),
+                        cx.observe_global_in::<crate::status_icon_themes::StatusIconThemes>(
+                            window,
+                            Self::push_settings_status_icon_themes,
+                        ),
                     ]
                     .into_iter()
                     .chain(
@@ -232,6 +240,32 @@ impl Workspace {
         let state = settings_update::update_state(cx);
         host.view
             .update(cx, |view, cx| view.set_update_state(state, cx));
+    }
+
+    fn open_status_icon_theme_folder(&mut self, cx: &mut Context<Self>) {
+        let path = daruda_store::persistence::status_icon_themes_dir();
+        match std::fs::create_dir_all(&path) {
+            Ok(()) => self.open_path_with_system_default(path, cx),
+            Err(error) => self.report_error(
+                daruda_store::observability::error_report::ErrorReport::new(
+                    crate::surface::strings::error::status_icon_theme_folder(),
+                )
+                .from_error(&error)
+                .at(file!(), line!())
+                .build(),
+                cx,
+            ),
+        }
+    }
+
+    fn push_settings_status_icon_themes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(host) = &self.settings else {
+            return;
+        };
+        let choices = crate::status_icon_themes::current(cx).choices();
+        host.view.update(cx, |view, cx| {
+            view.set_status_icon_themes(choices, window, cx)
+        });
     }
 
     fn push_settings_plugin_skills(&mut self, cx: &mut Context<Self>) {

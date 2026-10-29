@@ -33,6 +33,7 @@ mod search;
 mod sections;
 mod setting_kind;
 mod spec;
+mod status_icon_themes;
 pub mod store;
 mod strings;
 mod update_state;
@@ -136,6 +137,8 @@ pub enum SettingsEvent {
     /// Open the active project's config file, where `[shell]` can be
     /// overridden per project.
     OpenProjectConfig,
+    /// Open the profile-scoped folder for user-authored status artwork.
+    OpenStatusIconThemes,
     /// The accounts file was just written with this state; share it with
     /// every window.
     AccountsChanged(daruda_store::accounts::AccountsState),
@@ -178,6 +181,7 @@ pub struct SharedSnapshot {
     >,
     pub agent_vocabulary: daruda_store::agent_vocabulary::AgentVocabularyCache,
     pub plugin_skills: Vec<daruda_agent::skills::Skill>,
+    pub status_icon_themes: Vec<(String, String)>,
     pub update_state: UpdateState,
 }
 
@@ -346,6 +350,8 @@ pub struct SettingsView {
     // External Editor
     editor_select: Entity<SelectState>,
     left_dock_size_select: Entity<SelectState>,
+    status_icon_theme_select: Entity<SelectState>,
+    status_icon_themes: Vec<(String, String)>,
     file_icon_color_select: Entity<SelectState>,
     // Panels (bottom-dock macro grid)
     panels_grid_columns_input: Entity<InputState>,

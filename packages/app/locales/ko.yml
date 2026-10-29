@@ -989,6 +989,7 @@ error_modal:
   button_open_log: "로그 파일 열기"
 
 error:
+  status_icon_theme_folder: "상태 테마 폴더를 열 수 없습니다"
   workspace_recovery_failed: "작업공간을 복구하지 못했습니다. 기존 상태는 보존되었습니다."
   acp_connect_failed: "ACP 세션 연결 실패"
   cannot_read_directory: "디렉터리를 읽을 수 없습니다"

@@ -258,6 +258,10 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
     patch_section(&mut doc, "left_dock", |t| {
         t.insert("size", toml_edit::value(config.left_dock.size.as_str()));
         t.insert(
+            "status_icon_theme",
+            toml_edit::value(config.left_dock.status_icon_theme.as_str()),
+        );
+        t.insert(
             "files_show_hidden",
             toml_edit::value(config.left_dock.files_show_hidden),
         );

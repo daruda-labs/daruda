@@ -33,6 +33,7 @@ pub(super) enum Row {
 pub(super) enum CustomRow {
     CustomColors,
     ProjectShell,
+    StatusIconThemes,
     DarudaLink,
     RemoteLink,
     TelegramBody,
@@ -152,6 +153,8 @@ const WORKSPACE: &[Card] = &[
         title: s::settings::section_sidebar,
         rows: &[
             sel(S::LeftDockSize),
+            sel(S::StatusIconTheme),
+            Row::Custom(CustomRow::StatusIconThemes),
             t(T::LeftDefaultWidth),
             b(B::LeftCollapsedByDefault),
         ],

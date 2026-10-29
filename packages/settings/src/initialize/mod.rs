@@ -29,6 +29,7 @@ impl SettingsView {
             auth_statuses,
             agent_vocabulary,
             plugin_skills,
+            status_icon_themes,
             update_state,
         } = shared;
         // Defensive idempotent init for test fixtures that open a
@@ -108,8 +109,9 @@ impl SettingsView {
         let WorkspaceSelects {
             editor_select,
             left_dock_size_select,
+            status_icon_theme_select,
             file_icon_color_select,
-        } = WorkspaceSelects::new(&config, window, cx);
+        } = WorkspaceSelects::new(&config, &status_icon_themes, window, cx);
 
         let [
             panels_grid_columns_input,
@@ -217,6 +219,7 @@ impl SettingsView {
         for (state, setting) in [
             (&language_select, SelectSetting::Language),
             (&left_dock_size_select, SelectSetting::LeftDockSize),
+            (&status_icon_theme_select, SelectSetting::StatusIconTheme),
             (&file_icon_color_select, SelectSetting::FileIconColorMode),
             (&terminal_preset_select, SelectSetting::TerminalPreset),
             (&ui_preset_select, SelectSetting::UiPreset),
@@ -400,6 +403,8 @@ impl SettingsView {
             clipboard_streaming_input,
             editor_select,
             left_dock_size_select,
+            status_icon_theme_select,
+            status_icon_themes,
             file_icon_color_select,
             panels_grid_columns_input,
             claude_status_enable: config.claude_status.enable,

@@ -125,6 +125,11 @@ pub fn default_data_dir() -> PathBuf {
     directory
 }
 
+/// User-authored status icon packages in the current profile.
+pub fn status_icon_themes_dir() -> PathBuf {
+    StorageLayout::current().status_icon_themes()
+}
+
 /// The active profile's suffix for non-path resources that need the same
 /// release/debug/named-profile isolation [`default_data_dir`] gives
 /// on-disk paths — e.g. a macOS Keychain service name, so a debug build

@@ -5,6 +5,15 @@ trait ChangedSample {
     fn changed_sample(&self) -> Self;
 }
 
+impl ChangedSample for crate::StatusIconTheme {
+    fn changed_sample(&self) -> Self {
+        match self {
+            Self::Dots => Self::Icons,
+            Self::Icons | Self::Custom(_) => Self::Dots,
+        }
+    }
+}
+
 impl ChangedSample for bool {
     fn changed_sample(&self) -> Self {
         !self

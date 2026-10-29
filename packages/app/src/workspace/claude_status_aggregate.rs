@@ -167,20 +167,28 @@ pub(in crate::workspace) fn any_pane_session_animating(
     bindings: &HashMap<PaneId, PtyBinding>,
     store: &daruda_agent::ClaudeStatusStore,
     acp_statuses: &[(PaneId, SessionStatus)],
+    icon_theme: &daruda_config::StatusIconTheme,
+    catalog: &crate::status_icon_themes::Catalog,
 ) -> bool {
+    let animates = |status: SessionStatus| {
+        catalog.animates(
+            icon_theme,
+            crate::ui::agent_status_badge::state_for_status(status),
+        )
+    };
     pane_lane.iter().any(|(pane_id, _)| {
         // PTY-bound session.
         let pty_animating = bindings
             .get(pane_id)
             .and_then(|binding| store.get(&binding.session_id))
-            .is_some_and(|file| file.status.animates());
+            .is_some_and(|file| animates(file.status));
         if pty_animating {
             return true;
         }
         // ACP (agent chat) session.
         acp_statuses
             .iter()
-            .any(|(pid, status)| pid == pane_id && status.animates())
+            .any(|(pid, status)| pid == pane_id && animates(*status))
     })
 }
 
@@ -221,6 +229,28 @@ impl Workspace {
             &self.claude_sessions.status,
             &self.agent_chat_statuses(cx),
         )
+    }
+
+    /// Dock-only tool detail; busy/completion consumers keep the activity status.
+    pub(in crate::workspace) fn agent_chat_badge_statuses(
+        &self,
+        cx: &gpui::App,
+    ) -> Vec<(PaneId, SessionStatus)> {
+        if crate::ui::agent_status_badge::icon_theme(cx) == daruda_config::StatusIconTheme::Dots {
+            return self.agent_chat_statuses(cx);
+        }
+        self.lane_agent_chats()
+            .filter_map(|(id, view)| {
+                let view = view.read(cx);
+                let status = lane_status::session_status(view)?;
+                let status = if status == SessionStatus::Working && view.has_running_tool() {
+                    SessionStatus::ExecutingTool
+                } else {
+                    status
+                };
+                Some((id, status))
+            })
+            .collect()
     }
 
     /// `(pane_id, status)` for every AgentChat (ACP) pane across **all**

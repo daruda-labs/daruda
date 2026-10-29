@@ -116,3 +116,71 @@ fn dock_size_select_persists_and_reset_restores_normal(cx: &mut TestAppContext) 
     })
     .unwrap();
 }
+
+#[gpui::test]
+fn status_icon_theme_persists_and_reset_restores_dots(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    cx.update_window(wh.into(), |_, window, cx| {
+        win.update(cx, |w, cx| {
+            let select = w.status_icon_theme_select.clone();
+            SettingsView::set_select_value(&select, "icons", window, cx);
+            w.persist_select_setting(&select, SelectSetting::StatusIconTheme, cx);
+            assert_eq!(
+                crate::store::SettingsStore::global(cx)
+                    .user()
+                    .left_dock
+                    .status_icon_theme,
+                daruda_config::StatusIconTheme::Icons
+            );
+            let target = crate::layout::Target::Select(SelectSetting::StatusIconTheme);
+            assert!(w.differs_from_default(target));
+            w.reset_to_default(target, window, cx);
+            assert_eq!(
+                crate::store::SettingsStore::global(cx)
+                    .user()
+                    .left_dock
+                    .status_icon_theme,
+                daruda_config::StatusIconTheme::Dots
+            );
+            assert_eq!(
+                select.read(cx).selected_value().map(|s| s.as_ref()),
+                Some("dots")
+            );
+        });
+    })
+    .unwrap();
+}
+
+#[gpui::test]
+fn custom_theme_selection_survives_removal_and_catalog_refresh(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    cx.update_window(wh.into(), |_, window, cx| {
+        win.update(cx, |w, cx| {
+            let choices = vec![("user/example".into(), "Example".into())];
+            w.set_status_icon_themes(choices.clone(), window, cx);
+            let select = w.status_icon_theme_select.clone();
+            SettingsView::set_select_value(&select, "user/example", window, cx);
+            w.persist_select_setting(&select, SelectSetting::StatusIconTheme, cx);
+            for choices in [Vec::new(), choices] {
+                w.set_status_icon_themes(choices, window, cx);
+                assert_eq!(
+                    select
+                        .read(cx)
+                        .selected_value()
+                        .as_ref()
+                        .map(|v| v.as_ref()),
+                    Some("user/example")
+                );
+                assert_eq!(
+                    crate::store::SettingsStore::global(cx)
+                        .user()
+                        .left_dock
+                        .status_icon_theme
+                        .as_str(),
+                    "user/example"
+                );
+            }
+        });
+    })
+    .unwrap();
+}

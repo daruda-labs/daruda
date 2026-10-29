@@ -1,6 +1,6 @@
 //! Claude Code session-status indicator.
 //!
-//! Draws every state as the same 3x3 dot grid using GPUI primitives and
+//! Draws configurable dot grids or semantic icons using
 //! `theme::STATUS_INDICATOR_*` constants (G4: no inline literals).
 //!
 //! Animation uses one gated [`StatusPulseClock`] instead of `with_animation`:
@@ -9,8 +9,56 @@
 //! idle windows at zero redraws, and satisfies AGENTS.md Pitfall #10.
 
 use crate::ui::{StatusPulseClock, theme};
-use daruda_agent::SessionStatus;
+use daruda_agent::{AgentOutcome, SessionStatus};
 use gpui::{App, Hsla, IntoElement, ParentElement, Pixels, RenderOnce, Styled, Window, div, px};
+
+mod icons;
+
+#[derive(Clone, Copy)]
+enum BadgeContent {
+    Disconnected,
+    Status(SessionStatus),
+    Outcome(AgentOutcome),
+}
+
+impl BadgeContent {
+    fn state(self) -> crate::status_icon_themes::State {
+        use crate::status_icon_themes::State;
+        match self {
+            Self::Disconnected => State::Disconnected,
+            Self::Outcome(AgentOutcome::Completed) => State::Completed,
+            Self::Outcome(AgentOutcome::Errored) => State::Errored,
+            Self::Status(status) => state_for_status(status),
+        }
+    }
+
+    fn status(self) -> SessionStatus {
+        match self {
+            Self::Disconnected => SessionStatus::Idle,
+            Self::Status(status) => status,
+            Self::Outcome(AgentOutcome::Completed) => SessionStatus::Idle,
+            Self::Outcome(AgentOutcome::Errored) => SessionStatus::Failed,
+        }
+    }
+}
+
+pub(crate) fn icon_theme(cx: &App) -> daruda_config::StatusIconTheme {
+    cx.try_global::<crate::settings_store::SettingsStore>()
+        .map(|store| store.user().left_dock.status_icon_theme.clone())
+        .unwrap_or_default()
+}
+
+pub(crate) fn state_for_status(status: SessionStatus) -> crate::status_icon_themes::State {
+    use crate::status_icon_themes::State;
+    match status {
+        SessionStatus::Connecting => State::Connecting,
+        SessionStatus::Working => State::Working,
+        SessionStatus::ExecutingTool => State::ExecutingTool,
+        SessionStatus::NeedsAttention => State::NeedsAttention,
+        SessionStatus::Idle => State::Idle,
+        SessionStatus::Failed => State::Failed,
+    }
+}
 
 /// Ticks each 2-frame blink holds before toggling (~1 Hz at 4 fps).
 const BLINK_HOLD_TICKS: u64 = 2;
@@ -18,12 +66,6 @@ const BLINK_HOLD_TICKS: u64 = 2;
 /// `true` on the "lit" half of a 2-frame blink cycle.
 fn blink_on(tick: u64) -> bool {
     (tick / BLINK_HOLD_TICKS).is_multiple_of(2)
-}
-
-/// Serpentine head position for the Working comet's 6-frame cycle.
-fn snake_head(tick: u64) -> usize {
-    let f = tick % 6;
-    ((3 * f).div_ceil(2) % 9) as usize
 }
 
 /// Size variant of the indicator.
@@ -63,10 +105,10 @@ pub fn color_for_status(status: SessionStatus, cx: &App) -> Hsla {
     }
 }
 
-/// Stateless GPUI element rendering one of four animation modes.
+/// Stateless dock artwork, animated by the shared status clock.
 #[derive(IntoElement)]
 pub struct AgentStatusBadge {
-    status: SessionStatus,
+    content: BadgeContent,
     size: IndicatorSize,
     color: Hsla,
     /// When true, the indicator is wrapped in a 1 px outline
@@ -76,9 +118,16 @@ pub struct AgentStatusBadge {
 }
 
 impl AgentStatusBadge {
+    pub fn disconnected(size: IndicatorSize, cx: &App) -> Self {
+        Self {
+            content: BadgeContent::Disconnected,
+            ..Self::new(SessionStatus::Idle, size, theme::current(cx).text_muted)
+        }
+    }
+
     pub fn new(status: SessionStatus, size: IndicatorSize, color: Hsla) -> Self {
         Self {
-            status,
+            content: BadgeContent::Status(status),
             size,
             color,
             active: false,
@@ -91,6 +140,18 @@ impl AgentStatusBadge {
     /// light-mode tones on theme switch.
     pub fn for_status(status: SessionStatus, size: IndicatorSize, cx: &App) -> Self {
         Self::new(status, size, color_for_status(status, cx))
+    }
+
+    pub fn for_outcome(outcome: AgentOutcome, size: IndicatorSize, cx: &App) -> Self {
+        let content = BadgeContent::Outcome(outcome);
+        let color = match outcome {
+            AgentOutcome::Completed => theme::current(cx).status_idle_dark,
+            AgentOutcome::Errored => theme::current(cx).status_failed_dark,
+        };
+        Self {
+            content,
+            ..Self::new(content.status(), size, color)
+        }
     }
 
     /// Use the host surface's artwork size without changing its status shape.
@@ -113,13 +174,44 @@ impl RenderOnce for AgentStatusBadge {
             .try_global::<StatusPulseClock>()
             .map(|c| c.tick)
             .unwrap_or(0);
-        let inner = match self.status {
-            SessionStatus::Idle => idle_grid(dim, self.color),
-            SessionStatus::Connecting => connecting_grid(dim, self.color, tick),
-            SessionStatus::NeedsAttention => needs_attention_grid(dim, self.color, tick),
-            SessionStatus::Working => dot_grid(dim, self.color, tick),
-            SessionStatus::ExecutingTool => quadrant_grid(dim, self.color, tick),
-            SessionStatus::Failed => failed_grid(dim, self.color),
+        let selected = icon_theme(cx);
+        let catalog = crate::status_icon_themes::current(cx);
+        let base = catalog.base(&selected);
+        let state = self.content.state();
+        let artwork = catalog
+            .get(&selected)
+            .and_then(|theme| theme.states.get(&state));
+        let default_color = if base == crate::status_icon_themes::Base::Icons {
+            icons::color(self.content, self.color, cx)
+        } else {
+            self.color
+        };
+        let color = artwork
+            .and_then(|art| art.colors)
+            .map(|(dark, light)| {
+                gpui::rgb(if theme::current(cx).is_dark() {
+                    dark
+                } else {
+                    light
+                })
+                .into()
+            })
+            .unwrap_or(default_color);
+        let inner = if let Some(frame) = artwork.and_then(|art| art.frame(tick)) {
+            crate::status_icon_themes::render::frame(frame.clone(), dim, color)
+        } else if base == crate::status_icon_themes::Base::Icons
+            || matches!(self.content, BadgeContent::Disconnected)
+        {
+            icons::render(self.content, dim, color, tick, cx)
+        } else {
+            match self.content.status() {
+                SessionStatus::Idle => idle_grid(dim, color),
+                SessionStatus::Connecting => connecting_grid(dim, color, tick),
+                SessionStatus::NeedsAttention => needs_attention_grid(dim, color, tick),
+                SessionStatus::Working => working_grid(dim, color, tick),
+                SessionStatus::ExecutingTool => quadrant_grid(dim, color, tick),
+                SessionStatus::Failed => failed_grid(dim, color),
+            }
         };
         if self.active {
             wrap_active(inner, dim, cx).into_any_element()
@@ -306,73 +398,64 @@ impl RenderOnce for ConnectingGrid {
 
 // ── Working ───────────────────────────────────────────────────────────────────
 
-/// Lighting order for the Working-state 3×3 grid: left column up → middle
-/// column down → right column up. Each entry is `(col, row)` with row 0
-/// at the top. Index 0 is the first dot the head visits.
-const DOT_ORDER: [(usize, usize); 9] = [
+/// Clockwise perimeter of the 3×3 grid, starting at the top-left corner.
+const WORKING_PATH: [(usize, usize); 8] = [
     (0, 0),
     (1, 0),
     (2, 0),
     (2, 1),
-    (1, 1),
-    (0, 1),
-    (0, 2),
-    (1, 2),
     (2, 2),
+    (1, 2),
+    (0, 2),
+    (0, 1),
 ];
+const WORKING_DOT_COUNT: usize = 3;
 
-/// Working-state comet. `tick` drives a 6-frame serpentine sweep.
-fn dot_grid(size: Pixels, color: Hsla, tick: u64) -> gpui::AnyElement {
-    let head = snake_head(tick);
-    // `DotGrid` recovers the head via `floor(phase * 9)`; offset by 0.5
-    // so the floor lands exactly on `head`.
-    let phase = (head as f32 + 0.5) / DOT_ORDER.len() as f32;
-    DotGrid {
+fn working_dots(tick: u64) -> [(usize, usize); WORKING_DOT_COUNT] {
+    let head = (tick % WORKING_PATH.len() as u64) as usize;
+    std::array::from_fn(|offset| {
+        WORKING_PATH[(head + WORKING_PATH.len() - offset) % WORKING_PATH.len()]
+    })
+}
+
+/// Three equally bright dots advance one perimeter cell per shared tick.
+fn working_grid(size: Pixels, color: Hsla, tick: u64) -> gpui::AnyElement {
+    WorkingGrid {
         dim: size,
         color,
-        phase,
+        tick,
     }
     .into_any_element()
 }
 
-/// Working-state 3×3 grid where one head dot is fully lit and trailing dots
-/// fade down the serpentine path.
 #[derive(IntoElement)]
-struct DotGrid {
+struct WorkingGrid {
     dim: Pixels,
     color: Hsla,
-    phase: f32,
+    tick: u64,
 }
 
-impl RenderOnce for DotGrid {
+impl RenderOnce for WorkingGrid {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let dim_f: f32 = self.dim.into();
         let cell = dim_f / 3.0;
         let dot = cell * theme::STATUS_INDICATOR_DOT_GRID_RATIO;
         let pad = (cell - dot) * 0.5;
 
-        let n = DOT_ORDER.len();
-        let head = (self.phase * n as f32).floor() as usize % n;
-        let tail_min = theme::STATUS_INDICATOR_DOT_GRID_TAIL_ALPHA_MIN;
-
         div()
             .relative()
             .flex_none()
             .w(self.dim)
             .h(self.dim)
-            .children(DOT_ORDER.iter().enumerate().map(|(i, (col, row))| {
-                let lag = (head + n - i) % n;
-                let t = lag as f32 / (n - 1) as f32;
-                let mut c = self.color;
-                c.a *= 1.0 - t * (1.0 - tail_min);
+            .children(working_dots(self.tick).into_iter().map(|(col, row)| {
                 div()
                     .absolute()
-                    .left(px(cell * (*col as f32) + pad))
-                    .top(px(cell * (*row as f32) + pad))
+                    .left(px(cell * col as f32 + pad))
+                    .top(px(cell * row as f32 + pad))
                     .w(px(dot))
                     .h(px(dot))
                     .rounded_full()
-                    .bg(c)
+                    .bg(self.color)
             }))
     }
 }
@@ -468,7 +551,7 @@ mod tests {
     fn tick_ms_is_positive_and_low_rate() {
         const {
             // ~4 fps target: low enough to bound off-focus redraws, high
-            // enough that the 6-frame comet still reads as motion.
+            // enough that the perimeter sweep still reads as motion.
             assert!(theme::STATUS_INDICATOR_TICK_MS >= 80);
             assert!(theme::STATUS_INDICATOR_TICK_MS <= 300);
         }
@@ -485,14 +568,23 @@ mod tests {
     }
 
     #[test]
-    fn snake_head_visits_six_distinct_spread_positions() {
-        let heads: Vec<usize> = (0..6).map(snake_head).collect();
-        assert_eq!(heads, vec![0, 2, 3, 5, 6, 8], "6 heads spread over 9-path");
-        // Cycle repeats every 6 ticks.
-        assert_eq!(snake_head(6), snake_head(0));
-        for h in &heads {
-            assert!(*h < DOT_ORDER.len());
+    fn working_dots_move_clockwise_and_wrap_without_lighting_the_centre() {
+        let expected = [
+            [(0, 0), (0, 1), (0, 2)],
+            [(1, 0), (0, 0), (0, 1)],
+            [(2, 0), (1, 0), (0, 0)],
+            [(2, 1), (2, 0), (1, 0)],
+            [(2, 2), (2, 1), (2, 0)],
+            [(1, 2), (2, 2), (2, 1)],
+            [(0, 2), (1, 2), (2, 2)],
+            [(0, 1), (0, 2), (1, 2)],
+        ];
+        for (tick, dots) in expected.into_iter().enumerate() {
+            assert_eq!(working_dots(tick as u64), dots);
+            assert_eq!(working_dots(tick as u64 + 8), dots);
         }
+        assert_eq!(working_dots(u64::MAX), expected[7]);
+        assert_eq!(working_dots(u64::MAX.wrapping_add(1)), expected[0]);
     }
 
     #[test]
@@ -522,24 +614,6 @@ mod tests {
             assert!(theme::STATUS_INDICATOR_DOT_GRID_RATIO > 0.0);
             assert!(theme::STATUS_INDICATOR_DOT_GRID_RATIO < 1.0);
         }
-    }
-
-    #[test]
-    fn dot_grid_tail_alpha_leaves_visible_floor() {
-        const {
-            assert!(theme::STATUS_INDICATOR_DOT_GRID_TAIL_ALPHA_MIN > 0.0);
-            assert!(theme::STATUS_INDICATOR_DOT_GRID_TAIL_ALPHA_MIN < 1.0);
-        }
-    }
-
-    #[test]
-    fn dot_order_visits_each_cell_exactly_once() {
-        let mut seen = std::collections::HashSet::new();
-        for cell in DOT_ORDER.iter() {
-            assert!(seen.insert(*cell), "duplicate cell {:?}", cell);
-            assert!(cell.0 < 3 && cell.1 < 3, "out-of-range cell {:?}", cell);
-        }
-        assert_eq!(seen.len(), 9);
     }
 
     #[test]

@@ -26,6 +26,7 @@ macro_rules! with_settings_fields {
             ScrollbackMaxRows: scrollback.max_rows, "scrollback.max_rows", copy, |value: usize| value as i64;
             TerminalInsetX: font.terminal.inset_x, "font.terminal.inset_x", copy, |value: f32| f64::from(value);
             TerminalInsetY: font.terminal.inset_y, "font.terminal.inset_y", copy, |value: f32| f64::from(value);
+            StatusIconTheme: left_dock.status_icon_theme, "left_dock.status_icon_theme", clone, |value: crate::StatusIconTheme| value.as_str().to_owned();
             FilesShowHidden: left_dock.files_show_hidden, "left_dock.files_show_hidden", copy, |value: bool| value;
             FilesUseGitignore: left_dock.files_use_gitignore, "left_dock.files_use_gitignore", copy, |value: bool| value;
             UpdateAutoCheck: update.auto_check, "update.auto_check", copy, |value: bool| value;

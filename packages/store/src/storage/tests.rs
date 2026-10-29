@@ -180,3 +180,18 @@ fn resolving_storage_does_not_create_or_move_directories() {
     assert_eq!(storage.logs(), Some(root.join("logs")));
     assert!(!root.exists());
 }
+
+#[test]
+fn status_icon_packages_follow_the_config_profile_and_override() {
+    assert_ne!(
+        layout("release", None).status_icon_themes(),
+        layout("debug", None).status_icon_themes()
+    );
+    for profile in ["release", "debug", "preview"] {
+        let storage = layout(profile, Some("portable".into()));
+        assert_eq!(
+            storage.status_icon_themes(),
+            PathBuf::from("portable/status-icon-themes")
+        );
+    }
+}

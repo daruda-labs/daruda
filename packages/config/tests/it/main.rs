@@ -35,3 +35,5 @@ mod telegram;
 mod theme_presets;
 mod update;
 mod usage;
+
+mod status_icon_theme;

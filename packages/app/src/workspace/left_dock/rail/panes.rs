@@ -64,7 +64,7 @@ impl Workspace {
         lane: LaneRef,
         cx: &App,
     ) -> Vec<PaneSnapshot> {
-        let acp = self.agent_chat_statuses(cx);
+        let acp = self.agent_chat_badge_statuses(cx);
         self.lane_pane_snapshots(lane, &acp, true, cx)
     }
 

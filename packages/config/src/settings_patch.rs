@@ -60,6 +60,7 @@ pub enum SettingsFieldId {
     PreviewTab,
     LeftDefaultWidth,
     LeftDockSize,
+    StatusIconTheme,
     FileIconColorMode,
     ShellNaturalTextEditing,
     ShellProgram,
@@ -150,6 +151,7 @@ pub enum SettingsPatch {
     PreviewTab(bool),
     LeftDefaultWidth(f32),
     LeftDockSize(crate::UiSize),
+    StatusIconTheme(crate::StatusIconTheme),
     FileIconColorMode(crate::IconColorMode),
     /// The whole hidden list, for Settings' switches. The status bar's own
     /// menu keeps [`Self::ToggleStatusBarItem`]; both write one field.

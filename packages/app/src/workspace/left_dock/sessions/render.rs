@@ -29,6 +29,7 @@ fn status_label(status: daruda_agent::SessionStatus) -> String {
 
 fn session_row(
     target: RowTarget,
+    activity_status: Option<daruda_agent::SessionStatus>,
     current: bool,
     selected: bool,
     workspace: WeakEntity<Workspace>,
@@ -65,9 +66,7 @@ fn session_row(
         .hover(|style| style.bg(t.lane_row_hover_bg))
         .cursor_pointer()
         .child(match &target {
-            RowTarget::Pane(_, row) if row.unconnected_icon().is_some() => {
-                super::super::rail::pane_indicator(row, metrics, cx)
-            }
+            RowTarget::Pane(_, row) => super::super::rail::pane_indicator(row, metrics, cx),
             _ => AgentStatusBadge::for_status(status, IndicatorSize::Leading, cx)
                 .with_metrics(metrics)
                 .into_any_element(),
@@ -89,7 +88,7 @@ fn session_row(
                     div()
                         .text_size(px(metrics.text(theme::FONT_SIZE_SM)))
                         .text_color(t.text_muted)
-                        .child(status_label(status)),
+                        .child(status_label(activity_status.unwrap_or(status))),
                 ),
         )
         .when(current, |el| {
@@ -118,6 +117,11 @@ pub(in crate::workspace) fn chooser_overlay(
     };
     let metrics = theme::UiMetrics(ws.mirrors.left_dock_size);
     let rows = ws.rail_chooser_entries(chooser.target, cx);
+    // Tool artwork is a dock detail; status text keeps the activity vocabulary.
+    let activity_statuses = match chooser.target {
+        Target::Panes { .. } => ws.agent_chat_statuses(cx),
+        Target::Worktrees { .. } => Vec::new(),
+    };
     let t = theme::current(cx);
     let (title, subtitle) = match chooser.target {
         Target::Panes { lane, .. } => (ws.lane_label_for(lane), s::dock::pane_count(rows.len())),
@@ -217,6 +221,9 @@ pub(in crate::workspace) fn chooser_overlay(
                 match entry {
                     Entry::Pane { lane, row } => session_row(
                         RowTarget::Pane(*lane, row.clone()),
+                        activity_statuses
+                            .iter()
+                            .find_map(|(pane, status)| (*pane == row.pane).then_some(*status)),
                         ws.active == *lane && ws.active_runtime().focused_pane_id == row.pane,
                         chooser.target.is_selected(entry),
                         weak.clone(),
