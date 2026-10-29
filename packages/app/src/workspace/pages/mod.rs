@@ -85,6 +85,11 @@ impl Workspace {
         });
         if page == Page::Flows {
             self.respawn_flow_watcher(cx);
+            if let Some(detail) = &self.pages.flows.detail
+                && matches!(detail.body, flows::detail::FlowDetailBody::Run(_))
+            {
+                self.refresh_execution(detail.id, cx);
+            }
         }
         cx.notify();
     }
@@ -100,6 +105,7 @@ impl Workspace {
     }
 
     pub(in crate::workspace) fn close_page(&mut self, cx: &mut Context<Self>) {
+        self.pages.flows.history_request = None;
         if self.workspace_page.is_some() {
             self.mutate_durable(cx, |ws, _| {
                 ws.workspace_page = None;

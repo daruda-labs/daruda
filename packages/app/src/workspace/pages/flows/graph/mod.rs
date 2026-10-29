@@ -12,6 +12,8 @@ mod connect;
 mod delete_key;
 mod disconnect;
 mod drafts;
+pub(in crate::workspace) mod execution;
+mod execution_pan;
 pub(in crate::workspace) mod form;
 mod form_bridge;
 mod frame;
@@ -95,6 +97,7 @@ enum FlowGraphState {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::workspace) enum FlowGraphEvent {
     BackToList,
+    History,
     Save,
     Revert,
     /// Delete the selected node. Asks first — the workspace owns the dialog.

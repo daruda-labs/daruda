@@ -20,6 +20,7 @@ use super::{
 /// Kind chip and status badge, at the size where both words fit.
 fn full_header(card: &CardData, accent: gpui::Rgba, p: CardPalette) -> impl IntoElement {
     div()
+        .flex_none()
         .flex()
         .items_center()
         .w_full()
@@ -43,6 +44,13 @@ fn full_header(card: &CardData, accent: gpui::Rgba, p: CardPalette) -> impl Into
         .children(policy_chip(card, p))
         .children(issue_marker(card, p))
         .child(div().flex_grow())
+        .child(
+            div()
+                .flex_none()
+                .size(px(palette::TAB_STATUS_DOT_SIZE))
+                .rounded_full()
+                .bg(rgb(badge_ink(card, accent, p))),
+        )
         .child(
             div()
                 .min_w_0()
@@ -111,8 +119,10 @@ fn issue_marker(card: &CardData, p: CardPalette) -> Option<impl IntoElement> {
     })
 }
 
-fn full_body(card: &CardData, p: CardPalette) -> impl IntoElement {
+fn full_body(card: &CardData, p: CardPalette, show_summary: bool) -> impl IntoElement {
     div()
+        .min_h_0()
+        .overflow_hidden()
         .flex()
         .flex_col()
         .gap(px(palette::FLOW_GRAPH_CARD_ROW_GAP))
@@ -133,17 +143,18 @@ fn full_body(card: &CardData, p: CardPalette) -> impl IntoElement {
                 .text_size(px(palette::FLOW_GRAPH_META_FONT_SIZE))
                 .child(card.meta.clone()),
         )
-        .child(
-            // One line: the card is a fixed height and this is a preview of a
-            // prompt, so a second line pushes the header out of the box rather
-            // than telling anyone more.
-            div()
-                .min_w_0()
-                .truncate()
-                .text_color(rgb(p.text_subtle))
-                .text_size(px(palette::FLOW_GRAPH_META_FONT_SIZE))
-                .child(card.summary.clone()),
-        )
+        // Below native size the status, identity and metadata take precedence
+        // over the prompt preview; clipping a text line would make it unreadable.
+        .when(show_summary, |body| {
+            body.child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_color(rgb(p.text_subtle))
+                    .text_size(px(palette::FLOW_GRAPH_META_FONT_SIZE))
+                    .child(card.summary.clone()),
+            )
+        })
 }
 
 /// The chip reduced to a mark: at this size its word would not fit.
@@ -204,7 +215,7 @@ impl NodeRenderer for FlowNodeRenderer {
                         .gap(px(palette::FLOW_GRAPH_CARD_ROW_GAP))
                         .p(px(palette::FLOW_GRAPH_CARD_PAD))
                         .child(full_header(&card, accent, self.palette))
-                        .child(full_body(&card, self.palette)),
+                        .child(full_body(&card, self.palette, ctx.zoom() >= 1.0)),
                 )
                 .into_any(),
             CardDensity::Compact => shell

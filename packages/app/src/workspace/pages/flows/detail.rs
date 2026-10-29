@@ -30,6 +30,7 @@ pub(in crate::workspace) struct RunDetail {
     /// longer lists it.
     pub started: SharedString,
     pub report: RunReport,
+    pub execution: Box<super::execution_detail::ExecutionDetail>,
 }
 
 /// The run's `run.md`, read off the main thread.
@@ -50,6 +51,7 @@ pub(in crate::workspace) struct FlowDetail {
 #[derive(Default)]
 pub(in crate::workspace) struct FlowsPage {
     pub detail: Option<FlowDetail>,
+    pub history_request: Option<u64>,
 }
 
 impl Workspace {

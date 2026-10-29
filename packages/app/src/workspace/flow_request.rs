@@ -96,6 +96,11 @@ pub(in crate::workspace) struct FlowSelection {
     pub pinned: Vec<daruda_flow::NodeId>,
 }
 
+struct FlowAgentCatalog {
+    launches: HashMap<String, LaunchSpec>,
+    accounts: HashMap<String, daruda_flow::session::SessionAccount>,
+}
+
 /// A request and the stream that narrates it. The receiver is handed back
 /// separately because the sender lives inside the request, and the two are
 /// created together exactly once.
@@ -272,7 +277,7 @@ impl Workspace {
         let resumed = daruda_flow::resume::prepare(run_dir, Some(&lock_dir), &is_alive)
             .map_err(FlowSubmitError::Resume)?;
 
-        let agents = self.flow_agent_catalog(
+        let catalog = self.flow_agent_catalog(
             lane_ref,
             &cwd,
             FlowPurpose::Run,
@@ -288,6 +293,10 @@ impl Workspace {
         // process could still be writing it before then.
         let continuation = resumed.continuation();
         let request = RunRequest {
+            history: daruda_flow::session::HistoryContext {
+                source: None,
+                accounts: catalog.accounts,
+            },
             started_by: resumed.started_by,
             until: None,
             pinned: Vec::new(),
@@ -302,7 +311,7 @@ impl Workspace {
             // hold that flow any more.
             flow_dir: run_dir.to_path_buf(),
             cwd: cwd.clone(),
-            agents,
+            agents: catalog.launches,
             node_install_dir: node_install_dir.clone(),
             // A fresh ceiling, measured from now. What the earlier half
             // spent is carried by the run log, not by this.
@@ -374,7 +383,7 @@ impl Workspace {
         // settled by the time this runs.
         let pinned = self.resolve_flow_pins(lane_ref, flow_path, profile, &selection.pinned, cx);
 
-        let agents = self.flow_agent_catalog(
+        let catalog = self.flow_agent_catalog(
             lane_ref,
             &cwd,
             purpose,
@@ -386,6 +395,10 @@ impl Workspace {
         let (ask_tx, ask_rx) = smol::channel::unbounded();
 
         let request = RunRequest {
+            history: daruda_flow::session::HistoryContext {
+                source: daruda_core::path::strip_root(flow_path, &cwd),
+                accounts: catalog.accounts,
+            },
             started_by: Some(daruda_flow::request::StartedBy::Desktop),
             until: selection.until.clone(),
             pinned,
@@ -397,7 +410,7 @@ impl Workspace {
                 .map(Path::to_path_buf)
                 .unwrap_or_else(|| cwd.clone()),
             cwd: cwd.clone(),
-            agents,
+            agents: catalog.launches,
             node_install_dir: node_install_dir.clone(),
             budget: budget_from(&self.config_flow()),
             is_alive: Box::new(process_is_alive),
@@ -430,7 +443,7 @@ impl Workspace {
         purpose: FlowPurpose,
         referenced: &std::collections::HashSet<String>,
         cx: &mut Context<Self>,
-    ) -> Result<HashMap<String, LaunchSpec>, FlowSubmitError> {
+    ) -> Result<FlowAgentCatalog, FlowSubmitError> {
         let pane_cwd = PaneCwd::Local(cwd.to_path_buf());
         let lane = self.lane_for(lane_ref).cloned();
         let definitions: Vec<(String, AgentLaunchSpec)> = self
@@ -441,6 +454,7 @@ impl Workspace {
             .collect();
 
         let mut catalog = HashMap::new();
+        let mut accounts = HashMap::new();
         for (id, AgentLaunchSpec { launch, env }) in definitions {
             let resolved_host = match lane.as_ref().map(|lane| {
                 lane.effective_session_host(
@@ -507,6 +521,12 @@ impl Workspace {
             // the catalog and changes nothing.
             match resolved.spec {
                 Ok(spec) => {
+                    accounts.insert(
+                        id.clone(),
+                        daruda_flow::session::SessionAccount {
+                            managed: selection.to_persisted().map(|id| id.0.to_string()),
+                        },
+                    );
                     catalog.insert(id, spec);
                 }
                 Err(reason) if referenced.contains(&id) => {
@@ -515,7 +535,10 @@ impl Workspace {
                 Err(_) => {}
             }
         }
-        Ok(catalog)
+        Ok(FlowAgentCatalog {
+            launches: catalog,
+            accounts,
+        })
     }
 
     fn config_flow(&self) -> daruda_config::flow::FlowConfig {

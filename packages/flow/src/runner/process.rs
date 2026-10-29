@@ -277,6 +277,7 @@ mod tests {
 
         fn context(&self) -> RunContext<'_> {
             RunContext {
+                session: None,
                 // A command runs once; there is no turn to spend.
                 max_turns: 1,
                 node_id: &self.node,
@@ -521,6 +522,7 @@ mod tests {
         );
         let reported = std::cell::Cell::new(None);
         let ctx = RunContext {
+            session: None,
             spawned: &|group| reported.set(Some(group)),
             ..fixture.context()
         };

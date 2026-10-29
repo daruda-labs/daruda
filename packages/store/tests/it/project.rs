@@ -180,6 +180,7 @@ fn agent_chat_content_round_trip_preserves_account_id() {
     use daruda_store::accounts::AccountId;
     let id = AccountId::new();
     let content = SerializedAgentChatContent {
+        require_exact_resume: false,
         access: Default::default(),
         cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
         session_id: None,
@@ -229,6 +230,7 @@ fn agent_chat_content_round_trip_preserves_picked_mode_id() {
     // Every connect requests the pane's own pick ahead of the agent default,
     // so it has to survive the restart that ends the session it was made in.
     let content = SerializedAgentChatContent {
+        require_exact_resume: false,
         access: Default::default(),
         cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
         session_id: Some("sess-abc123".to_string()),
@@ -264,6 +266,7 @@ fn agent_chat_content_round_trip_preserves_model_id() {
     // Every connect reapplies this pane's model, so the pick has to survive
     // the restart that ends the session it was made in.
     let content = SerializedAgentChatContent {
+        require_exact_resume: false,
         access: Default::default(),
         cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
         session_id: Some("sess-abc123".to_string()),
@@ -301,6 +304,7 @@ fn agent_chat_content_round_trip_preserves_model_id() {
 #[test]
 fn agent_chat_content_width_round_trips_and_an_absent_key_follows_config() {
     let base = SerializedAgentChatContent {
+        require_exact_resume: false,
         access: Default::default(),
         cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
         session_id: Some("sess-abc123".to_string()),
@@ -321,6 +325,7 @@ fn agent_chat_content_width_round_trips_and_an_absent_key_follows_config() {
         SerializedChatContentWidth::Reading,
     ] {
         let content = SerializedAgentChatContent {
+            require_exact_resume: false,
             content_width: Some(width),
             ..base.clone()
         };
@@ -350,6 +355,7 @@ fn agent_chat_content_width_round_trips_and_an_absent_key_follows_config() {
 #[test]
 fn agent_chat_display_filter_round_trips_and_legacy_stays_unset() {
     let content = SerializedAgentChatContent {
+        require_exact_resume: false,
         access: Default::default(),
         cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
         session_id: None,
@@ -373,6 +379,7 @@ fn agent_chat_display_filter_round_trips_and_legacy_stays_unset() {
     );
 
     let cleared = SerializedAgentChatContent {
+        require_exact_resume: false,
         display_filter: Some(Vec::new()),
         visible_kinds: None,
         ..content
@@ -396,6 +403,7 @@ fn agent_chat_display_filter_round_trips_and_legacy_stays_unset() {
 #[test]
 fn agent_chat_fold_mode_round_trips_and_legacy_stays_unset() {
     let content = SerializedAgentChatContent {
+        require_exact_resume: false,
         access: Default::default(),
         cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
         session_id: None,
@@ -425,6 +433,7 @@ fn agent_chat_fold_mode_round_trips_and_legacy_stays_unset() {
     );
 
     let auto = SerializedAgentChatContent {
+        require_exact_resume: false,
         fold_mode: Some(vec!["auto".to_string()]),
         display_filter: None,
         visible_kinds: None,
@@ -452,6 +461,7 @@ fn agent_chat_fold_mode_round_trips_and_legacy_stays_unset() {
 #[test]
 fn agent_chat_tail_window_round_trips_and_legacy_stays_unset() {
     let content = SerializedAgentChatContent {
+        require_exact_resume: false,
         access: Default::default(),
         cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
         session_id: None,
@@ -480,6 +490,7 @@ fn agent_chat_tail_window_round_trips_and_legacy_stays_unset() {
     );
 
     let all = SerializedAgentChatContent {
+        require_exact_resume: false,
         tail_window: Some(SerializedChatTailWindow::All),
         tail_window_calls: None,
         display_filter: None,
@@ -591,6 +602,7 @@ fn a_future_view_preference_degrades_instead_of_losing_the_project() {
 #[test]
 fn unset_view_preferences_are_left_out_of_the_json() {
     let content = SerializedAgentChatContent {
+        require_exact_resume: false,
         access: Default::default(),
         cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
         session_id: None,
@@ -625,6 +637,7 @@ fn agent_chat_leaf_round_trip_preserves_cwd() {
     let leaf = SerializedLayout::Leaf {
         pane_id: 9,
         content: SerializedPaneContent::AgentChat(SerializedAgentChatContent {
+            require_exact_resume: false,
             access: Default::default(),
             cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
             session_id: Some("sess-abc123".to_string()),
@@ -667,6 +680,7 @@ fn agent_chat_leaf_round_trip_preserves_remote_cwd() {
     let leaf = SerializedLayout::Leaf {
         pane_id: 9,
         content: SerializedPaneContent::AgentChat(SerializedAgentChatContent {
+            require_exact_resume: false,
             access: Default::default(),
             cwd: Some(PaneCwd::Remote("host:/repo/lane".to_string())),
             session_id: None,
@@ -1632,6 +1646,7 @@ fn a_leaf_naming_two_kinds_takes_the_first() {
 #[test]
 fn a_pane_writes_the_new_visible_kinds_field_and_never_the_legacy_one() {
     let content = SerializedAgentChatContent {
+        require_exact_resume: false,
         access: Default::default(),
         cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
         session_id: None,
@@ -1747,4 +1762,20 @@ fn a_reference_file_leaf_round_trips_and_older_files_read_as_lane_files() {
     assert!(!json.contains("reference"));
     let restored: SerializedFileContent = serde_json::from_str(&json).unwrap();
     assert!(!restored.reference);
+}
+
+#[test]
+fn exact_session_restore_is_optional_for_old_panes_and_survives_round_trip() {
+    let mut content: SerializedAgentChatContent = serde_json::from_str("{}").unwrap();
+    assert!(!content.require_exact_resume);
+    assert!(
+        serde_json::to_value(&content)
+            .unwrap()
+            .get("require_exact_resume")
+            .is_none()
+    );
+    content.require_exact_resume = true;
+    let restored: SerializedAgentChatContent =
+        serde_json::from_value(serde_json::to_value(content).unwrap()).unwrap();
+    assert!(restored.require_exact_resume);
 }

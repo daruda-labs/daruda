@@ -11,6 +11,40 @@ use crate::runner::AskOwner;
 pub(super) fn check(state: &FlowRunState, event: &E) -> Result<(), R> {
     match event {
         E::RunStarted { .. } | E::Imported(_) => fresh(state),
+        E::SourceRecorded { source } => {
+            running(state)?;
+            if state.source.is_some()
+                || state.next_evidence != 0
+                || source.is_absolute()
+                || source
+                    .components()
+                    .any(|part| !matches!(part, std::path::Component::Normal(_)))
+                || source.as_os_str().is_empty()
+            {
+                return Err(R::InvalidSource);
+            }
+            Ok(())
+        }
+        E::SessionBound { binding } => {
+            running(state)?;
+            let active = state.nodes.get(&binding.node).is_some_and(|node| {
+                matches!(node.last,
+                AttemptState::Started { evidence, .. } if evidence == binding.evidence)
+            }) || (binding.node.as_str() == crate::schedule::FIX_SESSION_ID
+                && state
+                    .fixing
+                    .values()
+                    .any(|evidence| *evidence == binding.evidence));
+            if !active
+                || state.sessions.contains_key(&binding.evidence)
+                || binding.session_id.is_empty()
+                || binding.agent.is_empty()
+                || !binding.cwd.is_absolute()
+            {
+                return Err(R::NotInFlight(binding.node.clone()));
+            }
+            Ok(())
+        }
         E::Resumed { .. } => {
             if !state.is_resumable() {
                 return Err(R::NotResumable);

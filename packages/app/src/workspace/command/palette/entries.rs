@@ -28,6 +28,21 @@ pub(in crate::workspace) struct PaletteEntry {
 /// default page (General) so an empty-arg keybinding still works.
 pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
     PaletteEntry {
+        id: "open_flow_history",
+        label: s::flow::run_history_title,
+        shortcut: "",
+    },
+    PaletteEntry {
+        id: "continue_flow_session",
+        label: s::flow::session_continue,
+        shortcut: "",
+    },
+    PaletteEntry {
+        id: "return_to_flow_execution",
+        label: s::flow::session_return,
+        shortcut: "",
+    },
+    PaletteEntry {
         id: "toggle_lane_switcher",
         label: s::command::switch_lane,
         shortcut: k::SHORTCUT_LANE_SWITCHER,

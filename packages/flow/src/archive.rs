@@ -119,7 +119,7 @@ pub fn archive_canceled(
     move_aside(log_dir, node, &stamp, output)
 }
 
-fn archive_name(id: &NodeId, stamp: &str, output: &Path) -> String {
+pub(crate) fn archive_name(id: &NodeId, stamp: &str, output: &Path) -> String {
     match output.extension().and_then(|e| e.to_str()) {
         Some(ext) => format!("{id}.{stamp}.{ext}"),
         None => format!("{id}.{stamp}"),

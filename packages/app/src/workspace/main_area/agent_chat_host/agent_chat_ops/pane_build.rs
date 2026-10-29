@@ -140,6 +140,7 @@ impl Workspace {
         Pane {
             id: pane_id,
             content: PaneContent::AgentChat(AgentChatContent {
+                restore: Default::default(),
                 view,
                 cwd,
                 account,
@@ -351,6 +352,7 @@ impl Workspace {
         rt.panes.push(Pane {
             id: pane_id,
             content: PaneContent::AgentChat(AgentChatContent {
+                restore: Default::default(),
                 view,
                 cwd,
                 account,

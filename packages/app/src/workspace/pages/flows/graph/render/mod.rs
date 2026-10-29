@@ -62,6 +62,13 @@ impl Render for FlowGraphView {
                             .child(input(&self.name_input, cx, 0)),
                     )
                     .child(
+                        button_icon("flow-history", icons::HISTORY, cx)
+                            .tooltip(s::flow::run_history_title())
+                            .on_click(
+                                cx.listener(|_, _, _, cx| cx.emit(super::FlowGraphEvent::History)),
+                            ),
+                    )
+                    .child(
                         button_icon("flow-save", icons::SAVE, cx)
                             .tooltip(s::common::btn_save())
                             .disabled(!unsaved)

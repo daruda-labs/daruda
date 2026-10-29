@@ -649,6 +649,7 @@ pub struct RunContext<'a> {
     /// Told the process group a command started, so a resume after this
     /// process dies can end what it left running. Agent sessions never call it.
     pub spawned: &'a dyn Fn(SpawnedGroup),
+    pub session: Option<crate::session::SessionPort<'a>>,
 }
 
 /// A command's process group, named so that a later process can tell it

@@ -9,6 +9,7 @@
 // reports, and what it leaves on disk.
 pub mod error;
 pub mod event;
+pub mod history;
 pub mod journal;
 pub mod load;
 pub mod lock;
@@ -20,6 +21,7 @@ pub mod resume;
 pub mod run_log;
 pub mod runner;
 pub mod schedule;
+pub mod session;
 
 // Reachable because `load`'s return type and `RunRequest`'s fields name
 // them, not because a host is meant to build them.

@@ -218,6 +218,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> FlowDetailId {
+        self.pages.flows.history_request = None;
         let id = FlowDetailId(self.alloc_id());
         let owned = path.to_path_buf();
         let view = cx.new(|cx| FlowGraphView::new(&owned, window, cx));
@@ -260,6 +261,7 @@ impl Workspace {
         let path = view.read(cx).path().to_path_buf();
         match event {
             FlowGraphEvent::BackToList => self.back_to_flow_list(window, cx),
+            FlowGraphEvent::History => self.open_graph_execution_history(lane, &path, window, cx),
             FlowGraphEvent::Save => self.save_node_form(&path, view, window, cx),
             FlowGraphEvent::Revert => self.revert_node_form(&path, view, window, cx),
             FlowGraphEvent::Delete => {

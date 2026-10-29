@@ -291,6 +291,8 @@ pub(in crate::workspace) fn render_layout(
                     })
                     .child(render_pane_file_viewer(id, f, cx)),
                 self::pane::PaneContent::AgentChat(ac) => div()
+                    .flex()
+                    .flex_col()
                     .flex_1()
                     .min_h(px(0.))
                     .overflow_hidden()
@@ -300,6 +302,19 @@ pub(in crate::workspace) fn render_layout(
                     // `track_focus` here. Inactive-split dim is applied inside
                     // the view (`AgentChatView::dim`, alpha-preserving) rather
                     // than an overlay scrim, so window translucency survives.
+                    .when_some(ac.restore.flow_origin().cloned(), |d, origin| {
+                        d.child(
+                            crate::ui::button(
+                                ("flow-origin", id as usize),
+                                crate::surface::strings::flow::session_return(),
+                            )
+                            .on_click(cx.listener(
+                                move |ws, _, window, cx| {
+                                    ws.open_flow_run_origin(origin.clone(), window, cx)
+                                },
+                            )),
+                        )
+                    })
                     .child(
                         AnyView::from(ac.view.clone())
                             .cached(StyleRefinement::default().size_full().flex()),

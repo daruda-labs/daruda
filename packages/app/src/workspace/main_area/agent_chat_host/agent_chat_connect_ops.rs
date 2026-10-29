@@ -182,6 +182,11 @@ impl Workspace {
     ) -> bool {
         self.agent_chat_view(pane_id)
             .is_some_and(|view| view.read(cx).is_read_only())
+            || self
+                .main_area
+                .pane(pane_id)
+                .and_then(|pane| pane.agent_chat_content())
+                .is_some_and(|chat| chat.restore.requires_exact())
             || self.is_task_chat_restore(pane_id, cx)
     }
 
@@ -211,6 +216,13 @@ impl Workspace {
             cx,
         );
         view.update(cx, |v, cx| v.reset_for_new_session(cx));
+        if let Some(chat) = self
+            .main_area
+            .pane_mut(pane_id)
+            .and_then(|pane| pane.agent_chat_content_mut())
+        {
+            chat.restore = Default::default();
+        }
         self.mutate_durable(cx, |_, _| {});
         self.notify_status_docks(cx);
         self.connect_agent_chat(pane_id, cwd, None, cx);

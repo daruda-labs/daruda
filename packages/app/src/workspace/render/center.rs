@@ -27,14 +27,24 @@ use crate::workspace::main_area::render_layout;
 ///
 /// Reads only `&Workspace` (the `cx` is for the embedded views'
 /// listeners), so it stays render-pure.
-pub(super) fn render_center_content(ws: &Workspace, cx: &mut Context<Workspace>) -> AnyElement {
+pub(super) fn render_center_content(
+    ws: &Workspace,
+    window: &gpui::Window,
+    cx: &mut Context<Workspace>,
+) -> AnyElement {
     // Each page shows its detail when it holds one, its list otherwise. The
     // detail is read off the workspace, not a dock's snapshot.
     if let Some(page) = &ws.workspace_page
         && page.page == crate::workspace::pages::Page::Flows
         && let Some(detail) = &ws.pages.flows.detail
     {
-        return crate::workspace::pages::flows::detail_render::render(detail, page, cx);
+        return crate::workspace::pages::flows::detail_render::render(
+            detail,
+            page,
+            ws.flow_session_problem(detail.id),
+            ws.execution_layout(window, cx),
+            cx,
+        );
     }
     if let Some(page) = &ws.workspace_page
         && page.page == crate::workspace::pages::Page::Flows

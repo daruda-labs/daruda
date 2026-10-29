@@ -467,6 +467,9 @@ impl PaneCwd {
 /// replays it from the resumed session.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SerializedAgentChatContent {
+    /// Failed loading must not create a replacement conversation.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub require_exact_resume: bool,
     #[serde(default)]
     pub access: crate::tasks::AgentChatAccess,
     /// Lane working directory the agent session is rooted at. `None`

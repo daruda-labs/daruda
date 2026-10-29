@@ -141,3 +141,47 @@ fn a_turn_leaves_a_transcript_for_the_scheduler_to_archive() {
     assert!(text.contains("# Prompt"), "{text}");
     assert!(text.contains("# Ended"), "{text}");
 }
+
+#[test]
+fn session_binding_survives_runner_completion() {
+    let fixture = Fixture::with_script(&adapter_script("", &stops_with("end_turn")));
+    let store = crate::run_log::testing::attempt_in_flight(&fixture.run_dir, &fixture.node);
+    let mut ctx = fixture.context();
+    ctx.session = Some(crate::session::SessionPort {
+        store: &store,
+        node: &fixture.node,
+        attempt: 1,
+        evidence: 1,
+    });
+    let result = smol::block_on(fixture.runner().run_agent(&ctx, &spec(AGENT), "write it"));
+    assert_eq!(result.outcome, Ok(()));
+    let inspected = crate::run_log::reader::inspect(&fixture.run_dir)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        inspected.state.sessions().next().unwrap().session_id,
+        SESSION
+    );
+}
+
+#[test]
+fn refused_binding_never_submits_the_prompt() {
+    let fixture = Fixture::with_script(&adapter_script("", &stops_with("end_turn")));
+    let seen = fixture.cwd.join("prompt-seen");
+    let script = adapter_script(
+        &format!(": > {}", quote_path(&seen, Shell::Posix)),
+        &stops_with("end_turn"),
+    );
+    std::fs::write(fixture.cwd.join("adapter.sh"), script).unwrap();
+    let store = crate::run_log::testing::attempt_in_flight(&fixture.run_dir, &fixture.node);
+    let mut ctx = fixture.context();
+    ctx.session = Some(crate::session::SessionPort {
+        store: &store,
+        node: &fixture.node,
+        attempt: 1,
+        evidence: 2,
+    });
+    let result = smol::block_on(fixture.runner().run_agent(&ctx, &spec(AGENT), "never send"));
+    assert!(result.outcome.is_err());
+    assert!(!seen.exists());
+}

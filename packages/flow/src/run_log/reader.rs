@@ -39,6 +39,8 @@ pub struct Replay {
     pub next_seq: u32,
     /// Every attempt so far, so a resumed `run.md` covers both halves.
     pub records: Vec<NodeRecord>,
+    /// Native settled attempts in commit order; evidence order can differ in parallel waves.
+    pub attempt_order: Vec<(NodeId, u32)>,
     pub spent: Spent,
     pub profile: Option<String>,
     pub started_by: Option<crate::request::StartedBy>,
@@ -136,8 +138,12 @@ pub fn state(run_dir: &Path) -> Option<FlowRunState> {
 /// errors remain visible to callers; this never opens a writable log.
 #[derive(Debug)]
 pub struct Inspection {
+    /// Native start timestamp, independent of directory naming.
+    pub started_at: Option<std::time::SystemTime>,
     /// Sequence of the latest durable resume, or zero for the initial episode.
     pub resumed_at: u64,
+    /// Wall-clock span of a natively recorded, ended run, including resume downtime.
+    pub elapsed: Option<Duration>,
     pub state: FlowRunState,
     pub replay: Replay,
     pub end: Option<crate::event::RunEnd>,
@@ -164,10 +170,36 @@ pub fn inspect(run_dir: &Path) -> Result<Option<Inspection>, daruda_runlog::Open
             resumed_at = seq;
         }
     });
+    let started = history
+        .records
+        .iter()
+        .find(|r| matches!(event_of(r), Some(E::RunStarted { .. })))
+        .map(|r| r.at_ms);
+    let elapsed = if end.is_some() && !history.torn {
+        let ended = history
+            .records
+            .iter()
+            .rev()
+            .find(|r| matches!(event_of(r), Some(E::RunEnded { .. })))
+            .map(|r| r.at_ms);
+        started
+            .zip(ended)
+            .and_then(|(start, end)| end.checked_sub(start))
+            .map(Duration::from_millis)
+    } else {
+        None
+    };
     Ok(Some(Inspection {
         resumed_at,
+        started_at: started
+            .and_then(|ms| std::time::UNIX_EPOCH.checked_add(Duration::from_millis(ms))),
+        elapsed,
         state: history.state,
-        replay: replay_events(history.records.iter().filter_map(event_of)),
+        replay: {
+            let mut replay = replay_events(history.records.iter().filter_map(event_of));
+            replay.torn = history.torn;
+            replay
+        },
         end,
     }))
 }
@@ -315,6 +347,8 @@ pub(crate) fn replay_events<'e>(events: impl IntoIterator<Item = &'e E>) -> Repl
             | E::OutputLost { .. }
             | E::Resumed { .. }
             | E::NodeRefused { .. }
+            | E::SourceRecorded { .. }
+            | E::SessionBound { .. }
             | E::ProcessSpawned { .. }
             | E::RerunScheduled { .. }
             | E::AskRaised { .. }
@@ -333,6 +367,7 @@ fn settled(
     record: &super::line::AttemptLine,
     outcome: AttemptOutcome,
 ) {
+    replay.attempt_order.push((node.clone(), record.evidence));
     replay.spent = (&record.spent).into();
     crate::record::push_attempt(&mut replay.records, node, record.to_record(outcome));
 }

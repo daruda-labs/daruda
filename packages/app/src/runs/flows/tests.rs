@@ -185,6 +185,7 @@ async fn a_waiter_open_when_a_flow_ends_receives_its_report(cx: &mut gpui::TestA
     let (asks_tx, asks) = smol::channel::unbounded();
     let run_dir = dir.path().join("flow-report");
     let request = RunRequest {
+        history: Default::default(),
         started_by: Some(StartedBy::Orchestrator),
         loaded: daruda_flow::load(
             "version: 1\nnodes:\n  - id: check\n    kind: command\n    run: \"echo done\"\n",

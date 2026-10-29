@@ -88,6 +88,7 @@ fn main() {
     }
 
     let request = RunRequest {
+        history: Default::default(),
         started_by: Some(daruda_flow::request::StartedBy::Desktop),
         loaded,
         until: None,

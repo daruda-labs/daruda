@@ -22,6 +22,12 @@ pub enum FlowRunEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         profile: Option<String>,
     },
+    SourceRecorded {
+        source: std::path::PathBuf,
+    },
+    SessionBound {
+        binding: crate::session::SessionBinding,
+    },
     /// A run an older build recorded in `progress.jsonl`, taken over whole
     /// so it can be resumed. Only into an empty log.
     Imported(Box<Imported>),

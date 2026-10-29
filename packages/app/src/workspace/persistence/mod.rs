@@ -301,6 +301,7 @@ fn serialize_pane_content(
         // following config.
         let choices = v.pane_choices();
         return Content::AgentChat(daruda_store::project::SerializedAgentChatContent {
+            require_exact_resume: ac.restore.requires_exact(),
             access: v.access(),
             cwd: ac.cwd.clone(),
             session_id: v.session_id().map(str::to_owned),

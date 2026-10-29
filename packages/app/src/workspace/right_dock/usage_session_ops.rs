@@ -28,6 +28,16 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.restore_session_with_flow_origin(session, None, window, cx);
+    }
+
+    pub(in crate::workspace) fn restore_session_with_flow_origin(
+        &mut self,
+        session: RestorableSession,
+        origin: Option<crate::workspace::pages::flows::execution_detail::RunOrigin>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.active != session.lane_ref {
             self.activate_lane(session.lane_ref, window, cx);
         }
@@ -38,13 +48,42 @@ impl Workspace {
             return;
         }
 
+        let exact = origin.is_some();
         let existing = self.active_runtime().panes.iter().find_map(|p| {
             let content = p.agent_chat_content()?;
-            (content.view.read(cx).session_id() == Some(session.session_id.as_str()))
-                .then_some(p.id)
+            let view = content.view.read(cx);
+            (view.session_id() == Some(session.session_id.as_str())
+                && (!exact
+                    || (!view.is_read_only()
+                        && content.agent_id == session.agent_id
+                        && content.account == session.account
+                        && content
+                            .cwd
+                            .as_ref()
+                            .and_then(PaneCwd::as_local)
+                            .is_some_and(|cwd| daruda_core::path::same_path(cwd, &session.cwd)))))
+            .then_some(p.id)
         });
         if let Some(pane_id) = existing {
+            if origin.is_some()
+                && let Some(chat) = self
+                    .main_area
+                    .pane_mut(pane_id)
+                    .and_then(|pane| pane.agent_chat_content_mut())
+            {
+                chat.restore =
+                    crate::workspace::main_area::pane::SessionRestore::Exact { flow: origin };
+            }
+            if let Some(tab) = self
+                .active_runtime()
+                .tabs
+                .iter()
+                .position(|tab| tab.layout.contains(pane_id))
+            {
+                self.activate_tab(tab, window, cx);
+            }
             self.set_focused_pane(pane_id, window, cx);
+            self.mutate_durable(cx, |_, _| {});
             self.bump_activity(pane_id);
             self.focus_pane(pane_id, window, cx);
             cx.notify();
@@ -69,6 +108,10 @@ impl Workspace {
         );
         if let Some(content) = pane.agent_chat_content_mut() {
             content.account = account;
+            if origin.is_some() {
+                content.restore =
+                    crate::workspace::main_area::pane::SessionRestore::Exact { flow: origin };
+            }
         }
         let pane_id = pane.id;
         let tab_id = self.alloc_id();
@@ -94,6 +137,7 @@ impl Workspace {
         self.bump_activity(pane_id);
         self.focus_pane(pane_id, window, cx);
         self.resize_all_tabs(window, cx);
+        self.mutate_durable(cx, |_, _| {});
         cx.notify();
     }
 }

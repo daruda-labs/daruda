@@ -171,7 +171,7 @@ pub(crate) enum ScreenshotScenario {
     FlowForm(super::pages::flows::graph::form::screenshot::FlowFormShot),
     /// A past run's report as the Flows page's detail. Reached only by a row
     /// click on a run that wrote one, which no restored state holds.
-    FlowRunDetail,
+    FlowRunDetail(super::pages::flows::execution_fixture::ExecutionShot),
     /// An agent-chat pane parked on an expired login: the connect banner with
     /// its remedy buttons, and the failure card the conversation ends on.
     AgentChatFailure,
@@ -554,8 +554,8 @@ pub(crate) fn drive(
                 ws.open_authoring_flow_graph_for_shot(window, cx)
             });
         }
-        ScreenshotScenario::FlowRunDetail => {
-            workspace.update(cx, |ws, cx| ws.open_run_detail_for_shot(window, cx));
+        ScreenshotScenario::FlowRunDetail(shot) => {
+            workspace.update(cx, |ws, cx| ws.open_run_detail_for_shot(shot, window, cx));
         }
         ScreenshotScenario::FlowGraphFormRefused => {
             workspace.update(cx, |ws, cx| {

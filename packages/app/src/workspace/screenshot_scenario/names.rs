@@ -52,7 +52,16 @@ const NAME_FLOW_GRAPH_PINNED: &str = "flow-graph-pinned";
 /// issue count, a failure policy, a dropped pin's reason, inherited defaults.
 const NAME_FLOW_GRAPH_AUTHORING: &str = "flow-graph-authoring";
 /// CLI token for a past run's report as the Flows page's detail.
+const NAME_FLOW_RUN_OUTPUT: &str = "flow-run-output";
+const NAME_FLOW_RUN_METADATA: &str = "flow-run-metadata";
+const NAME_FLOW_RUN_REPORT: &str = "flow-run-report";
 const NAME_FLOW_RUN_DETAIL: &str = "flow-run-detail";
+const NAME_FLOW_RUN_RETRY: &str = "flow-run-retry";
+const NAME_FLOW_RUN_PENDING: &str = "flow-run-pending";
+const NAME_FLOW_RUN_DOCKED: &str = "flow-run-docked";
+const NAME_FLOW_RUN_ACTIVE: &str = "flow-run-active";
+const NAME_FLOW_RUN_LEGACY: &str = "flow-run-legacy";
+const NAME_FLOW_RUN_UNAVAILABLE: &str = "flow-run-unavailable";
 const NAME_AGENT_CHAT_FAILURE: &str = "agent-chat-failure";
 const NAME_AGENT_CHAT_TRANSPORT_CLOSED: &str = "agent-chat-transport-closed";
 const NAME_AGENT_CHAT_PACKAGE_NETWORK: &str = "agent-chat-package-network";
@@ -263,7 +272,36 @@ impl ScreenshotScenario {
             "flow-form-expanded" => Some(Self::FlowForm(FlowFormShot::Expanded)),
             "flow-form-command" => Some(Self::FlowForm(FlowFormShot::Command)),
             NAME_FLOW_GRAPH_AUTHORING => Some(Self::FlowGraphAuthoring),
-            NAME_FLOW_RUN_DETAIL => Some(Self::FlowRunDetail),
+            NAME_FLOW_RUN_OUTPUT => Some(Self::FlowRunDetail(
+                super::super::pages::flows::execution_fixture::ExecutionShot::Output,
+            )),
+            NAME_FLOW_RUN_METADATA => Some(Self::FlowRunDetail(
+                super::super::pages::flows::execution_fixture::ExecutionShot::Metadata,
+            )),
+            NAME_FLOW_RUN_REPORT => Some(Self::FlowRunDetail(
+                super::super::pages::flows::execution_fixture::ExecutionShot::Report,
+            )),
+            NAME_FLOW_RUN_DETAIL => Some(Self::FlowRunDetail(
+                super::super::pages::flows::execution_fixture::ExecutionShot::Completed,
+            )),
+            NAME_FLOW_RUN_RETRY => Some(Self::FlowRunDetail(
+                super::super::pages::flows::execution_fixture::ExecutionShot::Retry,
+            )),
+            NAME_FLOW_RUN_PENDING => Some(Self::FlowRunDetail(
+                super::super::pages::flows::execution_fixture::ExecutionShot::Pending,
+            )),
+            NAME_FLOW_RUN_DOCKED => Some(Self::FlowRunDetail(
+                super::super::pages::flows::execution_fixture::ExecutionShot::Docked,
+            )),
+            NAME_FLOW_RUN_ACTIVE => Some(Self::FlowRunDetail(
+                super::super::pages::flows::execution_fixture::ExecutionShot::Active,
+            )),
+            NAME_FLOW_RUN_LEGACY => Some(Self::FlowRunDetail(
+                super::super::pages::flows::execution_fixture::ExecutionShot::Legacy,
+            )),
+            NAME_FLOW_RUN_UNAVAILABLE => Some(Self::FlowRunDetail(
+                super::super::pages::flows::execution_fixture::ExecutionShot::Unavailable,
+            )),
             NAME_AGENT_CHAT_FAILURE => Some(Self::AgentChatFailure),
             NAME_AGENT_CHAT_TRANSPORT_CLOSED => Some(Self::AgentChatTransportClosed),
             NAME_AGENT_CHAT_PACKAGE_NETWORK => Some(Self::AgentChatPreparationFailure(

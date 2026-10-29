@@ -101,6 +101,12 @@ impl Run<'_> {
         };
         let reserve = || self.reserve_extra_turn();
         let fix_ctx = RunContext {
+            session: Some(crate::session::SessionPort {
+                store: &self.log,
+                node: &fix_id,
+                attempt: ctx.attempt,
+                evidence,
+            }),
             // A fix session writes no file, so there is no contract to go round
             // for and nothing a second turn could change.
             max_turns: 1,

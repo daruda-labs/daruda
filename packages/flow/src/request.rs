@@ -23,6 +23,7 @@ pub enum StartedBy {
 pub struct RunRequest {
     /// Unknown only when continuing a run recorded before origins existed.
     pub started_by: Option<StartedBy>,
+    pub history: crate::session::HistoryContext,
     /// The flow and its graph, which only mean anything as a pair.
     pub loaded: crate::load::LoadedFlow,
     /// The working directory every node shares.

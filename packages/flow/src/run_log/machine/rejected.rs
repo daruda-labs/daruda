@@ -11,6 +11,8 @@ pub enum FlowRunRejected {
     NotRunning,
     #[error("the run cannot be resumed from where it stopped")]
     NotResumable,
+    #[error("the source must be a nonempty worktree-relative path recorded before attempts")]
+    InvalidSource,
     #[error("`{0}` is not a node of this run")]
     UnknownNode(NodeId),
     #[error("`{node}` is in generation {current}, not {proposed}")]

@@ -7,6 +7,15 @@ use gpui::{AnyElement, IntoElement, prelude::*, px};
 mod controls;
 pub(in crate::workspace) mod detail;
 pub(in crate::workspace) mod detail_render;
+pub(in crate::workspace) mod execution_detail;
+mod execution_evidence;
+#[cfg(any(test, feature = "screenshot"))]
+pub(in crate::workspace) mod execution_fixture;
+mod execution_layout;
+mod execution_render;
+mod execution_selection;
+#[cfg(feature = "screenshot")]
+pub(in crate::workspace) mod execution_shots;
 mod files;
 pub(in crate::workspace) mod graph;
 mod graph_menu;
@@ -17,6 +26,7 @@ mod node_ops;
 mod past;
 mod rows;
 mod run_detail;
+mod session_ops;
 mod toolbar;
 
 pub(in crate::workspace) use controls::header;

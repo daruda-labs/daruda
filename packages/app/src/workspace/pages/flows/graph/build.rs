@@ -107,7 +107,7 @@ pub(super) fn build_graph_state(
 /// Build the canvas graph and lay it out. Coordinates are never persisted —
 /// the flow file declares dependencies, not positions — so every open
 /// places the nodes again.
-fn build_canvas_graph(model: &FlowGraphModel, pins: &PinSet) -> (Graph, NodeIds) {
+pub(super) fn build_canvas_graph(model: &FlowGraphModel, pins: &PinSet) -> (Graph, NodeIds) {
     let mut ids: HashMap<NodeId, CanvasNodeId> = HashMap::new();
     let mut inputs = HashMap::new();
     let mut outputs = HashMap::new();

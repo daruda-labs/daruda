@@ -20,6 +20,10 @@ pub(super) fn apply(state: &mut FlowRunState, event: &E) {
             start(state, nodes, until.clone(), pinned.clone(), profile.clone());
             state.start.started_by = *started_by;
         }
+        E::SourceRecorded { source } => state.source = Some(source.clone()),
+        E::SessionBound { binding } => {
+            state.sessions.insert(binding.evidence, binding.clone());
+        }
         E::Imported(imported) => import(state, imported),
         E::Resumed { .. } => {
             for node in state.nodes.values_mut() {

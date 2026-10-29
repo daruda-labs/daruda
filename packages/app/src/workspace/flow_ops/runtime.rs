@@ -170,7 +170,9 @@ fn runners_for(
 ) -> Runners {
     Runners {
         command: ProcessRunner::new(union_strip_env(&request.agents)),
-        agent: AcpRunner::new(request.agents.clone(), node_install_dir).with_overage_stop(overage),
+        agent: AcpRunner::new(request.agents.clone(), node_install_dir)
+            .with_accounts(request.history.accounts.clone())
+            .with_overage_stop(overage),
     }
 }
 
@@ -203,6 +205,7 @@ nodes:
     fn request_with(strip: &[&str]) -> RunRequest {
         let loaded = daruda_flow::load(MIXED_FLOW, None).expect("the fixture flow loads");
         RunRequest {
+            history: Default::default(),
             started_by: Some(daruda_flow::request::StartedBy::Desktop),
             until: None,
             pinned: Vec::new(),

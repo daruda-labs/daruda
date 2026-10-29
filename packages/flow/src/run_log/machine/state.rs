@@ -11,6 +11,10 @@ use crate::runner::AskOwner;
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct FlowRunState {
     pub(crate) phase: RunPhase,
+    #[serde(default)]
+    pub(crate) source: Option<std::path::PathBuf>,
+    #[serde(default)]
+    pub(crate) sessions: BTreeMap<u32, crate::session::SessionBinding>,
     pub(crate) start: StartFacts,
     pub(crate) nodes: BTreeMap<NodeId, NodeState>,
     /// The next evidence number; never reused, across resumes too.
@@ -136,6 +140,14 @@ pub struct OpenAsk {
 }
 
 impl FlowRunState {
+    pub fn source(&self) -> Option<&std::path::Path> {
+        self.source.as_deref()
+    }
+
+    pub fn sessions(&self) -> impl Iterator<Item = &crate::session::SessionBinding> {
+        self.sessions.values()
+    }
+
     pub fn phase(&self) -> RunPhase {
         self.phase
     }

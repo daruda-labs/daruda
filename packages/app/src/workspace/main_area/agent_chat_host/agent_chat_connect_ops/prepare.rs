@@ -144,6 +144,25 @@ impl Workspace {
         let is_remote = resolved_host
             .as_ref()
             .is_some_and(LaneSessionHost::is_remote);
+        if is_remote
+            && self
+                .main_area
+                .pane(pane_id)
+                .and_then(|pane| pane.agent_chat_content())
+                .is_some_and(|chat| chat.restore.requires_exact())
+        {
+            if let Some(view) = self.agent_chat_view(pane_id).cloned() {
+                view.update(cx, |view, cx| {
+                    view.set_error(
+                        s::flow::session_identity_missing(),
+                        daruda_acp::Remedy::Configure,
+                        cx,
+                    )
+                });
+            }
+            self.notify_status_docks(cx);
+            return None;
+        }
         let selection = self.agent_chat_account_selection(pane_id);
         let domain = crate::workspace::main_area::pane::AccountDomain::for_agent(
             account_recipe_for_connect(&launch, is_remote),

@@ -39,6 +39,21 @@ enum Sink {
     Closed,
 }
 
+/// The modern name cannot collide with an archived Markdown output.
+pub(crate) fn paths(
+    log_dir: &Path,
+    node: &crate::NodeId,
+    attempt: u32,
+    evidence: u32,
+) -> [PathBuf; 2] {
+    [
+        log_dir.join(format!(
+            "{node}.attempt-{attempt}.evidence-{evidence}.transcript.md"
+        )),
+        log_dir.join(format!("{node}.attempt-{attempt}.evidence-{evidence}.md")),
+    ]
+}
+
 pub(super) struct Transcript {
     sink: Sink,
     path: PathBuf,
@@ -54,9 +69,7 @@ impl Transcript {
         attempt: u32,
         evidence_seq: u32,
     ) -> Self {
-        let path = log_dir.join(format!(
-            "{node_id}.attempt-{attempt}.evidence-{evidence_seq}.md"
-        ));
+        let [path, _legacy] = paths(log_dir, node_id, attempt, evidence_seq);
         let sink = std::fs::create_dir_all(log_dir)
             .and_then(|()| std::fs::File::create(&path))
             .map_or(Sink::Unavailable, Sink::Open);
@@ -193,6 +206,32 @@ mod tests {
         Transcript::create(dir, &"design".into(), 1, 7)
     }
 
+    #[test]
+    fn an_archived_markdown_output_cannot_replace_its_transcript() {
+        let dir = tempfile::tempdir().unwrap();
+        let logs = dir.path().join("logs");
+        let node = crate::NodeId::from("design");
+        let mut transcript = Transcript::create(&logs, &node, 1, 7);
+        transcript.prompt("keep this conversation");
+        let output = dir.path().join("design.md");
+        std::fs::write(&output, "failed output").unwrap();
+        let artifacts = transcript.artifacts();
+        let archived =
+            crate::archive::archive_attempt(&logs, &[(node, Some(output))], 1, 7, &artifacts)
+                .unwrap();
+        assert_eq!(archived.len(), 2);
+        assert_ne!(archived[0], archived[1]);
+        assert_eq!(
+            std::fs::read_to_string(&archived[0]).unwrap(),
+            "failed output"
+        );
+        assert!(
+            std::fs::read_to_string(&archived[1])
+                .unwrap()
+                .contains("keep this conversation")
+        );
+    }
+
     /// The name `ProcessRunner` uses, so the archive handles both alike and
     /// a reader finds a node's log and transcript next to each other.
     #[test]
@@ -200,7 +239,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let t = transcript(dir.path());
         let name = t.path.file_name().unwrap().to_string_lossy().into_owned();
-        assert_eq!(name, "design.attempt-1.evidence-7.md");
+        assert_eq!(name, "design.attempt-1.evidence-7.transcript.md");
         assert_eq!(t.artifacts().len(), 1);
     }
 

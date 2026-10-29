@@ -24,7 +24,7 @@ impl Workspace {
     /// Open the live ACP session for an already-pushed pane and store the
     /// event-pump task on its view; closing the pane drops both. `resume`
     /// carries the persisted session id: `Some` branches `session/load`,
-    /// `None` starts `session/new`. Only non-task resumes may retry fresh.
+    /// `None` starts `session/new`. Only best-effort resumes may retry fresh.
     pub(in crate::workspace) fn connect_agent_chat(
         &mut self,
         pane_id: PaneId,
@@ -60,16 +60,25 @@ impl Workspace {
             .agent_chat_view(pane_id)
             .and_then(|view| view.read(cx).load_intent());
         let read_only = load_intent.is_some();
+        let exact_flow = self
+            .main_area
+            .pane(pane_id)
+            .and_then(|pane| pane.agent_chat_content())
+            .is_some_and(|chat| chat.restore.requires_exact());
         let strict_restore = resume.is_some() && self.requires_exact_resume(pane_id, cx);
         let snapshot = load_intent == Some(daruda_chat::view::LoadIntent::Snapshot);
 
         // A CLI snapshot mirrors one exact session; with nothing to load there
         // is nothing to show, and `session/new` would invent a conversation.
-        if read_only && resume.is_none() {
+        if (read_only || exact_flow) && resume.is_none() {
             if let Some(view) = self.agent_chat_view(pane_id).cloned() {
                 view.update(cx, |v, cx| {
                     v.set_error(
-                        s::task::cli_read_only(),
+                        if exact_flow {
+                            s::flow::session_legacy()
+                        } else {
+                            s::task::cli_read_only()
+                        },
                         daruda_acp::Remedy::NoneAvailable,
                         cx,
                     )

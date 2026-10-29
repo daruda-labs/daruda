@@ -2,6 +2,8 @@
 //! draining have separate lifecycle modules behind this public boundary.
 
 mod accounts;
+mod session_restore;
+pub(in crate::workspace) use session_restore::SessionRestore;
 mod output;
 mod terminal;
 mod terminal_content;
@@ -162,6 +164,7 @@ pub(in crate::workspace) struct FileContent {
 /// via `cx` instead, the same way `Pane::is_dirty` / `Pane::can_save` already
 /// read `f.editor_state` / `te.title_input` live for File / TaskEdit content.
 pub(in crate::workspace) struct AgentChatContent {
+    pub(in crate::workspace) restore: SessionRestore,
     /// The self-owned chat view entity. Embedded by the pane walker via
     /// `AnyView::cached(..)`, so its `cx.notify()` dirties only its subtree.
     pub(in crate::workspace) view: Entity<AgentChatView>,

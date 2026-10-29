@@ -436,6 +436,12 @@ impl<'a> Run<'a> {
                     attempt: started.attempt,
                 };
                 let ctx = RunContext {
+                    session: Some(crate::session::SessionPort {
+                        store: &self.log,
+                        node: id,
+                        attempt: started.attempt,
+                        evidence: started.evidence,
+                    }),
                     max_turns: node.kind.max_turns(),
                     node_id: id,
                     attempt: started.attempt,

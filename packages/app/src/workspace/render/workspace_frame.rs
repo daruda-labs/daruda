@@ -83,7 +83,7 @@ impl Workspace {
         // Content area — the active tab's pane layout, the inaccessible-
         // lane empty state, or a blank fallback. Built in `center.rs` so
         // this method stays focused on top-level layout assembly.
-        let center_content = center::render_center_content(self, cx);
+        let center_content = center::render_center_content(self, window, cx);
 
         // BodyLayout: [LeftDock] [MainArea] [RightDock]
         // Resize handles are absolutely positioned overlays centered
@@ -279,6 +279,9 @@ impl Workspace {
             .on_action(cx.listener(Self::on_toggle_right_dock))
             .on_action(cx.listener(Self::on_toggle_command_palette))
             .on_action(cx.listener(Self::on_toggle_lane_switcher))
+            .on_action(cx.listener(Self::on_open_flow_history))
+            .on_action(cx.listener(Self::on_continue_flow_session))
+            .on_action(cx.listener(Self::on_return_to_flow_execution))
             .on_action(cx.listener(Self::on_run_flow))
             .on_action(cx.listener(Self::on_validate_flow))
             .on_action(cx.listener(Self::on_show_flow_graph))

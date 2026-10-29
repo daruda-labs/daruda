@@ -12,7 +12,9 @@ use crate::workspace::pages::PageState;
 
 pub(in crate::workspace) fn render(
     detail: &FlowDetail,
-    page: &PageState,
+    _page: &PageState,
+    session_problem: Option<String>,
+    layout: super::execution_layout::ExecutionLayout,
     cx: &mut Context<Workspace>,
 ) -> AnyElement {
     let id = detail.id;
@@ -38,12 +40,22 @@ pub(in crate::workspace) fn render(
                 AnyView::from(view.clone()).cached(StyleRefinement::default().size_full().flex()),
             )
             .into_any_element(),
-        FlowDetailBody::Run(run) => crate::workspace::pages::render::frame(
-            page,
-            run_header(id, run, cx),
-            run_body(id, run, cx),
-            cx,
-        ),
+        FlowDetailBody::Run(run) => div()
+            .size_full()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .bg(theme::current(cx).dock_bg)
+            .child(run_header(id, run, cx))
+            .child(super::execution_render::body(
+                id,
+                detail.lane,
+                run,
+                layout,
+                session_problem,
+                cx,
+            ))
+            .into_any_element(),
     }
 }
 
@@ -57,9 +69,15 @@ fn run_header(id: FlowDetailId, run: &RunDetail, cx: &mut Context<Workspace>) ->
         .py(px(theme::GAP_SM))
         .child(
             button_icon("flow-run-back", icons::BACK, cx)
-                .tooltip(s::flow::back_to_list())
+                .tooltip(
+                    if run.execution.content == super::execution_detail::ExecutionContent::Report {
+                        s::flow::run_return_to_execution()
+                    } else {
+                        s::flow::back_to_list()
+                    },
+                )
                 .debug_selector(|| "flow-run-back".into())
-                .on_click(cx.listener(|ws, _, window, cx| ws.back_to_flow_list(window, cx))),
+                .on_click(cx.listener(|ws, _, window, cx| ws.back_from_execution(window, cx))),
         )
         .child(
             div()
@@ -67,26 +85,50 @@ fn run_header(id: FlowDetailId, run: &RunDetail, cx: &mut Context<Workspace>) ->
                 .min_w_0()
                 .truncate()
                 .text_color(t.text_primary)
-                .child(s::flow::run_report_title()),
+                .child(
+                    div().child(match &run.execution.inspection {
+                        super::execution_detail::Inspection::Ready(h) => h
+                            .source
+                            .as_ref()
+                            .and_then(|p| p.file_stem())
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_else(s::flow::run_history_title),
+                        _ => s::flow::run_history_title(),
+                    }),
+                )
+                .child(
+                    div()
+                        .text_size(px(theme::FONT_SIZE_SM))
+                        .text_color(t.text_muted)
+                        .child(s::flow::run_history_title()),
+                ),
         )
         .child(
             div()
                 .flex_none()
                 .text_size(px(theme::FONT_SIZE_SM))
                 .text_color(t.text_muted)
-                .child(run.started.clone()),
+                .child(match &run.execution.inspection {
+                    super::execution_detail::Inspection::Ready(history) => {
+                        super::execution_render::presentation::started(history.started_at)
+                    }
+                    _ => run.started.to_string(),
+                }),
         )
         .child(
-            button_icon("flow-run-open-file", icons::FOLDER_OPEN, cx)
-                .tooltip(s::flow::run_report_open_file())
-                .on_click(
-                    cx.listener(move |ws, _, window, cx| ws.open_run_report_file(id, window, cx)),
-                ),
+            button_icon("flow-execution-refresh", icons::REFRESH, cx)
+                .tooltip(s::flow::run_refresh())
+                .on_click(cx.listener(move |ws, _, _, cx| ws.refresh_execution(id, cx))),
+        )
+        .child(
+            button_icon("flow-run-open-file", icons::SKILL, cx)
+                .tooltip(s::flow::run_report_title())
+                .on_click(cx.listener(move |ws, _, _, cx| ws.show_execution_report(id, cx))),
         )
         .into_any_element()
 }
 
-fn run_body(id: FlowDetailId, run: &RunDetail, cx: &mut Context<Workspace>) -> AnyElement {
+pub(super) fn run_body(id: FlowDetailId, run: &RunDetail, cx: &gpui::App) -> AnyElement {
     let muted = theme::current(cx).text_muted;
     match &run.report {
         RunReport::Loading => div()

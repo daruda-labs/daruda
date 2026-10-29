@@ -242,6 +242,7 @@ impl Fixture {
 
     fn context(&self) -> RunContext<'_> {
         RunContext {
+            session: None,
             // Two: the first prompt and the one extra the correction turn always
             // allowed. A test that wants a longer loop raises it.
             max_turns: self.max_turns,

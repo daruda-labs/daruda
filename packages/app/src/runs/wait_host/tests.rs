@@ -23,6 +23,7 @@ async fn real_flow_thread_and_two_tasks_each_deliver_once(cx: &mut TestAppContex
     let (asks_tx, asks) = smol::channel::unbounded();
     let run_dir = dir.path().join("flow-result");
     let request = RunRequest {
+        history: Default::default(),
         started_by: Some(daruda_flow::request::StartedBy::Orchestrator),
         loaded: daruda_flow::load(
             "version: 1\nnodes:\n  - id: check\n    kind: command\n    run: \"echo done\"\n",
@@ -258,6 +259,7 @@ async fn resumed_pins_describe_live_and_retained_results_like_disk(cx: &mut Test
     let (events_tx, events) = smol::channel::unbounded();
     let (asks_tx, asks) = smol::channel::unbounded();
     let request = RunRequest {
+        history: Default::default(),
         started_by: resumed.started_by,
         loaded: resumed.loaded,
         cwd: dir.path().into(),

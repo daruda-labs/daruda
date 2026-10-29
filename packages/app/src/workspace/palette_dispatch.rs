@@ -1,6 +1,8 @@
 //! Command-palette key handling and dispatch: maps the focused palette
 //! row to the action it names.
 
+use crate::workspace::{ContinueFlowSession, OpenFlowHistory, ReturnToFlowExecution};
+
 use gpui::{Context, Window};
 
 use super::command::picker::PickerKey;
@@ -120,6 +122,13 @@ impl Workspace {
                 }
                 "toggle_lane_switcher" => {
                     self.on_toggle_lane_switcher(&ToggleLaneSwitcher, window, cx);
+                }
+                "open_flow_history" => self.on_open_flow_history(&OpenFlowHistory, window, cx),
+                "continue_flow_session" => {
+                    self.on_continue_flow_session(&ContinueFlowSession, window, cx)
+                }
+                "return_to_flow_execution" => {
+                    self.on_return_to_flow_execution(&ReturnToFlowExecution, window, cx)
                 }
                 "run_flow" => self.on_run_flow(&RunFlow, window, cx),
                 "validate_flow" => self.on_validate_flow(&ValidateFlow, window, cx),

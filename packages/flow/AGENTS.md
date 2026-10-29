@@ -26,6 +26,9 @@ The run's lock lives outside the tree, under the host's lock root
 - **Intent before an irreversible effect.** Commit `AttemptStarted` before a
   session is paid for, `Invalidated` before outputs are archived, `FixStarted`
   before a fix runs, `AskRaised` before a host sees a question.
+- **Session before prompt.** Commit `SessionBound` after ACP connects and before
+  sending the first prompt. Keep account references opaque; never record credentials.
+  New transcripts use `.transcript.md` so Markdown output archives cannot collide.
 - **Files before the record naming them.** Sync an output, or the directories
   of a rename, off the run thread (`schedule/durable.rs`) before committing the
   pass, failure or cancel that refers to it.

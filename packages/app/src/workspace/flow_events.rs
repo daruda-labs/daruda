@@ -96,6 +96,24 @@ impl Workspace {
         }
         let lanes = self.lanes_at(&change.worktree, cx);
         let lane = lanes.first().copied();
+        if self.active_page() == Some(super::pages::Page::Flows)
+            && matches!(
+                change.what,
+                FlowChanged::Ended(_) | FlowChanged::Progressed { .. }
+            )
+            && let Some(detail) = &self.pages.flows.detail
+            && lanes.contains(&detail.lane)
+            && matches!(
+                detail.body,
+                super::pages::flows::detail::FlowDetailBody::Run(_)
+            )
+        {
+            if matches!(change.what, FlowChanged::Ended(_)) {
+                self.refresh_execution(detail.id, cx);
+            } else {
+                self.refresh_execution_progress(detail.id, cx);
+            }
+        }
         match (&change.what, lane) {
             (FlowChanged::Ended(ended), lane) => {
                 for &held in &lanes {

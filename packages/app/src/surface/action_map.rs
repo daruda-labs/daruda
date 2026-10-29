@@ -1,6 +1,8 @@
 //! Maps user-facing action name strings from config to concrete GPUI
 //! `Action` instances. Called at startup to apply keybinding overrides.
 
+use crate::workspace::{ContinueFlowSession, OpenFlowHistory, ReturnToFlowExecution};
+
 use gpui::KeyBinding;
 
 use crate::workspace::{
@@ -96,6 +98,9 @@ pub fn apply_keybinding_overrides(
             "toggle_right_dock" => ToggleRightDock,
             "toggle_command_palette" => ToggleCommandPalette,
             "toggle_lane_switcher" => ToggleLaneSwitcher,
+            "open_flow_history" => OpenFlowHistory,
+            "continue_flow_session" => ContinueFlowSession,
+            "return_to_flow_execution" => ReturnToFlowExecution,
             "run_flow" => RunFlow,
             "validate_flow" => ValidateFlow,
             "show_flow_graph" => ShowFlowGraph,

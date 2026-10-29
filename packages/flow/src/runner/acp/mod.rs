@@ -20,6 +20,7 @@ mod transcript;
 pub use overage::OverageStop;
 use settings::{Announcement, announced, check_mode};
 use transcript::Transcript;
+pub(crate) use transcript::paths as transcript_paths;
 
 /// What a turn leaves behind besides its verdict, and the clock it ran
 /// against. Every field is written from inside the stream reader or read
@@ -77,6 +78,7 @@ pub struct AcpRunner {
     settings_budget: Duration,
     prepared: RefCell<HashMap<String, PreparedAdapter>>,
     overage: OverageStop,
+    accounts: HashMap<String, crate::session::SessionAccount>,
 }
 
 impl AcpRunner {
@@ -121,7 +123,16 @@ impl AcpRunner {
             settings_budget: SETTINGS_BUDGET,
             prepared: RefCell::new(HashMap::new()),
             overage: OverageStop::default(),
+            accounts: HashMap::new(),
         }
+    }
+
+    pub fn with_accounts(
+        mut self,
+        accounts: HashMap<String, crate::session::SessionAccount>,
+    ) -> Self {
+        self.accounts = accounts;
+        self
     }
 
     /// How long a cancelled turn is given to end itself before the session is
@@ -268,6 +279,15 @@ impl AcpRunner {
         rec: &Recording<'_>,
     ) -> Result<(), NodeFailure> {
         let connected = announced(events, rec.usage, Announcement::Connected).await?;
+        if let (Some(port), Some(id)) = (&ctx.session, connected.session_id) {
+            port.record(
+                &agent.id,
+                self.accounts.get(&agent.id).cloned(),
+                ctx.cwd,
+                id,
+            )
+            .await?;
+        }
         // Before the other two, because a mode that silently degraded is the
         // one axis that changes what the agent is *allowed* to do.
         check_mode(agent, connected.modes.as_ref())?;

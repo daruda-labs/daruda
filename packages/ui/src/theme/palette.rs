@@ -836,6 +836,14 @@ pub const FLOW_GRAPH_KIND_DOT: f32 = 6.0;
 pub const FLOW_GRAPH_FRAME_MARGIN: f32 = 0.08;
 pub const FLOW_GRAPH_FRAME_MIN_ZOOM: f32 = 0.2;
 pub const FLOW_INSPECTOR_W: f32 = 340.0;
+/// Execution history keeps graph overview above the attempt inspector.
+/// Canvas travel per logical wheel line; pixel-based trackpad deltas are unchanged.
+pub const FLOW_GRAPH_SCROLL_LINE_PX: f32 = 24.0;
+pub const FLOW_RUN_GRAPH_H: f32 = 260.0;
+pub const FLOW_RUN_HISTORY_W: f32 = 220.0;
+// Content budget for the saved conversation and its fixed continuation footer.
+pub const FLOW_RUN_INSPECTOR_W: f32 = 398.0;
+pub const FLOW_RUN_OVERVIEW_MIN_W: f32 = 280.0;
 pub const FLOW_INSPECTOR_GAP: f32 = PAD_LG;
 pub const FLOW_INSPECTOR_PAD: f32 = PAD_LG;
 pub const FLOW_INSPECTOR_PROMPT_ROWS: usize = 5;

@@ -675,7 +675,7 @@ impl daruda_runlog::Machine for SchemaOne {
 }
 
 #[test]
-fn schema_two_accepts_legacy_logs_and_schema_one_refuses_new_logs() {
+fn current_schema_accepts_legacy_logs_and_schema_one_refuses_new_logs() {
     use daruda_runlog::{FileBackend, OpenError, RunLog, Versioned};
     let legacy = tempfile::tempdir().expect("tempdir");
     let mut log =
@@ -697,7 +697,7 @@ fn schema_two_accepts_legacy_logs_and_schema_one_refuses_new_logs() {
         RunLog::<SchemaOne, _>::open(backend, "old"),
         Err(OpenError::TooNew {
             what: Versioned::Schema,
-            found: 2,
+            found: 3,
             supported: 1
         })
     ));

@@ -282,6 +282,12 @@ fn begin(request: &RunRequest, warnings: &mut Vec<String>) -> Result<Begun, RunO
         profile: request.loaded.flow().profile.clone(),
     };
     smol::block_on(store.commit(started)).map_err(|e| store.failure(IoSite::Run, e))?;
+    if let Some(source) = &request.history.source {
+        smol::block_on(store.commit(FlowRunEvent::SourceRecorded {
+            source: source.clone(),
+        }))
+        .map_err(|e| store.failure(IoSite::Run, e))?;
+    }
     Ok(Begun {
         store,
         pinned,

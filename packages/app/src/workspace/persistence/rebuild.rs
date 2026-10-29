@@ -74,7 +74,8 @@ impl Workspace {
                         // owning agent when still in the catalog (session id kept),
                         // else the default agent (session id dropped — it belongs
                         // to a now-absent agent and could not resume).
-                        let task_chat = ac.access.is_read_only()
+                        let exact_chat = ac.require_exact_resume
+                            || ac.access.is_read_only()
                             || ac.session_id.is_some()
                                 && cx
                                     .global::<crate::runs::GlobalTasks>()
@@ -96,8 +97,8 @@ impl Workspace {
                                                     })
                                         })
                                     });
-                        // A task's conversation must never switch agent or account on restore.
-                        let (agent_id, keep_session) = if task_chat {
+                        // Exact conversations must never switch agent or account on restore.
+                        let (agent_id, keep_session) = if exact_chat {
                             // A record without an agent is hand-edited; the
                             // default agent is where every other pane lands.
                             let agent = ac.agent_id.clone().unwrap_or_else(|| {
@@ -125,12 +126,16 @@ impl Workspace {
                         );
                         // The constructor seeds the domain default — patch in
                         // the persisted selection now that the pane exists.
-                        let account = if task_chat {
+                        let account = if exact_chat {
                             daruda_store::accounts::AccountSelection::from_persisted(ac.account_id)
                         } else {
                             restored_agent_account(ac.account_id, pane_recipe, &self.accounts)
                         };
                         if let Some(content) = restored.agent_chat_content_mut() {
+                            content.restore =
+                                crate::workspace::main_area::pane::SessionRestore::from_required(
+                                    ac.require_exact_resume,
+                                );
                             content
                                 .view
                                 .update(cx, |view, _| view.set_access(ac.access.clone()));

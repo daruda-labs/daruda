@@ -116,6 +116,7 @@ pub(super) fn check_mode(
 /// What one announcement carried. `modes` only ever arrives with
 /// `Connected` — `ConfigOptionsChanged` replaces options, not modes.
 pub(super) struct Announced {
+    pub(super) session_id: Option<String>,
     pub(super) options: Vec<ConfigOptionView>,
     pub(super) modes: Option<ModeStateView>,
 }
@@ -199,17 +200,20 @@ pub(super) async fn announced(
         };
         match event {
             AcpEvent::Connected {
+                session_id,
                 config_options,
                 modes,
                 ..
             } if wanted == Announcement::Connected => {
                 return Ok(Announced {
+                    session_id: Some(session_id),
                     options: config_options,
                     modes,
                 });
             }
             AcpEvent::ConfigOptionsChanged(options) if wanted == Announcement::OptionsChanged => {
                 return Ok(Announced {
+                    session_id: None,
                     options,
                     modes: None,
                 });
