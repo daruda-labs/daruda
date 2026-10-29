@@ -127,4 +127,7 @@ impl FlowGraphView {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    // Candidates are computed and tested in `inspector::links`; picker wiring
+    // is covered by the workspace authoring tests.
+}

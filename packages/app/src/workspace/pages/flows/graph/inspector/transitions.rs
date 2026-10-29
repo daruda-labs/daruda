@@ -12,15 +12,21 @@ impl InspectorModel {
         if self.selected() == node.as_ref() {
             return Effects::default();
         }
+        let mut fresh = false;
         self.selection = node
             .and_then(|id| {
                 if !self.drafts.contains_key(&id) {
                     let draft = NodeDraft::new(self.baseline.clone()?, id.clone())?;
                     self.drafts.insert(id.clone(), draft);
+                    fresh = true;
                 }
                 Some(Selection::Node(id))
             })
             .unwrap_or_default();
+        // A returning draft keeps the sections its person left open or shut.
+        if fresh {
+            self.open_for_notes();
+        }
         self.reconcile_notice();
         self.debug_assert_invariants();
         Effects {
@@ -30,12 +36,16 @@ impl InspectorModel {
         }
     }
 
-    pub(in crate::workspace) fn reload(&mut self, text: Option<Arc<str>>) -> Effects {
-        let next = text.map(Baseline::new);
+    pub(in crate::workspace) fn reload(
+        &mut self,
+        text: Option<Arc<str>>,
+        issues: Vec<daruda_flow::error::ValidationIssue>,
+    ) -> Effects {
+        let next = text.map(|text| Baseline::new(text, issues));
         let wanted = self.selected().or(self.remembered()).cloned();
         let mut rebind = false;
         let Some(base) = next.as_ref().filter(|b| b.file().is_some()) else {
-            self.drafts.retain(|_, draft| draft.has_input());
+            self.drafts.retain(|_, draft| draft.has_unsaved_typing());
             self.baseline = next;
             self.selection = wanted.map(Selection::Remembered).unwrap_or_default();
             self.reconcile_notice();
@@ -48,7 +58,7 @@ impl InspectorModel {
         let mut discarded = self.discarded.clone();
         self.drafts.retain(|id, draft| {
             if base.node(id).is_none() {
-                if draft.has_input() && !discarded.contains(id) {
+                if draft.has_unsaved_typing() && !discarded.contains(id) {
                     discarded.push(id.clone());
                 }
                 rebind |= wanted.as_ref() == Some(id);
@@ -57,7 +67,7 @@ impl InspectorModel {
             if draft.matches(base) {
                 draft.adopt(base.clone());
                 true
-            } else if draft.has_input() {
+            } else if draft.has_unsaved_typing() {
                 true
             } else {
                 rebind |= wanted.as_ref() == Some(id);
@@ -95,20 +105,21 @@ impl InspectorModel {
         let Some(after) = self.baseline.clone().filter(|b| b.file().is_some()) else {
             return Effects::default();
         };
-        let before = Baseline::new(Arc::from(before));
+        let before = Baseline::bare(Arc::from(before));
         let selected_before = self.draft().map(|d| d.raw().clone());
+        let selection_deleted = self.selected().is_some_and(|id| deleted.contains(id));
         self.drafts.retain(|id, _| !deleted.contains(id));
         for draft in self.drafts.values_mut() {
             draft.rebase_onto(&before, &after, deleted);
         }
         self.discarded.retain(|id| !deleted.contains(id));
-        if self.selected().is_some_and(|id| deleted.contains(id)) {
+        if selection_deleted {
             self.selection = Selection::None;
         }
         self.reconcile_notice();
         self.debug_assert_invariants();
         Effects {
-            rebind: false,
+            rebind: selection_deleted,
             refresh_links: selected_before != self.draft().map(|d| d.raw().clone()),
             ..Effects::default()
         }
@@ -159,9 +170,12 @@ impl InspectorModel {
     }
 
     pub(in crate::workspace) fn file_lost(&mut self) -> Effects {
-        self.reload(None)
+        self.reload(None, Vec::new())
     }
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    // Every transition is exercised in `inspector::tests`, which checks the
+    // invariants after each step.
+}

@@ -12,7 +12,7 @@ impl InspectorModel {
         let mut file = self.baseline.as_ref()?.file()?.clone();
         for (id, mut fields) in self.pending_fields() {
             fields.id = id.to_string();
-            super::super::form::apply::node_fields(&mut file, &id, &fields);
+            super::apply::node_fields(&mut file, &id, &fields);
         }
         Some(candidates(&file, draft.node(), &draft.fields().deps))
     }

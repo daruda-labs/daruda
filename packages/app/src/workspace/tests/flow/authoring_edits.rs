@@ -494,8 +494,10 @@ async fn a_refused_save_selects_the_drafted_node_it_names(cx: &mut TestAppContex
         let form = v.form().unwrap();
         assert_eq!(form.node, daruda_flow::NodeId::from("design"));
         assert!(
-            form.note_for_test(crate::workspace::pages::flows::graph::form::notes::FormField::Deps)
-                .is_some()
+            form.note_for_test(
+                crate::workspace::pages::flows::graph::inspector::notes::FormField::Deps
+            )
+            .is_some()
         );
     });
 }

@@ -92,4 +92,7 @@ impl super::super::FlowGraphView {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    // The modal needs a window; the workspace authoring tests open, apply and
+    // dismiss it.
+}

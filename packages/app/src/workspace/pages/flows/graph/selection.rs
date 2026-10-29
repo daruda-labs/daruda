@@ -99,7 +99,9 @@ impl FlowGraphView {
             Selection::One(node) => Some(node),
             Selection::None | Selection::Many(_) => None,
         };
-        if wanted == self.form.as_ref().map(|form| form.node.clone()) {
+        // Canvas → model → widgets, one way: the model's selection is the
+        // only thing compared, so the binding never decides what is selected.
+        if wanted.as_ref() == self.inspector.selected() {
             return;
         }
         self.sync_form(cx);

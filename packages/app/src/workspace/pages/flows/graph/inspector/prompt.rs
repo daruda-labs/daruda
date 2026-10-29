@@ -66,4 +66,7 @@ impl InspectorModel {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    // Covered by `inspector::tests::delayed_prompts_*`, beside the other
+    // transitions it must agree with.
+}

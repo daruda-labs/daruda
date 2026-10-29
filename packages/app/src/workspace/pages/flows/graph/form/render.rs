@@ -469,14 +469,14 @@ fn execution_section(
             .justify_start()
             .tab_stop(true)
             .tab_index(19)
-            .icon(crate::ui::icons::icon(if form.settings_open {
+            .icon(crate::ui::icons::icon(if form.settings_open() {
                 crate::ui::icons::EXPAND_MORE
             } else {
                 crate::ui::icons::CHEVRON_RIGHT
             }))
             .on_click(cx.listener(|view, _, _, cx| view.toggle_execution_section(cx))),
         );
-    if form.settings_open {
+    if form.settings_open() {
         let body = form.body_states(cx);
         section =
             section

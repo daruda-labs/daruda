@@ -1,10 +1,9 @@
 //! Widgets for the selected node. InspectorModel owns input and draft lifetime.
 //!
 //! `binding` projects named raw values onto widgets and reads user input back;
-//! `render` builds the inspector column. The GPUI-free `apply` module retains
-//! the existing mapping from editable values to the flow file.
+//! `render` builds the inspector column. The mapping onto the flow file and the
+//! field notes live in the GPUI-free `inspector` module.
 
-pub(in crate::workspace) mod apply;
 mod binding;
 pub(in crate::workspace) mod catalog;
 mod choice;
@@ -12,7 +11,7 @@ mod editor;
 pub(in crate::workspace) use super::inspector::fields;
 mod file_picker;
 mod links;
-pub(in crate::workspace) mod notes;
+use super::inspector::notes;
 pub(in crate::workspace) mod prompt_edit;
 mod render;
 #[cfg(feature = "screenshot")]
@@ -90,7 +89,6 @@ pub(in crate::workspace) struct FormBinding {
     /// The node this form was built for, by the id the **file** holds. The
     /// rename case is why this is kept separately from the `id` field.
     pub(in crate::workspace) node: NodeId,
-    applying: std::rc::Rc<std::cell::Cell<usize>>,
     id: Entity<InputState>,
     deps: Entity<InputState>,
     pub(super) dep_picker: Entity<crate::ui::select::SelectState>,
@@ -103,41 +101,24 @@ pub(in crate::workspace) struct FormBinding {
     pub(super) timeout_choice: Entity<choice::Choice>,
     pub(super) turns_choice: Entity<choice::Choice>,
     inherited: daruda_flow::parse::AgentOverride,
-    pub(super) settings_open: bool,
     /// Result targets focused since the form was built. Until then the caret
     /// is the one `set_value` left at the start, not one the person placed.
     placed_carets: Vec<gpui::EntityId>,
     body: Body,
-    /// Whether the override block is open. Closed by default — most nodes take
-    /// `defaults` and have nothing here to look at.
-    agent_open: bool,
-    /// The same refusal, split out to the boxes it is about. Empty when nothing
-    /// was refused, or when what was refused is about the flow rather than a box.
-    notes: Vec<notes::FieldNote>,
-    /// Why the last save did not reach the file, in the words whoever refused it
-    /// used. Held here rather than toasted: with fifteen fields, "the flow would
-    /// not load" is only useful next to the fields it is about.
-    banner: Option<String>,
+    /// Sections, banner and field notes as the model last projected them.
+    /// Written only by [`Self::project_chrome`]; never edited here.
+    chrome: super::inspector::FormChrome,
 }
 
 impl FormBinding {
     /// Construct widgets from the draft's cached baseline and its standing issues.
     pub(super) fn build<T: 'static>(
         draft: &super::inspector::NodeDraft,
-        issues: &[daruda_flow::error::ValidationIssue],
         window: &mut Window,
         cx: &mut Context<T>,
     ) -> Self {
         let node = draft.node();
         let initial = draft.initial_fields();
-        let notes = notes::notes_for(issues, node);
-        // Same rule `set_notes` follows: a note about the override block is no
-        // note at all while the block is closed, which is how it opens by
-        // default only when there is something to see.
-        let agent_open = !initial.agent.is_empty()
-            || notes
-                .iter()
-                .any(|note| note.field == notes::FormField::Agent);
 
         let id = single_line(&initial.id, window, cx);
         let deps = single_line(&initial.deps.join(", "), window, cx);
@@ -205,9 +186,8 @@ impl FormBinding {
             .collect();
         let timeout_choice = suggested(&timeout, &["5m", "10m", "30m", "1h"], 20, window, cx);
         let turns_choice = suggested(&max_turns, &["1", "3", "5", "10"], 22, window, cx);
-        let mut form = Self {
+        Self {
             node: node.clone(),
-            applying: Default::default(),
             id,
             deps,
             dep_picker: cx.new(|cx| {
@@ -224,17 +204,10 @@ impl FormBinding {
             timeout_choice,
             turns_choice,
             inherited,
-            settings_open: false,
             placed_carets: Vec::new(),
             body,
-            // Opened when the node already overrides something — there is
-            // something to see — and closed when it does not.
-            agent_open,
-            banner: None,
-            notes,
-        };
-        form.set_notes(form.notes.clone());
-        form
+            chrome: Default::default(),
+        }
     }
 
     pub(super) fn refresh_choices(
@@ -282,38 +255,19 @@ impl FormBinding {
         super::inspector::fields::refusal_of(&self.fields(cx))
     }
 
-    /// What to say about the last save, if it was refused.
+    /// What to say about the last save, if it was refused. Held beside the
+    /// fields rather than toasted: with fifteen fields, "the flow would not
+    /// load" is only useful next to the fields it is about.
     pub(in crate::workspace) fn banner(&self) -> Option<&str> {
-        self.banner.as_deref()
+        self.chrome.banner.as_deref()
     }
 
-    /// Put a refusal on the form, or clear it. Cleared at the start of every
-    /// save attempt, so what is shown is always about the latest one.
-    pub(super) fn set_banner(&mut self, message: Option<String>) {
-        self.banner = message;
-    }
-
-    /// The same refusal, pinned to the boxes it names.
-    ///
-    /// A note about the agent override opens that block: it is closed by default,
-    /// and a capture found the pointer hidden behind it — which is the same as
-    /// not pointing.
-    pub(super) fn set_notes(&mut self, notes: Vec<notes::FieldNote>) {
-        if notes
-            .iter()
-            .any(|note| note.field == notes::FormField::Agent)
-        {
-            self.agent_open = true;
-        }
-        if notes.iter().any(|note| {
-            matches!(
-                note.field,
-                notes::FormField::Cwd | notes::FormField::Fix | notes::FormField::Rerun
-            )
-        }) {
-            self.settings_open = true;
-        }
-        self.notes = notes;
+    /// Show what the model decided about sections, banner and notes.
+    pub(in crate::workspace::pages::flows::graph) fn project_chrome(
+        &mut self,
+        chrome: super::inspector::FormChrome,
+    ) {
+        self.chrome = chrome;
     }
 
     /// What to say under `field`, for a test that is about where a refusal
@@ -325,7 +279,8 @@ impl FormBinding {
 
     /// What to say under `field`, if anything.
     pub(super) fn note_for(&self, field: notes::FormField) -> Option<&str> {
-        self.notes
+        self.chrome
+            .notes
             .iter()
             .find(|note| note.field == field)
             .map(|note| note.message.as_str())
@@ -340,11 +295,11 @@ impl FormBinding {
     }
 
     pub(in crate::workspace) fn agent_open(&self) -> bool {
-        self.agent_open
+        self.chrome.agent_open
     }
 
-    pub(super) fn toggle_agent_open(&mut self) {
-        self.agent_open = !self.agent_open;
+    pub(in crate::workspace) fn settings_open(&self) -> bool {
+        self.chrome.settings_open
     }
 
     pub(in crate::workspace) fn id_state(&self) -> &Entity<InputState> {

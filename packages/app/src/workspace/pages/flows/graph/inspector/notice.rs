@@ -17,4 +17,7 @@ pub(in crate::workspace) enum Notice {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    // A plain enum; which notice stands when is a model rule, tested in
+    // `inspector::tests`.
+}

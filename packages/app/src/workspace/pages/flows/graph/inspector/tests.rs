@@ -1,4 +1,5 @@
 //! Transition contracts run without constructing an app, window or entity.
+use super::model::SaveBlock;
 use super::*;
 use daruda_flow::{
     NodeId,
@@ -8,7 +9,7 @@ use daruda_flow::{
 const FLOW: &str = "version: 1\nnodes:\n  - id: design\n    kind: agent\n    prompt: write\n    output: design.md\n  - id: build\n    deps: [design]\n    kind: command\n    run: echo ok\n";
 
 fn model() -> InspectorModel {
-    let mut model = InspectorModel::new(Some(FLOW.into()));
+    let mut model = InspectorModel::new(Some(FLOW.into()), Vec::new());
     model.select(Some("design".into()));
     model.assert_invariants();
     model
@@ -42,7 +43,10 @@ fn selecting_a_node_creates_one_owned_draft_and_keeps_input_across_switches() {
 fn unrelated_reload_moves_the_baseline_and_keeps_the_binding() {
     let mut model = model();
     edit(&mut model, |raw| raw.output = "draft.md".into());
-    let effects = model.reload(Some(FLOW.replace("echo ok", "echo updated").into()));
+    let effects = model.reload(
+        Some(FLOW.replace("echo ok", "echo updated").into()),
+        Vec::new(),
+    );
     assert!(!effects.rebind);
     assert!(effects.refresh_links);
     assert!(!model.status().conflict);
@@ -57,14 +61,17 @@ fn a_changed_node_conflicts_until_its_original_revision_returns() {
     edit(&mut model, |raw| raw.output = "draft.md".into());
     assert!(
         !model
-            .reload(Some(FLOW.replace("prompt: write", "prompt: theirs").into()))
+            .reload(
+                Some(FLOW.replace("prompt: write", "prompt: theirs").into()),
+                Vec::new()
+            )
             .rebind
     );
     assert!(matches!(model.notice(), Some(Notice::Conflict)));
     assert!(matches!(model.save_plan(), Err(SaveBlock::Conflict)));
     edit(&mut model, |raw| raw.output = "design.md".into());
     assert!(model.status().node_revertable);
-    model.reload(Some(FLOW.into()));
+    model.reload(Some(FLOW.into()), Vec::new());
     assert!(!model.status().conflict);
     assert!(model.notice().is_none());
     model.assert_invariants();
@@ -75,7 +82,10 @@ fn untouched_changed_nodes_are_rebuilt_without_conflict() {
     let mut model = model();
     assert!(
         model
-            .reload(Some(FLOW.replace("prompt: write", "prompt: theirs").into()))
+            .reload(
+                Some(FLOW.replace("prompt: write", "prompt: theirs").into()),
+                Vec::new()
+            )
             .rebind
     );
     assert_eq!(model.draft().unwrap().raw().prompt_inline, "theirs");
@@ -89,7 +99,7 @@ fn deleted_drafts_are_named_and_never_block_save() {
     let mut model = model();
     edit(&mut model, |raw| raw.output = "draft.md".into());
     let only_build = "version: 1\nnodes:\n  - id: build\n    kind: command\n    run: echo ok\n";
-    assert!(model.reload(Some(only_build.into())).rebind);
+    assert!(model.reload(Some(only_build.into()), Vec::new()).rebind);
     assert!(model.selected().is_none());
     assert!(
         matches!(model.notice(), Some(Notice::Discarded(ids)) if ids == &[NodeId::from("design")])
@@ -103,10 +113,10 @@ fn file_loss_and_parse_failure_remember_input_and_restore_selection() {
     for unreadable in [None, Some("nodes: [".into())] {
         let mut model = model();
         edit(&mut model, |raw| raw.output = "draft.md".into());
-        assert!(model.reload(unreadable).rebind);
+        assert!(model.reload(unreadable, Vec::new()).rebind);
         assert!(model.selected().is_none());
         assert_eq!(model.remembered(), Some(&"design".into()));
-        let effects = model.reload(Some(FLOW.into()));
+        let effects = model.reload(Some(FLOW.into()), Vec::new());
         assert!(effects.rebind);
         assert_eq!(effects.select_on_canvas, Some("design".into()));
         assert_eq!(model.draft().unwrap().raw().output, "draft.md");
@@ -125,7 +135,7 @@ fn canvas_edits_merge_edge_deltas_and_clear_deleted_references_in_hidden_drafts(
     });
     model.select(Some("design".into()));
     let next = FLOW.replace("deps: [design]", "deps: []");
-    model.reload(Some(next.into()));
+    model.reload(Some(next.into()), Vec::new());
     model.canvas_edit(&[], FLOW);
     model.select(Some("build".into()));
     assert_eq!(model.draft().unwrap().raw().deps, "typed");
@@ -133,7 +143,7 @@ fn canvas_edits_merge_edge_deltas_and_clear_deleted_references_in_hidden_drafts(
     assert!(!model.status().conflict);
     let before = model.draft().unwrap().source().to_string();
     let only_build = "version: 1\nnodes:\n  - id: build\n    kind: command\n    run: echo ok\n";
-    model.reload(Some(only_build.into()));
+    model.reload(Some(only_build.into()), Vec::new());
     model.canvas_edit(&["design".into()], &before);
     assert_eq!(model.draft().unwrap().raw().rerun, "typed");
     assert!(model.notice().is_none());
@@ -145,8 +155,11 @@ fn an_external_conflict_is_not_rebased_by_a_later_canvas_edit() {
     let mut model = model();
     edit(&mut model, |raw| raw.output = "draft.md".into());
     let external = FLOW.replace("prompt: write", "prompt: theirs");
-    model.reload(Some(external.clone().into()));
-    model.reload(Some(external.replace("deps: [design]", "deps: []").into()));
+    model.reload(Some(external.clone().into()), Vec::new());
+    model.reload(
+        Some(external.replace("deps: [design]", "deps: []").into()),
+        Vec::new(),
+    );
     model.canvas_edit(&[], &external);
     assert!(model.status().conflict);
     assert_eq!(model.draft().unwrap().raw().output, "draft.md");
@@ -172,7 +185,10 @@ fn node_revert_keeps_other_drafts_and_all_revert_clears_them() {
 fn reverting_the_conflicting_node_retracts_its_notice() {
     let mut model = model();
     edit(&mut model, |raw| raw.output = "draft.md".into());
-    model.reload(Some(FLOW.replace("prompt: write", "prompt: theirs").into()));
+    model.reload(
+        Some(FLOW.replace("prompt: write", "prompt: theirs").into()),
+        Vec::new(),
+    );
     model.revert_node();
     assert!(model.notice().is_none());
     assert!(!model.status().conflict);
@@ -183,7 +199,7 @@ fn reverting_the_conflicting_node_retracts_its_notice() {
 #[test]
 fn an_existing_refusal_and_inactive_input_do_not_block_another_nodes_save() {
     let empty = FLOW.replace("run: echo ok", "run: ''");
-    let mut model = InspectorModel::new(Some(empty.into()));
+    let mut model = InspectorModel::new(Some(empty.into()), Vec::new());
     model.select(Some("build".into()));
     edit(&mut model, |raw| {
         raw.prompt_inline = "inactive".into();
@@ -234,7 +250,7 @@ fn a_refused_rename_uses_both_file_and_edited_identity() {
 fn successful_save_resets_drafts_and_reselects_the_written_id() {
     let mut model = model();
     edit(&mut model, |raw| raw.id = "renamed".into());
-    model.reload(Some(FLOW.replace("design", "renamed").into()));
+    model.reload(Some(FLOW.replace("design", "renamed").into()), Vec::new());
     let effects = model.save_succeeded(Some("renamed".into()));
     assert!(effects.rebind);
     assert_eq!(effects.select_on_canvas, Some("renamed".into()));
@@ -249,7 +265,7 @@ fn delayed_prompts_update_hidden_drafts_and_reject_second_or_conflicting_writes(
     for field in [PromptField::Inline, PromptField::File] {
         let mut model = model();
         let token = model.begin_prompt(field).unwrap();
-        model.reload(Some(format!("{FLOW}# comment\n").into()));
+        model.reload(Some(format!("{FLOW}# comment\n").into()), Vec::new());
         model.select(Some("build".into()));
         assert!(model.apply_prompt(&token, "draft".into()));
         assert!(!model.apply_prompt(&token, "second".into()));
@@ -263,7 +279,10 @@ fn delayed_prompts_update_hidden_drafts_and_reject_second_or_conflicting_writes(
             "draft"
         );
         let token = model.begin_prompt(field).unwrap();
-        model.reload(Some(FLOW.replace("prompt: write", "prompt: theirs").into()));
+        model.reload(
+            Some(FLOW.replace("prompt: write", "prompt: theirs").into()),
+            Vec::new(),
+        );
         assert!(!model.apply_prompt(&token, "stale".into()));
         model.assert_invariants();
     }
@@ -280,7 +299,10 @@ fn custom_modes_and_inactive_raw_values_survive_selection_and_canvas_rebase() {
     ui.agent_model_custom = true;
     model.edit(&"design".into(), raw, ui);
     model.select(Some("build".into()));
-    model.reload(Some(FLOW.replace("deps: [design]", "deps: []").into()));
+    model.reload(
+        Some(FLOW.replace("deps: [design]", "deps: []").into()),
+        Vec::new(),
+    );
     model.canvas_edit(&[], FLOW);
     model.select(Some("design".into()));
     let draft = model.draft().unwrap();
@@ -294,7 +316,7 @@ fn custom_modes_and_inactive_raw_values_survive_selection_and_canvas_rebase() {
 fn independent_failures_are_not_cleared_by_an_unrelated_reload() {
     let mut model = model();
     model.set_notice(Some(Notice::Io("disk full".into())));
-    model.reload(Some(format!("{FLOW}# comment\n").into()));
+    model.reload(Some(format!("{FLOW}# comment\n").into()), Vec::new());
     assert!(matches!(model.notice(), Some(Notice::Io(message)) if message == "disk full"));
     model.title_edited();
     assert!(model.notice().is_none());
@@ -335,19 +357,19 @@ fn event_sequences_preserve_invariants_after_each_transition() {
                 }
                 Reload => {
                     current.push_str("# reload\n");
-                    model.reload(Some(current.clone().into()));
+                    model.reload(Some(current.clone().into()), Vec::new());
                 }
                 Canvas => {
                     let before = current.clone();
                     current = current.replace("deps: [design]", "deps: []");
-                    model.reload(Some(current.clone().into()));
+                    model.reload(Some(current.clone().into()), Vec::new());
                     model.canvas_edit(&[], &before);
                 }
                 Lose => {
                     model.file_lost();
                 }
                 Restore => {
-                    model.reload(Some(current.clone().into()));
+                    model.reload(Some(current.clone().into()), Vec::new());
                 }
                 RevertNode => {
                     model.revert_node();
@@ -369,7 +391,7 @@ fn a_lost_clean_file_has_no_draft_conflict_and_revert_keeps_remembered_selection
     assert!(!model.status().conflict);
     model.revert_all();
     assert_eq!(model.remembered(), Some(&"build".into()));
-    model.reload(Some(FLOW.into()));
+    model.reload(Some(FLOW.into()), Vec::new());
     assert_eq!(model.selected(), Some(&"build".into()));
     model.assert_invariants();
 }
@@ -379,7 +401,7 @@ fn an_unrelated_canvas_edit_preserves_raw_dependency_spacing() {
     let mut model = model();
     model.select(Some("build".into()));
     edit(&mut model, |raw| raw.deps = " design, ".into());
-    model.reload(Some(format!("{FLOW}# edit\n").into()));
+    model.reload(Some(format!("{FLOW}# edit\n").into()), Vec::new());
     model.canvas_edit(&["other".into()], FLOW);
     assert_eq!(model.draft().unwrap().raw().deps, " design, ");
     model.assert_invariants();
@@ -406,7 +428,7 @@ fn discarded_history_returns_after_conflict_and_survives_node_revert_and_io_fail
     model.select(Some("build".into()));
     edit(&mut model, |raw| raw.run = "echo draft".into());
     let next = "version: 1\nnodes:\n  - id: build\n    kind: command\n    run: echo theirs\n";
-    model.reload(Some(next.into()));
+    model.reload(Some(next.into()), Vec::new());
     assert!(matches!(model.notice(), Some(Notice::Conflict)));
     model.revert_node();
     assert!(
@@ -417,12 +439,12 @@ fn discarded_history_returns_after_conflict_and_survives_node_revert_and_io_fail
     assert!(
         matches!(model.notice(), Some(Notice::Discarded(ids)) if ids == &[NodeId::from("design")])
     );
-    model.reload(Some(format!("{next}# reload\n").into()));
+    model.reload(Some(format!("{next}# reload\n").into()), Vec::new());
     model.revert_node();
     assert!(matches!(model.notice(), Some(Notice::Discarded(_))));
     model.dismiss_discarded();
     assert!(model.notice().is_none());
-    model.reload(Some(next.into()));
+    model.reload(Some(next.into()), Vec::new());
     assert!(model.notice().is_none());
     model.assert_invariants();
 }
@@ -433,9 +455,10 @@ fn successful_save_and_full_revert_clear_discarded_history() {
         let mut model = model();
         edit(&mut model, |raw| raw.output = "draft.md".into());
         model.select(Some("build".into()));
-        model.reload(Some(
-            "version: 1\nnodes:\n  - id: build\n    kind: command\n    run: echo ok\n".into(),
-        ));
+        model.reload(
+            Some("version: 1\nnodes:\n  - id: build\n    kind: command\n    run: echo ok\n".into()),
+            Vec::new(),
+        );
         assert!(matches!(model.notice(), Some(Notice::Discarded(_))));
         if save {
             model.save_succeeded(Some("build".into()));
@@ -456,7 +479,7 @@ fn delayed_prompts_restore_clean_hidden_drafts_after_file_recovery() {
         model.select(Some("build".into()));
         model.file_lost();
         assert!(!model.apply_prompt(&token, "unavailable".into()));
-        model.reload(Some(FLOW.into()));
+        model.reload(Some(FLOW.into()), Vec::new());
         assert!(model.apply_prompt(&token, "recovered".into()));
         assert_eq!(model.selected(), Some(&NodeId::from("build")));
         assert!(!model.apply_prompt(&token, "stale".into()));
@@ -484,8 +507,74 @@ fn restoring_a_missing_prompt_draft_still_checks_the_expected_field_and_revision
         let token = model.begin_prompt(PromptField::Inline).unwrap();
         model.select(Some("build".into()));
         model.file_lost();
-        model.reload(Some(changed.into()));
+        model.reload(Some(changed.into()), Vec::new());
         assert!(!model.apply_prompt(&token, "stale".into()));
         model.assert_invariants();
     }
+}
+
+#[test]
+fn a_refused_rename_pins_notes_and_banner_by_either_identity() {
+    for issue_id in ["design", "renamed"] {
+        let mut model = model();
+        edit(&mut model, |raw| raw.id = "renamed".into());
+        let issues = [ValidationIssue {
+            node: Some(issue_id.into()),
+            kind: ValidationKind::DuplicateOutput,
+            message: "duplicate".into(),
+        }];
+        model.save_refused("refused".into(), &issues);
+        let chrome = model.chrome();
+        assert_eq!(chrome.banner.as_deref(), Some("refused"));
+        assert!(!chrome.notes.is_empty(), "issue named {issue_id}");
+        model.assert_invariants();
+    }
+}
+
+#[test]
+fn standing_issues_open_a_fresh_draft_but_not_one_the_person_closed() {
+    let issues = vec![ValidationIssue {
+        node: Some("design".into()),
+        kind: ValidationKind::AgentIdWithoutMode,
+        message: "mode".into(),
+    }];
+    let mut model = InspectorModel::new(Some(FLOW.into()), issues);
+    model.select(Some("design".into()));
+    assert!(model.chrome().agent_open);
+    model.toggle_agent_section();
+    model.select(Some("build".into()));
+    model.select(Some("design".into()));
+    assert!(!model.chrome().agent_open);
+    model.assert_invariants();
+}
+
+#[test]
+fn an_unreadable_draft_value_selects_its_node_and_opens_settings() {
+    let mut model = model();
+    edit(&mut model, |raw| raw.timeout = "soon".into());
+    model.select(Some("build".into()));
+    let block = model.save_plan().err().expect("an invalid draft blocks");
+    let effects = model.save_blocked(block);
+    assert_eq!(effects.select_on_canvas, Some("design".into()));
+    assert!(model.chrome().settings_open);
+    assert!(matches!(model.notice(), Some(Notice::InvalidDraft(_))));
+    model.assert_invariants();
+}
+
+#[test]
+fn deleting_the_selected_node_on_the_canvas_unbinds_it() {
+    let mut model = model();
+    model.select(Some("build".into()));
+    let effects = model.canvas_edit(&["build".into()], FLOW);
+    assert!(effects.rebind);
+    assert_eq!(model.selected(), None);
+    model.assert_invariants();
+}
+
+#[test]
+fn the_model_owns_the_pane_text() {
+    let mut model = InspectorModel::new(Some(FLOW.into()), Vec::new());
+    assert_eq!(model.text().map(AsRef::as_ref), Some(FLOW));
+    model.file_lost();
+    assert!(model.text().is_none());
 }

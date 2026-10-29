@@ -1164,7 +1164,7 @@ async fn a_node_can_become_a_command_and_back(cx: &mut TestAppContext) {
 /// A refusal lands on the box it is about, not only in the banner.
 #[gpui::test]
 async fn a_refusal_points_at_the_field_it_is_about(cx: &mut TestAppContext) {
-    use crate::workspace::pages::flows::graph::{FlowGraphEvent, form::notes::FormField};
+    use crate::workspace::pages::flows::graph::{FlowGraphEvent, inspector::notes::FormField};
 
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
@@ -1509,7 +1509,7 @@ async fn the_delete_key_asks_to_remove_the_selected_node(cx: &mut TestAppContext
 /// the card to the node was told nothing and had to press Save to find out.
 #[gpui::test]
 async fn the_inspector_names_the_box_a_standing_issue_is_about(cx: &mut TestAppContext) {
-    use crate::workspace::pages::flows::graph::form::notes::FormField;
+    use crate::workspace::pages::flows::graph::inspector::notes::FormField;
 
     const CLASHING: &str = "\
 version: 1

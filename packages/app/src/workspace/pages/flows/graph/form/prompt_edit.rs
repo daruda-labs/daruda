@@ -41,4 +41,7 @@ impl FlowGraphView {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    // The optimistic check is the model's (`inspector::tests`); this file only
+    // routes the expanded editor and file picker to it.
+}

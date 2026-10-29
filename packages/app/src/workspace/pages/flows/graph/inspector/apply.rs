@@ -10,7 +10,7 @@
 use daruda_flow::NodeId;
 use daruda_flow::parse::FlowFile;
 
-use super::{
+use super::fields::{
     AttemptsField, FailFields, KindChoice, NodeFields, SourceField, TimeoutField, TurnsField,
 };
 
@@ -408,7 +408,7 @@ fn duration_of(field: &TimeoutField) -> Option<std::time::Duration> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::BodyFields;
+    use super::super::fields::BodyFields;
     use super::*;
     use daruda_flow::parse::{GateFailFile, NodeKindFile};
 

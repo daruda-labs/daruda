@@ -3,6 +3,7 @@ use super::{
     baseline::Baseline,
     draft::NodeDraft,
     fields::{NodeFields, Refusal},
+    notes::{FieldNote, FormField, notes_for},
     notice::Notice,
     raw::{RawInputs, UiHints},
 };
@@ -17,12 +18,24 @@ pub(super) enum Selection {
     Remembered(NodeId),
 }
 
+/// What the view must do to its widgets after a transition. The model never
+/// touches GPUI; `rebind` rebuilds the selected node's widgets from the model.
 #[derive(Default)]
 pub(in crate::workspace) struct Effects {
     pub rebind: bool,
     pub refresh_links: bool,
     pub refresh_choices: bool,
     pub select_on_canvas: Option<NodeId>,
+}
+
+/// The inspector chrome the widgets show, derived from the model only: which
+/// sections are open, the refusal banner, and the notes pinned to fields.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(in crate::workspace) struct FormChrome {
+    pub agent_open: bool,
+    pub settings_open: bool,
+    pub banner: Option<String>,
+    pub notes: Vec<FieldNote>,
 }
 
 pub(in crate::workspace) struct InspectorStatus {
@@ -52,14 +65,19 @@ pub(in crate::workspace) struct InspectorModel {
 }
 
 impl InspectorModel {
-    pub(in crate::workspace) fn new(text: Option<Arc<str>>) -> Self {
+    pub(in crate::workspace) fn new(text: Option<Arc<str>>, issues: Vec<ValidationIssue>) -> Self {
         Self {
-            baseline: text.map(Baseline::new),
+            baseline: text.map(|text| Baseline::new(text, issues)),
             drafts: BTreeMap::new(),
             selection: Selection::None,
             notice: None,
             discarded: Vec::new(),
         }
+    }
+    /// The bytes the pane draws and edits are made against; the model is
+    /// their only owner.
+    pub(in crate::workspace) fn text(&self) -> Option<&Arc<str>> {
+        self.baseline.as_ref().map(Baseline::text)
     }
     pub(in crate::workspace) fn selected(&self) -> Option<&NodeId> {
         match &self.selection {
@@ -117,6 +135,80 @@ impl InspectorModel {
             ..Effects::default()
         }
     }
+    /// Notes for the selected node: a refused save's issues while that notice
+    /// stands, the file's standing issues otherwise. A renamed node is matched
+    /// by both ids, since the engine names it by the new one.
+    pub(in crate::workspace) fn notes(&self) -> Vec<FieldNote> {
+        let Some(draft) = self.draft() else {
+            return Vec::new();
+        };
+        let issues = match &self.notice {
+            Some(Notice::Refused { issues, .. }) => issues.as_slice(),
+            _ => self.baseline.as_ref().map_or(&[][..], Baseline::issues),
+        };
+        let node = draft.node_ref();
+        let mut notes = notes_for(issues, draft.node());
+        if notes.is_empty() && node.renamed() {
+            notes = notes_for(issues, &NodeId::from(node.edited()));
+        }
+        notes
+    }
+
+    pub(in crate::workspace) fn chrome(&self) -> FormChrome {
+        let Some(draft) = self.draft() else {
+            return FormChrome::default();
+        };
+        FormChrome {
+            agent_open: draft.ui().agent_open,
+            settings_open: draft.ui().settings_open,
+            banner: match &self.notice {
+                Some(Notice::Refused { message, .. }) => Some(message.clone()),
+                _ => None,
+            },
+            notes: self.notes(),
+        }
+    }
+
+    pub(in crate::workspace) fn toggle_agent_section(&mut self) {
+        if let Some(ui) = self.selected_ui() {
+            ui.agent_open = !ui.agent_open;
+        }
+    }
+    pub(in crate::workspace) fn toggle_settings_section(&mut self) {
+        if let Some(ui) = self.selected_ui() {
+            ui.settings_open = !ui.settings_open;
+        }
+    }
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn set_sections(&mut self, agent_open: bool, settings_open: bool) {
+        if let Some(ui) = self.selected_ui() {
+            ui.agent_open = agent_open;
+            ui.settings_open = settings_open;
+        }
+    }
+    fn selected_ui(&mut self) -> Option<&mut UiHints> {
+        let id = self.selected()?.clone();
+        Some(self.drafts.get_mut(&id)?.ui_mut())
+    }
+    /// A note is only seen when its section is open, so notes open theirs.
+    pub(super) fn open_for_notes(&mut self) {
+        let notes = self.notes();
+        let Some(ui) = self.selected_ui() else {
+            return;
+        };
+        if notes.iter().any(|note| note.field == FormField::Agent) {
+            ui.agent_open = true;
+        }
+        if notes.iter().any(|note| {
+            matches!(
+                note.field,
+                FormField::Cwd | FormField::Fix | FormField::Rerun
+            )
+        }) {
+            ui.settings_open = true;
+        }
+    }
+
     pub(in crate::workspace) fn edit_deps(&mut self, deps: String) -> Effects {
         let Some(draft) = self.draft() else {
             return Effects::default();
@@ -133,9 +225,9 @@ impl InspectorModel {
                 .as_ref()
                 .is_none_or(|base| !draft.matches(base))
         });
-        let local = self.draft().is_some_and(NodeDraft::has_input);
+        let local = self.draft().is_some_and(NodeDraft::has_unsaved_typing);
         InspectorStatus {
-            unsaved: self.drafts.values().any(NodeDraft::has_input),
+            unsaved: self.drafts.values().any(NodeDraft::has_unsaved_typing),
             conflict,
             node_refused: self
                 .draft()
@@ -149,7 +241,7 @@ impl InspectorModel {
     pub(in crate::workspace) fn pending_fields(&self) -> Vec<(NodeId, NodeFields)> {
         self.drafts
             .values()
-            .filter(|d| d.is_modified())
+            .filter(|d| d.writes_changes())
             .map(|d| (d.node().clone(), d.fields()))
             .collect()
     }
@@ -171,6 +263,33 @@ impl InspectorModel {
                 .map(|draft| NodeId::from(draft.raw().id.trim())),
         })
     }
+    /// Show why `save_plan` refused: the conflict, or the invalid draft —
+    /// selected, with the section holding its unreadable value opened.
+    pub(in crate::workspace) fn save_blocked(&mut self, block: SaveBlock) -> Effects {
+        match block {
+            SaveBlock::Conflict => {
+                self.notice = Some(Notice::Conflict);
+                self.debug_assert_invariants();
+                Effects::default()
+            }
+            SaveBlock::Invalid(node, refusal) => {
+                let mut effects = self.select(Some(node.clone()));
+                effects.select_on_canvas = Some(node.clone());
+                if matches!(
+                    refusal,
+                    Refusal::Timeout(_) | Refusal::Attempts(_) | Refusal::Turns(_)
+                ) && let Some(ui) = self.selected_ui()
+                {
+                    ui.settings_open = true;
+                }
+                self.notice = Some(Notice::InvalidDraft(node));
+                self.reconcile_notice();
+                self.debug_assert_invariants();
+                effects
+            }
+        }
+    }
+
     pub(in crate::workspace) fn save_refused(
         &mut self,
         message: String,
@@ -189,7 +308,7 @@ impl InspectorModel {
         } else {
             self.drafts
                 .values()
-                .find(|d| d.has_input() && matches(d))
+                .find(|d| d.has_unsaved_typing() && matches(d))
                 .map(|d| d.node().clone())
         };
         let mut effects = target
@@ -201,6 +320,7 @@ impl InspectorModel {
             message,
             issues: issues.to_vec(),
         });
+        self.open_for_notes();
         self.debug_assert_invariants();
         effects
     }
@@ -258,4 +378,6 @@ impl InspectorModel {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    // See `inspector::tests`: the model is tested as a whole state machine.
+}

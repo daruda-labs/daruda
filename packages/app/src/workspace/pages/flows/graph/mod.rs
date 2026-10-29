@@ -11,13 +11,13 @@ mod commands;
 mod connect;
 mod delete_key;
 mod disconnect;
-mod drafts;
 pub(in crate::workspace) mod execution;
 mod execution_pan;
 pub(in crate::workspace) mod form;
 mod form_bridge;
 mod frame;
-mod inspector;
+pub(in crate::workspace) mod inspector;
+mod inspector_ops;
 pub(in crate::workspace) mod model;
 mod node_ids;
 mod overlay;
@@ -31,6 +31,7 @@ mod run_states;
 mod selection;
 mod space_pan;
 mod test_hooks;
+mod title;
 
 pub(in crate::workspace) use pins::PinSet;
 /// The toolbar's test selectors keep their old path: a test names this module,
@@ -146,11 +147,6 @@ pub(in crate::workspace) struct FlowGraphView {
     /// — a reload handed the wrong one would quietly draw another file.
     path: PathBuf,
     state: FlowGraphState,
-    /// The file's text as this view last read it. Kept so [`Self::reload`] can
-    /// tell "the file changed" from "something touched the file": a watcher
-    /// reports our own writes back to us, and fsevents reports more than
-    /// writes. `None` when the file could not be read at all.
-    text: Option<std::sync::Arc<str>>,
     /// Nodes whose finished output this pane will reuse rather than run.
     ///
     /// Here and nowhere else: a pin is this machine at this moment, and the
@@ -161,6 +157,10 @@ pub(in crate::workspace) struct FlowGraphView {
     /// [`Self::reconcile_selection`] — a handler — rather than in `render`,
     /// which must not create entities.
     form: Option<form::FormBinding>,
+    /// Owns the file's text as this view last read it, with every draft made
+    /// against it. Kept so [`Self::reload`] can tell "the file changed" from
+    /// "something touched the file": a watcher reports our own writes back to
+    /// us, and fsevents reports more than writes.
     inspector: inspector::InspectorModel,
     _form_watches: Vec<gpui::Subscription>,
     catalog: form::catalog::Catalog,
@@ -260,6 +260,7 @@ impl FlowGraphView {
                 let _ = this.update(cx, |view: &mut Self, cx| view.rebuild_for_theme(window, cx));
             }
         });
+        let issues = issues_of(&state);
         let mut view = Self {
             name_input,
             saved_name,
@@ -271,8 +272,7 @@ impl FlowGraphView {
             holds_the_pointer: false,
             path: path.to_path_buf(),
             state,
-            inspector: inspector::InspectorModel::new(text.clone().map(Into::into)),
-            text: text.map(Into::into),
+            inspector: inspector::InspectorModel::new(text.map(Into::into), issues),
             pins: PinSet::default(),
             form: None,
             _form_watches: Vec::new(),
@@ -408,10 +408,7 @@ impl FlowGraphView {
     /// Cloned rather than borrowed: every caller goes on to build a form,
     /// which needs `&mut self`.
     fn current_issues(&self) -> Vec<daruda_flow::error::ValidationIssue> {
-        match &self.state {
-            FlowGraphState::Graph { model, .. } => model.issues.clone(),
-            FlowGraphState::Unreadable(_) => Vec::new(),
-        }
+        issues_of(&self.state)
     }
 
     /// Everything this view owes the canvas after it changed.
@@ -485,7 +482,7 @@ impl FlowGraphView {
     /// The bytes this view is drawing, which an edit has to be made against.
     /// `None` when the file could not be read — there is nothing to edit then.
     pub(in crate::workspace) fn text(&self) -> Option<&str> {
-        self.text.as_deref()
+        self.inspector.text().map(AsRef::as_ref)
     }
 
     /// Read the file again and rebuild the graph from it.
@@ -502,20 +499,20 @@ impl FlowGraphView {
     /// something that is no longer true.
     pub(in crate::workspace) fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let pending_name = self.name_is_dirty(cx);
-        let decision = policy::decide(read_flow(&self.path), self.text.as_deref(), self.drawn());
+        let decision = policy::decide(read_flow(&self.path), self.text(), self.drawn());
         if matches!(decision, policy::Reload::Unchanged) {
             return;
         }
         self.sync_form(cx);
-        match decision {
+        let next: Option<std::sync::Arc<str>> = match decision {
             policy::Reload::Unchanged => return,
             policy::Reload::Restamp { text, model } => {
-                self.absorb_surviving(pins::surviving(&self.pins, self.text.as_deref(), &text));
+                self.absorb_surviving(pins::surviving(&self.pins, self.text(), &text));
                 self.restamp(&model, cx);
-                self.text = Some(text.into());
+                Some(text.into())
             }
             policy::Reload::Rebuild { text, model } => {
-                self.absorb_surviving(pins::surviving(&self.pins, self.text.as_deref(), &text));
+                self.absorb_surviving(pins::surviving(&self.pins, self.text(), &text));
                 self.state = build_graph_state(
                     model,
                     &self.pins.clone(),
@@ -524,26 +521,25 @@ impl FlowGraphView {
                     window,
                     cx,
                 );
-                self.text = Some(text.into());
                 self.watch_canvas(window, cx);
+                Some(text.into())
             }
             policy::Reload::Unreadable { text, error } => {
                 // Nothing left to compare a pin against, and the graph it named
                 // is gone off the screen with it.
                 self.pins.clear();
                 self.state = FlowGraphState::Unreadable(error);
-                self.text = text.map(Into::into);
                 self.watch_canvas(window, cx);
+                text.map(Into::into)
             }
-        }
-        self.saved_name =
-            crate::workspace::flow_paths::display_name(&self.path, self.text.as_deref());
+        };
+        let effects = self.inspector.reload(next, self.current_issues());
+        self.saved_name = crate::workspace::flow_paths::display_name(&self.path, self.text());
         if !pending_name || self.name_input.read(cx).value().trim() == self.saved_name {
             self.name_input.update(cx, |input, cx| {
                 input.set_value(self.saved_name.clone(), window, cx)
             });
         }
-        let effects = self.inspector.reload(self.text.clone());
         self.apply_inspector_effects(effects, window, cx);
         cx.notify();
     }
@@ -568,7 +564,7 @@ impl FlowGraphView {
     ) {
         let pending_name = self.name_is_dirty(cx);
         self.path = to.to_path_buf();
-        self.saved_name = crate::workspace::flow_paths::display_name(to, self.text.as_deref());
+        self.saved_name = crate::workspace::flow_paths::display_name(to, self.text());
         if !pending_name {
             self.name_input.update(cx, |input, cx| {
                 input.set_value(self.saved_name.clone(), window, cx)
@@ -590,11 +586,16 @@ impl FlowGraphView {
         // The text with it, like every other fall to `Unreadable`: `reload`
         // returns early when the bytes it read are the ones it has, so a file
         // restored exactly as it was would otherwise never redraw.
-        self.text = None;
         self.sync_form(cx);
-        self.inspector.file_lost();
-        self.form = None;
-        self._form_watches.clear();
-        cx.notify();
+        let effects = self.inspector.file_lost();
+        self.apply_unbound_effects(effects, cx);
+    }
+}
+
+/// What the engine refuses about the file this state was built from.
+fn issues_of(state: &FlowGraphState) -> Vec<daruda_flow::error::ValidationIssue> {
+    match state {
+        FlowGraphState::Graph { model, .. } => model.issues.clone(),
+        FlowGraphState::Unreadable(_) => Vec::new(),
     }
 }

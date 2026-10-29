@@ -82,7 +82,7 @@ impl Workspace {
                 if rename {
                     file.name = Some(name);
                 }
-                super::graph::form::apply::draft_fields(file, &nodes);
+                super::graph::inspector::apply::draft_fields(file, &nodes);
             },
             window,
             cx,
@@ -167,7 +167,8 @@ impl Workspace {
             path,
             &base,
             move |file| {
-                *record.borrow_mut() = super::graph::form::apply::new_node(file, after.as_ref())
+                *record.borrow_mut() =
+                    super::graph::inspector::apply::new_node(file, after.as_ref())
             },
             window,
             cx,
@@ -206,7 +207,7 @@ impl Workspace {
         let outcome = self.edit_flow(
             path,
             &base,
-            move |file| super::graph::form::apply::connect(file, &out_of, &into),
+            move |file| super::graph::inspector::apply::connect(file, &out_of, &into),
             window,
             cx,
         );
@@ -240,7 +241,7 @@ impl Workspace {
         let outcome = self.edit_flow(
             path,
             &base,
-            move |file| super::graph::form::apply::disconnect(file, &out_of, &into),
+            move |file| super::graph::inspector::apply::disconnect(file, &out_of, &into),
             window,
             cx,
         );
@@ -299,7 +300,7 @@ impl Workspace {
             &base,
             move |file| {
                 for node in &targets {
-                    super::graph::form::apply::remove_node(file, node);
+                    super::graph::inspector::apply::remove_node(file, node);
                 }
             },
             window,
@@ -362,7 +363,7 @@ impl Workspace {
         view.read(cx)
             .text()
             .and_then(|text| daruda_flow::parse::parse_flow_file(text).ok())
-            .map(|file| super::graph::form::apply::dependents_outside(&file, going))
+            .map(|file| super::graph::inspector::apply::dependents_outside(&file, going))
             .unwrap_or(0)
     }
 

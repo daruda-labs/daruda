@@ -97,4 +97,20 @@ impl EffectiveFields {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_command_ignores_agent_only_values() {
+        let text = "version: 1\nnodes:\n  - id: c\n    kind: command\n    run: echo ok\n";
+        let file = daruda_flow::parse::parse_flow_file(text).unwrap();
+        let fields = fields_of(&file.nodes[0]);
+        let mut typed = fields.clone();
+        typed.body.prompt = SourceField::Inline("not for a command".into());
+        typed.body.output = "unused.md".into();
+        assert_eq!(
+            EffectiveFields::from_fields(typed),
+            EffectiveFields::from_fields(fields)
+        );
+    }
+}

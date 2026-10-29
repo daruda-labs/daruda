@@ -72,7 +72,7 @@ mod tests {
 
     /// The one assertion this module exists for. `design`'s output into
     /// `build`'s input means `build` has `deps: [design]` — **not** the other
-    /// way round. `form::apply::connect` writes the `GraphEdge` this returns,
+    /// way round. `inspector::apply::connect` writes the `GraphEdge` this returns,
     /// and `apply`'s own test carries the same claim through to the file.
     #[test]
     fn a_line_out_of_one_card_and_into_another_is_the_second_ones_dep() {

@@ -26,12 +26,12 @@ impl Workspace {
         };
         view.update(cx, |view, cx| {
             view.select_node_for_shot(&"build".into(), window, cx);
+            view.inspector.set_sections(false, shot == FlowFormShot::Command);
+            view.project_chrome();
             if let Some(form) = &mut view.form {
-                form.agent_open = false;
                 if shot == FlowFormShot::Command {
                     form.body.kind.update(cx, |select, cx| select.set_selected_value(&super::KIND_COMMAND.into(), window, cx));
                     form.body.run.update(cx, |input, cx| input.set_value("cargo test --workspace", window, cx));
-                    form.settings_open = true;
                 } else {
                     form.body.prompt.inline.update(cx, |input, cx| input.set_value("Read {{node.design.output}} as a file.\nReview the implementation against the acceptance criteria.\n\nPreserve existing behavior and explain the changes. Check keyboard navigation, long labels, and narrow windows before saving the final report.", window, cx));
                 }
@@ -43,4 +43,6 @@ impl Workspace {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    // Capture setup; `workspace::tests::flow::authoring` opens each shot.
+}

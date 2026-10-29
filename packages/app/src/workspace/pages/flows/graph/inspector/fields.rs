@@ -92,8 +92,9 @@ pub(in crate::workspace) struct BodyFields {
     pub on_fail: FailFields,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(in crate::workspace) enum KindChoice {
+    #[default]
     Agent,
     Command,
 }

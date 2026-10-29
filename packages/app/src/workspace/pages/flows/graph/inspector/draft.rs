@@ -16,6 +16,12 @@ impl NodeRef<'_> {
     pub(super) fn matches(&self, id: &NodeId) -> bool {
         id == self.file_id || id.as_str() == self.edited_id
     }
+    pub(super) fn renamed(&self) -> bool {
+        self.file_id.as_str() != self.edited_id
+    }
+    pub(super) fn edited(&self) -> &str {
+        self.edited_id
+    }
 }
 
 #[derive(Clone)]
@@ -83,10 +89,14 @@ impl NodeDraft {
     pub(super) fn fields(&self) -> NodeFields {
         self.effective.clone().into_fields()
     }
-    pub(super) fn is_modified(&self) -> bool {
+    /// Whether saving would write anything for this node: kind-aware values
+    /// differ from the file's.
+    pub(super) fn writes_changes(&self) -> bool {
         self.effective != self.initial
     }
-    pub(super) fn has_input(&self) -> bool {
+    /// Whether anything typed differs from the file, inactive fields included.
+    /// Gates Run and the close prompt, so nothing typed is lost unasked.
+    pub(super) fn has_unsaved_typing(&self) -> bool {
         self.raw != self.initial_raw
     }
     pub(super) fn introduced_refusal(&self) -> Option<Refusal> {
@@ -102,6 +112,9 @@ impl NodeDraft {
         let answer = self.base.matches(next, &self.node);
         *self.match_memo.borrow_mut() = Some((next.text().clone(), answer));
         answer
+    }
+    pub(super) fn ui_mut(&mut self) -> &mut UiHints {
+        &mut self.ui
     }
     pub(super) fn edit(&mut self, raw: RawInputs, ui: UiHints) {
         self.effective = raw.effective();
@@ -159,4 +172,17 @@ impl NodeDraft {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+
+    #[test]
+    fn typing_into_an_inactive_field_is_unsaved_but_writes_nothing() {
+        let text = "version: 1\nnodes:\n  - id: c\n    kind: command\n    run: echo ok\n";
+        let mut draft = NodeDraft::new(Baseline::bare(text.into()), "c".into()).unwrap();
+        let mut raw = draft.raw().clone();
+        raw.prompt_inline = "not for a command".into();
+        draft.edit(raw, draft.ui().clone());
+        assert!(draft.has_unsaved_typing());
+        assert!(!draft.writes_changes());
+    }
+}

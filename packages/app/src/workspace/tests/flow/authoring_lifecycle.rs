@@ -1,7 +1,7 @@
 //! Inspector lifecycle across reloads, canvas edits, refusals, and file loss.
 use super::authoring_edits::set_output;
 use super::*;
-use crate::workspace::pages::flows::graph::form::notes::FormField;
+use crate::workspace::pages::flows::graph::inspector::notes::FormField;
 
 fn open(
     flow: &str,

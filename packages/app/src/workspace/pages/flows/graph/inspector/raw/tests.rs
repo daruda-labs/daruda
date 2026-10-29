@@ -36,12 +36,12 @@ fn effective_fields_preserve_the_existing_file_mutation_for_each_kind_and_policy
         let mut before = file.clone();
         let mut after = file;
         let node = daruda_flow::NodeId::from("build");
-        crate::workspace::pages::flows::graph::form::apply::node_fields(
+        crate::workspace::pages::flows::graph::inspector::apply::node_fields(
             &mut before,
             &node,
             &fields,
         );
-        crate::workspace::pages::flows::graph::form::apply::node_fields(
+        crate::workspace::pages::flows::graph::inspector::apply::node_fields(
             &mut after, &node, &effective,
         );
         assert_eq!(before, after, "{text}");

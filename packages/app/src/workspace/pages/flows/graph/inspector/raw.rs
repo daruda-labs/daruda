@@ -2,7 +2,7 @@
 use super::{effective::EffectiveFields, fields::*};
 use daruda_flow::parse::PermissionPolicyFile;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(in crate::workspace) struct RawInputs {
     pub id: String,
     pub deps: String,
