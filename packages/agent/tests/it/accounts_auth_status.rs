@@ -1,5 +1,6 @@
 //! Public API tests for accounts auth status.
 
+#[cfg(unix)]
 use daruda_agent::accounts::CliCommand;
 use daruda_agent::accounts::auth_status::*;
 
