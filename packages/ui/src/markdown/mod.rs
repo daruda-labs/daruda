@@ -33,6 +33,7 @@ pub struct Markdown {
     color: Option<Hsla>,
     font_family: Option<SharedString>,
     text_size: Option<Pixels>,
+    heading_size: Option<Pixels>,
     line_height: Option<f32>,
     full_width: bool,
     surface: Option<Hsla>,
@@ -74,6 +75,13 @@ impl Markdown {
     /// relative to their own base. Unset = inherit the ambient size.
     pub fn text_size(mut self, size: Pixels) -> Self {
         self.text_size = Some(size);
+        self
+    }
+
+    /// Use a fixed heading size in compact reading surfaces. Body text and
+    /// heading weights retain their own styling; other callers keep the default scale.
+    pub fn heading_size(mut self, size: Pixels) -> Self {
+        self.heading_size = Some(size);
         self
     }
 
@@ -169,8 +177,16 @@ impl RenderOnce for Markdown {
                 line_height: relative(self.line_height.unwrap_or(theme::MD_VIEW_LINE_HEIGHT)),
                 paragraph_gap: (size * theme::MD_VIEW_PARAGRAPH_GAP).into(),
                 heading_base_font_size: size,
+                heading_font_size: self
+                    .heading_size
+                    .map(|size| Arc::new(move |_, _| size) as _),
                 ..TextViewStyle::default()
             });
+        }
+        if self.text_size.is_none()
+            && let Some(size) = self.heading_size
+        {
+            view = view.style(TextViewStyle::default().heading_font_size(move |_, _| size));
         }
         // Adapt the domain-free `(lang, source)` hook to TextView's
         // `CodeBlock`-shaped one: extract lang + raw source and forward.
@@ -239,6 +255,7 @@ pub fn markdown(
         color: None,
         font_family: None,
         text_size: None,
+        heading_size: None,
         line_height: None,
         full_width: true,
         surface: None,

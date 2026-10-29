@@ -24,6 +24,7 @@ struct MarkdownProbe {
     text: SharedString,
     /// Body text size, or `None` to inherit the ambient one.
     size: Option<Pixels>,
+    heading_size: Option<Pixels>,
 }
 
 impl Render for MarkdownProbe {
@@ -34,7 +35,8 @@ impl Render for MarkdownProbe {
             .w_full()
             .child(
                 super::markdown("probe", self.text.clone(), copy_tooltips())
-                    .when_some(self.size, |md, size| md.text_size(size)),
+                    .when_some(self.size, |md, size| md.text_size(size))
+                    .when_some(self.heading_size, |md, size| md.heading_size(size)),
             )
     }
 }
@@ -69,6 +71,16 @@ fn probe_height(
     width: Pixels,
     text_size: Option<Pixels>,
 ) -> Pixels {
+    probe_with_heading_size(cx, text, width, text_size, None)
+}
+
+fn probe_with_heading_size(
+    cx: &mut TestAppContext,
+    text: impl Into<SharedString>,
+    width: Pixels,
+    text_size: Option<Pixels>,
+    heading_size: Option<Pixels>,
+) -> Pixels {
     let bounds = Bounds::new(point(px(0.), px(0.)), size(width, px(4000.)));
     let opts = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -81,6 +93,7 @@ fn probe_height(
                 cx.new(|_cx| MarkdownProbe {
                     text,
                     size: text_size,
+                    heading_size,
                 })
             })
         })
@@ -695,5 +708,22 @@ fn a_click_inside_an_occluding_panel_does_not_open_the_link_under_it(cx: &mut Te
     assert!(
         !click_opens_the_link(cx, true, MouseButton::Left),
         "the click reached the link under the occluding panel and opened it"
+    );
+}
+
+#[gpui::test]
+fn compact_heading_size_reduces_wrapping_without_changing_default_callers(cx: &mut TestAppContext) {
+    init_gpui_component(cx);
+    let text = "# Saved conversation heading with enough words to wrap";
+    let standard = probe_height(cx, text, px(240.), Some(px(12.)));
+    let compact = probe_with_heading_size(cx, text, px(240.), Some(px(12.)), Some(px(13.)));
+    assert!(
+        compact < standard,
+        "compact inspector headings must occupy less space"
+    );
+    assert_eq!(standard, probe_height(cx, text, px(240.), Some(px(12.))));
+    assert!(
+        probe_with_heading_size(cx, text, px(240.), None, Some(px(13.)))
+            < probe_height(cx, text, px(240.), None)
     );
 }
