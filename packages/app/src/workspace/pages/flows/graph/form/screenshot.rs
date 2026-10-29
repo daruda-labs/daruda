@@ -30,7 +30,7 @@ impl Workspace {
             if let Some(form) = &mut view.form {
                 if shot == FlowFormShot::Command {
                     form.body.kind.update(cx, |select, cx| select.set_selected_value(&super::KIND_COMMAND.into(), window, cx));
-                    form.body.run.update(cx, |input, cx| input.set_value("cargo test --workspace", window, cx));
+                    form.body.run.update(cx, |input, cx| input.set_value("cargo test --workspace\ncargo clippy --all-targets", window, cx));
                 } else {
                     form.body.prompt.inline.update(cx, |input, cx| input.set_value("Read {{node.design.output}} as a file.\nReview the implementation against the acceptance criteria.\n\nPreserve existing behavior and explain the changes. Check keyboard navigation, long labels, and narrow windows before saving the final report.", window, cx));
                 }

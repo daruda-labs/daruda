@@ -193,14 +193,31 @@ nodes:
       cargo build
 ";
 
+fn saved_run(path: &std::path::Path) -> String {
+    let file =
+        daruda_flow::parse::parse_flow_file(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let daruda_flow::parse::NodeKindFile::Command { run, .. } = &file.nodes[0].kind else {
+        panic!("a command");
+    };
+    run.trim_end().to_string()
+}
+
 #[gpui::test]
-async fn a_value_a_box_cannot_hold_is_neither_an_edit_nor_rewritten(cx: &mut TestAppContext) {
+async fn a_multiline_command_is_shown_and_kept_whole(cx: &mut TestAppContext) {
     let (_lane, ws, path, view, mut vcx) = open(MULTILINE_RUN, cx);
     view.update_in(&mut vcx, |v, window, cx| {
         v.select_node_for_test(&"check".into(), window, cx)
     });
     vcx.run_until_parked();
     assert!(!view.read_with(&vcx, |v, cx| v.has_unsaved_form(cx)));
+    let run = view.read_with(&vcx, |v, cx| v.form().unwrap().body_states(cx).run.clone());
+    assert_eq!(
+        run.read_with(&vcx, |input, _| input.value().to_string())
+            .trim_end(),
+        "cargo test\ncargo build"
+    );
+
+    // Another field's save leaves the block untouched.
     view.update_in(&mut vcx, |v, window, cx| {
         v.form()
             .unwrap()
@@ -209,17 +226,24 @@ async fn a_value_a_box_cannot_hold_is_neither_an_edit_nor_rewritten(cx: &mut Tes
             .update(cx, |input, cx| input.set_value("10m", window, cx));
     });
     vcx.run_until_parked();
-    let saved = ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.save_flow_editor(&path, view.clone(), window, cx)
-    });
-    let why = view.read_with(&vcx, |v, _| v.save_error_for_test());
-    assert!(saved, "{why:?}");
-    let file =
-        daruda_flow::parse::parse_flow_file(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    let daruda_flow::parse::NodeKindFile::Command { run, .. } = &file.nodes[0].kind else {
-        panic!("a command");
+    let save = |ws: &gpui::Entity<crate::workspace::Workspace>,
+                vcx: &mut gpui::VisualTestContext| {
+        ws.update_in(vcx, |ws, window, cx| {
+            ws.save_flow_editor(&path, view.clone(), window, cx)
+        })
     };
-    assert_eq!(run.trim_end(), "cargo test\ncargo build");
+    assert!(save(&ws, &mut vcx));
+    assert_eq!(saved_run(&path), "cargo test\ncargo build");
+
+    // Editing the command keeps the lines the person typed. A save rebinds
+    // the form, so the box is the new binding's.
+    let run = view.read_with(&vcx, |v, cx| v.form().unwrap().body_states(cx).run.clone());
+    run.update_in(&mut vcx, |input, window, cx| {
+        input.set_value("cargo test\ncargo clippy", window, cx)
+    });
+    vcx.run_until_parked();
+    assert!(save(&ws, &mut vcx));
+    assert_eq!(saved_run(&path), "cargo test\ncargo clippy");
 }
 
 #[gpui::test]

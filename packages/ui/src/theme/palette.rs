@@ -847,6 +847,8 @@ pub const FLOW_RUN_OVERVIEW_MIN_W: f32 = 280.0;
 pub const FLOW_INSPECTOR_GAP: f32 = PAD_LG;
 pub const FLOW_INSPECTOR_PAD: f32 = PAD_LG;
 pub const FLOW_INSPECTOR_PROMPT_ROWS: usize = 5;
+/// The command box grows from one line to this many before it scrolls.
+pub const FLOW_INSPECTOR_RUN_MAX_ROWS: usize = 6;
 pub const FLOW_TOOLBAR_INSET: f32 = PAD_LG;
 pub const FLOW_TOOLBAR_GAP: f32 = GAP_SM;
 

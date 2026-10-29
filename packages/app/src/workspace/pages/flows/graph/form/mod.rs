@@ -161,7 +161,7 @@ impl FormBinding {
             kind: kind_select(initial.body.kind, window, cx),
             prompt: source_states(&initial.body.prompt, window, cx),
             output: single_line(&initial.body.output, window, cx),
-            run: single_line(&initial.body.run, window, cx),
+            run: command_box(&initial.body.run, window, cx),
             on_fail: fail_states(
                 &initial.body.on_fail,
                 fail_kind_of(initial.body.kind),
@@ -605,6 +605,22 @@ fn multi_line<T: 'static>(
         window,
         cx,
     )
+}
+
+/// A command box: one line, like the other fields, until the command needs
+/// more. A `run: |` block keeps its lines on screen and back in the file
+/// instead of being run together.
+fn command_box<T: 'static>(
+    value: &str,
+    window: &mut Window,
+    cx: &mut Context<T>,
+) -> Entity<InputState> {
+    let value = value.to_string();
+    cx.new(|cx| {
+        InputState::new(window, cx)
+            .auto_grow(1, crate::ui::theme::palette::FLOW_INSPECTOR_RUN_MAX_ROWS)
+            .default_value(value)
+    })
 }
 
 fn read(state: &Entity<InputState>, cx: &App) -> String {
