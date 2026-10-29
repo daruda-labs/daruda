@@ -48,7 +48,7 @@ fn status_icon_theme_round_trips_without_changing_other_settings() {
 }
 
 #[test]
-fn full_config_write_preserves_the_selected_icon_theme() {
+fn full_config_write_preserves_the_selected_theme() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
     let mut config = Config::default();

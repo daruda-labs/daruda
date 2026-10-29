@@ -5,6 +5,17 @@ use std::sync::Arc;
 const PREVIEW_WIDTH: f32 = 160.0;
 const PREVIEW_HEIGHT: f32 = 64.0;
 
+fn init_dot_theme(cx: &mut gpui::App) {
+    use gpui::BorrowAppContext as _;
+    theme::DarudaTheme::init(cx);
+    crate::settings_store::SettingsStore::init(cx);
+    cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+        let mut config = daruda_config::Config::default();
+        config.left_dock.status_icon_theme = daruda_config::StatusIconTheme::Dots;
+        store.set_user_for_testing(config);
+    });
+}
+
 struct Indicators {
     outcomes: [Option<AgentOutcome>; 2],
 }
@@ -49,7 +60,7 @@ fn capture_idle_and_completed_grids() {
             ))
         },
     );
-    app.update(theme::DarudaTheme::init);
+    app.update(init_dot_theme);
     let window = app
         .open_window(
             gpui::size(px(PREVIEW_WIDTH), px(PREVIEW_HEIGHT)),
@@ -128,7 +139,7 @@ fn capture_working_perimeter_cycle() {
             ))
         },
     );
-    app.update(theme::DarudaTheme::init);
+    app.update(init_dot_theme);
     let window = app
         .open_window(
             gpui::size(px(PREVIEW_WIDTH), px(PREVIEW_HEIGHT)),

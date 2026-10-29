@@ -1536,8 +1536,9 @@ Both themes share the existing 250ms status clock.
 The icon theme uses a gray plug with blinking gray lightning for Connecting, a
 blue speech bubble with advancing dots for Working, and an ice-colored terminal
 with a blinking cursor for tool execution. Attention is a static yellow bubble
-with an exclamation mark; Idle is an empty gray bubble. An unseen completion is
-a green circled check, an unseen execution error a red warning triangle, and a
+with an exclamation mark; Idle is a static gray bubble with a large Z and a
+smaller raised z (Zz). An unseen completion is a green circled check, an unseen execution
+error a red warning triangle, and a
 failed session a red disconnected plug. These distinct shapes also carry meaning
 without color. The dot theme retains its existing status patterns, with three
 dots moving clockwise around the outer eight cells for Working.

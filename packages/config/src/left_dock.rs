@@ -92,7 +92,7 @@ impl Default for LeftDockConfig {
     fn default() -> Self {
         Self {
             size: crate::UiSize::Normal,
-            status_icon_theme: StatusIconTheme::Dots,
+            status_icon_theme: StatusIconTheme::default(),
             left_default_width: LEFT_DEFAULT_W,
             left_collapsed_by_default: false,
             files_show_hidden: true,

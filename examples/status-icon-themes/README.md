@@ -2,7 +2,8 @@
 
 Settings → Workspace → Sidebar → Status icon theme selects the artwork used by
 left-dock lane and session indicators, including the compact rail. Dots and
-Icons are bundled. Custom themes inherit either and override individual states.
+Icons are bundled; Dots is the default. Custom themes inherit either and
+override individual states.
 Selections apply immediately and survive restart; activity, permission, elapsed
 time and completion decisions remain owned by the sessions.
 
