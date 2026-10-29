@@ -105,6 +105,9 @@ pub(in crate::workspace) struct FormBinding {
     /// is the one `set_value` left at the start, not one the person placed.
     placed_carets: Vec<gpui::EntityId>,
     body: Body,
+    /// What the widgets read right after the last projection. A field that
+    /// still reads this way is untouched, whatever the model holds.
+    shown: super::inspector::RawInputs,
     /// Sections, banner and field notes as the model last projected them.
     /// Written only by [`Self::project_chrome`]; never edited here.
     chrome: super::inspector::FormChrome,
@@ -206,6 +209,7 @@ impl FormBinding {
             inherited,
             placed_carets: Vec::new(),
             body,
+            shown: Default::default(),
             chrome: Default::default(),
         }
     }

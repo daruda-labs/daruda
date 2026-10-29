@@ -26,8 +26,7 @@ impl Workspace {
         };
         view.update(cx, |view, cx| {
             view.select_node_for_shot(&"build".into(), window, cx);
-            view.inspector.set_sections(false, shot == FlowFormShot::Command);
-            view.project_chrome();
+            view.update_inspector(|model| model.set_sections(false, shot == FlowFormShot::Command), cx);
             if let Some(form) = &mut view.form {
                 if shot == FlowFormShot::Command {
                     form.body.kind.update(cx, |select, cx| select.set_selected_value(&super::KIND_COMMAND.into(), window, cx));

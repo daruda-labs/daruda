@@ -36,24 +36,37 @@ impl FlowGraphView {
     /// Reading back exactly the model's values is no edit, which is what
     /// makes the Change events a projection causes harmless.
     pub(super) fn sync_form(&mut self, cx: &App) -> Effects {
-        let (Some(form), Some(draft)) = (&self.form, self.inspector.draft()) else {
+        let (Some(form), Some(draft)) = (&mut self.form, self.inspector.draft()) else {
             return Effects::default();
         };
-        let raw = form.read(cx);
         let hints = form.hints(draft.ui(), cx);
-        if &raw == draft.raw() && &hints == draft.ui() {
+        let raw = form.take_edits(draft.raw(), cx);
+        if raw.is_none() && &hints == draft.ui() {
             return Effects::default();
         }
+        let raw = raw.unwrap_or_else(|| draft.raw().clone());
         let node = form.node.clone();
         self.inspector.edit(&node, raw, hints)
     }
 
-    /// Show the model's values in the existing widgets.
+    /// Show the model's values in the existing widgets. The chrome follows
+    /// through `apply_inspector_effects`.
     pub(super) fn project_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let (Some(form), Some(draft)) = (&mut self.form, self.inspector.draft()) {
             form.write(draft.raw(), draft.ui(), window, cx);
         }
+    }
+
+    /// Change the inspector's notice or sections, then show the result: the
+    /// one path for model changes that are not node transitions.
+    pub(super) fn update_inspector(
+        &mut self,
+        change: impl FnOnce(&mut super::inspector::InspectorModel),
+        cx: &mut Context<Self>,
+    ) {
+        change(&mut self.inspector);
         self.project_chrome();
+        cx.notify();
     }
 
     pub(super) fn project_chrome(&mut self) {
@@ -87,7 +100,9 @@ impl FlowGraphView {
         if effects.refresh_links && !effects.rebind {
             self.refresh_form_links(window, cx);
         }
-        self.project_chrome();
+        if effects.chrome && !effects.rebind {
+            self.project_chrome();
+        }
         #[cfg(test)]
         self.assert_binding(cx);
         cx.notify();
@@ -110,7 +125,7 @@ impl FlowGraphView {
         match (&self.form, self.inspector.draft()) {
             (Some(binding), Some(draft)) => {
                 assert_eq!(&binding.node, draft.node());
-                assert_eq!(&binding.read(cx), draft.raw());
+                assert!(binding.in_step_with(draft.raw(), cx));
             }
             (None, None) => {}
             _ => panic!("selected draft and form binding must exist together"),
@@ -124,11 +139,7 @@ impl FlowGraphView {
                 self._form_watches.push(cx.subscribe_in(
                     &input,
                     window,
-                    |view, _, event, window, cx| {
-                        if matches!(event, crate::ui::InputEvent::Change) {
-                            view.on_form_changed(window, cx);
-                        }
-                    },
+                    |view, _, event, window, cx| view.on_bound_input(event, window, cx),
                 ));
             }
             for select in form.watch_selects(cx) {
@@ -159,6 +170,17 @@ impl FlowGraphView {
         self.refresh_form_links(window, cx);
     }
 
+    fn on_bound_input(
+        &mut self,
+        event: &crate::ui::InputEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if matches!(event, crate::ui::InputEvent::Change) {
+            self.on_form_changed(window, cx);
+        }
+    }
+
     pub(super) fn on_form_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let effects = self.sync_form(cx);
         self.apply_inspector_effects(effects, window, cx);
@@ -167,16 +189,12 @@ impl FlowGraphView {
     /// Open or close the inspector's agent-override block.
     pub(in crate::workspace) fn toggle_agent_section(&mut self, cx: &mut Context<Self>) {
         self.sync_form(cx);
-        self.inspector.toggle_agent_section();
-        self.project_chrome();
-        cx.notify();
+        self.update_inspector(|model| model.toggle_agent_section(), cx);
     }
 
     pub(super) fn toggle_execution_section(&mut self, cx: &mut Context<Self>) {
         self.sync_form(cx);
-        self.inspector.toggle_settings_section();
-        self.project_chrome();
-        cx.notify();
+        self.update_inspector(|model| model.toggle_settings_section(), cx);
     }
 
     /// The form for the selected node, when there is one.

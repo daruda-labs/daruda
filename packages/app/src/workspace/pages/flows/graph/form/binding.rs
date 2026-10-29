@@ -109,9 +109,10 @@ impl FormBinding {
         }
     }
 
-    /// Show `raw` and `hints`. Only boxes that differ are written; the Change
-    /// events that follow read back exactly the model's values, which the
-    /// view's sync recognizes as no edit, so no guard is needed.
+    /// Show `raw` and `hints`. Only boxes that differ are written. What the
+    /// widgets then read is remembered as `shown`, so the Change events this
+    /// causes — and any value a widget stores differently, such as a
+    /// single-line box dropping a newline — are not taken as edits.
     pub(in crate::workspace::pages::flows::graph) fn write(
         &mut self,
         raw: &RawInputs,
@@ -170,6 +171,34 @@ impl FormBinding {
         ] {
             choice.update(cx, |choice, cx| choice.set_custom(custom, window, cx));
         }
+        self.shown = self.read(cx);
+    }
+
+    /// The model's `base` with whatever the person changed since the last
+    /// projection, or `None` when nothing was. Marks the current reading as
+    /// seen, so the next call reports only later edits.
+    pub(in crate::workspace::pages::flows::graph) fn take_edits(
+        &mut self,
+        base: &RawInputs,
+        cx: &App,
+    ) -> Option<RawInputs> {
+        let now = self.read(cx);
+        if now == self.shown {
+            return None;
+        }
+        let merged = RawInputs::merge_edits(base, &self.shown, &now);
+        self.shown = now;
+        Some(merged)
+    }
+
+    /// Whether the widgets hold no edit the model has not taken.
+    #[cfg(test)]
+    pub(in crate::workspace::pages::flows::graph) fn in_step_with(
+        &self,
+        base: &RawInputs,
+        cx: &App,
+    ) -> bool {
+        RawInputs::merge_edits(base, &self.shown, &self.read(cx)) == *base
     }
 
     pub(in crate::workspace::pages::flows::graph) fn watch_inputs(

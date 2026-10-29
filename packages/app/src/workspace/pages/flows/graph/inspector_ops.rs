@@ -53,8 +53,7 @@ impl FlowGraphView {
     }
 
     pub(in crate::workspace) fn dismiss_discarded_drafts(&mut self, cx: &mut Context<Self>) {
-        self.inspector.dismiss_discarded();
-        cx.notify();
+        self.update_inspector(|model| model.dismiss_discarded(), cx);
     }
 
     /// What Save would write, or `None` after showing why it cannot.
@@ -76,14 +75,11 @@ impl FlowGraphView {
 
     /// Cleared before the attempt, so what is shown is about the latest one.
     pub(in crate::workspace) fn begin_form_save(&mut self, cx: &mut Context<Self>) {
-        self.inspector.set_notice(None);
-        self.project_chrome();
-        cx.notify();
+        self.update_inspector(|model| model.set_notice(None), cx);
     }
 
     pub(in crate::workspace) fn save_io_failed(&mut self, message: String, cx: &mut Context<Self>) {
-        self.inspector.set_notice(Some(Notice::Io(message)));
-        cx.notify();
+        self.update_inspector(|model| model.set_notice(Some(Notice::Io(message))), cx);
     }
 
     /// Put a refused save on the pane. Save writes every draft, so when the

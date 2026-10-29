@@ -22,32 +22,13 @@ impl FlowGraphView {
             prompt: Some(s::flow::form_pick_prompt().into()),
         });
         cx.spawn_in(window, async move |this, cx| {
-            let result = selection.await;
-            if let Err(error) = this.update_in(cx, |view, window, cx| match result {
-                Ok(Ok(Some(paths))) => {
-                    if let Some(path) = paths.first() {
-                        match daruda_core::path::strip_root(path, &root) {
-                            Some(relative) => {
-                                if !view.apply_prompt_edit(&edit, portable(&relative), window, cx) {
-                                    view.inspector.set_notice(Some(
-                                        super::super::inspector::Notice::PromptStale,
-                                    ));
-                                    cx.notify();
-                                }
-                            }
-                            None => {
-                                view.inspector.set_notice(Some(
-                                    super::super::inspector::Notice::PromptOutside,
-                                ));
-                                cx.notify();
-                            }
-                        }
-                    }
-                }
-                Ok(Err(error)) => cx.emit(super::super::FlowGraphEvent::PromptPickerFailed {
-                    detail: format!("{error:#}"),
-                }),
-                _ => {}
+            // A cancelled channel means the picker went away unanswered —
+            // the same as choosing nothing.
+            let Ok(result) = selection.await else {
+                return;
+            };
+            if let Err(error) = this.update_in(cx, |view, window, cx| {
+                view.finish_prompt_pick(&edit, &root, result, window, cx)
             }) {
                 // The view is gone, so there is no workspace path to report on.
                 LogWriter::log(
@@ -59,6 +40,41 @@ impl FlowGraphView {
             }
         })
         .detach();
+    }
+
+    /// Put the picked file into the prompt, or say why it was not: it lies
+    /// outside the flow's directory, the node changed meanwhile, or the
+    /// native picker failed (the workspace's toast reports that).
+    fn finish_prompt_pick(
+        &mut self,
+        edit: &super::prompt_edit::PromptEdit,
+        root: &Path,
+        result: anyhow::Result<Option<Vec<std::path::PathBuf>>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use super::super::inspector::Notice;
+        let path = match result {
+            Ok(Some(paths)) => match paths.into_iter().next() {
+                Some(path) => path,
+                None => return,
+            },
+            Ok(None) => return,
+            Err(error) => {
+                cx.emit(super::super::FlowGraphEvent::PromptPickerFailed {
+                    detail: format!("{error:#}"),
+                });
+                return;
+            }
+        };
+        let notice = match daruda_core::path::strip_root(&path, root) {
+            Some(relative) if self.apply_prompt_edit(edit, portable(&relative), window, cx) => {
+                return;
+            }
+            Some(_) => Notice::PromptStale,
+            None => Notice::PromptOutside,
+        };
+        self.update_inspector(|model| model.set_notice(Some(notice)), cx);
     }
 }
 

@@ -23,6 +23,10 @@ pub(super) enum Selection {
 #[derive(Default)]
 pub(in crate::workspace) struct Effects {
     pub rebind: bool,
+    /// The chrome (sections, banner, notes) may have changed and must be
+    /// projected again. Off for an edit that left the notice alone, so a
+    /// keystroke does not recompute it.
+    pub chrome: bool,
     pub refresh_links: bool,
     pub refresh_choices: bool,
     pub select_on_canvas: Option<NodeId>,
@@ -122,6 +126,7 @@ impl InspectorModel {
     ) -> Effects {
         let mut links = false;
         let mut choices = false;
+        let notice = self.notice.clone();
         if let Some(draft) = self.drafts.get_mut(node) {
             choices = draft.raw().agent_id != raw.agent_id;
             links = draft.raw().deps != raw.deps || draft.raw().kind != raw.kind;
@@ -132,6 +137,7 @@ impl InspectorModel {
         Effects {
             refresh_links: links,
             refresh_choices: choices,
+            chrome: self.notice != notice,
             ..Effects::default()
         }
     }
@@ -139,12 +145,40 @@ impl InspectorModel {
     /// stands, the file's standing issues otherwise. A renamed node is matched
     /// by both ids, since the engine names it by the new one.
     pub(in crate::workspace) fn notes(&self) -> Vec<FieldNote> {
+        let issues = match self.selected_refusal() {
+            Some((_, issues)) => issues,
+            None => self.standing_issues(),
+        };
+        self.notes_in(issues)
+    }
+
+    fn standing_issues(&self) -> &[ValidationIssue] {
+        self.baseline.as_ref().map_or(&[][..], Baseline::issues)
+    }
+
+    /// The refused save, if it is about the selected node: the node it was
+    /// shown on, or one its issues name by either identity.
+    fn selected_refusal(&self) -> Option<(&str, &[ValidationIssue])> {
+        let Some(Notice::Refused {
+            message,
+            issues,
+            at,
+        }) = &self.notice
+        else {
+            return None;
+        };
+        let draft = self.draft()?;
+        let node = draft.node_ref();
+        let named = issues
+            .iter()
+            .any(|issue| issue.node.as_ref().is_some_and(|id| node.matches(id)));
+        (named || at.as_ref() == Some(draft.node()))
+            .then_some((message.as_str(), issues.as_slice()))
+    }
+
+    fn notes_in(&self, issues: &[ValidationIssue]) -> Vec<FieldNote> {
         let Some(draft) = self.draft() else {
             return Vec::new();
-        };
-        let issues = match &self.notice {
-            Some(Notice::Refused { issues, .. }) => issues.as_slice(),
-            _ => self.baseline.as_ref().map_or(&[][..], Baseline::issues),
         };
         let node = draft.node_ref();
         let mut notes = notes_for(issues, draft.node());
@@ -161,10 +195,9 @@ impl InspectorModel {
         FormChrome {
             agent_open: draft.ui().agent_open,
             settings_open: draft.ui().settings_open,
-            banner: match &self.notice {
-                Some(Notice::Refused { message, .. }) => Some(message.clone()),
-                _ => None,
-            },
+            banner: self
+                .selected_refusal()
+                .map(|(message, _)| message.to_owned()),
             notes: self.notes(),
         }
     }
@@ -191,8 +224,14 @@ impl InspectorModel {
         Some(self.drafts.get_mut(&id)?.ui_mut())
     }
     /// A note is only seen when its section is open, so notes open theirs.
-    pub(super) fn open_for_notes(&mut self) {
-        let notes = self.notes();
+    /// `standing` limits this to the file's own issues — what a freshly
+    /// selected node shows, whatever an earlier save left as a notice.
+    pub(super) fn open_for_notes(&mut self, standing: bool) {
+        let notes = if standing {
+            self.notes_in(self.standing_issues())
+        } else {
+            self.notes()
+        };
         let Some(ui) = self.selected_ui() else {
             return;
         };
@@ -270,7 +309,10 @@ impl InspectorModel {
             SaveBlock::Conflict => {
                 self.notice = Some(Notice::Conflict);
                 self.debug_assert_invariants();
-                Effects::default()
+                Effects {
+                    chrome: true,
+                    ..Effects::default()
+                }
             }
             SaveBlock::Invalid(node, refusal) => {
                 let mut effects = self.select(Some(node.clone()));
@@ -285,6 +327,7 @@ impl InspectorModel {
                 self.notice = Some(Notice::InvalidDraft(node));
                 self.reconcile_notice();
                 self.debug_assert_invariants();
+                effects.chrome = true;
                 effects
             }
         }
@@ -319,9 +362,11 @@ impl InspectorModel {
         self.notice = Some(Notice::Refused {
             message,
             issues: issues.to_vec(),
+            at: self.selected().cloned(),
         });
-        self.open_for_notes();
+        self.open_for_notes(false);
         self.debug_assert_invariants();
+        effects.chrome = true;
         effects
     }
     pub(super) fn reconcile_notice(&mut self) {

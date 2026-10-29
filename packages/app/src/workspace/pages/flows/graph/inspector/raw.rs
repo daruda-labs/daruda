@@ -104,6 +104,56 @@ impl RawInputs {
         raw
     }
 
+    /// `base` with only the fields the person changed since `shown` was put
+    /// on screen. A widget can hold a value differently from the model — a
+    /// single-line box drops newlines — so an untouched field keeps the
+    /// model's value rather than the widget's rendition of it.
+    pub(in crate::workspace::pages::flows::graph) fn merge_edits(
+        base: &Self,
+        shown: &Self,
+        now: &Self,
+    ) -> Self {
+        macro_rules! merged {
+            ($($field:ident),* $(,)?) => {{
+                // Exhaustive on purpose: a new field must be merged here.
+                let Self { $($field: _),* } = now;
+                Self {
+                    $($field: if now.$field != shown.$field {
+                        now.$field.clone()
+                    } else {
+                        base.$field.clone()
+                    }),*
+                }
+            }};
+        }
+        merged!(
+            id,
+            deps,
+            timeout,
+            max_turns,
+            cwd,
+            agent_id,
+            agent_model,
+            agent_mode,
+            agent_effort,
+            prompt_inline,
+            prompt_file,
+            output,
+            run,
+            hint_inline,
+            hint_file,
+            fix,
+            rerun,
+            max_attempts,
+            wait,
+            kind,
+            prompt_is_file,
+            hint_is_file,
+            acting,
+            permission,
+        )
+    }
+
     /// Only fields written for the active kind participate in modification and validation.
     pub(in crate::workspace::pages::flows::graph) fn effective(&self) -> EffectiveFields {
         let agent = self.kind == KindChoice::Agent;

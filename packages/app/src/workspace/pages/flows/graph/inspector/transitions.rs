@@ -25,12 +25,13 @@ impl InspectorModel {
             .unwrap_or_default();
         // A returning draft keeps the sections its person left open or shut.
         if fresh {
-            self.open_for_notes();
+            self.open_for_notes(true);
         }
         self.reconcile_notice();
         self.debug_assert_invariants();
         Effects {
             rebind: true,
+            chrome: true,
             refresh_links: true,
             ..Effects::default()
         }
@@ -52,6 +53,7 @@ impl InspectorModel {
             self.debug_assert_invariants();
             return Effects {
                 rebind: true,
+                chrome: true,
                 ..Effects::default()
             };
         };
@@ -91,6 +93,7 @@ impl InspectorModel {
         self.debug_assert_invariants();
         Effects {
             rebind: rebind || restored,
+            chrome: true,
             refresh_links: true,
             select_on_canvas: self.selected().cloned(),
             ..Effects::default()
@@ -120,6 +123,7 @@ impl InspectorModel {
         self.debug_assert_invariants();
         Effects {
             rebind: selection_deleted,
+            chrome: true,
             refresh_links: selected_before != self.draft().map(|d| d.raw().clone()),
             ..Effects::default()
         }
@@ -131,11 +135,13 @@ impl InspectorModel {
             self.drafts.remove(id);
         }
         self.selection = Selection::None;
-        let mut effects = self.select(id);
-        effects.rebind = true;
+        // Cleared before the node is rebuilt: a refusal of the discarded
+        // input must not open sections on the reverted form.
         if !self.status().conflict {
             self.notice = None;
         }
+        let mut effects = self.select(id);
+        effects.rebind = true;
         self.reconcile_notice();
         self.debug_assert_invariants();
         effects

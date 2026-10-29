@@ -245,12 +245,7 @@ impl FlowGraphView {
         let name_watch =
             cx.subscribe_in(&name_input, window, |view, _, event, _, cx| match event {
                 crate::ui::InputEvent::PressEnter { .. } => cx.emit(FlowGraphEvent::Save),
-                // Programmatic resets to the saved title also emit `Change`;
-                // only an edit is a reason to drop the banner.
-                crate::ui::InputEvent::Change if view.name_is_dirty(cx) => {
-                    view.inspector.title_edited();
-                    cx.notify();
-                }
+                crate::ui::InputEvent::Change => view.title_changed(cx),
                 _ => {}
             });
         let this = cx.entity().downgrade();
@@ -356,7 +351,7 @@ impl FlowGraphView {
         let FlowGraphState::Graph { model, .. } = &self.state else {
             return;
         };
-        let was_selected = self.form.as_ref().map(|form| form.node.clone());
+        let was_selected = self.inspector.selected().cloned();
         self.state = build_graph_state(
             model.clone(),
             &self.pins.clone(),
@@ -401,14 +396,6 @@ impl FlowGraphView {
     fn absorb_surviving(&mut self, surviving: pins::Surviving) {
         self.pins = surviving.kept;
         self.unpinned = surviving.dropped;
-    }
-
-    /// What the engine refuses about the file as it stands.
-    ///
-    /// Cloned rather than borrowed: every caller goes on to build a form,
-    /// which needs `&mut self`.
-    fn current_issues(&self) -> Vec<daruda_flow::error::ValidationIssue> {
-        issues_of(&self.state)
     }
 
     /// Everything this view owes the canvas after it changed.
@@ -533,7 +520,9 @@ impl FlowGraphView {
                 text.map(Into::into)
             }
         };
-        let effects = self.inspector.reload(next, self.current_issues());
+        // The graph and the inspector each keep the issues of the revision
+        // they show; this is the one place both are handed the same list.
+        let effects = self.inspector.reload(next, issues_of(&self.state));
         self.saved_name = crate::workspace::flow_paths::display_name(&self.path, self.text());
         if !pending_name || self.name_input.read(cx).value().trim() == self.saved_name {
             self.name_input.update(cx, |input, cx| {

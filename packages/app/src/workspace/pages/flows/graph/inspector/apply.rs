@@ -38,6 +38,12 @@ pub(in crate::workspace) fn node_fields(file: &mut FlowFile, node: &NodeId, fiel
     };
 
     target.cwd = fields.cwd.as_ref().map(std::path::PathBuf::from);
+    // The form compares `run` trimmed, so a block scalar's trailing newline is
+    // not a change; keeping the file's text leaves an untouched line alone.
+    let run = match &target.kind {
+        NodeKindFile::Command { run, .. } if run.trim() == fields.body.run => run.clone(),
+        _ => fields.body.run.clone(),
+    };
     // The kind is the form's to say: switching it replaces the node's body
     // wholesale, and the boxes for the other kind have been alive all along.
     target.kind = match fields.body.kind {
@@ -59,7 +65,7 @@ pub(in crate::workspace) fn node_fields(file: &mut FlowFile, node: &NodeId, fiel
             on_fail: retry_of(&target.kind, &fields.body.on_fail),
         },
         KindChoice::Command => NodeKindFile::Command {
-            run: fields.body.run.clone(),
+            run,
             on_fail: repair_of(&target.kind, &fields.body.on_fail),
         },
     };

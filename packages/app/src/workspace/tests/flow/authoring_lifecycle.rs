@@ -182,3 +182,73 @@ async fn inactive_typing_does_not_revive_an_untouched_refusal(cx: &mut TestAppCo
     )));
     assert!(std::fs::read_to_string(&path).unwrap().contains("mine.md"));
 }
+
+const MULTILINE_RUN: &str = "\
+version: 1
+nodes:
+  - id: check
+    kind: command
+    run: |
+      cargo test
+      cargo build
+";
+
+#[gpui::test]
+async fn a_value_a_box_cannot_hold_is_neither_an_edit_nor_rewritten(cx: &mut TestAppContext) {
+    let (_lane, ws, path, view, mut vcx) = open(MULTILINE_RUN, cx);
+    view.update_in(&mut vcx, |v, window, cx| {
+        v.select_node_for_test(&"check".into(), window, cx)
+    });
+    vcx.run_until_parked();
+    assert!(!view.read_with(&vcx, |v, cx| v.has_unsaved_form(cx)));
+    view.update_in(&mut vcx, |v, window, cx| {
+        v.form()
+            .unwrap()
+            .timeout_state()
+            .clone()
+            .update(cx, |input, cx| input.set_value("10m", window, cx));
+    });
+    vcx.run_until_parked();
+    let saved = ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.save_flow_editor(&path, view.clone(), window, cx)
+    });
+    let why = view.read_with(&vcx, |v, _| v.save_error_for_test());
+    assert!(saved, "{why:?}");
+    let file =
+        daruda_flow::parse::parse_flow_file(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let daruda_flow::parse::NodeKindFile::Command { run, .. } = &file.nodes[0].kind else {
+        panic!("a command");
+    };
+    assert_eq!(run.trim_end(), "cargo test\ncargo build");
+}
+
+#[gpui::test]
+async fn editing_the_title_clears_a_refusal_from_the_form(cx: &mut TestAppContext) {
+    let (_lane, ws, path, view, mut vcx) = open(TWO_NODE_CHAIN, cx);
+    view.update_in(&mut vcx, |v, window, cx| {
+        v.select_node_for_test(&"design".into(), window, cx);
+        v.form()
+            .unwrap()
+            .id_state()
+            .clone()
+            .update(cx, |input, cx| input.set_value("build", window, cx));
+    });
+    assert!(
+        !ws.update_in(&mut vcx, |ws, window, cx| ws.save_flow_editor(
+            &path,
+            view.clone(),
+            window,
+            cx
+        ))
+    );
+    assert!(view.read_with(&vcx, |v, _| v.form().unwrap().banner().is_some()));
+    view.update_in(&mut vcx, |v, window, cx| {
+        v.name_input_for_test()
+            .update(cx, |input, cx| input.set_value("Renamed", window, cx))
+    });
+    vcx.run_until_parked();
+    view.read_with(&vcx, |v, _| {
+        assert!(v.form().unwrap().banner().is_none());
+        assert!(v.save_error_for_test().is_none());
+    });
+}

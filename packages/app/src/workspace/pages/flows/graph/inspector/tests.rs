@@ -578,3 +578,73 @@ fn the_model_owns_the_pane_text() {
     model.file_lost();
     assert!(model.text().is_none());
 }
+
+fn refuse(model: &mut InspectorModel, node: &str) {
+    let issues = [ValidationIssue {
+        node: Some(node.into()),
+        kind: ValidationKind::DuplicateOutput,
+        message: "duplicate".into(),
+    }];
+    model.save_refused("refused".into(), &issues);
+}
+
+#[test]
+fn a_refusal_stays_on_its_node_and_others_show_their_standing_notes() {
+    let issues = vec![ValidationIssue {
+        node: Some("build".into()),
+        kind: ValidationKind::UnknownDep {
+            dep: "ghost".into(),
+        },
+        message: "dep".into(),
+    }];
+    let mut model = InspectorModel::new(Some(FLOW.into()), issues);
+    model.select(Some("design".into()));
+    edit(&mut model, |raw| raw.output = "mine.md".into());
+    refuse(&mut model, "design");
+    assert!(model.chrome().banner.is_some());
+    model.select(Some("build".into()));
+    let chrome = model.chrome();
+    assert_eq!(chrome.banner, None);
+    assert!(!chrome.notes.is_empty(), "build keeps its standing note");
+    model.select(Some("design".into()));
+    assert!(model.chrome().banner.is_some());
+    model.assert_invariants();
+}
+
+#[test]
+fn reverting_a_refused_node_does_not_reopen_sections_for_the_refusal() {
+    let mut model = model();
+    edit(&mut model, |raw| raw.agent_id = "custom".into());
+    assert!(!model.chrome().agent_open);
+    let issues = [ValidationIssue {
+        node: Some("design".into()),
+        kind: ValidationKind::AgentIdWithoutMode,
+        message: "mode".into(),
+    }];
+    model.save_refused("refused".into(), &issues);
+    assert!(model.chrome().agent_open);
+    model.revert_node();
+    assert!(!model.chrome().agent_open);
+    assert_eq!(model.notice(), None);
+    model.assert_invariants();
+}
+
+#[test]
+fn an_edit_flags_chrome_only_when_the_notice_changes() {
+    let mut model = model();
+    let draft = model.draft().unwrap();
+    let (id, mut raw, ui) = (
+        draft.node().clone(),
+        draft.raw().clone(),
+        draft.ui().clone(),
+    );
+    raw.timeout = "soon".into();
+    assert!(!model.edit(&id, raw.clone(), ui.clone()).chrome);
+    model.set_notice(Some(Notice::InvalidDraft(id.clone())));
+    raw.timeout = String::new();
+    assert!(
+        model.edit(&id, raw, ui).chrome,
+        "fixing the value retracts the notice"
+    );
+    model.assert_invariants();
+}

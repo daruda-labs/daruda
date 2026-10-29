@@ -47,3 +47,25 @@ fn effective_fields_preserve_the_existing_file_mutation_for_each_kind_and_policy
         assert_eq!(before, after, "{text}");
     }
 }
+
+#[test]
+fn only_changed_fields_replace_the_model_value() {
+    let base = RawInputs {
+        run: "cargo test\ncargo build".into(),
+        output: "out.md".into(),
+        ..RawInputs::default()
+    };
+    // What a single-line box shows for that run, then the person edits output.
+    let shown = RawInputs {
+        run: "cargo testcargo build".into(),
+        ..base.clone()
+    };
+    let now = RawInputs {
+        output: "typed.md".into(),
+        ..shown.clone()
+    };
+    let merged = RawInputs::merge_edits(&base, &shown, &now);
+    assert_eq!(merged.run, base.run);
+    assert_eq!(merged.output, "typed.md");
+    assert_eq!(RawInputs::merge_edits(&base, &shown, &shown), base);
+}

@@ -25,10 +25,19 @@ impl FlowGraphView {
             .update(cx, |input, cx| input.focus(window, cx));
     }
 
+    /// The title box changed. Only an edit — not a programmatic reset to the
+    /// saved title — is a reason to drop the notice it may have answered.
+    pub(super) fn title_changed(&mut self, cx: &mut Context<Self>) {
+        if self.name_is_dirty(cx) {
+            self.update_inspector(|model| model.title_edited(), cx);
+        }
+    }
+
     pub(in crate::workspace) fn name_empty(&mut self, cx: &mut Context<Self>) {
-        self.inspector
-            .set_notice(Some(super::inspector::Notice::NameEmpty));
-        cx.notify();
+        self.update_inspector(
+            |model| model.set_notice(Some(super::inspector::Notice::NameEmpty)),
+            cx,
+        );
     }
 
     #[cfg(test)]
