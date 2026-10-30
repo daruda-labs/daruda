@@ -162,28 +162,29 @@ impl Workspace {
         });
     }
 
-    /// Rename a flow file, keeping any open graph of it pointed at it.
-    ///
-    /// The run history is not touched and does not need to be: `run.yaml`
-    /// records the resolved spec, not the file it came from, and the panel
-    /// lists a lane's runs rather than a flow's.
+    /// Rename a flow file, keeping any open graph of it pointed at it. A refused
+    /// name returns its reason for the dialog's field; a filesystem failure is
+    /// reported here. Run history needs no change: `run.yaml` records the
+    /// resolved spec, not the file it came from.
     pub(in crate::workspace) fn rename_flow(
         &mut self,
         from: &Path,
         typed_name: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Result<(), String> {
         let Some(dir) = from.parent().map(Path::to_path_buf) else {
-            return;
+            return Ok(());
         };
-        let to = match super::flow_paths::flow_file_name_in(&dir, typed_name) {
-            Ok(path) => path,
-            Err(reason) => {
-                self.report_flow_name_refusal(reason, cx);
-                return;
-            }
-        };
+        // Confirming the name the dialog opened with renames nothing; it is not
+        // a clash with the file itself.
+        if super::flow_paths::flow_file_name(typed_name)
+            .is_ok_and(|named| from.file_name() == Some(std::ffi::OsStr::new(&named)))
+        {
+            return Ok(());
+        }
+        let to =
+            super::flow_paths::flow_file_name_in(&dir, typed_name).map_err(flow_name_refusal)?;
         // WORKAROUND: the name check above is not sealed by this write, unlike
         // `create_flow_in`'s — `rename(2)` replaces its destination by definition,
         // so a file arriving at the new name in between is overwritten. Closing
@@ -191,11 +192,12 @@ impl Workspace {
         // platforms; deferred until something makes that worth carrying.
         if let Err(e) = std::fs::rename(from, &to) {
             self.report_flow_file_error(s::flow::rename_failed_title(), from, &e, cx);
-            return;
+            return Ok(());
         }
         self.repoint_flow_graph(from, &to, window, cx);
         self.invalidate_flow_list();
         cx.notify();
+        Ok(())
     }
 
     /// Delete a flow file. The caller is responsible for having asked first.
@@ -328,29 +330,6 @@ impl Workspace {
                 .severity(ErrorSeverity::Warning)
                 .message(message)
                 .dedup(dedup)
-                .at(file!(), line!())
-                .build(),
-            cx,
-        );
-    }
-
-    fn report_flow_name_refusal(
-        &mut self,
-        reason: super::flow_paths::FlowNameError,
-        cx: &mut Context<Self>,
-    ) {
-        use super::flow_paths::FlowNameError;
-        let message = match reason {
-            FlowNameError::Empty => s::flow::name_empty(),
-            FlowNameError::HasSeparator => s::flow::name_has_separator(),
-            FlowNameError::Unportable => s::flow::name_unportable(),
-            FlowNameError::Taken => s::flow::name_taken(),
-        };
-        self.report_error(
-            ErrorReport::new(s::flow::name_refused_title())
-                .severity(ErrorSeverity::Warning)
-                .message(message)
-                .dedup("flow.name_refused")
                 .at(file!(), line!())
                 .build(),
             cx,
@@ -549,6 +528,17 @@ fn starter_flow(agent: &str, name: &str, prompt: &str) -> Result<String, yaml_se
             },
         }],
     })
+}
+
+/// Why a typed flow file name was refused, in the user's words.
+fn flow_name_refusal(reason: super::flow_paths::FlowNameError) -> String {
+    use super::flow_paths::FlowNameError;
+    match reason {
+        FlowNameError::Empty => s::flow::name_empty(),
+        FlowNameError::HasSeparator => s::flow::name_has_separator(),
+        FlowNameError::Unportable => s::flow::name_unportable(),
+        FlowNameError::Taken => s::flow::name_taken(),
+    }
 }
 
 #[cfg(test)]

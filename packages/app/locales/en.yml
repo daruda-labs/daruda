@@ -1878,7 +1878,6 @@ flow:
   # The button that answers the question. Not the menu's label: an ellipsis on a
   # menu item promises a question, and this *is* the question.
   delete_confirm_ok: "Delete"
-  name_refused_title: "That name will not do"
   name_empty: "A flow needs a name."
   name_has_separator: "A name cannot contain a path separator."
   name_unportable: "A name cannot contain < > : \" | ? *, end in a dot or space, or be a device name like CON."

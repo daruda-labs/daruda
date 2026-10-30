@@ -1,6 +1,6 @@
-//! Rename-skill prompt — wraps `SingleFieldModal` to ask the user for
-//! a new directory name, validates against the same regex used by
-//! Create, and calls `persist::rename_skill` on submit.
+//! Rename-skill prompt — a validated single-field dialog asking for a new
+//! directory name. A name the Create rules refuse stays in the dialog with the
+//! reason under it; a passing one goes to `persist::rename_skill`.
 
 use std::path::PathBuf;
 
@@ -11,21 +11,7 @@ use gpui::{Context, Window};
 use crate::agent::skills::{NameError, SkillScope, persist, validate_name};
 use crate::surface::strings;
 use crate::workspace::Workspace;
-use crate::workspace::dialog_helpers::open_single_field_dialog;
-
-fn report_validation(
-    ws: &mut Workspace,
-    msg: impl Into<String>,
-    dedup: &'static str,
-    cx: &mut Context<Workspace>,
-) {
-    let report = ErrorReport::new(msg)
-        .severity(ErrorSeverity::Info)
-        .at(file!(), line!())
-        .dedup(dedup)
-        .build();
-    ws.report_error(report, cx);
-}
+use crate::workspace::dialog_helpers::open_validated_single_field_dialog;
 
 pub fn open_rename_skill_modal(
     ws: &mut Workspace,
@@ -45,73 +31,36 @@ pub fn open_rename_skill_modal(
         .to_string();
     let dir_for_callback = dir.clone();
 
-    open_single_field_dialog(
+    open_validated_single_field_dialog(
         workspace,
         strings::common::btn_rename(),
         "new-name",
         Some(&current_name),
         move |ws, value, _window, cx| {
             let dir = dir_for_callback.clone();
-            let Some(new_name) = value.map(|s| s.trim().to_string()) else {
-                return;
+            let Some(new_name) = value else {
+                return Err(strings::common::name_required().into());
             };
-            if new_name.is_empty() {
-                report_validation(
-                    ws,
-                    strings::common::name_required(),
-                    "skills.rename.empty",
-                    cx,
-                );
-                return;
+            // The name it already has: nothing to rename, and not a duplicate.
+            if dir.file_name() == Some(std::ffi::OsStr::new(&new_name)) {
+                return Ok(());
             }
             match validate_name(&new_name) {
                 Ok(()) => {}
-                Err(NameError::Empty) => {
-                    report_validation(
-                        ws,
-                        strings::common::name_required(),
-                        "skills.rename.empty",
-                        cx,
-                    );
-                    return;
-                }
+                Err(NameError::Empty) => return Err(strings::common::name_required().into()),
                 Err(NameError::TooLong { .. }) => {
-                    report_validation(
-                        ws,
-                        strings::skills::name_too_long(),
-                        "skills.rename.too_long",
-                        cx,
-                    );
-                    return;
+                    return Err(strings::skills::name_too_long().into());
                 }
                 Err(NameError::InvalidChar { .. }) => {
-                    report_validation(
-                        ws,
-                        strings::skills::name_invalid(),
-                        "skills.rename.invalid",
-                        cx,
-                    );
-                    return;
+                    return Err(strings::skills::name_invalid().into());
                 }
                 Err(NameError::InvalidLeading { .. }) => {
-                    report_validation(
-                        ws,
-                        strings::skills::name_leading(),
-                        "skills.rename.leading",
-                        cx,
-                    );
-                    return;
+                    return Err(strings::skills::name_leading().into());
                 }
                 Err(NameError::DuplicateInScope { .. }) => unreachable!(),
             }
             if dir.parent().is_some_and(|p| p.join(&new_name).exists()) {
-                report_validation(
-                    ws,
-                    strings::skills::name_duplicate(),
-                    "skills.rename.duplicate",
-                    cx,
-                );
-                return;
+                return Err(strings::skills::name_duplicate().into());
             }
             match persist::rename_skill(&dir, &new_name) {
                 Ok(_) => {
@@ -130,6 +79,7 @@ pub fn open_rename_skill_modal(
                     ws.report_error(report, cx);
                 }
             }
+            Ok(())
         },
         window,
         cx,

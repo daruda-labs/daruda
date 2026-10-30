@@ -27,16 +27,14 @@ fn flow_row_menu(
             let weak = cx.entity().downgrade();
             let path = rename_path.clone();
             let initial = rename_from.clone();
-            crate::workspace::dialog_helpers::open_single_field_dialog(
+            crate::workspace::dialog_helpers::open_validated_single_field_dialog(
                 weak,
                 strings::flow::rename_title(),
                 strings::flow::file_name_placeholder(),
                 Some(&initial),
                 move |ws, value, window, cx| {
-                    let Some(to) = value else {
-                        return;
-                    };
-                    ws.rename_flow(&path, &to, window, cx);
+                    ws.rename_flow(&path, value.as_deref().unwrap_or_default(), window, cx)
+                        .map_err(Into::into)
                 },
                 window,
                 cx,

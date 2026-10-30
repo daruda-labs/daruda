@@ -4,6 +4,8 @@
 //! and the error-report modal. Dialog owns outer chrome; guarded form entities
 //! also own Escape handling alongside their custom body/footer behaviour.
 
+mod field_error;
+
 use std::rc::Rc;
 
 use crate::ui::theme;
@@ -20,6 +22,7 @@ use crate::ui::{InputState, form_input};
 use crate::workspace::Workspace;
 use crate::workspace::error::modal::ErrorReportModal;
 use crate::workspace::modal_view::ModalView;
+use field_error::FieldError;
 
 /// Open a one-input Dialog. Enter propagates to Dialog Confirm; OK receives
 /// trimmed text or `None`.
@@ -34,6 +37,41 @@ pub(in crate::workspace) fn open_single_field_dialog<Cb>(
 ) where
     Cb: Fn(&mut Workspace, Option<String>, &mut Window, &mut Context<Workspace>) + 'static,
 {
+    open_validated_single_field_dialog(
+        workspace,
+        title,
+        placeholder,
+        initial,
+        move |ws, value, window, cx| {
+            on_submit(ws, value, window, cx);
+            Ok(())
+        },
+        window,
+        cx,
+    );
+}
+
+/// [`open_single_field_dialog`] whose submit can refuse the value: `Err`
+/// keeps the dialog open with the message under the field, so the user fixes
+/// what they typed instead of retyping it after a toast. Editing the field
+/// clears the message.
+pub(in crate::workspace) fn open_validated_single_field_dialog<Cb>(
+    workspace: WeakEntity<Workspace>,
+    title: impl Into<SharedString>,
+    placeholder: impl Into<SharedString>,
+    initial: Option<&str>,
+    on_submit: Cb,
+    window: &mut Window,
+    cx: &mut App,
+) where
+    Cb: Fn(
+            &mut Workspace,
+            Option<String>,
+            &mut Window,
+            &mut Context<Workspace>,
+        ) -> Result<(), SharedString>
+        + 'static,
+{
     let placeholder: SharedString = placeholder.into();
     let initial_owned: Option<SharedString> = initial.map(|v| v.to_string().into());
 
@@ -45,6 +83,8 @@ pub(in crate::workspace) fn open_single_field_dialog<Cb>(
         s
     });
 
+    let field_error = cx.new(|cx| FieldError::new(&state, cx));
+
     let title: SharedString = title.into();
     let on_submit = Rc::new(on_submit);
     let state_for_focus = state.clone();
@@ -52,15 +92,22 @@ pub(in crate::workspace) fn open_single_field_dialog<Cb>(
     window.open_dialog(cx, move |dialog, _window, cx| {
         let state_for_body = state.clone();
         let state_for_ok = state.clone();
+        let error_for_ok = field_error.clone();
         let workspace = workspace.clone();
         let on_submit = on_submit.clone();
         dialog
             .title(title.clone())
             .child(
                 div()
-                    .id("single-modal-field")
-                    .debug_selector(|| "single-modal-field".into())
-                    .child(form_input(&state_for_body, cx, 0)),
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .id("single-modal-field")
+                            .debug_selector(|| "single-modal-field".into())
+                            .child(form_input(&state_for_body, cx, 0)),
+                    )
+                    .child(field_error.clone()),
             )
             .confirm()
             .button_props(DialogButtonProps::default().ok_text(s::common::btn_ok()))
@@ -72,10 +119,16 @@ pub(in crate::workspace) fn open_single_field_dialog<Cb>(
                 } else {
                     Some(trimmed.to_string())
                 };
-                if let Some(ws) = workspace.upgrade() {
-                    ws.update(app_cx, |ws, cx| (on_submit)(ws, value, window, cx));
+                let Some(ws) = workspace.upgrade() else {
+                    return true;
+                };
+                match ws.update(app_cx, |ws, cx| (on_submit)(ws, value, window, cx)) {
+                    Ok(()) => true,
+                    Err(message) => {
+                        error_for_ok.update(app_cx, |error, cx| error.show(message, cx));
+                        false
+                    }
                 }
-                true
             })
     });
 
@@ -272,5 +325,48 @@ mod tests {
             vcx.debug_bounds("single-modal-field").unwrap().size.height,
             px(36.)
         );
+    }
+
+    #[gpui::test]
+    fn a_refused_submit_keeps_the_dialog_open_until_the_value_passes(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (window, workspace) = crate::workspace::tests::build_workspace(cx);
+        let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
+        vcx.update(|window, cx| {
+            open_validated_single_field_dialog(
+                workspace.downgrade(),
+                "Rename",
+                "name",
+                Some("bad"),
+                |_, value, _, _| match value.as_deref() {
+                    Some("bad") => Err("refused".into()),
+                    _ => Ok(()),
+                },
+                window,
+                cx,
+            );
+        });
+        vcx.run_until_parked();
+        let dialog_up =
+            |vcx: &mut gpui::VisualTestContext| vcx.update(crate::ui::WindowExt::has_active_dialog);
+        let error_shown = |vcx: &mut gpui::VisualTestContext| {
+            vcx.update(|window, _| window.refresh());
+            vcx.run_until_parked();
+            vcx.debug_bounds("single-modal-error").is_some()
+        };
+
+        vcx.simulate_keystrokes("enter");
+        vcx.run_until_parked();
+        assert!(dialog_up(&mut vcx), "a refused value keeps the dialog");
+        assert!(error_shown(&mut vcx), "with the reason under the field");
+
+        vcx.simulate_input("x");
+        vcx.run_until_parked();
+        assert!(!error_shown(&mut vcx), "editing clears the stale reason");
+
+        vcx.simulate_keystrokes("enter");
+        vcx.run_until_parked();
+        assert!(!dialog_up(&mut vcx), "an accepted value closes it");
     }
 }

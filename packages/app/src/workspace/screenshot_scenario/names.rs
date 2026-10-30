@@ -136,6 +136,8 @@ const NAME_AGENT_CHAT_SUBAGENT_TAIL_OPEN: &str = "agent-chat-subagent-tail-open"
 const NAME_AGENT_CHAT_OPTIONS: &str = "agent-chat-options";
 /// CLI token for the flow delete confirmation, on the repository's copy.
 const NAME_FLOW_DELETE_CONFIRM: &str = "flow-delete-confirm";
+/// CLI token for the flow rename dialog holding a refused name.
+const NAME_FLOW_RENAME_REFUSED: &str = "flow-rename-refused";
 
 const NAME_FLOW_PICKER: &str = "flow-picker";
 const NAME_FLOW_PROFILE_PICKER: &str = "flow-profile-picker";
@@ -359,6 +361,7 @@ impl ScreenshotScenario {
             NAME_FLOW_RUNNING => Some(Self::FlowRunning),
             NAME_FLOW_ASKING => Some(Self::FlowAsking),
             NAME_FLOW_DELETE_CONFIRM => Some(Self::FlowDeleteConfirm),
+            NAME_FLOW_RENAME_REFUSED => Some(Self::FlowRenameRefused),
             _ => name
                 .strip_prefix(NAME_AGENT_CHAT_OPTIONS)
                 .and_then(|rest| rest.strip_prefix(':'))

@@ -8,7 +8,7 @@
 //! `crate::screenshot`; this module owns the scenario enum, its CLI-name
 //! mapping, and the workspace-driving dispatch ([`drive`]).
 
-use gpui::{App, Entity, Point, Window, px};
+use gpui::{App, AppContext as _, Entity, Point, Window, px};
 
 use super::main_area::agent_chat_host::agent_chat_ops::ThoughtsShot;
 use super::main_area::tab_ops::OpenIntent;
@@ -299,6 +299,9 @@ pub(crate) enum ScreenshotScenario {
     /// of the three sentences, and the only way to see whether it still reads
     /// as a sentence inside the dialog rather than as a wall.
     FlowDeleteConfirm,
+    /// The rename dialog after a refused name: the reason sits under the field
+    /// and the dialog stays up. Only a submit reaches that state.
+    FlowRenameRefused,
     /// A flow parked on a permission question, with the Flows panel showing.
     /// The buttons a person has to read and hit — the one part of `ask` no
     /// state test can look at, and a surface that needs visual verification.
@@ -418,6 +421,28 @@ pub(crate) fn drive(
                 window,
                 cx,
             );
+        }
+        ScreenshotScenario::FlowRenameRefused => {
+            dialog_helpers::open_validated_single_field_dialog(
+                workspace.downgrade(),
+                crate::surface::strings::flow::rename_title(),
+                crate::surface::strings::flow::file_name_placeholder(),
+                Some("review/build"),
+                |_, _, _, _| Err(crate::surface::strings::flow::name_has_separator().into()),
+                window,
+                cx,
+            );
+            // Queued behind the dialog's own deferred focus claim, so the Enter
+            // lands in the field and submits the way a person's would.
+            let wh = window.window_handle();
+            cx.defer(move |cx| {
+                // SILENT-OK: a capture whose window already closed has nothing to submit
+                let _ = cx.update_window(wh, |_, window, cx| {
+                    if let Ok(enter) = gpui::Keystroke::parse("enter") {
+                        window.dispatch_keystroke(enter, cx);
+                    }
+                });
+            });
         }
         ScreenshotScenario::ErrorModal => {
             dialog_helpers::open_error_report_dialog(sample_report(), window, cx);

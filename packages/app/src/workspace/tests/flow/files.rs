@@ -371,9 +371,23 @@ async fn renaming_a_flow_is_followed_by_the_graph_of_it(cx: &mut TestAppContext)
         })
         .expect("the created flow is open");
 
+    // The file is named on creation (`flow-<uuid>.yaml`), not after its title,
+    // so confirming the dialog unchanged hands back that stem.
+    let current = before
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .expect("a named flow file")
+        .to_owned();
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.rename_flow(&before, &current, window, cx)
+    })
+    .expect("confirming the current name is not a clash with itself");
+    assert!(before.exists(), "and renames nothing: {}", before.display());
+
     ws.update_in(&mut vcx, |ws, window, cx| {
         ws.rename_flow(&before, "after", window, cx)
-    });
+    })
+    .expect("the name is accepted");
     vcx.run_until_parked();
 
     let (path, title) = ws

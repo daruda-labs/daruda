@@ -1312,7 +1312,6 @@ flow:
   delete_confirm_body: "%{name}(%{origin})을(를) 디스크에서 지웁니다. 이미 실행한 기록은 남습니다."
   delete_confirm_body_repo: "%{name}은(는) 이 저장소에 커밋되는 파일이라, 지우면 작업 트리가 바뀌고 커밋이 반영되면 저장소를 여는 모두가 잃습니다. 이미 실행한 기록은 남습니다."
   delete_confirm_ok: "삭제"
-  name_refused_title: "그 이름은 쓸 수 없습니다"
   name_empty: "플로우에는 이름이 필요합니다."
   name_has_separator: "이름에 경로 구분자를 넣을 수 없습니다."
   name_unportable: "이름에 < > : \" | ? * 를 넣거나, 점·공백으로 끝내거나, CON 같은 장치 이름을 쓸 수 없습니다."
