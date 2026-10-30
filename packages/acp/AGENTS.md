@@ -24,14 +24,14 @@ from two different repos, and each release note names only its own line:
 
 | Line | Where | daruda integration |
 |---|---|---|
-| SDK crate `agent-client-protocol` | <https://github.com/agentclientprotocol/rust-sdk> | `3.3.0` |
-| Schema crate `agent-client-protocol-schema` | <https://github.com/agentclientprotocol/agent-client-protocol> (tags `vX.Y.Z`, "Rust Crate") | `1.11.0` |
+| SDK crate `agent-client-protocol` | <https://github.com/agentclientprotocol/rust-sdk> | `3.6.0` |
+| Schema crate `agent-client-protocol-schema` | <https://github.com/agentclientprotocol/agent-client-protocol> (tags `vX.Y.Z`, "Rust Crate") | `1.13.0` |
 | JSON spec | same repo (tags `schema-vX.Y.Z`) | v1 protocol types under `schema::v1` |
 
-- The SDK **exact-pins** the schema crate (`= 1.11.0` at SDK 3.3.0), so the
+- The SDK **exact-pins** the schema crate (`= 1.13.0` at SDK 3.6.0), so the
   schema line cannot be advanced on its own — it moves only when the SDK
   releases against a newer one.
-- Keep current: `"3.3"` in the workspace `Cargo.toml` is a caret requirement (`>=3.3.0,
+- Keep current: `"3.6"` in the workspace `Cargo.toml` is a caret requirement (`>=3.6.0,
   <4.0.0`), so `cargo update -p agent-client-protocol` picks up patch and minor
   releases; edit the version string only when a new major lands.
 - SDK 3.x enables no default features. `process` supplies `AcpAgent`,
