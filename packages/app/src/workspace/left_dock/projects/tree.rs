@@ -60,8 +60,10 @@ mod tests {
 
     #[test]
     fn tree_gutter_clears_scrollbar() {
+        // The press strip, not just the painted thumb: the strip takes every
+        // press inside it, so a row reaching into it would lose its clicks.
         const {
-            assert!(theme::LANE_TREE_MARGIN_X >= theme::SCROLLBAR_MARGIN_R + theme::SCROLLBAR_W);
+            assert!(theme::LANE_TREE_MARGIN_X >= theme::SCROLLBAR_HIT_W);
         }
     }
 

@@ -140,12 +140,12 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
     body.into_any_element()
 }
 
-/// Scrollbar thumb for the project tree. Display-only (no `on_drag`),
-/// matching the Git Changes / Files dock views.
+/// Scrollbar thumb for the project tree; a track press or a thumb drag
+/// scrolls `handle`, as in the Git Changes / Files dock views.
 ///
-/// Sits in the gutter the tree leaves free: the thumb spans `[2, 6]` px from
-/// the right edge (`SCROLLBAR_MARGIN_R` + `SCROLLBAR_W`) while a tree root
-/// stops at `LANE_TREE_MARGIN_X` (8 px), so it never overlaps a row.
+/// Sits in the gutter the tree leaves free: the press strip spans the right
+/// `SCROLLBAR_HIT_W` (8 px) while a tree root stops at `LANE_TREE_MARGIN_X`
+/// (8 px), so it never overlaps a row.
 fn lanes_scrollbar(
     handle: &gpui::ScrollHandle,
     cx: &gpui::App,
@@ -155,6 +155,7 @@ fn lanes_scrollbar(
     let t = theme::current(cx);
     crate::ui::scrollbar::vertical_thumb(
         "lanes-scrollbar-thumb",
+        handle.clone(),
         viewport_h,
         viewport_h + max_offset,
         handle.offset().y,

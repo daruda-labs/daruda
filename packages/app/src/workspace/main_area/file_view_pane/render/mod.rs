@@ -21,7 +21,7 @@ use self::scrollbar::file_viewer_scrollbar;
 use self::search_panel::render_search_panel;
 use self::toolbar::render_file_viewer_toolbar;
 use crate::workspace::Workspace;
-use crate::workspace::main_area::file_view_pane::{FileViewMode, PaneFileContent};
+use crate::workspace::main_area::file_view_pane::PaneFileContent;
 use crate::workspace::main_area::pane::FileContent;
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -50,9 +50,6 @@ pub(in crate::workspace) fn render_pane_file_viewer(
         PaneFileContent::LoadedRaw { .. } | PaneFileContent::LoadedDiff { .. }
     );
 
-    // Preview has variable-height blocks; derive height from measured offset.
-    let is_preview_mode = matches!(&fv.content, PaneFileContent::LoadedMarkdown { .. })
-        && fv.view_mode == FileViewMode::Preview;
     let surface = theme::PaneSurfaceTokens::file_viewer(cx);
     let viewer_bg = surface.background;
 
@@ -63,19 +60,26 @@ pub(in crate::workspace) fn render_pane_file_viewer(
         // vendored editor (see `InputState::scroll_size` doc comment) — the
         // real viewport/content geometry lives in `last_bounds()` /
         // `scroll_size()` instead.
-        let editor_scroll = editor.scroll_handle().clone();
+        let offset_y = editor.scroll_handle().offset().y;
         let viewport_h = editor.last_bounds().map_or(px(0.), |b| b.size.height);
         let content_h = editor.scroll_size().height;
-        file_viewer_scrollbar(&editor_scroll, toolbar_h, viewport_h, content_h, cx)
+        let editor = editor_state.clone();
+        file_viewer_scrollbar(editor, offset_y, toolbar_h, viewport_h, content_h, cx)
     } else {
+        // Measured, not `rows * line height`: that estimate omits the body's
+        // padding, so a press at the track's end stopped short of the last row.
+        // The virtual list's spacers keep the measured extent stable.
         let viewport_h = scroll_handle.bounds().size.height;
-        let content_h = if is_preview_mode {
-            viewport_h + scroll_handle.max_offset().y
-        } else {
-            let total_rows = fv.visible_row_count();
-            px(total_rows as f32 * theme::editor_font_size(cx) * theme::editor_line_height(cx))
-        };
-        file_viewer_scrollbar(scroll_handle, toolbar_h, viewport_h, content_h, cx)
+        let content_h = viewport_h + scroll_handle.max_offset().y;
+        let offset_y = scroll_handle.offset().y;
+        file_viewer_scrollbar(
+            scroll_handle.clone(),
+            offset_y,
+            toolbar_h,
+            viewport_h,
+            content_h,
+            cx,
+        )
     };
     // The editor provides its own find (Cmd+F); the custom search panel
     // only drives the non-editor renderers.

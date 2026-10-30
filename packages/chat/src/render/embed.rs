@@ -3,8 +3,8 @@
 //! capping makes necessary.
 
 use gpui::{
-    AnyElement, App, ElementId, Entity, Hsla, IntoElement, Pixels, RenderOnce, SharedString,
-    Window, div, point, prelude::*, px,
+    AnyElement, App, ElementId, Entity, Hsla, IntoElement, RenderOnce, SharedString, Window, div,
+    prelude::*, px,
 };
 
 use crate::output_editor::{bounded_embed_height, embed_text_height};
@@ -89,18 +89,16 @@ pub(crate) fn bounded_editor_embed(
         // Rows past the cap are reachable only by scrolling inside the embed, so
         // the embed needs a vertical thumb. No horizontal one: a wrapped editor's
         // content is never wider than its viewport.
-        .children(
-            daruda_ui::scrollbar::vertical_thumb(
-                format!("agent-chat-out-vthumb-{id}"),
-                viewport_h,
-                content_h,
-                offset_y,
-                px(0.),
-                t.scrollbar_thumb,
-                t.file_viewer_scrollbar_thumb_hover,
-            )
-            .map(|thumb| thumb.on_drag(drag_vertical(editor))),
-        )
+        .children(daruda_ui::scrollbar::vertical_thumb(
+            format!("agent-chat-out-vthumb-{id}"),
+            editor.clone(),
+            viewport_h,
+            content_h,
+            offset_y,
+            px(0.),
+            t.scrollbar_thumb,
+            t.file_viewer_scrollbar_thumb_hover,
+        ))
         .children(copy_source.map(|code| CopyOverlay {
             group,
             id: ElementId::Name(format!("agent-chat-out-copy-{id}").into()),
@@ -108,23 +106,6 @@ pub(crate) fn bounded_editor_embed(
             chip_bg: surface,
         }))
         .into_any_element()
-}
-
-/// Add a dragged thumb's scroll delta to `editor`'s vertical offset. Reads the
-/// offset live rather than closing over a render-time copy, so moves that
-/// arrive between two paints accumulate instead of each overwriting the last.
-/// `set_scroll_offset` owns the clamp and the repaint, so the host never has to
-/// know the editor's content extent.
-fn drag_vertical(
-    editor: &Entity<daruda_ui::InputState>,
-) -> impl Fn(Pixels, &mut Window, &mut App) + use<> {
-    let editor = editor.clone();
-    move |delta, _window, cx| {
-        editor.update(cx, |state, cx| {
-            let current = state.scroll_handle().offset();
-            state.set_scroll_offset(point(current.x, current.y + delta), cx);
-        });
-    }
 }
 
 /// Hover-revealed copy button over an embed, so replacing a markdown-rendered
@@ -149,7 +130,12 @@ struct CopyOverlay {
 
 impl RenderOnce for CopyOverlay {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let selector = format!("{}-chip", self.id);
         div()
+            .debug_selector(move || selector)
+            // Over the embed's scrollbar strip: a press on the chip is the
+            // chip's alone, not also a track press that jumps the embed.
+            .occlude()
             .absolute()
             .top_1()
             .right_1()

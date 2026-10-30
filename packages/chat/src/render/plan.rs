@@ -206,6 +206,7 @@ fn plan_list(
     let content_h = viewport_h + plan_scroll.max_offset().y;
     let thumb = daruda_ui::scrollbar::vertical_thumb(
         ("agent-chat-plan-scrollbar", pane_id as usize),
+        plan_scroll.clone(),
         viewport_h,
         content_h,
         plan_scroll.offset().y,

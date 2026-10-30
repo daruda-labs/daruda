@@ -194,3 +194,26 @@ async fn the_changed_file_list_builds_the_viewport_not_the_change_set(cx: &mut T
          2000 — virtualization is leaking"
     );
 }
+
+/// A press low on the scrollbar track must scroll the list there rather than
+/// fall through to the rows below it.
+#[gpui::test]
+async fn git_changes_scrollbar_track_click_scrolls(cx: &mut TestAppContext) {
+    let (w, ws) = dock_showing_changes(cx, changed_files(500));
+    let mut vcx = gpui::VisualTestContext::from_window(w.into(), cx);
+    let strip = vcx
+        .debug_bounds("git-changes-scrollbar-thumb")
+        .expect("500 changed files overflow the dock");
+
+    let near_bottom = gpui::point(strip.center().x, strip.bottom() - gpui::px(2.));
+    vcx.simulate_click(near_bottom, gpui::Modifiers::default());
+    vcx.run_until_parked();
+
+    let offset = ws.read_with(&vcx, |ws, _| {
+        ws.git.scroll_handle.0.borrow().base_handle.offset().y
+    });
+    assert!(
+        offset < gpui::px(0.),
+        "the track press left the list at {offset:?}"
+    );
+}

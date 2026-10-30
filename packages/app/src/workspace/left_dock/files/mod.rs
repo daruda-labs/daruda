@@ -138,6 +138,7 @@ fn build_files_scrollbar(
     let t = theme::current(cx);
     crate::ui::scrollbar::vertical_thumb(
         "files-scrollbar",
+        handle.clone(),
         viewport_h,
         viewport_h + max_offset_h,
         offset_y,

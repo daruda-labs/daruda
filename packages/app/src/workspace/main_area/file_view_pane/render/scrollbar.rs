@@ -1,14 +1,12 @@
-//! File-viewer scrollbar — visual indicator only (no drag-to-scroll yet).
-//!
-//! Sized from the pre-computed `content_h` so the thumb size and position
-//! stay accurate across both the fixed-line-height path (Raw / Changes)
-//! and the variable-block path (Markdown Preview, derived from
-//! `max_offset` instead of `total_rows * line_h`).
+//! File-viewer scrollbar thumb, sized from the caller's `content_h` because
+//! the editor modes and the rendered-Markdown modes measure it differently.
 
+use crate::ui::scrollbar::ThumbTarget;
 use crate::ui::theme;
 use gpui::App;
 
-/// Build an optional scrollbar thumb element based on the current scroll state.
+/// Build an optional scrollbar thumb element based on the current scroll state;
+/// `target` is the handle a track press or a thumb drag moves.
 /// Returns `None` when there is nothing to scroll (content fits in viewport).
 ///
 /// `body_top` offsets the thumb within the `.relative()` file-viewer container.
@@ -18,11 +16,11 @@ use gpui::App;
 /// one, whose `.bounds()` this vendored fork's text element never populates
 /// (it never calls `div().track_scroll(&handle)` — see `InputState::scroll_size`'s
 /// doc comment) and would silently draw no thumb. `content_h`:
-/// - Raw/Changes: `total_rows * configured row height` (stable across virtual-list shifts).
-/// - Preview: `viewport_h + max_offset().y` (measured after layout; variable blocks).
+/// - Markdown Source / Preview: `viewport_h + max_offset().y` (measured after layout).
 /// - Raw/Diff editor: `InputState::scroll_size().height`.
 pub(super) fn file_viewer_scrollbar(
-    scroll_handle: &gpui::ScrollHandle,
+    target: impl ThumbTarget,
+    scroll_offset_y: gpui::Pixels,
     body_top: gpui::Pixels,
     viewport_h: gpui::Pixels,
     content_h: gpui::Pixels,
@@ -33,9 +31,10 @@ pub(super) fn file_viewer_scrollbar(
     // container; the thumb range is [body_top, body_top + viewport_h].
     crate::ui::scrollbar::vertical_thumb(
         "file-viewer-scrollbar",
+        target,
         viewport_h,
         content_h,
-        scroll_handle.offset().y,
+        scroll_offset_y,
         body_top,
         t.scrollbar_thumb,
         t.file_viewer_scrollbar_thumb_hover,

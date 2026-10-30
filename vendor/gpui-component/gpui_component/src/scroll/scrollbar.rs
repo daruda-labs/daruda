@@ -886,18 +886,21 @@ impl Element for Scrollbar {
                                             (event.position.x - thumb_size / 2. - bounds.origin.x)
                                                 / (bounds.size.width - thumb_size)
                                         }
-                                        .min(1.);
+                                        .clamp(0., 1.);
+                                        // The thumb's travel maps onto the scrollable
+                                        // range, as in the drag path below — not the
+                                        // whole content, which overshot every press.
+                                        let target =
+                                            -(scroll_area_size - container_size) * percentage;
 
                                         if is_vertical {
                                             scroll_handle.set_offset(point(
                                                 offset.x,
-                                                (-scroll_area_size * percentage)
-                                                    .clamp(safe_range.start, safe_range.end),
+                                                target.clamp(safe_range.start, safe_range.end),
                                             ));
                                         } else {
                                             scroll_handle.set_offset(point(
-                                                (-scroll_area_size * percentage)
-                                                    .clamp(safe_range.start, safe_range.end),
+                                                target.clamp(safe_range.start, safe_range.end),
                                                 offset.y,
                                             ));
                                         }

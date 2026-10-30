@@ -932,3 +932,137 @@ async fn clicking_a_floating_button_still_ends_the_selection_drag(cx: &mut TestA
         "the drag outlived its mouse-up, so the autoscroll poll is still running"
     );
 }
+
+/// A transcript long enough to scroll, following its tail, with its scrollbar
+/// strip's window bounds.
+fn tailing_transcript(
+    cx: &mut TestAppContext,
+) -> (
+    gpui::VisualTestContext,
+    Entity<crate::view::AgentChatView>,
+    gpui::Bounds<gpui::Pixels>,
+) {
+    let (window_handle, view) = render_shell_output_card(cx, 3, true);
+    push_filler_cards(cx, window_handle, &view, 40);
+    view.update(cx, |v, cx| v.scroll_to_bottom(cx));
+    cx.run_until_parked();
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
+    vcx.update(|window, _| window.refresh());
+    vcx.run_until_parked();
+    let pane_id = view.read_with(&vcx, |v, _| v.pane_id);
+    // `debug_bounds` takes a `'static` selector; a test leaks one per run.
+    let selector: &'static str = format!("agent-chat-scrollbar-{pane_id}").leak();
+    let strip = vcx
+        .debug_bounds(selector)
+        .expect("forty cards overflow the transcript");
+    assert!(
+        view.read_with(&vcx, |v, _| v.list_state.is_following_tail()),
+        "the fixture starts at the tail"
+    );
+    (vcx, view, strip)
+}
+
+/// Pressing the track above the end reads history: tail-follow must stop, or
+/// the next streamed row would yank the transcript back down.
+#[gpui::test]
+async fn track_click_above_end_stops_tail_follow(cx: &mut TestAppContext) {
+    let (mut vcx, view, strip) = tailing_transcript(cx);
+    let before = view.read_with(&vcx, |v, _| v.list_state.scroll_px_offset_for_scrollbar().y);
+    vcx.simulate_click(
+        point(strip.center().x, strip.top() + px(2.)),
+        gpui::Modifiers::default(),
+    );
+    vcx.run_until_parked();
+    let (after, following) = view.read_with(&vcx, |v, _| {
+        (
+            v.list_state.scroll_px_offset_for_scrollbar().y,
+            v.list_state.is_following_tail(),
+        )
+    });
+    assert!(
+        after > before,
+        "the press must scroll up: {before:?} -> {after:?}"
+    );
+    assert!(!following, "reading history must stop tail-follow");
+}
+
+/// Dragging the thumb back to the end of the track resumes tail-follow, the
+/// way scrolling to the bottom does.
+#[gpui::test]
+async fn drag_to_end_resumes_tail_follow(cx: &mut TestAppContext) {
+    use gpui::{Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent};
+
+    let (mut vcx, view, strip) = tailing_transcript(cx);
+    let x = strip.center().x;
+    vcx.simulate_click(point(x, strip.top() + px(2.)), Modifiers::default());
+    vcx.run_until_parked();
+    assert!(!view.read_with(&vcx, |v, _| v.list_state.is_following_tail()));
+
+    // The thumb now sits at the top of the track; grab it and drag past the end.
+    let grab = point(x, strip.top() + px(4.));
+    let end = point(x, strip.bottom() + px(40.));
+    vcx.simulate_event(MouseDownEvent {
+        position: grab,
+        modifiers: Modifiers::default(),
+        button: MouseButton::Left,
+        click_count: 1,
+        first_mouse: false,
+    });
+    vcx.run_until_parked();
+    vcx.simulate_event(MouseMoveEvent {
+        position: end,
+        modifiers: Modifiers::default(),
+        pressed_button: Some(MouseButton::Left),
+    });
+    vcx.run_until_parked();
+    vcx.simulate_event(MouseUpEvent {
+        position: end,
+        modifiers: Modifiers::default(),
+        button: MouseButton::Left,
+        click_count: 1,
+    });
+    vcx.run_until_parked();
+    assert!(
+        view.read_with(&vcx, |v, _| v.list_state.is_following_tail()),
+        "dragging to the end must resume tail-follow"
+    );
+}
+
+/// The copy chip sits over the embed's scrollbar strip. Pressing the chip's
+/// right edge must copy, not also jump the scrolled embed back to its top.
+#[gpui::test]
+async fn copy_chip_press_leaves_the_embed_scroll_alone(cx: &mut TestAppContext) {
+    let (window_handle, view) = render_shell_output_card(cx, LARGE_ROWS, true);
+    let editor = view.read_with(cx, |v, _| {
+        v.assets
+            .output_editors
+            .get("b1#0")
+            .cloned()
+            .expect("output editor built for the shell block")
+    });
+    // Far enough down that the thumb has left the chip's corner, so a press
+    // there would be a track press, not a grab.
+    editor.update(cx, |state, cx| {
+        state.set_scroll_offset(point(px(0.), px(-2000.)), cx)
+    });
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
+    let embed = vcx
+        .debug_bounds("agent-chat-out-embed-b1#0")
+        .expect("the bounded embed painted");
+    // Hovering the embed reveals the chip.
+    vcx.simulate_mouse_move(embed.center(), None, gpui::Modifiers::default());
+    vcx.update(|window, _| window.refresh());
+    vcx.run_until_parked();
+    let chip = vcx
+        .debug_bounds("agent-chat-out-copy-b1#0-chip")
+        .expect("the copy chip painted");
+    let before = editor.read_with(&vcx, |s, _| s.scroll_handle().offset().y);
+    assert!(before < px(0.), "the fixture must start scrolled");
+    vcx.simulate_click(
+        point(chip.right() - px(1.), chip.center().y),
+        gpui::Modifiers::default(),
+    );
+    vcx.run_until_parked();
+    let after = editor.read_with(&vcx, |s, _| s.scroll_handle().offset().y);
+    assert_eq!(before, after, "the chip press scrolled the embed");
+}

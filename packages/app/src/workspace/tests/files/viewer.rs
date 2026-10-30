@@ -699,3 +699,62 @@ async fn installing_content_releases_the_previous_image_table(cx: &mut TestAppCo
     })
     .unwrap();
 }
+
+/// Markdown Source renders a virtualized row list inside padding, so a thumb
+/// sized from the row count alone would stop a press at the track's bottom
+/// short of the last row; it must land on the real end of the content.
+#[gpui::test]
+async fn file_viewer_markdown_source_track_bottom_reaches_end(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::file_view_pane::FileViewMode;
+
+    let (wh, ws, temp) = build_workspace_with_temp_project(cx);
+    let body: String = (0..400).map(|i| format!("line {i}\n")).collect();
+    std::fs::write(temp.path().join("long.md"), body).unwrap();
+    cx.update(|cx| {
+        crate::window_registry::WindowRegistry::register(wh.into(), ws.downgrade(), cx);
+    });
+    let id = ws.read_with(cx, |ws, _| ws.active_ref());
+    ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
+    cx.run_until_parked();
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_files_entry(
+                id,
+                std::path::PathBuf::from("long.md"),
+                crate::workspace::main_area::tab_ops::OpenIntent::Enter,
+                window,
+                cx,
+            );
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.set_file_view_mode(FileViewMode::Raw, window, cx)
+        });
+        window.refresh();
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    vcx.update(|window, _| window.refresh());
+    vcx.run_until_parked();
+    let strip = vcx
+        .debug_bounds("file-viewer-scrollbar")
+        .expect("400 Markdown source rows overflow the viewer");
+    let bottom = gpui::point(strip.center().x, strip.bottom() - gpui::px(1.));
+    vcx.simulate_click(bottom, gpui::Modifiers::default());
+    vcx.run_until_parked();
+
+    let (offset, max) = ws.read_with(&vcx, |ws, _| {
+        let fc = ws.focused_file_content().expect("viewer open");
+        (fc.scroll_handle.offset().y, fc.scroll_handle.max_offset().y)
+    });
+    assert!(max > gpui::px(0.), "the source rows must overflow");
+    assert!(
+        (offset + max).abs() < gpui::px(1.),
+        "a press at the track's end must reach the content's end: offset {offset:?}, max {max:?}"
+    );
+}

@@ -18,6 +18,7 @@ pub(in crate::workspace) mod pane;
 pub(in crate::workspace) mod pane_drag_ops;
 pub(in crate::workspace) mod pane_input_ops;
 pub(in crate::workspace) mod pane_menu;
+mod pane_press;
 pub(in crate::workspace) mod pane_tree;
 pub(in crate::workspace) mod resize;
 pub(in crate::workspace) mod tab_drag_ops;
@@ -266,7 +267,9 @@ pub(in crate::workspace) fn render_layout(
                 ))
                 .on_drop::<TabDrag>(cx.listener(move |this, d: &TabDrag, window, cx| {
                     this.drop_tab_onto_pane(d.tab_id, window, cx)
-                }));
+                }))
+                // First child, so its hitbox is behind everything the pane paints.
+                .child(pane_press::blocked_press_layer(id, cx));
 
             if has_splits {
                 let basename = pane.display_cwd();

@@ -117,6 +117,7 @@ fn scrollbar_thumb(handle: &ScrollHandle, cx: &App) -> Option<crate::ui::scrollb
     let t = theme::current(cx);
     crate::ui::scrollbar::vertical_thumb(
         "right-panel-scrollbar-thumb",
+        handle.clone(),
         viewport_h,
         viewport_h + max_offset,
         handle.offset().y,

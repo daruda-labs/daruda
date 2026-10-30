@@ -501,6 +501,9 @@ pub const MAIN_EMPTY_STATE_BODY_MAX_W: f32 = 360.0;
 pub const SCROLLBAR_W: f32 = 4.0;
 pub const SCROLLBAR_MARGIN_R: f32 = GAP_XS;
 pub const SCROLLBAR_MIN_THUMB_H: f32 = 24.0;
+/// Width of the strip that takes scrollbar presses: the thumb plus its margin
+/// on both sides, so the thin thumb is easy to grab without covering content.
+pub const SCROLLBAR_HIT_W: f32 = SCROLLBAR_W + 2.0 * SCROLLBAR_MARGIN_R;
 pub const SCROLLBAR_THUMB: Hsla = hsla(0.0, 0.0, 1.0, 0.25);
 pub const SCROLLBAR_THUMB_HOVER: Hsla = hsla(0.0, 0.0, 1.0, 0.45);
 pub const SCROLLBAR_TRACK_BG: Hsla = hsla(0.0, 0.0, 1.0, 0.04);

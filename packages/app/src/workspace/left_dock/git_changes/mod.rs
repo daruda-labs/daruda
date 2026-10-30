@@ -628,6 +628,7 @@ fn git_changes_scrollbar(
     let t = theme::current(cx);
     crate::ui::scrollbar::vertical_thumb(
         "git-changes-scrollbar-thumb",
+        handle.clone(),
         viewport_h,
         viewport_h + max_offset,
         offset_y,

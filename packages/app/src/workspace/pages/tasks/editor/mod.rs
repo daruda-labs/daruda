@@ -287,6 +287,7 @@ fn render(
         .child(footer)
         .children(ui::scrollbar::vertical_thumb(
             ("task-edit-scrollbar", editor_id.0 as usize),
+            scroll.clone(),
             scroll.bounds().size.height,
             scroll.bounds().size.height + scroll.max_offset().y,
             scroll.offset().y,
