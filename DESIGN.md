@@ -1080,21 +1080,28 @@ Severity left border (3px):
 ```
 error:   3px solid error   (#e06060)
 warning: 3px solid warning (#d4a853)
-success: 3px solid success (#4aaf78)
 info:    3px solid accent  (#5e6ad2)
 ```
 
-- Slides in from bottom-right of the window.
-- Max 3 toasts stacked; `xs` (4px) gap between.
+- Anchored bottom-right, above the status bar; no entry animation.
+- Max 3 toasts stacked, oldest evicted first; `xs` (4px) gap between. A repeat
+  of a deduplicated report bumps its count and restarts its timer.
 - Dismiss button: `×` at `ui-sm mute`, top-right of toast.
 
-**Auto-dismiss timing:**
+**Auto-dismiss timing** (`ErrorSeverity::auto_dismiss_after`):
 ```
-info:    3s then fade out
-success: 3s then fade out
-warning: 8s then fade out  (user should notice)
-error:   manual dismiss only  (must be explicitly closed)
+info:    5s
+warning: 8s
+error:   30s  (the details modal and the NDJSON log keep it past that)
 ```
+
+**When to toast.** A toast is for a result that has no surface of its own left
+to show it. Report a failure where the user acted when that place still exists:
+a dialog whose submit is refused stays open with the reason under its field
+(`open_validated_single_field_dialog`), and a form shows its own banner. A
+success the screen already shows — a row that appears, renames or goes away —
+gets no toast. Toast a success only when it finishes out of sight (an
+asynchronous sign-in, a flow run with no unread mark to carry it).
 
 **Toast action button** (optional, right of message body):
 ```
