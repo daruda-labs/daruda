@@ -149,4 +149,7 @@ agent_chat:
   tool_media_label_no_mime: "[%{size}]"
   working: "작업 중"
   working_tool: "%{name} 실행 중"
+  working_thinking: "생각하는 중"
+  working_writing: "답변 작성 중"
+  working_compacting: "컨텍스트 압축 중"
   awaiting_permission: "승인을 기다리는 중"

@@ -2,7 +2,7 @@
 //! rather than drawn in the pane chrome — the signal sits where the next
 //! response will appear.
 
-use daruda_acp::ChatItem;
+use daruda_acp::{ChatItem, CompactionStatusView};
 use gpui::{Context, IntoElement, SharedString, div, prelude::*, px};
 
 use super::super::format_elapsed;
@@ -35,6 +35,32 @@ fn running_tool_title(items: &[ChatItem]) -> Option<String> {
     })
 }
 
+/// What the newest item says the agent is producing, when it is producing
+/// something the footer can name more precisely than "Working".
+#[derive(Debug, PartialEq, Eq)]
+enum StreamPhase {
+    Thinking,
+    Writing,
+    Compacting,
+}
+
+/// Only the newest item counts: an earlier streaming flag is a chunk the agent
+/// has since moved past, and naming it would describe work that already ended.
+fn stream_phase(items: &[ChatItem]) -> Option<StreamPhase> {
+    match items.last()? {
+        ChatItem::Thinking {
+            streaming: true, ..
+        } => Some(StreamPhase::Thinking),
+        ChatItem::AssistantText {
+            streaming: true, ..
+        } => Some(StreamPhase::Writing),
+        ChatItem::Compaction(item) if item.status == CompactionStatusView::InProgress => {
+            Some(StreamPhase::Compacting)
+        }
+        _ => None,
+    }
+}
+
 /// Collapse an adapter-supplied tool-call title to a single clean line for the
 /// status label: runs of whitespace (incl. newlines and tabs) become one space
 /// and the ends are trimmed, so a multi-line command title can never force a
@@ -45,7 +71,8 @@ fn single_line_title(title: &str) -> String {
 }
 
 /// The live activity label this turn: blocked on a permission prompt, running
-/// background subagents, running a named tool, or otherwise generating prose.
+/// background subagents, running a named tool, thinking, writing, compacting,
+/// or otherwise just working.
 /// The animated trailing dots are appended by [`working_indicator`]. Subagent
 /// activity outranks the running-tool title because during a subagent run the
 /// live tool is a (noisy) child call — the count is the signal the user wants.
@@ -57,7 +84,13 @@ fn working_status(content: &AgentChatView) -> SharedString {
     } else if let Some(title) = running_tool_title(&content.items) {
         s::agent_chat::working_tool(single_line_title(&title)).into()
     } else {
-        s::agent_chat::working().into()
+        match stream_phase(&content.items) {
+            Some(StreamPhase::Thinking) => s::agent_chat::working_thinking(),
+            Some(StreamPhase::Writing) => s::agent_chat::working_writing(),
+            Some(StreamPhase::Compacting) => s::agent_chat::working_compacting(),
+            None => s::agent_chat::working(),
+        }
+        .into()
     }
 }
 
@@ -109,8 +142,10 @@ pub(in crate::render) fn working_indicator(
 
 #[cfg(test)]
 mod tests {
-    use super::{running_tool_title, single_line_title};
-    use daruda_acp::{ChatItem, ToolCallItem, ToolKindView, ToolStatusView};
+    use super::{StreamPhase, running_tool_title, single_line_title, stream_phase};
+    use daruda_acp::{
+        ChatItem, CompactionItem, CompactionStatusView, ToolCallItem, ToolKindView, ToolStatusView,
+    };
 
     fn tool(id: &str, status: ToolStatusView) -> ChatItem {
         ChatItem::ToolCall(ToolCallItem {
@@ -160,5 +195,41 @@ mod tests {
             tool("c3", ToolStatusView::Pending),
         ];
         assert_eq!(running_tool_title(&items), Some("Tool c3".to_owned()));
+    }
+
+    #[test]
+    fn stream_phase_names_only_the_newest_item() {
+        let text = |streaming| ChatItem::AssistantText {
+            text: "a".into(),
+            streaming,
+            message_id: None,
+            phase: Default::default(),
+        };
+        let thought = |streaming| ChatItem::Thinking {
+            text: "t".into(),
+            streaming,
+            message_id: None,
+        };
+        assert_eq!(stream_phase(&[]), None);
+        assert_eq!(stream_phase(&[thought(true)]), Some(StreamPhase::Thinking));
+        assert_eq!(
+            stream_phase(&[thought(false), text(true)]),
+            Some(StreamPhase::Writing)
+        );
+        assert_eq!(
+            stream_phase(&[text(true), tool("c1", ToolStatusView::Completed)]),
+            None,
+            "a stream the agent moved past is not the current phase"
+        );
+        let mut compaction = CompactionItem::new("s", "c");
+        assert_eq!(
+            stream_phase(&[ChatItem::Compaction(Box::new(compaction.clone()))]),
+            Some(StreamPhase::Compacting)
+        );
+        compaction.status = CompactionStatusView::Completed;
+        assert_eq!(
+            stream_phase(&[ChatItem::Compaction(Box::new(compaction))]),
+            None
+        );
     }
 }

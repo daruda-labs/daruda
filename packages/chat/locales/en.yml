@@ -279,5 +279,10 @@ agent_chat:
   working: "Working"
   # Pinned working-footer label while a named tool call is in progress.
   working_tool: "Running %{name}"
+  # Working-footer phases read from the newest item: reasoning streaming, the
+  # reply streaming, and the agent compacting its context.
+  working_thinking: "Thinking"
+  working_writing: "Writing"
+  working_compacting: "Compacting context"
   # Pinned working-footer label while the turn is blocked on a permission prompt.
   awaiting_permission: "Waiting for your approval"
