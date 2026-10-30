@@ -68,7 +68,7 @@ gpui_component_macros = { path = "vendor/gpui-component/gpui_component_macros" }
 gpui_component_assets = { path = "vendor/gpui-component/gpui_component_assets" }
 
 # Shared registry dependencies, including the vendored widget packages.
-agent-client-protocol = "3.3"
+agent-client-protocol = "3.6"
 anyhow = "1"
 base64 = "0.23"
 chrono = { version = "0.4.38", default-features = false }
