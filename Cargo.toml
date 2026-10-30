@@ -86,7 +86,7 @@ log = "0.4"
 lsp-types = { version = "0.97.0", features = ["proposed"] }
 notify = { version = "8.2.0", default-features = false }
 portable-pty = "0.9"
-pulldown-cmark = { version = "0.13", default-features = false }
+pulldown-cmark = { version = "0.13.5", default-features = false }
 raw-window-handle = "0.6"
 regex = "1.10"
 ropey = { version = "=2.0.0-beta.1", features = [
