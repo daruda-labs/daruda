@@ -119,7 +119,14 @@ pub(super) fn user_bubble(
         .flex_col()
         .gap(px(theme::AGENT_CHAT_MSG_GAP))
         .child(bubble)
-        .child(div().flex().flex_row().justify_end().child(toggle))
+        .child(
+            div()
+                .debug_selector(move || format!("agent-chat-user-fold-{ix}"))
+                .flex()
+                .flex_row()
+                .justify_end()
+                .child(toggle),
+        )
 }
 
 /// Whether a prompt is long enough to fold, and if so which way it is shown.
@@ -524,7 +531,14 @@ pub(super) fn failure_block(
             // width (flex-column default), so `justify_center` has something to
             // centre within; this container is `failure_block`'s alone, so
             // neither the gap nor the alignment reaches any other block.
-            el.child(div().flex().flex_row().justify_center().child(btn))
+            el.child(
+                div()
+                    .debug_selector(move || format!("agent-chat-failure-action-{ix}"))
+                    .flex()
+                    .flex_row()
+                    .justify_center()
+                    .child(btn),
+            )
         })
 }
 

@@ -62,3 +62,62 @@ fn a_preview_keeps_the_opening_lines_and_caps_one_huge_line() {
         crate::PROMPT_PREVIEW_CHARS + 1
     );
 }
+
+/// The user's path through a folded prompt: read the preview, open it, fold it
+/// back — each click changing the row's height.
+#[gpui::test]
+fn the_toggle_opens_and_refolds_a_settled_prompt(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.items = vec![
+                ChatItem::UserText("pasted log line\n".repeat(40)),
+                assistant_text_item("read it"),
+            ];
+            view.settle_prompts();
+            view.rebuild_rows();
+            cx.notify();
+        })
+        .unwrap();
+    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    let prompt_height = |visual: &mut gpui::VisualTestContext| {
+        window
+            .read_with(visual, |view, _| {
+                let row = view
+                    .rows
+                    .iter()
+                    .position(|r| matches!(r.kind, crate::rows::RowKind::User(0)))
+                    .expect("prompt row");
+                view.list_state
+                    .bounds_for_item(row)
+                    .expect("prompt row measured")
+                    .size
+                    .height
+            })
+            .unwrap()
+    };
+    let click_toggle = |visual: &mut gpui::VisualTestContext| {
+        let toggle = visual
+            .debug_bounds("agent-chat-user-fold-0")
+            .expect("the toggle sits under the prompt");
+        // Right-aligned in a full-width row: press just inside its right end.
+        let at = gpui::point(toggle.right() - gpui::px(8.), toggle.center().y);
+        visual.simulate_click(at, gpui::Modifiers::default());
+        visual.run_until_parked();
+    };
+
+    let folded = prompt_height(&mut visual);
+    click_toggle(&mut visual);
+    let open = prompt_height(&mut visual);
+    assert!(
+        open > folded,
+        "opening shows the whole prompt: {folded:?} -> {open:?}"
+    );
+    click_toggle(&mut visual);
+    assert_eq!(
+        prompt_height(&mut visual),
+        folded,
+        "folding it back restores the preview"
+    );
+}

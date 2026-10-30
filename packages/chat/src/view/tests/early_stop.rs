@@ -99,8 +99,8 @@ fn continue_is_a_visible_prompt_and_never_jumps_the_queue(cx: &mut gpui::TestApp
 }
 
 /// The stop row loses its Continue button once something follows it. On screen
-/// the list relays it out anyway; the splice in `rebuild_rows` also covers the
-/// off-screen case, where a stale height would skew the scroll extent.
+/// the list relays it out anyway; `rebuild_rows` remeasuring the old last row
+/// also covers the off-screen case, where a stale height skews the extent.
 #[gpui::test]
 fn the_stop_row_shrinks_when_its_button_goes(cx: &mut gpui::TestAppContext) {
     let window = make_test_view(cx);
@@ -141,5 +141,46 @@ fn the_stop_row_shrinks_when_its_button_goes(cx: &mut gpui::TestAppContext) {
     assert!(
         height(&mut visual) < with_button,
         "the row is remeasured without the button: {with_button:?}"
+    );
+}
+
+/// The user's path through a cut-short answer: click Continue, see it wait,
+/// and find no second press that would send it twice.
+#[gpui::test]
+fn clicking_continue_queues_it_once_and_the_button_steps_aside(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.items = vec![
+                ChatItem::UserText("go".into()),
+                ChatItem::Failure(AcpFailure::Stopped(EarlyStop::MaxTokens)),
+            ];
+            view.rebuild_rows();
+            cx.notify();
+        })
+        .unwrap();
+    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    let button = visual
+        .debug_bounds("agent-chat-failure-action-1")
+        .expect("Continue is offered under the newest stop");
+    visual.simulate_click(button.center(), gpui::Modifiers::default());
+    visual.run_until_parked();
+
+    window
+        .read_with(&visual, |view, _| {
+            assert_eq!(
+                texts(&view.queue.pending_prompts),
+                vec![crate::strings::agent_chat::continue_prompt()],
+                "with no session yet, the click waits like a typed prompt"
+            );
+            assert!(!view.offers_continue(), "and is not offered twice");
+        })
+        .unwrap();
+    visual.update(|window, _| window.refresh());
+    visual.run_until_parked();
+    assert!(
+        visual.debug_bounds("agent-chat-failure-action-1").is_none(),
+        "the button is gone while its prompt waits"
     );
 }

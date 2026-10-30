@@ -76,7 +76,15 @@ impl AgentChatView {
     /// turn that stopped. Both inputs reproject the rows when they change, so
     /// the stop row is remeasured as the button comes and goes.
     pub(crate) fn offers_continue(&self) -> bool {
-        !self.is_read_only() && !self.is_busy()
+        !self.is_read_only() && !self.is_busy() && !self.continue_is_queued()
+    }
+
+    /// A Continue already waiting (the pane is reconnecting, or behind the
+    /// user's prompts) has not reached the transcript, so the stop is still
+    /// the newest item; a second press would only queue it twice.
+    fn continue_is_queued(&self) -> bool {
+        let text = crate::strings::agent_chat::continue_prompt();
+        self.queue.pending_prompts.iter().any(|q| q.text == text)
     }
 
     /// Ask the agent to pick up an answer it cut short, as an ordinary visible
