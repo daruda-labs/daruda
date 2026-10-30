@@ -41,6 +41,13 @@ pub fn failure_message(failure: &daruda_acp::AcpFailure) -> String {
                 | PreparationKind::Process => s::agent_chat::adapter_setup_required(),
             }
         }
+        daruda_acp::AcpFailure::Stopped(stop) => match stop {
+            daruda_acp::EarlyStop::MaxTokens => crate::strings::agent_chat::stopped_max_tokens(),
+            daruda_acp::EarlyStop::MaxTurnRequests => {
+                crate::strings::agent_chat::stopped_turn_limit()
+            }
+            daruda_acp::EarlyStop::Refusal => crate::strings::agent_chat::stopped_refusal(),
+        },
         _ => failure.message().to_owned(),
     }
 }

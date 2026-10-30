@@ -177,6 +177,10 @@ pub(crate) enum ScreenshotScenario {
     AgentChatFailure,
     /// A disconnected adapter with localized recovery copy and a retry button.
     AgentChatTransportClosed,
+    /// A reply the agent cut off at its output limit, with the Continue button.
+    AgentChatStopped,
+    /// A long prompt folded to its preview once its turn settled.
+    AgentChatLongPrompt,
     AgentChatPreparationFailure(daruda_acp::preparation::PreparationKind),
     /// A fresh agent-chat pane before the first prompt, with view options open.
     AgentChatEmpty,
@@ -597,6 +601,14 @@ pub(crate) fn drive(
                     cx,
                 )
             });
+        }
+        ScreenshotScenario::AgentChatLongPrompt => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_long_prompt_for_shot(window, cx)
+            });
+        }
+        ScreenshotScenario::AgentChatStopped => {
+            workspace.update(cx, |ws, cx| ws.open_agent_chat_stopped_for_shot(window, cx));
         }
         ScreenshotScenario::AgentChatTransportClosed => {
             workspace.update(cx, |ws, cx| {

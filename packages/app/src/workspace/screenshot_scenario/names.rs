@@ -64,6 +64,8 @@ const NAME_FLOW_RUN_LEGACY: &str = "flow-run-legacy";
 const NAME_FLOW_RUN_UNAVAILABLE: &str = "flow-run-unavailable";
 const NAME_AGENT_CHAT_FAILURE: &str = "agent-chat-failure";
 const NAME_AGENT_CHAT_TRANSPORT_CLOSED: &str = "agent-chat-transport-closed";
+const NAME_AGENT_CHAT_STOPPED: &str = "agent-chat-stopped";
+const NAME_AGENT_CHAT_LONG_PROMPT: &str = "agent-chat-long-prompt";
 const NAME_AGENT_CHAT_PACKAGE_NETWORK: &str = "agent-chat-package-network";
 const NAME_AGENT_CHAT_PACKAGE_INVALID: &str = "agent-chat-package-invalid";
 /// CLI token for an empty agent-chat pane with its view options open.
@@ -306,6 +308,8 @@ impl ScreenshotScenario {
             )),
             NAME_AGENT_CHAT_FAILURE => Some(Self::AgentChatFailure),
             NAME_AGENT_CHAT_TRANSPORT_CLOSED => Some(Self::AgentChatTransportClosed),
+            NAME_AGENT_CHAT_STOPPED => Some(Self::AgentChatStopped),
+            NAME_AGENT_CHAT_LONG_PROMPT => Some(Self::AgentChatLongPrompt),
             NAME_AGENT_CHAT_PACKAGE_NETWORK => Some(Self::AgentChatPreparationFailure(
                 daruda_acp::preparation::PreparationKind::Network,
             )),

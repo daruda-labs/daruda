@@ -135,11 +135,11 @@ impl AgentChatView {
                 self.apply_cancel_ack(&mut changes, cx);
             }
             AcpEvent::TurnEnded {
+                stop_reason,
                 completed_normally,
                 usage,
-                ..
             } => {
-                self.apply_turn_ended(completed_normally, usage, &mut changes, cx);
+                self.apply_turn_ended(&stop_reason, completed_normally, usage, &mut changes, cx);
             }
             AcpEvent::AvailableCommandsChanged(commands) => {
                 self.session_config.available_commands = commands;
@@ -315,6 +315,7 @@ impl AgentChatView {
             // revisit: no event follows a closed stream, so a call this settle
             // just made terminal would otherwise wait for a fold toggle.
             self.settle_run_state(cx);
+            self.settle_prompts();
             self.reconcile_tool_images(&ReconcileScope::All, cx);
             self.rebuild_rows();
             self.apply_list_sync(ListSync::EveryRow, "stream-eof");

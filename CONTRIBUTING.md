@@ -620,14 +620,14 @@ after settle and forces a repaint before capture.
 | Compact dock | `left-dock-groups` shows aliases and individual panes; `left-dock-group-status` compares active and neutral collapsed-group lines; `left-dock-group-hover` adds header hover; `left-dock-pane-hover` shows selected-row hover and the name-first tooltip; `left-dock-project-alias` opens the initials editor |
 | Tab status | `tab-indicators` seeds each status dot; inspect its color |
 | Status bar | `status-ports`, `status-flows`, `status-usage`, `status-account`, `keep-awake`, `keep-awake-failed` — each chip's popup open over seeded data |
-| Agent chat | `agent-chat`, `agent-chat-working`, `agent-chat-empty`, `agent-chat-failure` |
+| Agent chat | `agent-chat`, `agent-chat-working`, `agent-chat-empty`, `agent-chat-failure`, `agent-chat-stopped`, `agent-chat-long-prompt` |
 | Orchestrator | `orchestrator-chip`, `orchestrator-tab`, `orchestrator-approval` (pending and settled host cards) |
 | Chat interaction | `agent-chat-fold`, `agent-chat-interrupted`, `agent-chat-overage-stopped`, `agent-chat-options[:<tab>]`, `agent-chat-queue-parked`, `agent-chat-queue-armed`, `input-dock-shrunk[-queue]`, `input-dock-expanded` (overflowing draft at the dock floor) |
 | Chat details | `agent-chat-running-tool`, `agent-chat-plan[-stopped]`, `agent-chat-thoughts[-working\|-only]`, `agent-chat-sole-reply` |
 | Transcript boundaries | `agent-chat-tail[-open]`, `agent-chat-group-tail[-open]`, `agent-chat-subagent-tail[-open]` |
 | CLI transcript | `agent-chat-cli-running`, `agent-chat-cli-ended` |
 | Task editor | `task-editor`, `task-editor-preview`, `task-editor-saving` (checklist disabled during save), `task-editor-running`, `task-editor-disk-copy` |
-| Flows | `flow-picker`, `flow-profile-picker`, `flow-running`, `flow-asking`, `flow-resumable`, `flow-delete-confirm` |
+| Flows | `flow-picker`, `flow-profile-picker`, `flow-running`, `flow-asking`, `flow-resumable`, `flow-delete-confirm`, `flow-rename-refused` |
 | Flow graph | `flow-graph`, `flow-graph-running`, `flow-graph-form[-refused]`, `flow-graph-pinned`, `flow-graph-authoring`, `flow-run-detail` |
 
 Bracketed forms summarize related names, not literal CLI arguments. The

@@ -17,6 +17,15 @@ rust_i18n::i18n!("locales", fallback = "en");
 /// agent pushing faster than turns complete would grow it without bound.
 pub const QUEUE_DEPTH_MAX: usize = 10;
 
+/// A prompt longer than this, in characters or lines, folds to a preview once
+/// its turn settles; pasted logs and specs otherwise push the answer away.
+pub(crate) const PROMPT_FOLD_CHARS: usize = 500;
+pub(crate) const PROMPT_FOLD_LINES: usize = 12;
+/// How much of a folded prompt the preview keeps — well under the fold
+/// thresholds, or folding a prompt just past them would save nothing.
+pub(crate) const PROMPT_PREVIEW_LINES: usize = 6;
+pub(crate) const PROMPT_PREVIEW_CHARS: usize = 240;
+
 pub mod agent_chat_helpers;
 pub(crate) mod autoscroll_ops;
 /// Which rows a pane has folded, and the mode those defaults come from.

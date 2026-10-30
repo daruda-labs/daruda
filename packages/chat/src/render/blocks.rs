@@ -54,10 +54,21 @@ impl<'a> MarkdownRender<'a> {
 pub(super) fn user_bubble(
     ix: usize,
     text: &str,
+    fold: PromptFold,
     dim: f32,
+    copy: AnyElement,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
-    let body = daruda_ui::selectable_text(("agent-chat-user", ix), text.to_string())
+    // The preview keys its own text state: a keyed `TextView` reparses a
+    // changed source asynchronously, after the list has measured the row, so
+    // swapping one state between preview and full text left a stale height.
+    let (id, shown) = match fold {
+        PromptFold::Long { expanded: false } => ("agent-chat-user-preview", prompt_preview(text)),
+        PromptFold::Short | PromptFold::Long { expanded: true } => {
+            ("agent-chat-user", text.to_string())
+        }
+    };
+    let body = daruda_ui::selectable_text((id, ix), shown)
         .color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
         .font_family(theme::agent_chat_font_family(cx))
         .text_size(px(theme::agent_chat_font_size(cx)))
@@ -81,7 +92,98 @@ pub(super) fn user_bubble(
         .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
         .text_size(px(theme::agent_chat_font_size(cx)))
         .child(body);
-    div().flex().flex_row().justify_end().child(inner)
+    let bubble = div()
+        .flex()
+        .flex_row()
+        .justify_end()
+        .items_end()
+        .gap(px(theme::AGENT_CHAT_TRAILING_GAP))
+        .child(copy)
+        .child(inner);
+    let PromptFold::Long { expanded } = fold else {
+        return bubble;
+    };
+    let label = if expanded {
+        s::agent_chat::prompt_show_less()
+    } else {
+        s::agent_chat::prompt_show_full()
+    };
+    let toggle = pane_quiet_button(("agent-chat-user-fold", ix), label, cx).on_click(cx.listener(
+        move |this, _ev, window, cx| this.toggle_fold(FoldKey::UserPrompt(ix), window, cx),
+    ));
+    // The column stretches the bubble row to the pane, as it is without a
+    // toggle; shrink-wrapping it made the bubble's 85% cap measure against its
+    // own text, so the prompt spilled past its edge.
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(theme::AGENT_CHAT_MSG_GAP))
+        .child(bubble)
+        .child(div().flex().flex_row().justify_end().child(toggle))
+}
+
+/// Whether a prompt is long enough to fold, and if so which way it is shown.
+#[derive(Clone, Copy)]
+pub(super) enum PromptFold {
+    Short,
+    Long { expanded: bool },
+}
+
+impl PromptFold {
+    pub(super) fn of(text: &str, expanded: impl FnOnce() -> bool) -> Self {
+        // `nth` stops at the threshold, so a huge prompt costs no full scan per
+        // frame just to learn it is long.
+        let long = text.chars().nth(crate::PROMPT_FOLD_CHARS).is_some()
+            || text.lines().nth(crate::PROMPT_FOLD_LINES).is_some();
+        if long {
+            Self::Long {
+                expanded: expanded(),
+            }
+        } else {
+            Self::Short
+        }
+    }
+}
+
+/// The opening of a folded prompt: its first lines, capped in characters so
+/// one enormous line cannot defeat the fold, with an ellipsis for the rest.
+pub(super) fn prompt_preview(text: &str) -> String {
+    let head = text
+        .lines()
+        .take(crate::PROMPT_PREVIEW_LINES)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut preview: String = head.chars().take(crate::PROMPT_PREVIEW_CHARS).collect();
+    preview.truncate(preview.trim_end().len());
+    preview.push('…');
+    preview
+}
+
+/// The hover group every transcript row carries, so a message's copy button
+/// shows only while the pointer is over that message's row.
+pub(super) const MESSAGE_HOVER_GROUP: &str = "agent-chat-message";
+
+/// A whole-message copy button, revealed on row hover. It copies `text` as
+/// written — the prompt verbatim, the answer's markdown source — not the
+/// rendered or folded view of it.
+pub(super) fn message_copy(
+    id: (&'static str, usize),
+    text: &str,
+    window: &mut gpui::Window,
+    cx: &mut App,
+) -> AnyElement {
+    div()
+        .debug_selector(move || format!("{}-{}", id.0, id.1))
+        .flex_none()
+        .invisible()
+        .group_hover(MESSAGE_HOVER_GROUP, |s| s.visible())
+        .child(crate::localized::message_copy_button(
+            id,
+            SharedString::from(text.to_string()),
+            window,
+            cx,
+        ))
+        .into_any_element()
 }
 
 /// Markdown painted on the chat pane. The body colour, the surface it sits on
@@ -141,6 +243,7 @@ pub(super) fn conclusion_block(
     expanded: bool,
     text: &str,
     stats: Option<AnyElement>,
+    copy: AnyElement,
     markdown: MarkdownRender<'_>,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
@@ -157,6 +260,7 @@ pub(super) fn conclusion_block(
     if let Some(stats) = stats {
         header = header.trailing(stats);
     }
+    header = header.trailing(copy);
     let dim = markdown.dim;
     FoldRow::block(("agent-chat-conclusion", ix), key, expanded, header, |cx| {
         assistant_markdown(ix, text, markdown, cx)
@@ -303,6 +407,24 @@ pub(super) fn pane_action_button(
     )
 }
 
+/// [`pane_action_button`]'s quiet form: no fill until hovered, a muted label —
+/// for a disclosure that sits under content rather than offering an action.
+/// Pane-toned for the same reason; ghost would take the window theme's label.
+pub(super) fn pane_quiet_button(
+    id: impl Into<gpui::ElementId>,
+    label: String,
+    cx: &mut Context<AgentChatView>,
+) -> daruda_ui::Button {
+    daruda_ui::button(id, label).custom(
+        daruda_ui::ButtonCustomVariant::new(cx)
+            .color(theme::TRANSPARENT)
+            .foreground(theme::agent_chat_fg_muted(cx))
+            .border(theme::TRANSPARENT)
+            .hover(theme::agent_chat_tint(cx))
+            .active(theme::agent_chat_border_tint(cx)),
+    )
+}
+
 /// A button on the status banner — which is *not* the pane body.
 ///
 /// The banner composites its tint over the window surface, so it reads light
@@ -344,6 +466,7 @@ pub(super) fn banner_action_button(
 pub(super) fn failure_block(
     ix: usize,
     failure: &daruda_acp::AcpFailure,
+    can_continue: bool,
     t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
@@ -363,6 +486,26 @@ pub(super) fn failure_block(
             cx.emit(super::super::view::AgentChatEvent::Reauthenticate);
         }))
     });
+    // A refusal is not offered: asking again is refused again.
+    // The output limit arrives either as a stop reason or as an adapter error
+    // naming it; both cut the same answer short.
+    let resumable = matches!(
+        failure,
+        daruda_acp::AcpFailure::Stopped(
+            daruda_acp::EarlyStop::MaxTokens | daruda_acp::EarlyStop::MaxTurnRequests
+        ) | daruda_acp::AcpFailure::Categorized {
+            kind: daruda_acp::FailureKind::MaxOutputTokens,
+            ..
+        }
+    );
+    let continue_btn = (resumable && can_continue).then(|| {
+        pane_action_button(
+            ("agent-chat-failure-continue", ix),
+            s::agent_chat::continue_turn(),
+            cx,
+        )
+        .on_click(cx.listener(|this, _ev, _window, cx| this.continue_after_stop(cx)))
+    });
     div()
         .w_full()
         .flex()
@@ -376,7 +519,7 @@ pub(super) fn failure_block(
             t,
             cx,
         ))
-        .when_some(sign_in, |el, btn| {
+        .when_some(sign_in.or(continue_btn), |el, btn| {
             // Centred under the message. The row stretches to the column's
             // width (flex-column default), so `justify_center` has something to
             // centre within; this container is `failure_block`'s alone, so

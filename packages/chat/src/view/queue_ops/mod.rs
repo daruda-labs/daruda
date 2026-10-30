@@ -71,6 +71,34 @@ impl AgentChatView {
         self.send_prompt_text_inner(text, PromptOrigin::InApp, None, EditSource::Composer, cx)
     }
 
+    /// Whether a cut-short answer may offer to continue: the pane can send,
+    /// and nothing is still working — background subagents can outlive the
+    /// turn that stopped. Both inputs reproject the rows when they change, so
+    /// the stop row is remeasured as the button comes and goes.
+    pub(crate) fn offers_continue(&self) -> bool {
+        !self.is_read_only() && !self.is_busy()
+    }
+
+    /// Ask the agent to pick up an answer it cut short, as an ordinary visible
+    /// prompt — sent now, or behind anything the user already queued, never
+    /// ahead of it.
+    pub(crate) fn continue_after_stop(&mut self, cx: &mut Context<Self>) {
+        if !self.offers_continue() {
+            return;
+        }
+        match self.send_external_prompt_text(crate::strings::agent_chat::continue_prompt(), cx) {
+            PromptDispatch::SentNow | PromptDispatch::Queued => {}
+            // A dead handoff already reported itself through
+            // `fail_prompt_handoff`, the way a typed prompt's does.
+            PromptDispatch::Unavailable => {}
+            // A full queue is the user's own prompts; continuing waits for
+            // them, and the button stays to be pressed again.
+            PromptDispatch::QueueFull => {}
+            // Ruled out by `offers_continue` above.
+            PromptDispatch::ReadOnly => {}
+        }
+    }
+
     /// Submit a host-supplied, non-phone prompt without committing a draft
     /// currently being edited in the local composer.
     pub fn send_external_prompt_text(

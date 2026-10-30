@@ -17,6 +17,10 @@ agent_chat:
   diff_no_newline: "\\ No newline at end of file"
   code_copy: "Copy code"
   code_copied: "Copied"
+  message_copy: "Copy message"
+  # Under a long prompt folded to its opening lines, and once it is open again.
+  prompt_show_full: "Show full prompt"
+  prompt_show_less: "Show less"
   # `chrono` patterns, consumed by `crate::stamp`: field order and clock
   # convention differ per locale. A full date and time, then a time of day
   # alone for a stamp whose date the surrounding UI already implies.
@@ -34,6 +38,14 @@ agent_chat:
   # Deliberately distinct from the Settings row's label: here the user is
   # recovering a session, not administering accounts.
   sign_in_again: "Sign in again"
+  # A turn the agent ended before its answer was done. The wire reports these
+  # as completions, so this row is what tells the reader the answer is partial.
+  stopped_max_tokens: "The answer was cut off at the model's output limit."
+  stopped_turn_limit: "The agent reached its request limit for this turn."
+  stopped_refusal: "The model declined to continue."
+  # Button under a cut-short answer, and the message it sends the agent.
+  continue_turn: "Continue"
+  continue_prompt: "Continue."
   # Tooltip on a mermaid diagram card's zoom button, which opens the lightbox.
   diagram_zoom: "Enlarge diagram"
   # Tooltip on a mermaid diagram card's copy button — it copies the diagram

@@ -104,8 +104,8 @@ impl<'a> RenderAssets<'a> {
 }
 
 use blocks::{
-    MarkdownRender, assistant_markdown, conclusion_block, failure_block, group_thought_block,
-    thinking_block, user_bubble,
+    MESSAGE_HOVER_GROUP, MarkdownRender, PromptFold, assistant_markdown, conclusion_block,
+    failure_block, group_thought_block, message_copy, thinking_block, user_bubble,
 };
 use chrome::{ActivityBarProps, activity_bar, overage_banner, status_banner, working_indicator};
 use fold_header::{FoldHeader, FoldRow, SummaryLine, interrupted_row, rollup_glyph};
@@ -416,6 +416,11 @@ fn scroll_to_bottom_button(
                     this.scroll_to_bottom(cx);
                 })),
         )
+}
+
+#[cfg(test)]
+pub(crate) fn prompt_preview_for_test(text: &str) -> String {
+    blocks::prompt_preview(text)
 }
 
 #[cfg(test)]

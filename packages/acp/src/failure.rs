@@ -150,6 +150,9 @@ pub enum AcpFailure {
     /// Neither a known code nor an `errorKind` — including host-synthesized
     /// failures that never came from the wire at all.
     Unclassified { message: String },
+    /// The turn ended without error but before the answer was done. The wire
+    /// calls this a completion, so it is the host that names it a failure.
+    Stopped(crate::stop_reason::EarlyStop),
 }
 
 impl AcpFailure {
@@ -220,6 +223,9 @@ impl AcpFailure {
             Self::Categorized { kind, .. } => kind.remedy(),
             Self::Runtime { kind, .. } => kind.remedy(),
             Self::Unclassified { .. } => Remedy::NoneAvailable,
+            // Continuing is a new instruction to the agent, not a retry of the
+            // same request; the chat offers it from the stop itself.
+            Self::Stopped(_) => Remedy::NoneAvailable,
         }
     }
 
@@ -233,6 +239,17 @@ impl AcpFailure {
             | Self::Categorized { message, .. }
             | Self::Runtime { message, .. }
             | Self::Unclassified { message } => message,
+            // Log and report-detail wording; the transcript row is localized by
+            // the chat's `failure_message`, as the wire-text variants are not.
+            Self::Stopped(stop) => match stop {
+                crate::stop_reason::EarlyStop::MaxTokens => {
+                    "The answer was cut off at the model's output limit."
+                }
+                crate::stop_reason::EarlyStop::MaxTurnRequests => {
+                    "The agent reached its request limit for this turn."
+                }
+                crate::stop_reason::EarlyStop::Refusal => "The model declined to continue.",
+            },
         }
     }
 }

@@ -71,6 +71,13 @@ impl AgentChatView {
                 },
                 "splice-count",
             );
+            // What ended the transcript can render differently once something
+            // follows it (a stop loses its Continue button). Remeasure it in
+            // place rather than splicing it, which would reset a reader's
+            // offset inside it to the row's top.
+            if at > 0 && self.rows.len() > old.len() {
+                self.apply_list_sync(ListSync::Rows(at - 1..at), "splice-count-prev");
+            }
             return;
         }
         // Same slots & count: only `hidden` flipped or item content grew.

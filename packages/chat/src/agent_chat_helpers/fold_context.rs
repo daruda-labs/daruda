@@ -69,7 +69,8 @@ fn fold_key_index(key: &FoldKey, items: &[daruda_acp::ChatItem]) -> Option<usize
         | FoldKey::ThinkingGroup(ix)
         | FoldKey::Response(ix)
         | FoldKey::Tail(ix)
-        | FoldKey::Filtered(ix) => Some(*ix),
+        | FoldKey::Filtered(ix)
+        | FoldKey::UserPrompt(ix) => Some(*ix),
         FoldKey::Tool(id)
         | FoldKey::Subagent(id)
         | FoldKey::ToolRawInput(id)
@@ -150,11 +151,13 @@ fn fold_active_at(
                 .take_while(|item| matches!(item, ChatItem::Thinking { .. }))
                 .any(is_active)
         }),
+        // A prompt's fold follows its turn's settle edge, not item liveness.
         FoldKey::Tail(_)
         | FoldKey::Compaction(_)
         | FoldKey::ToolGroupTail(_)
         | FoldKey::SubagentTail(_)
-        | FoldKey::Filtered(_) => false,
+        | FoldKey::Filtered(_)
+        | FoldKey::UserPrompt(_) => false,
     }
 }
 
@@ -177,7 +180,10 @@ pub(crate) fn fold_key_item_index(key: &FoldKey, items: &[daruda_acp::ChatItem])
         TranscriptStructure::new(items, &hierarchy).owning_item(id)
     };
     match key {
-        FoldKey::Assistant(ix) | FoldKey::Thinking(ix) | FoldKey::Compaction(ix) => Some(*ix),
+        FoldKey::Assistant(ix)
+        | FoldKey::Thinking(ix)
+        | FoldKey::Compaction(ix)
+        | FoldKey::UserPrompt(ix) => Some(*ix),
         // `SubagentTail` belongs with these: its reveal changes which child
         // cards the parent's body holds — a height change in place, with no
         // `RenderRow::hidden` flip for the diff to see.

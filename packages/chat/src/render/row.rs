@@ -25,7 +25,16 @@ pub(super) fn render_row(
     let inner: AnyElement = match &row.kind {
         RowKind::User(i) => match this.items.get(*i) {
             Some(ChatItem::UserText(text)) => {
-                user_bubble(*i, text, this.dim_amount, cx).into_any_element()
+                let fold = prompt_fold(
+                    *i,
+                    text,
+                    &this.fold,
+                    &this.items,
+                    this.turn_boundary,
+                    &this.live_units,
+                );
+                let copy = message_copy(("agent-chat-user-copy", *i), text, window, cx);
+                user_bubble(*i, text, fold, this.dim_amount, copy, cx).into_any_element()
             }
             _ => gpui::Empty.into_any_element(),
         },
@@ -119,6 +128,7 @@ pub(super) fn render_row(
                     expanded,
                     text,
                     turn_stats_element(this, *i, cx),
+                    message_copy(("agent-chat-answer-copy", *i), text, window, cx),
                     MarkdownRender::new(
                         &this.assets.mermaid_images,
                         this.dim_amount,
@@ -151,6 +161,7 @@ pub(super) fn render_row(
         })
         .child(inner);
     let row_el = div()
+        .group(MESSAGE_HOVER_GROUP)
         .w_full()
         .min_w_0()
         .px(px(theme::AGENT_CHAT_PAD_X))
@@ -167,6 +178,21 @@ pub(super) fn render_row(
             .child(row_el.max_w(px(theme::agent_chat_reading_width(cx))))
             .into_any_element(),
     }
+}
+
+/// How the prompt at `ix` folds, resolved the way every other key is.
+fn prompt_fold(
+    ix: usize,
+    text: &str,
+    fold: &FoldState,
+    items: &[ChatItem],
+    boundary: TurnBoundary,
+    live_units: &LiveSubagentUnits,
+) -> PromptFold {
+    PromptFold::of(text, || {
+        let key = FoldKey::UserPrompt(ix);
+        fold.is_expanded(&key, fold_context_at(&key, ix, items, boundary, live_units))
+    })
 }
 
 /// Look up an item row's `ChatItem` and render it. The run's verdict glyph is the
@@ -197,6 +223,7 @@ fn render_agent_item(
             this.dim_amount,
             this.preferred_editor(),
             this.session_id(),
+            this.offers_continue(),
             window,
             cx,
         ),
@@ -230,6 +257,8 @@ fn render_item(
     dim: f32,
     preferred_editor: &str,
     session_id: Option<&str>,
+    // Gates offering to continue a cut-short answer (`offers_continue`).
+    offers_continue: bool,
     window: &mut Window,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
@@ -240,7 +269,11 @@ fn render_item(
         AgentChatMarkdownLinks::new(cx.weak_entity()),
     );
     match item {
-        ChatItem::UserText(text) => user_bubble(ix, text, dim, cx).into_any_element(),
+        ChatItem::UserText(text) => {
+            let fold = prompt_fold(ix, text, fold, items, boundary, live_units);
+            let copy = message_copy(("agent-chat-user-copy", ix), text, window, cx);
+            user_bubble(ix, text, fold, dim, copy, cx).into_any_element()
+        }
         // Prose reaching here is never the conclusion (that is
         // `RowKind::ConclusionItem`), and its response bar already labels the
         // speaker, so it renders inline with no per-block header or fold.
@@ -275,7 +308,11 @@ fn render_item(
         )
         .into_any_element(),
         ChatItem::Permission(card) => permission_card(ix, card, t, dim, cx).into_any_element(),
-        ChatItem::Failure(failure) => failure_block(ix, failure, t, cx).into_any_element(),
+        ChatItem::Failure(failure) => {
+            // Only the newest stop: one further down has been answered since.
+            let can_continue = ix + 1 == items.len() && offers_continue;
+            failure_block(ix, failure, can_continue, t, cx).into_any_element()
+        }
         ChatItem::Compaction(item) => {
             let key = FoldKey::Compaction(ix);
             let expanded =

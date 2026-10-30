@@ -69,6 +69,19 @@ impl AgentChatView {
         self.set_fold_expanded(key, expanded, window, cx);
     }
 
+    /// Every prompt in the conversation has had its turn settle, so a long
+    /// one may fold. Only at a settle edge or a restore, both of which
+    /// remeasure every row after.
+    pub(super) fn settle_prompts(&mut self) {
+        if let Some(ix) = self
+            .items
+            .iter()
+            .rposition(|item| matches!(item, daruda_acp::ChatItem::UserText(_)))
+        {
+            self.fold.settle_prompts_through(ix);
+        }
+    }
+
     pub(crate) fn toggle_fold(
         &mut self,
         key: FoldKey,
@@ -121,7 +134,8 @@ impl AgentChatView {
             // disclosure: an in-place body height change, which is what makes
             // `fold_key_item_index`'s targeted remeasure the operative fix.
             | FoldKey::SubagentTail(_)
-            | FoldKey::ToolRawInput(_) => None,
+            | FoldKey::ToolRawInput(_)
+            | FoldKey::UserPrompt(_) => None,
         };
         let reconciled = embed_scope.is_some();
         if let Some(scope) = embed_scope {

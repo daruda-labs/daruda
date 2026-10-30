@@ -43,6 +43,7 @@ impl AgentChatView {
     ) {
         self.items = items;
         self.overage_stop_markers.clear();
+        self.settle_prompts();
         // The seed stands in for a turn that already settled, so give it the
         // record a settled turn would have. Without one the answer row renders
         // bare and a capture cannot judge the facts it is supposed to carry.

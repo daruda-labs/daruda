@@ -34,6 +34,9 @@ pub enum FoldKey {
     /// same place [`FoldKey::ToolRawInput`]'s disclosure does.
     SubagentTail(String),
     Filtered(usize),
+    /// A long user prompt, keyed by its item. Open while its turn runs, folded
+    /// once that turn settles — see [`FoldState::settle_prompts_through`].
+    UserPrompt(usize),
 }
 
 impl FoldKey {
@@ -53,7 +56,8 @@ impl FoldKey {
             | FoldKey::Compaction(_)
             | FoldKey::ToolGroupTail(_)
             | FoldKey::SubagentTail(_)
-            | FoldKey::Filtered(_) => None,
+            | FoldKey::Filtered(_)
+            | FoldKey::UserPrompt(_) => None,
         }
     }
 }
@@ -108,6 +112,10 @@ pub(crate) struct FoldState {
     /// yanked away. Machine-written, so it stays out of `overrides` and holds
     /// only the newest run start — see [`Self::hold_response`].
     held_response: Option<usize>,
+    /// The newest prompt whose turn has settled. Machine-written at the settle
+    /// edge, where every row is remeasured, so a prompt never changes height
+    /// mid-turn where nothing would remeasure it.
+    settled_prompt: Option<usize>,
     mode: PaneChoice<FoldMode>,
 }
 
@@ -116,6 +124,7 @@ impl FoldState {
         Self {
             overrides: HashMap::new(),
             held_response: None,
+            settled_prompt: None,
             mode: PaneChoice::Seeded(mode),
         }
     }
@@ -171,6 +180,15 @@ impl FoldState {
         self.held_response = run_start;
     }
 
+    /// Every prompt at or before `prompt_ix` has had its turn settle. Only moves
+    /// forward: a settle never reopens an earlier prompt.
+    pub(super) fn settle_prompts_through(&mut self, prompt_ix: usize) {
+        self.settled_prompt = Some(
+            self.settled_prompt
+                .map_or(prompt_ix, |ix| ix.max(prompt_ix)),
+        );
+    }
+
     /// The rule that folds `key`, or `None` for a chip-owned key.
     fn rule_for(&self, key: &FoldKey, ctx: FoldContext) -> Option<BlockRule> {
         let mode = self.mode.value();
@@ -194,6 +212,9 @@ impl FoldState {
         }
         if matches!(key, FoldKey::Response(run_start) if self.held_response == Some(*run_start)) {
             return true;
+        }
+        if let FoldKey::UserPrompt(ix) = key {
+            return self.settled_prompt.is_none_or(|settled| *ix > settled);
         }
         // Chip-owned bulk stays folded until the user reveals it.
         self.rule_for(key, ctx)
@@ -220,8 +241,9 @@ impl FoldState {
 
     pub(super) fn clear_overrides(&mut self) {
         self.overrides.clear();
-        // The anchor is an item index, invalid once the conversation is dropped.
+        // The anchors are item indices, invalid once the conversation is dropped.
         self.held_response = None;
+        self.settled_prompt = None;
     }
 
     /// The reveals one level of the recent-steps axis granted: the step level
@@ -258,6 +280,33 @@ impl FoldState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_prompt_folds_once_its_turn_settles_and_the_user_has_the_last_word() {
+        let mut state = FoldState::default();
+        let ctx = FoldContext::last(false);
+        let prompt = FoldKey::UserPrompt(4);
+        assert!(state.is_expanded(&prompt, ctx), "open while its turn runs");
+
+        state.settle_prompts_through(4);
+        assert!(!state.is_expanded(&prompt, ctx), "folded once it settled");
+        assert!(
+            state.is_expanded(&FoldKey::UserPrompt(6), ctx),
+            "a later prompt is not settled by an earlier turn"
+        );
+
+        state.settle_prompts_through(2);
+        assert!(!state.is_expanded(&prompt, ctx), "a settle never reopens");
+
+        state.toggle(prompt.clone(), ctx);
+        assert!(state.is_expanded(&prompt, ctx), "the user's reveal wins");
+
+        state.clear_overrides();
+        assert!(
+            state.is_expanded(&prompt, ctx),
+            "a dropped conversation forgets"
+        );
+    }
 
     #[test]
     fn assistant_is_always_expanded_by_default() {

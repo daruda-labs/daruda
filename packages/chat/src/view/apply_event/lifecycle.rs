@@ -30,6 +30,7 @@ impl AgentChatView {
         // is still flagged live and nothing more is coming for it.
         if changes.finished_restore {
             self.settle_run_state(cx);
+            self.settle_prompts();
         }
         // Record the live session id so it persists — and so a later
         // launch resumes this session instead of starting fresh.
@@ -87,12 +88,21 @@ impl AgentChatView {
         // Two effects the tail owes that settle: revisit the calls it
         // just made terminal, and remeasure the rows whose streaming
         // height it just fixed.
-        changes.turn_settled = true;
+        self.mark_turn_settled(changes);
         changes.phone_turn_action = PhoneTurnAction::Clear;
         self.pump_pending_prompt(cx);
     }
+    /// The turn is over: the event tail remeasures every row for it, which is
+    /// what lets the prompts that ran fold now rather than mid-turn. Called
+    /// before any queued prompt is pumped, so the next prompt stays open.
+    fn mark_turn_settled(&mut self, changes: &mut EventChanges) {
+        changes.turn_settled = true;
+        self.settle_prompts();
+    }
+
     pub(super) fn apply_turn_ended(
         &mut self,
+        stop_reason: &str,
         completed_normally: bool,
         usage: Option<daruda_acp::model::TurnUsageView>,
         changes: &mut EventChanges,
@@ -108,19 +118,31 @@ impl AgentChatView {
         // batch. `Turn::InFlight` carries the per-turn start, which is
         // exactly the span being reported.
         self.record_turn(usage.map(|u| u.output_tokens));
+        // The wire calls a cut-short answer a completion; the transcript says
+        // otherwise, or a truncated reply reads exactly like a finished one.
+        // It settles as an error too, as a flow node does: a task must not be
+        // marked done, nor an asking agent handed half an answer as the reply.
+        let early = match daruda_acp::TurnStop::from_reported(stop_reason) {
+            daruda_acp::TurnStop::Early(stop) => Some(stop),
+            _ => None,
+        };
+        if let Some(stop) = early {
+            self.items
+                .push(ChatItem::Failure(daruda_acp::AcpFailure::Stopped(stop)));
+        }
         // Settle the turn: finalize streaming, cancel any tool the agent
         // left non-terminal (e.g. a `Cancelled` stop reason), and drain a
         // still-pending permission so no card keeps live buttons.
         self.settle_turn(cx);
-        changes.turn_settled = true;
+        self.mark_turn_settled(changes);
         changes.phone_turn_action = PhoneTurnAction::Finish;
         // Capture the outcome; it fires only when the pane settles
         // busy→idle (via `reconcile_activity`), which may trail this
         // `end_turn` while trailing subagents finish.
-        self.activity.pending_completion = Some(if completed_normally {
-            TurnOutcome::Completed
-        } else {
-            TurnOutcome::Stopped
+        self.activity.pending_completion = Some(match (completed_normally, early) {
+            (false, _) => TurnOutcome::Stopped,
+            (true, Some(_)) => TurnOutcome::Errored,
+            (true, None) => TurnOutcome::Completed,
         });
         // Drain the next buffered prompt (if any) now that the turn
         // completed — one per `TurnEnded`, so the queue advances a single
@@ -162,7 +184,7 @@ impl AgentChatView {
         // (A `TurnFailed` while `cancel_in_flight` is handled by the
         // guarded arm above; here the turn was not being cancelled.)
         self.settle_turn(cx);
-        changes.turn_settled = true;
+        self.mark_turn_settled(changes);
         changes.phone_turn_action = PhoneTurnAction::Finish;
         // Capture the errored outcome; it fires (notification +
         // backing-task done) on the busy→idle settle edge that
@@ -211,7 +233,7 @@ impl AgentChatView {
         // forever and the response bar reads `Running` after the session
         // is already dead.
         self.settle_turn(cx);
-        changes.turn_settled = true;
+        self.mark_turn_settled(changes);
         changes.phone_turn_action = PhoneTurnAction::Finish;
         // Capture the failure outcome; it fires on the busy→idle settle
         // edge (via `reconcile_activity`), same as a normal completion.

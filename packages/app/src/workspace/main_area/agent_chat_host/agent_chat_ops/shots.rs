@@ -112,6 +112,73 @@ impl Workspace {
         );
     }
 
+    /// A reply cut off at the output limit: the partial answer, the notice the
+    /// wire never sends, and the button that continues it.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_agent_chat_stopped_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_agent_chat_pane_seeded(
+            None,
+            |v, window, cx| {
+                v.seed_transcript(
+                    vec![
+                        daruda_acp::ChatItem::UserText("summarize the release notes".to_string()),
+                        daruda_acp::ChatItem::AssistantText {
+                            text: "Here is the summary:\n\n- The updater now verifies".to_string(),
+                            streaming: false,
+                            message_id: None,
+                            phase: Default::default(),
+                        },
+                        daruda_acp::ChatItem::Failure(daruda_acp::AcpFailure::Stopped(
+                            daruda_acp::EarlyStop::MaxTokens,
+                        )),
+                    ],
+                    window,
+                    cx,
+                );
+            },
+            window,
+            cx,
+        );
+    }
+
+    /// A pasted log as the prompt, folded to its opening lines under the
+    /// answer it got, with the toggle that opens it again.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_agent_chat_long_prompt_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let log = (1..=40)
+            .map(|n| format!("error[E0308]: mismatched types at src/lib.rs:{n}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        self.open_agent_chat_pane_seeded(
+            None,
+            move |v, window, cx| {
+                v.seed_transcript(
+                    vec![
+                        daruda_acp::ChatItem::UserText(format!("why does this fail?\n{log}")),
+                        daruda_acp::ChatItem::AssistantText {
+                            text: "Every error points at the same signature change.".to_string(),
+                            streaming: false,
+                            message_id: None,
+                            phase: Default::default(),
+                        },
+                    ],
+                    window,
+                    cx,
+                );
+            },
+            window,
+            cx,
+        );
+    }
+
     /// Open an empty agent-chat pane with view options open.
     #[cfg(feature = "screenshot")]
     pub(in crate::workspace) fn open_agent_chat_empty_for_shot(

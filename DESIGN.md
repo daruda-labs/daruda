@@ -796,7 +796,13 @@ user-set size can leave in either direction.
 - **Previous response cleanup is separate from lifecycle rules.** Its checkbox
   collapses completed historical responses, including their final answers,
   after a new request. It defaults off; explicit per-block expansion and
-  permission prompts remain respected. Ordinary folding keeps the final answer.
+  permission prompts remain respected. Ordinary folding keeps the final answer
+  and any turn failure, so a collapsed response still says why it stopped.
+- **A long prompt** (over 500 characters or 12 lines) stays whole while its
+  turn runs and folds to its first 6 lines once that turn settles — the edge
+  where every row is remeasured, so it never changes height mid-turn. A quiet
+  pane-toned `Show full prompt` / `Show less` under the bubble toggles it; the
+  choice is the user's from then on, and copy always takes the whole prompt.
 - Visible items uses hierarchical checkboxes, one section per axis with a
   hairline between, two columns for nested facets and a tri-state parent whose
   row also carries a `checked / total` count and its own disclosure (open by
