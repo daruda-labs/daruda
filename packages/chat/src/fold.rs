@@ -35,7 +35,7 @@ pub enum FoldKey {
     SubagentTail(String),
     Filtered(usize),
     /// A long user prompt, keyed by its item. Open while its turn runs, folded
-    /// once that turn settles — see [`FoldState::settle_prompts_through`].
+    /// once that turn settles — see `FoldState::settle_prompts_through`.
     UserPrompt(usize),
 }
 
