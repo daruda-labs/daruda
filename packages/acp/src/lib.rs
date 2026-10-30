@@ -28,6 +28,8 @@ mod prepared;
 pub use prepared::{AdapterCli, PreparedAdapter};
 pub(crate) mod output_highlight;
 pub mod session;
+mod stop_reason;
+pub use stop_reason::{EarlyStop, TurnStop};
 #[cfg(all(test, unix))]
 mod test_support;
 pub mod wire_log;

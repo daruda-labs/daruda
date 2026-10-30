@@ -622,22 +622,24 @@ fn decide(policy: &Permission<'_>, options: &[PermissionOption]) -> PermissionDe
     }
 }
 
-/// `stop_reason` arrives as a Debug-formatted string, so this is the one
-/// place in the crate that reads it — a second `match` on the same text would
-/// drift the moment an adapter's wording changes.
-///
 /// `daruda_acp` reports everything but a cancel as a normal completion, which
 /// would pass a node that exhausted its context after writing half its
-/// output. Only `EndTurn` passes here, and an unrecognized reason fails:
-/// stopping loudly beats letting a node through on a reason nobody has read.
+/// output. Only `EndTurn` passes here, and any other reason fails: stopping
+/// loudly beats letting a node through on a reason nobody has read.
 fn failure_for(stop_reason: &str) -> Option<NodeFailure> {
-    match stop_reason {
-        "EndTurn" => None,
-        "MaxTokens" => Some(NodeFailure::ContextExhausted),
-        "MaxTurnRequests" => Some(NodeFailure::TurnLimit),
-        "Refusal" => Some(NodeFailure::Refused),
-        other => Some(NodeFailure::TurnFailed(format!(
-            "the agent stopped for an unrecognized reason: {other}"
+    use daruda_acp::{EarlyStop, TurnStop};
+    match TurnStop::from_reported(stop_reason) {
+        TurnStop::EndTurn => None,
+        TurnStop::Early(EarlyStop::MaxTokens) => Some(NodeFailure::ContextExhausted),
+        TurnStop::Early(EarlyStop::MaxTurnRequests) => Some(NodeFailure::TurnLimit),
+        TurnStop::Early(EarlyStop::Refusal) => Some(NodeFailure::Refused),
+        // A cancel this run asked for ends through `Interrupt::Canceled`
+        // before the turn reports; one arriving here came from the agent's side.
+        TurnStop::Cancelled => Some(NodeFailure::TurnFailed(
+            "the agent's turn was cancelled".to_owned(),
+        )),
+        TurnStop::Unrecognized(_) => Some(NodeFailure::TurnFailed(format!(
+            "the agent stopped for an unrecognized reason: {stop_reason}"
         ))),
     }
 }
