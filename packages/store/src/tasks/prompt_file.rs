@@ -79,13 +79,47 @@ pub fn render_task_prompt(task: &TaskRecord, branch: &str) -> String {
          \n\
          {body}\n\
          \n\
-         Work in the current workspace. Inspect the relevant code, make the needed \
-         changes, and verify them when practical. When done, end with a short summary \
-         of what you changed and how you verified it; that final answer is recorded \
-         as the task's result.\n",
+         {CLOSING_INSTRUCTION}\n",
         title = title,
         status = state_label,
         body = prompt,
+    )
+}
+
+const CLOSING_INSTRUCTION: &str = "Work in the current workspace. Inspect the relevant \
+    code, make the needed changes, and verify them when practical. When done, end with \
+    a short summary of what you changed and how you verified it; that final answer is \
+    recorded as the task's result.";
+
+/// The user's prompt inside text [`render_task_prompt`] produced, so an edit
+/// to the prompt file reaches the task without its frame. Each frame part is
+/// dropped only where it is still recognizable; text without one comes back
+/// whole. Expects LF line endings.
+pub fn task_prompt_body(rendered: &str) -> &str {
+    let body = after_header(rendered).unwrap_or(rendered);
+    before_closing(body).unwrap_or(body)
+}
+
+/// Past the `Task:` line, and the `Status:` line and blank line when a hand
+/// edit left them, so a trimmed header still never reaches the prompt.
+fn after_header(text: &str) -> Option<&str> {
+    let (_, rest) = text.strip_prefix("Task: ")?.split_once('\n')?;
+    let rest = match rest.strip_prefix("Status: ") {
+        Some(status) => status.split_once('\n').map_or("", |(_, rest)| rest),
+        None => rest,
+    };
+    Some(rest.strip_prefix('\n').unwrap_or(rest))
+}
+
+fn before_closing(text: &str) -> Option<&str> {
+    let rest = text
+        .strip_suffix('\n')
+        .unwrap_or(text)
+        .strip_suffix(CLOSING_INSTRUCTION)?;
+    Some(
+        rest.strip_suffix("\n\n")
+            .or_else(|| rest.strip_suffix('\n'))
+            .unwrap_or(rest),
     )
 }
 

@@ -32,7 +32,7 @@ pub use migrate::migrate_legacy;
 pub use persistence::{load_tasks, load_tasks_in, tasks_path_in};
 pub use prompt_file::{
     build_claude_command, existing_prompt_file_path, prompt_file_path, render_task_prompt,
-    write_prompt_file,
+    task_prompt_body, write_prompt_file,
 };
 pub use store::{ReconcileBlocked, Reconciling, TaskStore, TaskStoreError};
 pub use task::{

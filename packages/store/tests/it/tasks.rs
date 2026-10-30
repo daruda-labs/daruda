@@ -9,7 +9,7 @@ use daruda_store::tasks::branch::{branch_name_for, random_branch_name};
 use daruda_store::tasks::persistence::{load_tasks_in, tasks_path_in};
 use daruda_store::tasks::prompt_file::{
     PROMPT_DIR_NAME, build_claude_command, existing_prompt_file_path, prompt_file_path,
-    render_task_prompt, write_prompt_file,
+    render_task_prompt, task_prompt_body, write_prompt_file,
 };
 
 use daruda_store::tasks::task::{
@@ -675,6 +675,53 @@ fn render_task_prompt_does_not_ask_the_agent_to_update_the_task() {
     let out = render_task_prompt(&record_of(&t), "feature-x");
     assert!(!out.contains("update task"), "{out}");
     assert!(!out.contains(&format!("\"{}\"", t.id)), "{out}");
+}
+
+/// The prompt file holds the framed prompt; reading it back must yield the
+/// user's text alone, or a reload frames it a second time on the next run.
+#[test]
+fn task_prompt_body_inverts_render_task_prompt() {
+    for prompt in [
+        "Fix the bug.",
+        "line one\n\nline two\n",
+        "\nleading blank",
+        "",
+    ] {
+        let mut t = sample_task();
+        t.prompt = prompt.to_string();
+        let out = render_task_prompt(&record_of(&t), "feature-x");
+        assert_eq!(task_prompt_body(&out), prompt, "{out}");
+        assert_eq!(task_prompt_body(out.trim_end_matches('\n')), prompt);
+    }
+}
+
+#[test]
+fn task_prompt_body_keeps_text_without_a_frame() {
+    assert_eq!(task_prompt_body("External update"), "External update");
+    assert_eq!(
+        task_prompt_body("Task: \"T\" (b)\nStatus: Running\n\nEdited body"),
+        "Edited body",
+        "a removed closing instruction keeps the body after the header"
+    );
+}
+
+/// A hand edit that trims the header or the gap before the closing
+/// instruction must still leave the frame out of the prompt.
+#[test]
+fn task_prompt_body_drops_a_hand_trimmed_frame() {
+    let mut t = sample_task();
+    t.prompt = "Body".to_string();
+    let out = render_task_prompt(&record_of(&t), "feature-x");
+    let (header, rest) = out.split_once("\n\n").unwrap();
+    let (task_line, status_line) = header.split_once('\n').unwrap();
+    let without_status = format!("{task_line}\n\n{rest}");
+    let without_gap = format!("{header}\n{rest}");
+    let closing = rest.strip_prefix("Body\n\n").unwrap();
+    let without_closing_gap = format!("{header}\n\nBody\n{closing}");
+    for edited in [without_status, without_gap, without_closing_gap] {
+        assert_eq!(task_prompt_body(&edited), "Body", "{edited:?}");
+    }
+    assert!(status_line.starts_with("Status: "));
 }
 
 // ---------------------------------------------------------------------------

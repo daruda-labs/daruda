@@ -110,8 +110,8 @@ pub(super) fn install_prompt_watcher(
 
 impl Workspace {
     /// Dispatched by the prompt-file watcher when an external editor
-    /// rewrites `<wt>/.daruda/task-<id>.md`. Reloads the editor
-    /// silently when the form is clean; surfaces a conflict prompt
+    /// rewrites `<wt>/.daruda/task-<id>.md`. Loads the disk prompt into
+    /// a clean form, unsaved; surfaces a conflict prompt
     /// (Use disk version / Keep my version / Diff) when it is dirty.
     pub(super) fn handle_prompt_file_changed(
         &mut self,
@@ -147,16 +147,22 @@ impl Workspace {
         let prompt_entity = te.prompt_state.clone();
         let title = te.cached_title.clone();
         let is_dirty = te.is_dirty(cx);
+        let saved_normalized = normalize_newlines(&te.saved_snapshot.prompt);
 
-        // Disk content matching the editor (modulo CRLF) is the echo of
-        // Start's own `write_prompt_file`: re-baseline instead of asking.
+        // The file holds the prompt inside Start's frame; the form edits the
+        // prompt alone, so every comparison and reload uses the unframed body.
+        let disk_normalized = normalize_newlines(&disk_content);
+        let disk_content = daruda_store::tasks::task_prompt_body(&disk_normalized).to_owned();
         let editor_normalized =
             normalize_newlines(prompt_entity.read(cx).text().to_string().as_str());
-        let disk_normalized = normalize_newlines(&disk_content);
-        if editor_normalized == disk_normalized {
+        // Nothing on disk the form lacks: it already reads the same, or the
+        // file is Start's own write of the saved prompt behind unsaved edits.
+        // A disk copy shown beside the prompt is then out of date.
+        if editor_normalized == disk_content || saved_normalized == disk_content {
             if let Some(te) = self.task_editor_mut(editor_id) {
-                te.saved_snapshot.prompt = disk_content;
+                te.disk_copy = None;
             }
+            cx.notify();
             return;
         }
 
@@ -211,8 +217,8 @@ impl Workspace {
         .detach();
     }
 
-    /// Overwrite the prompt with `content` and rebaseline the dirty
-    /// snapshot so the form no longer reads as dirty.
+    /// Overwrite the prompt with `content`. The form stays dirty: the task
+    /// keeps its saved prompt until a save carries the disk version to it.
     fn reload_prompt_from_disk(
         &mut self,
         editor_id: TaskEditorId,
@@ -221,11 +227,10 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        prompt_entity.update(cx, |state, cx| state.set_value(content.clone(), window, cx));
+        prompt_entity.update(cx, |state, cx| state.set_value(content, window, cx));
         if let Some(te) = self.task_editor_mut(editor_id) {
             // The prompt now is the disk version; a copy beside it says nothing.
             te.disk_copy = None;
-            te.saved_snapshot.prompt = content;
         }
         cx.notify();
     }

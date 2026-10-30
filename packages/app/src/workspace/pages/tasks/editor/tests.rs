@@ -367,10 +367,77 @@ fn task_editor_watches_prompt_after_start_parks_its_lane(cx: &mut TestAppContext
             ws.handle_prompt_file_changed(editor, path, window, cx);
             let te = ws.task_editor(editor).unwrap();
             assert_eq!(te.prompt_state.read(cx).value().as_ref(), "External update");
-            assert!(!te.is_dirty(cx));
+            assert!(
+                te.is_dirty(cx),
+                "the task keeps its saved prompt until the disk version is saved"
+            );
         });
     })
     .unwrap();
+}
+
+/// The prompt file holds Start's framed prompt. Its echo must not replace the
+/// form's prompt with the frame, an edit made inside the frame reaches the form
+/// without it, and Start writing the saved prompt behind unsaved edits raises
+/// no conflict.
+#[gpui::test]
+fn task_editor_reads_the_prompt_file_without_its_frame(cx: &mut TestAppContext) {
+    let source = tempfile::tempdir().unwrap();
+    let (window, ws) = build_with(
+        cx,
+        &daruda_config::Config::default(),
+        Some(daruda_store::project::Project::from_path(source.path())),
+    );
+    let other = tempfile::tempdir().unwrap();
+    cx.update_window(window.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_task_editor(None, window, cx);
+            let editor = ws
+                .task_detail_id()
+                .expect("the Tasks page holds the editor");
+            let te = ws.task_editor(editor).unwrap();
+            let (title, prompt) = (te.title_input.clone(), te.prompt_state.clone());
+            title.update(cx, |s, cx| s.set_value("Framed", window, cx));
+            prompt.update(cx, |s, cx| s.set_value("Fix the bug", window, cx));
+            let id = ws.commit_task_form(editor, cx).unwrap();
+            let project = ws.active.project;
+            let lane = ws.alloc_id();
+            ws.project_for_mut(project).unwrap().lanes.push(
+                crate::lane::Lane::default_for_project(lane, other.path().to_path_buf()),
+            );
+            ws.activate_lane(daruda_store::project::LaneRef { project, lane }, window, cx);
+            crate::runs::seed::commit_now(
+                crate::runs::seed::run(&id, &SeedRun::chat(other.path()), SeedEnd::Running),
+                cx,
+            );
+            let task = cx.global::<GlobalTasks>().get(&id).unwrap().clone();
+            let path = daruda_store::tasks::prompt_file::prompt_file_path(&task.spec, other.path());
+            let framed = daruda_store::tasks::render_task_prompt(&task, "task-branch");
+            daruda_store::tasks::prompt_file::write_prompt_file(&path, &framed).unwrap();
+            ws.attach_prompt_watcher_if_editor_open(&id, window, cx);
+
+            ws.handle_prompt_file_changed(editor, path.clone(), window, cx);
+            assert_eq!(prompt.read(cx).value().as_ref(), "Fix the bug");
+            assert!(!ws.task_editor(editor).unwrap().is_dirty(cx));
+
+            let edited = framed
+                .replace("Fix the bug", "Fix both bugs")
+                .replace('\n', "\r\n");
+            daruda_store::tasks::prompt_file::write_prompt_file(&path, &edited).unwrap();
+            ws.handle_prompt_file_changed(editor, path.clone(), window, cx);
+            assert_eq!(prompt.read(cx).value().as_ref(), "Fix both bugs");
+
+            prompt.update(cx, |s, cx| s.set_value("Unsaved draft", window, cx));
+            daruda_store::tasks::prompt_file::write_prompt_file(&path, &framed).unwrap();
+            ws.handle_prompt_file_changed(editor, path, window, cx);
+            assert_eq!(prompt.read(cx).value().as_ref(), "Unsaved draft");
+        });
+    })
+    .unwrap();
+    assert!(
+        !cx.has_pending_prompt(),
+        "the saved prompt's echo is no conflict with unsaved edits"
+    );
 }
 
 #[gpui::test]
