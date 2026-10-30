@@ -1,5 +1,7 @@
 # daruda
 
+> **Keep the vibe. Try every idea.**
+
 **daruda is an Agentic Development Environment (ADE) for running multiple AI
 coding agents side by side.**
 
