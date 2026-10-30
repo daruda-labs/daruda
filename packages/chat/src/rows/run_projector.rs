@@ -470,16 +470,18 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                     );
                 }
             } else {
-                // The run's last prose and actionable permissions escape enclosing
-                // folds. Only the conclusion reading of that prose earns the
-                // conclusion's chrome: a preamble the agent wrote before work it is
-                // still doing is not the response's answer, and a bare-chevron fold
-                // announcing it as one is what read as a stray row.
+                // The run's last prose, its failures (why it stopped) and
+                // actionable permissions escape enclosing folds. Only the
+                // conclusion reading of that prose earns the conclusion's chrome:
+                // a preamble written before work still in progress is not the
+                // answer, and a bare-chevron fold announcing it read as a stray row.
                 let is_last_prose = last_prose.map(LastProse::ix) == Some(k);
                 let is_conclusion = last_prose == Some(LastProse::Conclusion(k));
+                let is_failure = matches!(&items[k], ChatItem::Failure(_));
                 let pending_permission =
                     matches!(&items[k], ChatItem::Permission(c) if c.resolved.is_none());
-                let force_visible = (is_last_prose && !history_fold) || pending_permission;
+                let force_visible =
+                    ((is_last_prose || is_failure) && !history_fold) || pending_permission;
                 let kind = if is_conclusion && base_indent > 0 {
                     RowKind::ConclusionItem(k)
                 } else {

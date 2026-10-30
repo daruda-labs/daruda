@@ -444,6 +444,50 @@ fn a_pending_permission_outlives_every_fold_that_encloses_it() {
     assert!(!visible(&rows, 3), "so is the call the window left out");
 }
 
+/// A turn failure answers for its response the way the final answer does: an
+/// ordinary fold keeps it visible, so a collapsed past response cannot hide why
+/// it stopped, while the history policy still shuts it with the answer.
+#[test]
+fn a_failure_escapes_ordinary_folds_but_not_the_history_policy() {
+    use ToolStatusView::Completed;
+    let items = [
+        ChatItem::UserText("q".into()),
+        asst("working"),
+        tool("a", Completed),
+        ChatItem::Failure(daruda_acp::AcpFailure::Unclassified {
+            message: "boom".into(),
+        }),
+        ChatItem::UserText("next".into()),
+        asst("latest answer"),
+    ];
+    let failure_hidden = |rows: &[RenderRow]| {
+        rows.iter()
+            .find(|r| matches!(r.kind, RowKind::AgentItem(3)))
+            .expect("failure row present")
+            .hidden
+    };
+
+    let mut fold = FoldState::default();
+    fold.toggle(FoldKey::Response(1), FoldContext::past(true));
+    let rows = project_under(&items, &fold);
+    assert!(
+        !failure_hidden(&rows),
+        "the failure survives a collapsed response"
+    );
+    let tool_hidden = rows
+        .iter()
+        .find(|r| matches!(r.kind, RowKind::AgentItem(2)))
+        .is_none_or(|r| r.hidden);
+    assert!(tool_hidden, "the work beside it does fold");
+
+    let mut fold = FoldState::with_mode(FoldPreset::Auto.mode().with_collapse_history(true));
+    fold.hold_response(Some(1));
+    assert!(
+        failure_hidden(&project_under(&items, &fold)),
+        "the history policy shuts the failure with its response"
+    );
+}
+
 #[test]
 fn collapsed_response_surfaces_a_live_tool_group() {
     use ToolStatusView::{Completed, InProgress};
