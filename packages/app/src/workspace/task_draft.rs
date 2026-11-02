@@ -34,6 +34,15 @@ pub(in crate::workspace) enum DraftLocation {
     ExistingLane(PathBuf),
 }
 
+/// Where a task runs, once checked: no base for an existing lane, and a
+/// branch only when one was named for a worktree Start creates.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::workspace) struct TaskPlacement {
+    pub run_in: TaskRunIn,
+    pub base: Option<PathBuf>,
+    pub branch: Option<String>,
+}
+
 /// Why a draft cannot become a task.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::workspace) enum DraftError {
@@ -66,21 +75,52 @@ impl Workspace {
         if title.is_empty() {
             return Err(DraftError::TitleEmpty);
         }
+        let placement = self.task_placement(project, draft.location, &draft.branch)?;
+        let mut spec = TaskSpec::new(
+            project,
+            title.to_owned(),
+            draft.prompt,
+            placement.base,
+            Utc::now(),
+        );
+        if let Some(branch) = placement.branch {
+            spec.branch_name = branch;
+        }
+        spec.run_in = placement.run_in;
+        spec.notes = draft.notes;
+        spec.agent_surface = draft.agent_surface;
+        spec.auto_execute = draft.auto_execute;
+        Ok(spec)
+    }
+
+    /// Where a task of `project` runs and on which branch, checked as every
+    /// caller that places one must check it — creating a task and editing a
+    /// task that has not started alike.
+    pub(in crate::workspace) fn task_placement(
+        &self,
+        project: ProjectUuid,
+        location: DraftLocation,
+        branch: &str,
+    ) -> Result<TaskPlacement, DraftError> {
         let lanes = self
             .project_by_uuid(project)
             .map(|p| p.lanes.as_slice())
             .ok_or(DraftError::ProjectNotOpen)?;
-        let (run_in, base, branch) = match draft.location {
+        Ok(match location {
             DraftLocation::NewWorktree { base } => {
-                let branch = match daruda_core::git::validate_branch_name(&draft.branch) {
+                let branch = match daruda_core::git::validate_branch_name(branch) {
                     Ok(name) if branch_checked_out(lanes, name) => {
                         return Err(DraftError::BranchTaken);
                     }
-                    Ok(name) => Some(name),
+                    Ok(name) => Some(name.to_owned()),
                     Err(daruda_core::git::BranchNameRule::Empty) => None,
                     Err(_) => return Err(DraftError::BranchInvalid),
                 };
-                (TaskRunIn::NewWorktree, base, branch)
+                TaskPlacement {
+                    run_in: TaskRunIn::NewWorktree,
+                    base,
+                    branch,
+                }
             }
             DraftLocation::ExistingLane(path) => {
                 if !lanes
@@ -89,18 +129,13 @@ impl Workspace {
                 {
                     return Err(DraftError::LaneNotInProject);
                 }
-                (TaskRunIn::ExistingLane { path }, None, None)
+                TaskPlacement {
+                    run_in: TaskRunIn::ExistingLane { path },
+                    base: None,
+                    branch: None,
+                }
             }
-        };
-        let mut spec = TaskSpec::new(project, title.to_owned(), draft.prompt, base, Utc::now());
-        if let Some(branch) = branch {
-            spec.branch_name = branch.to_owned();
-        }
-        spec.run_in = run_in;
-        spec.notes = draft.notes;
-        spec.agent_surface = draft.agent_surface;
-        spec.auto_execute = draft.auto_execute;
-        Ok(spec)
+        })
     }
 
     /// Whether a lane of `project` already checks out `branch`.

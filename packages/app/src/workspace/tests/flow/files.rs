@@ -677,3 +677,34 @@ async fn a_move_from_another_lane_leaves_the_open_graph_reporting_its_file_gone(
     assert_eq!(path, global, "not pointed at another worktree's file");
     assert!(unreadable, "and says its file is gone");
 }
+
+/// The palette command always says why it moved nothing, so it never reads
+/// as a dead command.
+#[gpui::test]
+async fn the_move_command_says_why_it_moved_nothing(cx: &mut TestAppContext) {
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    let run = |ws: &gpui::Entity<Workspace>, vcx: &mut gpui::VisualTestContext| {
+        ws.update_in(vcx, |ws, window, cx| {
+            ws.on_move_flow_to_repository(&crate::workspace::MoveFlowToRepository, window, cx)
+        });
+        ws.read_with(vcx, |ws, _| {
+            // Newest first.
+            ws.error_history()
+                .first()
+                .map(|report| report.message.clone())
+        })
+    };
+    assert_eq!(
+        run(&ws, &mut vcx),
+        Some(crate::surface::strings::flow::move_no_graph())
+    );
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+    assert_eq!(
+        run(&ws, &mut vcx),
+        Some(crate::surface::strings::flow::move_already_in_repo())
+    );
+}

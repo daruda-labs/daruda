@@ -1160,6 +1160,39 @@ fn task_editor_says_why_a_lane_gone_since_picking_refuses_the_save(cx: &mut Test
     .unwrap();
 }
 
+/// Editing a task that has not started places it by the same checks as
+/// creating one: a lane gone from the project refuses the save, out loud.
+#[gpui::test]
+fn task_editor_refuses_an_edit_into_a_lane_gone_since_picking(cx: &mut TestAppContext) {
+    let (_root, window, ws) = build_workspace_with_project(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_task_editor(None, window, cx);
+            let editor = ws
+                .task_detail_id()
+                .expect("the Tasks page holds the editor");
+            let title = ws.task_editor(editor).unwrap().title_input.clone();
+            title.update(cx, |s, cx| s.set_value("Saved first", window, cx));
+            let id = ws.commit_task_form(editor, cx).expect("the new task saves");
+            ws.set_task_run_in(editor, RunInChoice::ExistingLane, cx);
+            let project = ws.active.project;
+            ws.project_for_mut(project).unwrap().lanes.clear();
+            assert!(ws.commit_task_form(editor, cx).is_none());
+            assert_eq!(
+                cx.global::<GlobalTasks>().get(&id).unwrap().spec.run_in,
+                TaskRunIn::NewWorktree,
+                "the edit was not recorded"
+            );
+            let toasts: Vec<_> = ws.error_toasts(cx).iter().collect();
+            assert_eq!(
+                toasts.last().map(|t| t.report.title.clone()),
+                Some(crate::surface::strings::task::save_refused_title())
+            );
+        });
+    })
+    .unwrap();
+}
+
 /// A started task's branch is its own lane's; that must not block edits.
 #[gpui::test]
 fn task_editor_saves_a_running_task_whose_lane_holds_its_branch(cx: &mut TestAppContext) {

@@ -21,6 +21,7 @@ use crate::control::result::{
 use crate::workspace::Workspace;
 use crate::workspace::flow_ops::FlowStartRefused;
 use crate::workspace::flow_paths::{FlowOrigin, FoundFlow, flow_label, project_flows_dir};
+use crate::workspace::flow_profiles::declared_profiles;
 use crate::workspace::flow_request::{FlowSelection, FlowSubmitError};
 use daruda_control_types::runs::RunHandle;
 use daruda_store::project::LaneRef;
@@ -287,11 +288,28 @@ fn refusal_answer(
         FlowStartRefused::AlreadyRunning => return ControlError::FlowLocked { name, held_by },
         FlowStartRefused::Submit(error) => error,
     };
+    match classify_refusal(error) {
+        SubmitRefusal::Load(_) | SubmitRefusal::Invalid(_) => ControlError::FlowRefused { name },
+        SubmitRefusal::Locked => ControlError::FlowLocked { name, held_by },
+        SubmitRefusal::NotStarted(reason) => ControlError::FlowNotStarted { name, reason },
+    }
+}
+
+/// What a submission's refusal means to a control caller, decided once for a
+/// start and a check alike: the file's own problem, a held worktree, or a
+/// reason outside the file.
+enum SubmitRefusal {
+    Load(daruda_flow::FlowError),
+    Invalid(usize),
+    Locked,
+    NotStarted(FlowNotStartedReason),
+}
+
+fn classify_refusal(error: FlowSubmitError) -> SubmitRefusal {
     let reason = match error {
-        FlowSubmitError::Load(_) | FlowSubmitError::Invalid(_) => {
-            return ControlError::FlowRefused { name };
-        }
-        FlowSubmitError::LockHeld { .. } => return ControlError::FlowLocked { name, held_by },
+        FlowSubmitError::Load(error) => return SubmitRefusal::Load(error),
+        FlowSubmitError::Invalid(issues) => return SubmitRefusal::Invalid(issues.len()),
+        FlowSubmitError::LockHeld { .. } => return SubmitRefusal::Locked,
         FlowSubmitError::NoLane => FlowNotStartedReason::NoLane,
         FlowSubmitError::LaneUnresolvable { .. } => FlowNotStartedReason::LaneUnresolvable,
         FlowSubmitError::RemoteLane { agent } => FlowNotStartedReason::RemoteLane { agent },
@@ -304,7 +322,7 @@ fn refusal_answer(
         FlowSubmitError::Read { .. } => FlowNotStartedReason::ReadFailed,
         FlowSubmitError::Resume(_) => FlowNotStartedReason::ResumeRefused,
     };
-    ControlError::FlowNotStarted { name, reason }
+    SubmitRefusal::NotStarted(reason)
 }
 
 /// The file name unsaved text is checked under. Only its directory matters:
@@ -314,25 +332,12 @@ const DRAFT_FLOW_FILE: &str = "draft.yaml";
 /// A check's refusal that is not a list of issues, in the fixed English an
 /// MCP answer carries. Paths stay in the desktop's log.
 fn submit_problem(error: FlowSubmitError) -> String {
-    let reason = match error {
-        FlowSubmitError::Load(error) => return error.to_string(),
-        FlowSubmitError::RemoteLane { agent } => FlowNotStartedReason::RemoteLane { agent },
-        FlowSubmitError::AgentLaunchRefused { agent, .. } => {
-            FlowNotStartedReason::AgentLaunchRefused { agent }
-        }
-        FlowSubmitError::UnusableSessionHost { agent, .. } => {
-            FlowNotStartedReason::SessionHostUnusable { agent }
-        }
-        FlowSubmitError::NoLane => FlowNotStartedReason::NoLane,
-        FlowSubmitError::LaneUnresolvable { .. } => FlowNotStartedReason::LaneUnresolvable,
-        FlowSubmitError::Read { .. } => FlowNotStartedReason::ReadFailed,
-        FlowSubmitError::Resume(_) => FlowNotStartedReason::ResumeRefused,
-        FlowSubmitError::LockHeld { .. } => return "worktree is locked by another run".into(),
-        FlowSubmitError::Invalid(issues) => {
-            return format!("the flow has {} validation problem(s)", issues.len());
-        }
-    };
-    reason.to_string()
+    match classify_refusal(error) {
+        SubmitRefusal::Load(error) => error.to_string(),
+        SubmitRefusal::Invalid(count) => format!("the flow has {count} validation problem(s)"),
+        SubmitRefusal::Locked => "worktree is locked by another run".into(),
+        SubmitRefusal::NotStarted(reason) => reason.to_string(),
+    }
 }
 
 /// The single conversion between the workspace-private flow origin and the
@@ -343,17 +348,4 @@ fn map_origin(origin: FlowOrigin) -> FlowOriginKind {
         FlowOrigin::Project => FlowOriginKind::Project,
         FlowOrigin::Global => FlowOriginKind::Global,
     }
-}
-
-/// The profiles the file at `path` declares, in the order the desktop picker
-/// offers them.
-///
-/// A file that cannot be read or parsed answers none: the run that follows
-/// fails on the same read and names it properly, and refusing here would
-/// report a parse error as a profile problem.
-fn declared_profiles(path: &Path) -> Vec<String> {
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|text| daruda_flow::load::profiles(&text).ok())
-        .unwrap_or_default()
 }

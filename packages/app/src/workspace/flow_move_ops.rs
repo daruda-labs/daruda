@@ -123,11 +123,37 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The command is always listed, so saying why it does nothing is
+        // what keeps it from reading as broken.
         let Some((_, lane, view)) = self.open_graph() else {
-            return;
+            return self.report_nothing_to_move(s::flow::move_no_graph(), "flow.move_no_graph", cx);
         };
         let path = view.read(cx).path().to_path_buf();
+        if self.flow_move_plan(lane, &path).is_none() {
+            return self.report_nothing_to_move(
+                s::flow::move_already_in_repo(),
+                "flow.move_in_repo",
+                cx,
+            );
+        }
         self.ask_before_moving(lane, path, window, cx);
+    }
+
+    fn report_nothing_to_move(
+        &mut self,
+        reason: String,
+        dedup: &'static str,
+        cx: &mut Context<Self>,
+    ) {
+        self.report_error(
+            ErrorReport::new(s::flow::move_nothing_title())
+                .severity(ErrorSeverity::Info)
+                .message(reason)
+                .dedup(dedup)
+                .at(file!(), line!())
+                .build(),
+            cx,
+        );
     }
 
     /// Ask, then move on yes. The plan is made from `self` before the dialog
@@ -198,6 +224,12 @@ pub(in crate::workspace) fn open_move_dialog(
 
 fn move_confirm_body(name: &str, plan: &FlowMovePlan) -> String {
     let mut body = s::flow::move_confirm_body(name, origin_label(plan.origin));
+    // The personal folder is every project's: the move takes it from all of
+    // them, where a project flow stays in reach of the project once committed.
+    if plan.origin == FlowOrigin::Global {
+        body.push(' ');
+        body.push_str(&s::flow::move_confirm_leaves_global());
+    }
     for shadowed in &plan.shadows {
         body.push(' ');
         body.push_str(&s::flow::move_confirm_shadows(origin_label(*shadowed)));
@@ -221,6 +253,10 @@ mod tests {
             "ship.yaml",
             origin_label(FlowOrigin::Global)
         )));
+        assert!(
+            body.contains(&s::flow::move_confirm_leaves_global()),
+            "a personal flow's move says the other projects lose it"
+        );
         assert!(body.ends_with(&s::flow::move_confirm_shadows(origin_label(
             FlowOrigin::Project
         ))));

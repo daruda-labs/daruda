@@ -1898,10 +1898,16 @@ flow:
   row_menu_move_to_repo: "Move to Repository…"
   move_confirm_title: "Move this flow into the repository?"
   move_confirm_body: "%{name} (%{origin}) will be moved into this worktree's .daruda/flows/. Other worktrees and other people see it only once it is committed."
+  # Added when the flow comes from the personal folder, which every project reads.
+  move_confirm_leaves_global: "It leaves your personal folder, so your other projects stop offering it."
   # Appended to the body once per scope holding a flow of the same file name.
   move_confirm_shadows: "In this worktree it will take the place of the %{origin} flow with the same file name."
   move_confirm_ok: "Move"
   move_failed_title: "Could not move the flow"
+  # The palette command run with nothing it can move.
+  move_nothing_title: "Nothing to move"
+  move_no_graph: "Open a flow's graph first; the command moves the flow it shows."
+  move_already_in_repo: "This flow is already in the repository."
   move_taken: "The repository already has a flow named %{name}; rename one of them first."
   # Why an edit was not written. The title is the same for all three refusals —
   # the file is untouched either way, and the reason follows as the message.

@@ -92,13 +92,36 @@ impl Workspace {
         let task_id = match &form.task_id {
             Some(id) => {
                 cx.global::<crate::runs::GlobalTasks>().get(id)?;
+                // A task that has not started is placed by the same checks a
+                // new one is; once started, where it runs is fixed and the
+                // log ignores the launch fields.
+                let (base_worktree_path, branch, run_in) = match (run_in, form.project) {
+                    (Some(run_in), Some(project)) => {
+                        let location = match run_in {
+                            TaskRunIn::NewWorktree => DraftLocation::NewWorktree {
+                                base: base_path.clone(),
+                            },
+                            TaskRunIn::ExistingLane { path } => DraftLocation::ExistingLane(path),
+                        };
+                        match self.task_placement(project, location, &values.branch) {
+                            Ok(placed) => (placed.base, placed.branch, Some(placed.run_in)),
+                            Err(refused) => {
+                                self.report_task_draft_refusal(
+                                    editor_id, refused, project, values, cx,
+                                );
+                                return None;
+                            }
+                        }
+                    }
+                    (run_in, _) => (base_path.clone(), branch, run_in),
+                };
                 let edit = TaskEdit {
                     title: values.title.clone(),
                     prompt: values.prompt.clone(),
                     notes: values.notes.clone(),
                     auto_execute: values.auto_execute,
                     agent_surface: values.agent_surface,
-                    base_worktree_path: base_path.clone(),
+                    base_worktree_path,
                     branch,
                     run_in,
                     project: form.project.filter(|_| form.editable),

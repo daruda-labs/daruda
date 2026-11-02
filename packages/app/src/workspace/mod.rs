@@ -55,6 +55,7 @@ mod flow_navigation;
 mod flow_ops;
 mod flow_paths;
 mod flow_pins;
+mod flow_profiles;
 pub(in crate::workspace) mod flow_request;
 mod flow_rows;
 pub(in crate::workspace) mod flow_runs;

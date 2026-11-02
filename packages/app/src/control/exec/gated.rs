@@ -44,7 +44,10 @@ fn run_gated_with(
     if let Err(refusal) = guard_gated(&cmd, cx) {
         return Dispatch::Ready(Err(refusal));
     }
-    let summary = approval_summary(&cmd, cx);
+    let summary = match approval_summary(&cmd, cx) {
+        Ok(summary) => summary,
+        Err(refusal) => return Dispatch::Ready(Err(refusal)),
+    };
     let solicited = origin.is_solicited(cx);
     let away = crate::app_presence::is_away(cx);
     let delivery = crate::remote_channel::delivery::remote_delivery(solicited, away);
@@ -169,8 +172,11 @@ fn task_title(task: &str, cx: &App) -> String {
 /// One line naming what the user is being asked to allow. Built here rather
 /// than on `GatedCommand`, which is the contract every adapter shares and
 /// deliberately carries no rendered sentences.
-fn approval_summary(cmd: &GatedCommand, cx: &mut App) -> String {
-    match cmd {
+///
+/// A target that cannot be named is refused rather than asked about: a card
+/// with the place left blank asks the person to approve without saying where.
+fn approval_summary(cmd: &GatedCommand, cx: &mut App) -> Result<String, ControlError> {
+    Ok(match cmd {
         GatedCommand::LaneCreate { name, .. } => s::control::approval_lane_create(name),
         GatedCommand::ChatNew { lane, .. } => {
             let path = in_lane_window(*lane, cx, |ws, _window, _cx| {
@@ -178,8 +184,7 @@ fn approval_summary(cmd: &GatedCommand, cx: &mut App) -> String {
                     ws.control_project_name(lane.project),
                     ws.control_lane_name(lane.lane_ref()),
                 ))
-            })
-            .unwrap_or_default();
+            })?;
             s::control::approval_chat_new(&path)
         }
         GatedCommand::TaskCreate {
@@ -203,8 +208,7 @@ fn approval_summary(cmd: &GatedCommand, cx: &mut App) -> String {
                     },
                 };
                 Ok((ws.control_project_name(*project), location))
-            })
-            .unwrap_or_default();
+            })?;
             let surface = match task.surface.unwrap_or_default() {
                 TaskAgentSurface::AgentChat => s::control::approval_task_as_chat(),
                 TaskAgentSurface::Terminal => s::control::approval_task_as_terminal(),
@@ -213,7 +217,7 @@ fn approval_summary(cmd: &GatedCommand, cx: &mut App) -> String {
         }
         GatedCommand::TaskStart { task } => s::control::approval_task_start(task_title(task, cx)),
         GatedCommand::TaskOpen { task } => s::control::approval_task_open(task_title(task, cx)),
-    }
+    })
 }
 
 /// Do the thing, now that the user has said yes.
