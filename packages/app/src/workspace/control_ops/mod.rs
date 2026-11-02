@@ -751,6 +751,34 @@ impl Workspace {
         view.update(cx, |v, _| v.hold_permission_for_shot(1));
     }
 
+    pub(crate) fn set_pane_awaiting_answer_for_test(
+        &mut self,
+        pane: PaneId,
+        cx: &mut Context<Self>,
+    ) {
+        let view = self.agent_chat_view(pane).expect("pane").clone();
+        let question = daruda_acp::QuestionRequest {
+            message: "Which?".into(),
+            tool_call_id: None,
+            fields: vec![daruda_acp::QuestionField {
+                key: "question_0".into(),
+                title: None,
+                description: None,
+                required: false,
+                kind: daruda_acp::QuestionFieldKind::Text,
+                companion_of: None,
+            }],
+        };
+        view.update(cx, |v, cx| {
+            v.apply_event(
+                daruda_acp::AcpEvent::QuestionAsked { id: 1, question },
+                "",
+                false,
+                cx,
+            );
+        });
+    }
+
     pub(crate) fn set_pane_errored_for_test(&mut self, pane: PaneId, cx: &mut Context<Self>) {
         let view = self.agent_chat_view(pane).expect("pane").clone();
         view.update(cx, |v, cx| {

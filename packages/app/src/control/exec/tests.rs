@@ -61,7 +61,7 @@ async fn brief_counts_each_state_separately(cx: &mut gpui::TestAppContext) {
     let panes = cx
         .update_window(fixture.window.into(), |_, window, cx| {
             fixture.workspace.update(cx, |ws, cx| {
-                ws.open_agent_chat_panes_in_fresh_lanes_for_test(2, window, cx)
+                ws.open_agent_chat_panes_in_fresh_lanes_for_test(3, window, cx)
             })
         })
         .expect("window is live");
@@ -70,13 +70,15 @@ async fn brief_counts_each_state_separately(cx: &mut gpui::TestAppContext) {
         ws.set_pane_working_for_test(fixture.pane(), cx);
         ws.set_pane_awaiting_permission_for_test(panes[0], cx);
         ws.set_pane_errored_for_test(panes[1], cx);
+        ws.set_pane_awaiting_answer_for_test(panes[2], cx);
     });
 
     cx.update(|cx| {
         let brief = brief(cx);
-        assert_eq!(brief.total, 3);
+        assert_eq!(brief.total, 4);
         assert_eq!(brief.working, 1, "{brief:?}");
         assert_eq!(brief.awaiting_permission, 1, "{brief:?}");
+        assert_eq!(brief.awaiting_answer, 1, "{brief:?}");
         assert_eq!(brief.error, 1, "{brief:?}");
     });
 }

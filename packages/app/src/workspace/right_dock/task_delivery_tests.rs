@@ -608,3 +608,70 @@ fn a_prompt_start_failure_drops_the_queue_without_a_running_transition(cx: &mut 
         )
     });
 }
+
+/// A continued run's turn can end before the write that records the run
+/// lands. Its settle then waits for the log instead of settling the run that
+/// already ended and leaving the new one running forever.
+#[gpui::test]
+fn a_continued_turn_that_ends_before_its_run_is_recorded_still_settles(cx: &mut TestAppContext) {
+    let (window, workspace) = build_workspace(cx);
+    let id = cx
+        .update_window(window.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(
+                    Some(PaneCwd::Local(std::env::temp_dir())),
+                    None,
+                    ws.mirrors.agents[0].id.clone(),
+                    None,
+                    window,
+                    cx,
+                );
+                let pane_id = pane.id;
+                pane.agent_chat_view().unwrap().update(cx, |view, _| {
+                    view.set_session_id_for_test(Some("race-session".into()));
+                });
+                ws.active_runtime_mut().panes.push(pane);
+                let run = SeedRun::chat(std::env::temp_dir()).session("race-session");
+                let id = seed::task(
+                    seed::spec(Default::default(), "Race"),
+                    Some((&run, SeedEnd::Done)),
+                    cx,
+                );
+                let pane = ws.run_pane(pane_id);
+                RunsHost::bind_execution(pane, run.exec(&id), cx);
+                RunsHost::person_prompt_sent(
+                    pane,
+                    Some("race-session".into()),
+                    daruda_store::tasks::StartedBy::Desktop,
+                    "one more thing".into(),
+                    cx,
+                );
+                // The turn ends at once, before `Continued` is projected.
+                ws.settle_agent_chat_task(
+                    pane_id,
+                    daruda_store::tasks::machine::SettleOutcome::Completed {
+                        end_reason: daruda_store::tasks::SessionEndReason::Stop,
+                    },
+                    Some("done again".into()),
+                    cx,
+                );
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+    cx.update(|cx| {
+        let record = cx.global::<GlobalTasks>().get(&id).unwrap();
+        assert!(
+            matches!(record.lifecycle, Lifecycle::Done { .. }),
+            "{:?}",
+            record.lifecycle
+        );
+        assert_eq!(record.ended_executions.len(), 2);
+        assert!(record.ended_executions[1].is_continuation());
+        assert_eq!(
+            record.ended_executions[1].result.as_deref(),
+            Some("done again")
+        );
+    });
+}
