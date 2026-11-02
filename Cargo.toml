@@ -28,7 +28,6 @@ gpui = { git = "https://github.com/zed-industries/zed", package = "gpui", rev = 
 gpui_macros = { git = "https://github.com/zed-industries/zed", package = "gpui_macros", rev = "decd2399b180b64dea2a4182f9ac63545a45e7a3" }
 sum_tree = { git = "https://github.com/zed-industries/zed", package = "sum_tree", rev = "decd2399b180b64dea2a4182f9ac63545a45e7a3" }
 gpui_macos = { git = "https://github.com/zed-industries/zed", package = "gpui_macos", rev = "decd2399b180b64dea2a4182f9ac63545a45e7a3", features = ["font-kit"] }
-gpui_linux = { git = "https://github.com/zed-industries/zed", package = "gpui_linux", rev = "decd2399b180b64dea2a4182f9ac63545a45e7a3" }
 # zed's own OS-dispatch wrapper (`current_platform`/`application`) over
 # gpui_macos/gpui_linux/gpui_windows — lets `bootstrap.rs` build the
 # `gpui::Application` without `#[cfg(target_os = ...)]` of its own.

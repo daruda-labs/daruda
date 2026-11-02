@@ -1609,14 +1609,12 @@ version = "0.2.20"
 dependencies = [
  "daruda_core",
  "daruda_store",
- "dirs 7.0.0",
  "serde",
  "serde_json",
  "shell-words",
  "tempfile",
  "toml 1.1.8+spec-1.1.0",
  "toml_edit 0.25.17+spec-1.1.0",
- "uuid",
 ]
 
 [[package]]
@@ -1774,7 +1772,6 @@ dependencies = [
  "rust-i18n",
  "serde",
  "serde_json",
- "smallvec",
  "tempfile",
  "tracing",
  "unicode-width",
