@@ -139,7 +139,8 @@ async fn modal_safety_escape_and_cancel_share_draft_protection(cx: &mut TestAppC
     vcx.update(|window, cx| {
         assert!(footer.bottom() <= window.viewport_size().height);
         window.dispatch_event(
-            gpui::PlatformInput::ScrollWheel(gpui::ScrollWheelEvent {
+            gpui::PlatformInput::Scroll(gpui::ScrollEvent {
+                source: gpui::ScrollSource::Pointer,
                 position: gpui::point(footer.center().x, footer.top() - px(40.0)),
                 delta: gpui::ScrollDelta::Pixels(gpui::point(
                     px(0.0),

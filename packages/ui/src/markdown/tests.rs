@@ -29,15 +29,17 @@ struct MarkdownProbe {
 
 impl Render for MarkdownProbe {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .id("markdown-probe")
-            .debug_selector(|| "markdown-probe".into())
-            .w_full()
-            .child(
-                super::markdown("probe", self.text.clone(), copy_tooltips())
-                    .when_some(self.size, |md, size| md.text_size(size))
-                    .when_some(self.heading_size, |md, size| md.heading_size(size)),
-            )
+        div().child(
+            div()
+                .id("markdown-probe")
+                .debug_selector(|| "markdown-probe".into())
+                .w_full()
+                .child(
+                    super::markdown("probe", self.text.clone(), copy_tooltips())
+                        .when_some(self.size, |md, size| md.text_size(size))
+                        .when_some(self.heading_size, |md, size| md.heading_size(size)),
+                ),
+        )
     }
 }
 

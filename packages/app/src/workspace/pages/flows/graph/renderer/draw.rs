@@ -43,7 +43,7 @@ fn full_header(card: &CardData, accent: gpui::Rgba, p: CardPalette) -> impl Into
         )
         .children(policy_chip(card, p))
         .children(issue_marker(card, p))
-        .child(div().flex_grow())
+        .child(div().flex_grow(1.))
         .child(
             div()
                 .flex_none()
@@ -238,7 +238,7 @@ impl NodeRenderer for FlowNodeRenderer {
                         )
                         .child(
                             div()
-                                .flex_shrink()
+                                .flex_shrink(1.)
                                 .truncate()
                                 .text_color(accent)
                                 .text_size(px(palette::FLOW_GRAPH_MARKER_FONT_SIZE))

@@ -181,7 +181,7 @@ pub(in crate::render) fn activity_bar(
         })
         .child(
             div()
-                .flex_shrink()
+                .flex_shrink(1.)
                 .min_w_0()
                 .max_w_full()
                 .flex()

@@ -141,7 +141,7 @@ impl InputState {
         window: &mut Window,
         cx: &mut Context<InputState>,
     ) {
-        if event.modifiers.secondary() {
+        if event.modifiers.secondary(cx) {
             self.handle_hover_definition(offset, window, cx);
         } else {
             self.hover_definition.clear();

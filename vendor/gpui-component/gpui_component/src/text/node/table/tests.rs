@@ -182,7 +182,7 @@ fn narrow_tables_scroll_without_crushing_identifiers(cx: &mut TestAppContext) {
         cell(&mut vcx, 0, 0).size.height + px(1.)
     );
     let before = cell(&mut vcx, 1, 0).origin.x;
-    vcx.simulate_event(gpui::ScrollWheelEvent {
+    vcx.simulate_event(gpui::ScrollEvent {
         position: viewport.center(),
         delta: gpui::ScrollDelta::Pixels(point(px(-100.), px(0.))),
         ..Default::default()
@@ -201,7 +201,7 @@ fn reading_past_a_table_does_not_drag_its_columns(cx: &mut TestAppContext) {
     );
     let viewport = vcx.debug_bounds("markdown-table-viewport").unwrap();
     let before = cell(&mut vcx, 1, 0).origin.x;
-    vcx.simulate_event(gpui::ScrollWheelEvent {
+    vcx.simulate_event(gpui::ScrollEvent {
         position: viewport.center(),
         delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-100.))),
         ..Default::default()
@@ -254,7 +254,7 @@ async fn streamed_updates_preserve_horizontal_scroll(cx: &mut TestAppContext) {
     let (view, mut vcx) = probe(cx, initial, 180.);
     let viewport = vcx.debug_bounds("markdown-table-viewport").unwrap();
     let unscrolled = cell(&mut vcx, 1, 0).origin.x;
-    vcx.simulate_event(gpui::ScrollWheelEvent {
+    vcx.simulate_event(gpui::ScrollEvent {
         position: viewport.center(),
         delta: gpui::ScrollDelta::Pixels(point(px(-100.), px(0.))),
         ..Default::default()

@@ -205,11 +205,14 @@ fn find_widget_by_shortcut_finds_buttons_and_skips_unknown_widgets() {
 
 #[test]
 fn is_valid_shortcut_accepts_simple_and_rejects_blank() {
-    assert!(is_valid_shortcut("cmd-shift-1"));
-    assert!(is_valid_shortcut("ctrl-a"));
-    assert!(is_valid_shortcut("f5"));
-    assert!(!is_valid_shortcut(""));
-    assert!(!is_valid_shortcut("   "));
+    assert!(is_valid_shortcut(
+        "cmd-shift-1",
+        gpui::OperatingSystem::Unknown
+    ));
+    assert!(is_valid_shortcut("ctrl-a", gpui::OperatingSystem::Unknown));
+    assert!(is_valid_shortcut("f5", gpui::OperatingSystem::Unknown));
+    assert!(!is_valid_shortcut("", gpui::OperatingSystem::Unknown));
+    assert!(!is_valid_shortcut("   ", gpui::OperatingSystem::Unknown));
 }
 
 #[test]

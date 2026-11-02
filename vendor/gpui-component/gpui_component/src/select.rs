@@ -23,11 +23,19 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new("up", SelectUp, Some(CONTEXT)),
         KeyBinding::new("down", SelectDown, Some(CONTEXT)),
         KeyBinding::new("enter", Confirm { secondary: false }, Some(CONTEXT)),
-        KeyBinding::new(
+        KeyBinding::load(
             "secondary-enter",
-            Confirm { secondary: true },
-            Some(CONTEXT),
-        ),
+            Box::new(Confirm { secondary: true }),
+            Some(CONTEXT).map(|value| {
+                gpui::KeyBindingContextPredicate::parse(value)
+                    .expect("valid key context")
+                    .into()
+            }),
+            false,
+            None,
+            cx,
+        )
+        .expect("valid widget keybinding"),
         KeyBinding::new("escape", Cancel, Some(CONTEXT)),
     ])
 }

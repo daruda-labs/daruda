@@ -97,7 +97,7 @@ pub(super) fn toolbar(state: ToolbarState, cx: &mut Context<FlowGraphView>) -> i
         // interaction (`nodrag` / `nopan` / `nowheel`) for the same reason.
         .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .on_mouse_down(gpui::MouseButton::Right, |_, _, cx| cx.stop_propagation())
-        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+        .on_scroll(|_, _, cx| cx.stop_propagation())
         .top(px(palette::FLOW_TOOLBAR_INSET))
         .right(px(palette::FLOW_TOOLBAR_INSET))
         .flex()

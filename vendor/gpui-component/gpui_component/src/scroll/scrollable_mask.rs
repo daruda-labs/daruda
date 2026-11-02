@@ -1,7 +1,7 @@
 use gpui::{
     App, Axis, BorderStyle, Bounds, ContentMask, Corners, Edges, Element, ElementId,
     GlobalElementId, Hitbox, Hsla, IntoElement, IsZero as _, LayoutId, PaintQuad, Pixels, Point,
-    Position, ScrollHandle, ScrollWheelEvent, Style, Window, px, relative,
+    Position, ScrollEvent, ScrollHandle, Style, Window, px, relative,
 };
 
 use crate::AxisExt;
@@ -124,7 +124,7 @@ impl Element for ScrollableMask {
                 let view_id = window.current_view();
                 let scroll_handle = self.scroll_handle.clone();
 
-                move |event: &ScrollWheelEvent, phase, _, cx| {
+                move |event: &ScrollEvent, phase, _, cx| {
                     if !(bounds.contains(&event.position) && phase.bubble()) {
                         return;
                     }

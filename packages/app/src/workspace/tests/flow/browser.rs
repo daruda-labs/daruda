@@ -243,7 +243,7 @@ async fn flow_browser_request_recovery_does_not_clear_definition_filters(cx: &mu
 #[gpui::test]
 async fn flow_browser_narrow_tables_scroll_to_the_action_column(cx: &mut TestAppContext) {
     use crate::workspace::flow_history::{FlowHistory, FlowRunEntry};
-    use gpui::{ScrollDelta, ScrollWheelEvent, TouchPhase, point, px};
+    use gpui::{ScrollDelta, ScrollEvent, TouchPhase, point, px};
 
     let (_dir, ws, path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
     let mut vcx = VisualTestContext::from_window(wh.into(), cx);
@@ -269,7 +269,8 @@ async fn flow_browser_narrow_tables_scroll_to_the_action_column(cx: &mut TestApp
             before.right() > viewport.right(),
             "{tab:?}: action={before:?}, viewport={viewport:?}"
         );
-        vcx.simulate_event(ScrollWheelEvent {
+        vcx.simulate_event(ScrollEvent {
+            source: gpui::ScrollSource::Pointer,
             position: viewport.center(),
             delta: ScrollDelta::Pixels(point(px(-1000.0), px(0.0))),
             modifiers: Modifiers::default(),

@@ -68,7 +68,8 @@ pub(crate) fn drive(
                 let _ = cx.update(|window, cx| {
                     let size = window.viewport_size();
                     window.dispatch_event(
-                        gpui::PlatformInput::ScrollWheel(gpui::ScrollWheelEvent {
+                        gpui::PlatformInput::Scroll(gpui::ScrollEvent {
+                            source: gpui::ScrollSource::Pointer,
                             position: gpui::point(
                                 size.width / 2.,
                                 px(theme::TITLE_BAR_HEIGHT + theme::PAD_XL * 6.),

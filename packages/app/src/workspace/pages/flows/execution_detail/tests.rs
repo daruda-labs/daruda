@@ -285,7 +285,7 @@ fn report_navigation_keeps_the_run_attempt_and_evidence_tab(cx: &mut TestAppCont
 
 #[gpui::test]
 fn long_conversation_and_output_scroll_inside_the_inspector(cx: &mut TestAppContext) {
-    use gpui::{ScrollDelta, ScrollWheelEvent, TouchPhase, point, px};
+    use gpui::{ScrollDelta, ScrollEvent, TouchPhase, point, px};
     let root = tempfile::tempdir().unwrap();
     let dir = seed(root.path(), ExecutionShot::Completed);
     let history = RunHistory::read(&dir).unwrap();
@@ -325,7 +325,8 @@ fn long_conversation_and_output_scroll_inside_the_inspector(cx: &mut TestAppCont
                 before.size.height > viewport.size.height,
                 "evidence must exceed viewport: {before:?}, {viewport:?}"
             );
-            vcx.simulate_event(ScrollWheelEvent {
+            vcx.simulate_event(ScrollEvent {
+                source: gpui::ScrollSource::Pointer,
                 position: viewport.center(),
                 delta: ScrollDelta::Pixels(point(px(0.0), px(-100.0))),
                 modifiers: Default::default(),

@@ -3,8 +3,8 @@ use std::{ops::Range, rc::Rc};
 use gpui::{
     App, Bounds, Corners, DispatchPhase, Element, ElementId, ElementInputHandler, Entity,
     GlobalElementId, Half, HighlightStyle, Hitbox, HitboxBehavior, Hsla, IntoElement, LayoutId,
-    MouseButton, MouseMoveEvent, Path, Pixels, Point, ScrollWheelEvent, ShapedLine, SharedString,
-    Size, Style, TextRun, TextStyle, UnderlineStyle, Window, fill, point, px, relative, size,
+    MouseButton, MouseMoveEvent, Path, Pixels, Point, ScrollEvent, ShapedLine, SharedString, Size,
+    Style, TextRun, TextStyle, UnderlineStyle, Window, fill, point, px, relative, size,
 };
 use ropey::Rope;
 use smallvec::SmallVec;
@@ -67,7 +67,7 @@ impl TextElement {
             let state = self.state.clone();
             let hitbox = hitbox.clone();
 
-            move |event: &ScrollWheelEvent, phase, window, cx| {
+            move |event: &ScrollEvent, phase, window, cx| {
                 if phase == DispatchPhase::Capture && hitbox.should_handle_scroll(window) {
                     state.update(cx, |state, cx| {
                         state.on_scroll_wheel(event, window, cx);

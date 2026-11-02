@@ -56,7 +56,9 @@ allow-git = [
     "https://github.com/proptest-rs/proptest",
     "https://github.com/zed-industries/font-kit",
     "https://github.com/zed-industries/scap",
-    "https://github.com/zed-industries/wgpu",
+    "https://github.com/gfx-rs/wgpu",
+    "https://github.com/zed-industries/oo7",
+    "https://github.com/zed-industries/wasm_thread",
     "https://github.com/zed-industries/xim-rs",
     "https://github.com/zed-industries/zed",
 ]

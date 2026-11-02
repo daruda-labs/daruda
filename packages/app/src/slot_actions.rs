@@ -6,52 +6,61 @@
 
 #[macro_export]
 macro_rules! tab_slot_table {
-    (@bindings) => {
+    (@bindings $cx:expr) => {
         [
-            ::gpui::KeyBinding::new(
+            $crate::bind_keys::binding(
                 $crate::surface::keybindings::SHORTCUT_ACTIVATE_TAB_1,
                 $crate::workspace::ActivateTab1,
                 None,
+                $cx,
             ),
-            ::gpui::KeyBinding::new(
+            $crate::bind_keys::binding(
                 $crate::surface::keybindings::SHORTCUT_ACTIVATE_TAB_2,
                 $crate::workspace::ActivateTab2,
                 None,
+                $cx,
             ),
-            ::gpui::KeyBinding::new(
+            $crate::bind_keys::binding(
                 $crate::surface::keybindings::SHORTCUT_ACTIVATE_TAB_3,
                 $crate::workspace::ActivateTab3,
                 None,
+                $cx,
             ),
-            ::gpui::KeyBinding::new(
+            $crate::bind_keys::binding(
                 $crate::surface::keybindings::SHORTCUT_ACTIVATE_TAB_4,
                 $crate::workspace::ActivateTab4,
                 None,
+                $cx,
             ),
-            ::gpui::KeyBinding::new(
+            $crate::bind_keys::binding(
                 $crate::surface::keybindings::SHORTCUT_ACTIVATE_TAB_5,
                 $crate::workspace::ActivateTab5,
                 None,
+                $cx,
             ),
-            ::gpui::KeyBinding::new(
+            $crate::bind_keys::binding(
                 $crate::surface::keybindings::SHORTCUT_ACTIVATE_TAB_6,
                 $crate::workspace::ActivateTab6,
                 None,
+                $cx,
             ),
-            ::gpui::KeyBinding::new(
+            $crate::bind_keys::binding(
                 $crate::surface::keybindings::SHORTCUT_ACTIVATE_TAB_7,
                 $crate::workspace::ActivateTab7,
                 None,
+                $cx,
             ),
-            ::gpui::KeyBinding::new(
+            $crate::bind_keys::binding(
                 $crate::surface::keybindings::SHORTCUT_ACTIVATE_TAB_8,
                 $crate::workspace::ActivateTab8,
                 None,
+                $cx,
             ),
-            ::gpui::KeyBinding::new(
+            $crate::bind_keys::binding(
                 $crate::surface::keybindings::SHORTCUT_ACTIVATE_TAB_9,
                 $crate::workspace::ActivateTab9,
                 None,
+                $cx,
             ),
         ]
     };
@@ -59,75 +68,111 @@ macro_rules! tab_slot_table {
     (@try_bind_override $key:expr, $name:expr, $cx:expr) => {{
         match $name {
             "activate_tab_1" => {
-                $cx.bind_keys([::gpui::KeyBinding::new(
+                $cx.bind_keys([::gpui::KeyBinding::load(
                     $key,
-                    $crate::workspace::ActivateTab1,
+                    Box::new($crate::workspace::ActivateTab1),
                     None,
-                )]);
+                    false,
+                    None,
+                    $cx,
+                )
+                .expect("valid keybinding override")]);
                 true
             }
             "activate_tab_2" => {
-                $cx.bind_keys([::gpui::KeyBinding::new(
+                $cx.bind_keys([::gpui::KeyBinding::load(
                     $key,
-                    $crate::workspace::ActivateTab2,
+                    Box::new($crate::workspace::ActivateTab2),
                     None,
-                )]);
+                    false,
+                    None,
+                    $cx,
+                )
+                .expect("valid keybinding override")]);
                 true
             }
             "activate_tab_3" => {
-                $cx.bind_keys([::gpui::KeyBinding::new(
+                $cx.bind_keys([::gpui::KeyBinding::load(
                     $key,
-                    $crate::workspace::ActivateTab3,
+                    Box::new($crate::workspace::ActivateTab3),
                     None,
-                )]);
+                    false,
+                    None,
+                    $cx,
+                )
+                .expect("valid keybinding override")]);
                 true
             }
             "activate_tab_4" => {
-                $cx.bind_keys([::gpui::KeyBinding::new(
+                $cx.bind_keys([::gpui::KeyBinding::load(
                     $key,
-                    $crate::workspace::ActivateTab4,
+                    Box::new($crate::workspace::ActivateTab4),
                     None,
-                )]);
+                    false,
+                    None,
+                    $cx,
+                )
+                .expect("valid keybinding override")]);
                 true
             }
             "activate_tab_5" => {
-                $cx.bind_keys([::gpui::KeyBinding::new(
+                $cx.bind_keys([::gpui::KeyBinding::load(
                     $key,
-                    $crate::workspace::ActivateTab5,
+                    Box::new($crate::workspace::ActivateTab5),
                     None,
-                )]);
+                    false,
+                    None,
+                    $cx,
+                )
+                .expect("valid keybinding override")]);
                 true
             }
             "activate_tab_6" => {
-                $cx.bind_keys([::gpui::KeyBinding::new(
+                $cx.bind_keys([::gpui::KeyBinding::load(
                     $key,
-                    $crate::workspace::ActivateTab6,
+                    Box::new($crate::workspace::ActivateTab6),
                     None,
-                )]);
+                    false,
+                    None,
+                    $cx,
+                )
+                .expect("valid keybinding override")]);
                 true
             }
             "activate_tab_7" => {
-                $cx.bind_keys([::gpui::KeyBinding::new(
+                $cx.bind_keys([::gpui::KeyBinding::load(
                     $key,
-                    $crate::workspace::ActivateTab7,
+                    Box::new($crate::workspace::ActivateTab7),
                     None,
-                )]);
+                    false,
+                    None,
+                    $cx,
+                )
+                .expect("valid keybinding override")]);
                 true
             }
             "activate_tab_8" => {
-                $cx.bind_keys([::gpui::KeyBinding::new(
+                $cx.bind_keys([::gpui::KeyBinding::load(
                     $key,
-                    $crate::workspace::ActivateTab8,
+                    Box::new($crate::workspace::ActivateTab8),
                     None,
-                )]);
+                    false,
+                    None,
+                    $cx,
+                )
+                .expect("valid keybinding override")]);
                 true
             }
             "activate_tab_9" => {
-                $cx.bind_keys([::gpui::KeyBinding::new(
+                $cx.bind_keys([::gpui::KeyBinding::load(
                     $key,
-                    $crate::workspace::ActivateTab9,
+                    Box::new($crate::workspace::ActivateTab9),
                     None,
-                )]);
+                    false,
+                    None,
+                    $cx,
+                )
+                .expect("valid keybinding override")]);
                 true
             }
             _ => false,
@@ -199,52 +244,61 @@ macro_rules! tab_slot_table {
 
 #[macro_export]
 macro_rules! lane_slot_table {
-    (@bindings) => {
+    (@bindings $cx:expr) => {
         [
-            ::gpui::KeyBinding::new(
+            $crate::bind_keys::binding(
                 $crate::surface::keybindings::SHORTCUT_ACTIVATE_LANE_1,
                 $crate::workspace::ActivateLane1,
                 None,
+                $cx,
             ),
-            ::gpui::KeyBinding::new(
+            $crate::bind_keys::binding(
                 $crate::surface::keybindings::SHORTCUT_ACTIVATE_LANE_2,
                 $crate::workspace::ActivateLane2,
                 None,
+                $cx,
             ),
-            ::gpui::KeyBinding::new(
+            $crate::bind_keys::binding(
                 $crate::surface::keybindings::SHORTCUT_ACTIVATE_LANE_3,
                 $crate::workspace::ActivateLane3,
                 None,
+                $cx,
             ),
-            ::gpui::KeyBinding::new(
+            $crate::bind_keys::binding(
                 $crate::surface::keybindings::SHORTCUT_ACTIVATE_LANE_4,
                 $crate::workspace::ActivateLane4,
                 None,
+                $cx,
             ),
-            ::gpui::KeyBinding::new(
+            $crate::bind_keys::binding(
                 $crate::surface::keybindings::SHORTCUT_ACTIVATE_LANE_5,
                 $crate::workspace::ActivateLane5,
                 None,
+                $cx,
             ),
-            ::gpui::KeyBinding::new(
+            $crate::bind_keys::binding(
                 $crate::surface::keybindings::SHORTCUT_ACTIVATE_LANE_6,
                 $crate::workspace::ActivateLane6,
                 None,
+                $cx,
             ),
-            ::gpui::KeyBinding::new(
+            $crate::bind_keys::binding(
                 $crate::surface::keybindings::SHORTCUT_ACTIVATE_LANE_7,
                 $crate::workspace::ActivateLane7,
                 None,
+                $cx,
             ),
-            ::gpui::KeyBinding::new(
+            $crate::bind_keys::binding(
                 $crate::surface::keybindings::SHORTCUT_ACTIVATE_LANE_8,
                 $crate::workspace::ActivateLane8,
                 None,
+                $cx,
             ),
-            ::gpui::KeyBinding::new(
+            $crate::bind_keys::binding(
                 $crate::surface::keybindings::SHORTCUT_ACTIVATE_LANE_9,
                 $crate::workspace::ActivateLane9,
                 None,
+                $cx,
             ),
         ]
     };
@@ -252,75 +306,111 @@ macro_rules! lane_slot_table {
     (@try_bind_override $key:expr, $name:expr, $cx:expr) => {{
         match $name {
             "activate_lane_1" => {
-                $cx.bind_keys([::gpui::KeyBinding::new(
+                $cx.bind_keys([::gpui::KeyBinding::load(
                     $key,
-                    $crate::workspace::ActivateLane1,
+                    Box::new($crate::workspace::ActivateLane1),
                     None,
-                )]);
+                    false,
+                    None,
+                    $cx,
+                )
+                .expect("valid keybinding override")]);
                 true
             }
             "activate_lane_2" => {
-                $cx.bind_keys([::gpui::KeyBinding::new(
+                $cx.bind_keys([::gpui::KeyBinding::load(
                     $key,
-                    $crate::workspace::ActivateLane2,
+                    Box::new($crate::workspace::ActivateLane2),
                     None,
-                )]);
+                    false,
+                    None,
+                    $cx,
+                )
+                .expect("valid keybinding override")]);
                 true
             }
             "activate_lane_3" => {
-                $cx.bind_keys([::gpui::KeyBinding::new(
+                $cx.bind_keys([::gpui::KeyBinding::load(
                     $key,
-                    $crate::workspace::ActivateLane3,
+                    Box::new($crate::workspace::ActivateLane3),
                     None,
-                )]);
+                    false,
+                    None,
+                    $cx,
+                )
+                .expect("valid keybinding override")]);
                 true
             }
             "activate_lane_4" => {
-                $cx.bind_keys([::gpui::KeyBinding::new(
+                $cx.bind_keys([::gpui::KeyBinding::load(
                     $key,
-                    $crate::workspace::ActivateLane4,
+                    Box::new($crate::workspace::ActivateLane4),
                     None,
-                )]);
+                    false,
+                    None,
+                    $cx,
+                )
+                .expect("valid keybinding override")]);
                 true
             }
             "activate_lane_5" => {
-                $cx.bind_keys([::gpui::KeyBinding::new(
+                $cx.bind_keys([::gpui::KeyBinding::load(
                     $key,
-                    $crate::workspace::ActivateLane5,
+                    Box::new($crate::workspace::ActivateLane5),
                     None,
-                )]);
+                    false,
+                    None,
+                    $cx,
+                )
+                .expect("valid keybinding override")]);
                 true
             }
             "activate_lane_6" => {
-                $cx.bind_keys([::gpui::KeyBinding::new(
+                $cx.bind_keys([::gpui::KeyBinding::load(
                     $key,
-                    $crate::workspace::ActivateLane6,
+                    Box::new($crate::workspace::ActivateLane6),
                     None,
-                )]);
+                    false,
+                    None,
+                    $cx,
+                )
+                .expect("valid keybinding override")]);
                 true
             }
             "activate_lane_7" => {
-                $cx.bind_keys([::gpui::KeyBinding::new(
+                $cx.bind_keys([::gpui::KeyBinding::load(
                     $key,
-                    $crate::workspace::ActivateLane7,
+                    Box::new($crate::workspace::ActivateLane7),
                     None,
-                )]);
+                    false,
+                    None,
+                    $cx,
+                )
+                .expect("valid keybinding override")]);
                 true
             }
             "activate_lane_8" => {
-                $cx.bind_keys([::gpui::KeyBinding::new(
+                $cx.bind_keys([::gpui::KeyBinding::load(
                     $key,
-                    $crate::workspace::ActivateLane8,
+                    Box::new($crate::workspace::ActivateLane8),
                     None,
-                )]);
+                    false,
+                    None,
+                    $cx,
+                )
+                .expect("valid keybinding override")]);
                 true
             }
             "activate_lane_9" => {
-                $cx.bind_keys([::gpui::KeyBinding::new(
+                $cx.bind_keys([::gpui::KeyBinding::load(
                     $key,
-                    $crate::workspace::ActivateLane9,
+                    Box::new($crate::workspace::ActivateLane9),
                     None,
-                )]);
+                    false,
+                    None,
+                    $cx,
+                )
+                .expect("valid keybinding override")]);
                 true
             }
             _ => false,

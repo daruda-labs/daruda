@@ -193,7 +193,7 @@ mod tests {
     #[gpui::test]
     fn background_drag_and_scroll_move_the_execution_canvas(cx: &mut TestAppContext) {
         use crate::workspace::pages::flows::detail::FlowDetailBody;
-        use gpui::{MouseButton, ScrollDelta, ScrollWheelEvent, TouchPhase, point, px};
+        use gpui::{MouseButton, ScrollDelta, ScrollEvent, TouchPhase, point, px};
         let root = tempfile::tempdir().unwrap();
         let dir = seed(root.path(), ExecutionShot::Completed);
         let project = daruda_store::project::Project::from_path(root.path());
@@ -229,7 +229,8 @@ mod tests {
             assert_eq!(canvas.viewport().offset(), offset + delta);
             assert_eq!(canvas.viewport().zoom(), zoom);
         });
-        vcx.simulate_event(ScrollWheelEvent {
+        vcx.simulate_event(ScrollEvent {
+            source: gpui::ScrollSource::Pointer,
             position: start,
             delta: ScrollDelta::Pixels(delta),
             modifiers: Default::default(),
@@ -241,7 +242,8 @@ mod tests {
             assert_eq!(canvas.viewport().zoom(), zoom);
         });
         let lines = point(2.0, -3.0);
-        vcx.simulate_event(ScrollWheelEvent {
+        vcx.simulate_event(ScrollEvent {
+            source: gpui::ScrollSource::Pointer,
             position: start,
             delta: ScrollDelta::Lines(lines),
             modifiers: Default::default(),
@@ -255,7 +257,8 @@ mod tests {
             );
             assert_eq!(canvas.viewport().zoom(), zoom);
         });
-        vcx.simulate_event(ScrollWheelEvent {
+        vcx.simulate_event(ScrollEvent {
+            source: gpui::ScrollSource::Pointer,
             position: start,
             delta: ScrollDelta::Pixels(delta),
             modifiers: gpui::Modifiers {

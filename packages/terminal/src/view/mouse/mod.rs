@@ -1,6 +1,6 @@
 use gpui::{
     Bounds, Context, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
-    ScrollDelta, ScrollWheelEvent, TouchPhase, Window, point, px,
+    ScrollDelta, ScrollEvent, TouchPhase, Window, point, px,
 };
 
 use super::selection::ScreenPos;

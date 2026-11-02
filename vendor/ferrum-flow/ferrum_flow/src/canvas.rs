@@ -458,7 +458,7 @@ impl FlowCanvas {
         self.process_event_queue(cx);
     }
 
-    fn on_scroll_wheel(&mut self, ev: &ScrollWheelEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_scroll_wheel(&mut self, ev: &ScrollEvent, _: &mut Window, cx: &mut Context<Self>) {
         self.handle_event(FlowEvent::Input(InputEvent::Wheel(ev.clone())), cx);
         self.process_event_queue(cx);
     }
@@ -620,7 +620,7 @@ impl Render for FlowCanvas {
                 MouseButton::Left,
                 window.listener_for(&entity, Self::on_mouse_up),
             )
-            .on_scroll_wheel(window.listener_for(&entity, Self::on_scroll_wheel))
+            .on_scroll(window.listener_for(&entity, Self::on_scroll_wheel))
             .child(measured_stack)
     }
 }

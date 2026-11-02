@@ -199,14 +199,14 @@ fn find_widget_by_shortcut(panels: &PanelsState, shortcut: &str) -> Option<(TabI
 /// **panics** on parse error — a single malformed user-defined
 /// shortcut would otherwise crash daruda when the binding gets
 /// registered.
-fn is_valid_shortcut(shortcut: &str) -> bool {
+fn is_valid_shortcut(shortcut: &str, os: gpui::OperatingSystem) -> bool {
     let trimmed = shortcut.trim();
     if trimmed.is_empty() {
         return false;
     }
     trimmed
         .split_whitespace()
-        .all(|part| Keystroke::parse(part).is_ok())
+        .all(|part| Keystroke::parse_with_os(part, os).is_ok())
 }
 
 /// Re-bind every macro shortcut to a `RunMacroByShortcut` action.
@@ -229,7 +229,7 @@ pub(in crate::workspace) fn register_macro_shortcuts(panels: &PanelsState, cx: &
             let Some(shortcut) = btn.shortcut.as_deref().filter(|s| !s.is_empty()) else {
                 continue;
             };
-            if !is_valid_shortcut(shortcut) {
+            if !is_valid_shortcut(shortcut, cx.platform_info().os) {
                 LogWriter::log(
                     ErrorReport::new("Macro shortcut invalid; binding skipped")
                         .severity(ErrorSeverity::Info)
@@ -245,11 +245,15 @@ pub(in crate::workspace) fn register_macro_shortcuts(panels: &PanelsState, cx: &
                 );
                 continue;
             }
-            cx.bind_keys([KeyBinding::new(
+            cx.bind_keys([KeyBinding::load(
                 shortcut,
-                RunMacroByShortcut(SharedString::from(shortcut.to_string())),
+                Box::new(RunMacroByShortcut(SharedString::from(shortcut.to_string()))),
                 None,
-            )]);
+                false,
+                None,
+                cx,
+            )
+            .expect("validated macro shortcut")]);
         }
     }
 }

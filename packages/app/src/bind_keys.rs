@@ -35,172 +35,242 @@ use crate::{
 use daruda_terminal::view::{Copy, Paste, SelectAll};
 use gpui::{App, AppContext as _, KeyBinding};
 
+/// Resolve host modifier aliases for both built-in and configured bindings.
+pub(crate) fn binding<A: gpui::Action>(
+    keys: &str,
+    action: A,
+    context: Option<&str>,
+    cx: &App,
+) -> KeyBinding {
+    KeyBinding::load(
+        keys,
+        Box::new(action),
+        context.map(|value| {
+            gpui::KeyBindingContextPredicate::parse(value)
+                .expect("valid key context")
+                .into()
+        }),
+        false,
+        None,
+        cx,
+    )
+    .expect("valid keybinding")
+}
+
 pub(crate) fn register_static_bindings(cx: &mut App) {
     cx.bind_keys([
         // App
-        KeyBinding::new(k::SHORTCUT_QUIT, Quit, None),
-        KeyBinding::new(
+        binding(k::SHORTCUT_QUIT, Quit, None, cx),
+        binding(
             k::SHORTCUT_SETTINGS,
             OpenSettings(daruda_config::BuiltinSection::default()),
             None,
+            cx,
         ),
         // Edit
-        KeyBinding::new(k::SHORTCUT_SELECT_ALL, SelectAll, None),
-        KeyBinding::new(k::SHORTCUT_COPY, Copy, None),
-        KeyBinding::new(k::SHORTCUT_PASTE, Paste, None),
+        binding(k::SHORTCUT_SELECT_ALL, SelectAll, None, cx),
+        binding(k::SHORTCUT_COPY, Copy, None, cx),
+        binding(k::SHORTCUT_PASTE, Paste, None, cx),
         // Tabs
-        KeyBinding::new(k::SHORTCUT_NEW_TAB, NewTab, None),
-        KeyBinding::new(k::SHORTCUT_CLOSE_PANE, ClosePane, None),
+        binding(k::SHORTCUT_NEW_TAB, NewTab, None, cx),
+        binding(k::SHORTCUT_CLOSE_PANE, ClosePane, None, cx),
         // Split
-        KeyBinding::new(k::SHORTCUT_SPLIT_RIGHT, SplitRight, None),
-        KeyBinding::new(k::SHORTCUT_SPLIT_DOWN, SplitDown, None),
-        KeyBinding::new(k::SHORTCUT_FOCUS_NEXT_PANE, FocusNextPane, None),
-        KeyBinding::new(k::SHORTCUT_FOCUS_PREV_PANE, FocusPrevPane, None),
+        binding(k::SHORTCUT_SPLIT_RIGHT, SplitRight, None, cx),
+        binding(k::SHORTCUT_SPLIT_DOWN, SplitDown, None, cx),
+        binding(k::SHORTCUT_FOCUS_NEXT_PANE, FocusNextPane, None, cx),
+        binding(k::SHORTCUT_FOCUS_PREV_PANE, FocusPrevPane, None, cx),
         // Directional pane focus (iTerm2: cmd-alt-arrow).
-        KeyBinding::new(k::SHORTCUT_FOCUS_PANE_LEFT, FocusPaneLeft, None),
-        KeyBinding::new(k::SHORTCUT_FOCUS_PANE_RIGHT, FocusPaneRight, None),
-        KeyBinding::new(k::SHORTCUT_FOCUS_PANE_UP, FocusPaneUp, None),
-        KeyBinding::new(k::SHORTCUT_FOCUS_PANE_DOWN, FocusPaneDown, None),
+        binding(k::SHORTCUT_FOCUS_PANE_LEFT, FocusPaneLeft, None, cx),
+        binding(k::SHORTCUT_FOCUS_PANE_RIGHT, FocusPaneRight, None, cx),
+        binding(k::SHORTCUT_FOCUS_PANE_UP, FocusPaneUp, None, cx),
+        binding(k::SHORTCUT_FOCUS_PANE_DOWN, FocusPaneDown, None, cx),
         // Tab move (iTerm2: cmd-shift-ctrl-arrow).
-        KeyBinding::new(k::SHORTCUT_MOVE_TAB_LEFT, MoveTabLeft, None),
-        KeyBinding::new(k::SHORTCUT_MOVE_TAB_RIGHT, MoveTabRight, None),
-        KeyBinding::new(k::SHORTCUT_NEXT_TAB, NextTab, None),
-        KeyBinding::new(k::SHORTCUT_PREV_TAB, PrevTab, None),
+        binding(k::SHORTCUT_MOVE_TAB_LEFT, MoveTabLeft, None, cx),
+        binding(k::SHORTCUT_MOVE_TAB_RIGHT, MoveTabRight, None, cx),
+        binding(k::SHORTCUT_NEXT_TAB, NextTab, None, cx),
+        binding(k::SHORTCUT_PREV_TAB, PrevTab, None, cx),
         // Dock toggles
-        KeyBinding::new(k::SHORTCUT_TOGGLE_LEFT_DOCK, ToggleLeftDock, None),
+        binding(k::SHORTCUT_TOGGLE_LEFT_DOCK, ToggleLeftDock, None, cx),
         // Global on purpose: these are the only keyboard way *into* a
         // left-dock panel, so they must fire from wherever focus is.
-        KeyBinding::new(
+        binding(
             k::SHORTCUT_TOGGLE_GIT_CHANGES_FOCUS,
             ToggleGitChangesFocus,
             None,
+            cx,
         ),
-        KeyBinding::new(k::SHORTCUT_TOGGLE_FILES_FOCUS, ToggleFilesFocus, None),
-        KeyBinding::new(k::SHORTCUT_TOGGLE_BOTTOM_DOCK, ToggleBottomDock, None),
-        KeyBinding::new(k::SHORTCUT_TOGGLE_RIGHT_DOCK, ToggleRightDock, None),
+        binding(k::SHORTCUT_TOGGLE_FILES_FOCUS, ToggleFilesFocus, None, cx),
+        binding(k::SHORTCUT_TOGGLE_BOTTOM_DOCK, ToggleBottomDock, None, cx),
+        binding(k::SHORTCUT_TOGGLE_RIGHT_DOCK, ToggleRightDock, None, cx),
         // Command palette
-        KeyBinding::new(k::SHORTCUT_COMMAND_PALETTE, ToggleCommandPalette, None),
+        binding(k::SHORTCUT_COMMAND_PALETTE, ToggleCommandPalette, None, cx),
         // Lane switcher (Cmd+P) — fuzzy quick-switch across lanes.
-        KeyBinding::new(k::SHORTCUT_LANE_SWITCHER, ToggleLaneSwitcher, None),
+        binding(k::SHORTCUT_LANE_SWITCHER, ToggleLaneSwitcher, None, cx),
         // Skills shortcuts
-        KeyBinding::new(k::SHORTCUT_FOCUS_SKILL_SEARCH, FocusSkillSearch, None),
-        KeyBinding::new(k::SHORTCUT_INVOKE_SKILL_PALETTE, InvokeSkillPalette, None),
+        binding(k::SHORTCUT_FOCUS_SKILL_SEARCH, FocusSkillSearch, None, cx),
+        binding(
+            k::SHORTCUT_INVOKE_SKILL_PALETTE,
+            InvokeSkillPalette,
+            None,
+            cx,
+        ),
         // File viewer
-        KeyBinding::new(k::SHORTCUT_SAVE_FILE_PANE, SaveFilePane, Some("FileViewer")),
-        KeyBinding::new(
+        binding(
+            k::SHORTCUT_SAVE_FILE_PANE,
+            SaveFilePane,
+            Some("FileViewer"),
+            cx,
+        ),
+        binding(
             k::SHORTCUT_SAVE_FILE_PANE,
             SaveFilePane,
             Some("FlowGraphPane"),
+            cx,
         ),
-        KeyBinding::new(
+        binding(
             k::SHORTCUT_SAVE_FILE_PANE,
             SaveFilePane,
             Some("TaskEditPane"),
+            cx,
         ),
-        KeyBinding::new(
+        binding(
             k::SHORTCUT_FILE_VIEWER_SEARCH_OPEN,
             FileViewerSearchOpen,
             Some("FileViewer"),
+            cx,
         ),
-        KeyBinding::new(
+        binding(
             k::SHORTCUT_FILE_VIEWER_SEARCH_NEXT,
             FileViewerSearchNext,
             Some("FileViewerSearch"),
+            cx,
         ),
-        KeyBinding::new(
+        binding(
             k::SHORTCUT_FILE_VIEWER_SEARCH_PREV,
             FileViewerSearchPrev,
             Some("FileViewerSearch"),
+            cx,
         ),
         // Project
-        KeyBinding::new(k::SHORTCUT_OPEN_FOLDER, OpenFolder, None),
-        KeyBinding::new(
+        binding(k::SHORTCUT_OPEN_FOLDER, OpenFolder, None, cx),
+        binding(
             k::SHORTCUT_OPEN_FOLDER_IN_NEW_WINDOW,
             OpenFolderInNewWindow,
             None,
+            cx,
         ),
-        KeyBinding::new(k::SHORTCUT_NEW_WINDOW, NewEmptyWindow, None),
-        KeyBinding::new(k::SHORTCUT_CLOSE_PROJECT, CloseProject, None),
-        KeyBinding::new(k::SHORTCUT_NEW_GROUP, NewGroup, None),
-        KeyBinding::new(k::SHORTCUT_RENAME_PROJECT, RenameActiveProject, None),
-        KeyBinding::new(
+        binding(k::SHORTCUT_NEW_WINDOW, NewEmptyWindow, None, cx),
+        binding(k::SHORTCUT_CLOSE_PROJECT, CloseProject, None, cx),
+        binding(k::SHORTCUT_NEW_GROUP, NewGroup, None, cx),
+        binding(k::SHORTCUT_RENAME_PROJECT, RenameActiveProject, None, cx),
+        binding(
             k::SHORTCUT_MOVE_PROJECT_TO_GROUP,
             MoveActiveProjectToGroup,
             None,
+            cx,
         ),
         // Files view (global toggle)
-        KeyBinding::new(k::SHORTCUT_FILES_TOGGLE_HIDDEN, FilesToggleHidden, None),
+        binding(k::SHORTCUT_FILES_TOGGLE_HIDDEN, FilesToggleHidden, None, cx),
         // Files panel keyboard navigation — only fires when the
         // dock/left-dock Files body holds focus, so arrow keys still
         // reach terminal panes by default.
-        KeyBinding::new(
+        binding(
             k::SHORTCUT_FILES_SELECT_NEXT,
             FilesSelectNext,
             Some("FilesPanel"),
+            cx,
         ),
-        KeyBinding::new(
+        binding(
             k::SHORTCUT_FILES_SELECT_PREV,
             FilesSelectPrev,
             Some("FilesPanel"),
+            cx,
         ),
-        KeyBinding::new(k::SHORTCUT_FILES_EXPAND, FilesExpand, Some("FilesPanel")),
-        KeyBinding::new(
+        binding(
+            k::SHORTCUT_FILES_EXPAND,
+            FilesExpand,
+            Some("FilesPanel"),
+            cx,
+        ),
+        binding(
             k::SHORTCUT_FILES_COLLAPSE,
             FilesCollapse,
             Some("FilesPanel"),
+            cx,
         ),
-        KeyBinding::new(
+        binding(
             k::SHORTCUT_FILES_ACTIVATE,
             FilesActivate,
             Some("FilesPanel"),
+            cx,
         ),
-        KeyBinding::new(k::SHORTCUT_FILES_REFRESH, FilesRefresh, Some("FilesPanel")),
+        binding(
+            k::SHORTCUT_FILES_REFRESH,
+            FilesRefresh,
+            Some("FilesPanel"),
+            cx,
+        ),
         // Git Changes view — only fires when the left-dock Git body
         // holds focus (key_context "GitChanges"), so arrow keys still
         // reach terminal panes by default.
-        KeyBinding::new(
+        binding(
             k::SHORTCUT_GIT_CHANGES_SELECT_NEXT,
             GitChangesSelectNext,
             Some("GitChanges"),
+            cx,
         ),
-        KeyBinding::new(
+        binding(
             k::SHORTCUT_GIT_CHANGES_SELECT_PREV,
             GitChangesSelectPrev,
             Some("GitChanges"),
+            cx,
         ),
-        KeyBinding::new(
+        binding(
             k::SHORTCUT_GIT_CHANGES_TOGGLE_STAGE,
             GitChangesToggleStage,
             Some("GitChanges"),
+            cx,
         ),
-        KeyBinding::new(
+        binding(
             k::SHORTCUT_GIT_CHANGES_ACTIVATE,
             GitChangesActivate,
             Some("GitChanges"),
+            cx,
         ),
         // Window menu — Minimize / Toggle Full Screen are global so
         // they work whether terminal or settings is the
         // focused responder. Zoom has no standard macOS keystroke.
-        KeyBinding::new(k::SHORTCUT_MINIMIZE, MinimizeWindow, None),
-        KeyBinding::new(k::SHORTCUT_TOGGLE_FULL_SCREEN, ToggleFullScreen, None),
+        binding(k::SHORTCUT_MINIMIZE, MinimizeWindow, None, cx),
+        binding(k::SHORTCUT_TOGGLE_FULL_SCREEN, ToggleFullScreen, None, cx),
         // Help menu — ⌘/ surfaces the command palette as the
         // canonical "what shortcuts are there" UI (superset pattern);
         // ⌘⇧/ (= ⌘?) is the macOS HIG Help-menu alias.
-        KeyBinding::new(k::SHORTCUT_KEYBOARD_SHORTCUTS, ToggleCommandPalette, None),
-        KeyBinding::new(
+        binding(
+            k::SHORTCUT_KEYBOARD_SHORTCUTS,
+            ToggleCommandPalette,
+            None,
+            cx,
+        ),
+        binding(
             k::SHORTCUT_KEYBOARD_SHORTCUTS_ALT,
             ToggleCommandPalette,
             None,
+            cx,
         ),
         // ⌘⇧H — command-history picker (iTerm2 Toolbelt > Commands).
-        KeyBinding::new(k::SHORTCUT_OPEN_COMMAND_HISTORY, OpenCommandHistory, None),
+        binding(
+            k::SHORTCUT_OPEN_COMMAND_HISTORY,
+            OpenCommandHistory,
+            None,
+            cx,
+        ),
     ]);
 
     // Cmd+1..9 tab quick-switch and Cmd+Ctrl+1..9 lane quick-switch
     // come from a shared slot table so adding a tenth slot is one line
     // in `slot_actions.rs` instead of nine across four files.
-    cx.bind_keys(crate::tab_slot_table!(@bindings));
-    cx.bind_keys(crate::lane_slot_table!(@bindings));
+    cx.bind_keys(crate::tab_slot_table!(@bindings cx));
+    cx.bind_keys(crate::lane_slot_table!(@bindings cx));
 }
 
 pub(crate) fn register_global_actions(cx: &mut App, config: std::sync::Arc<daruda_config::Config>) {
@@ -391,7 +461,7 @@ mod tests {
         );
         for chord in &chords {
             assert!(
-                Keystroke::parse(chord).is_ok(),
+                Keystroke::parse_with_os(chord, gpui::OperatingSystem::Unknown).is_ok(),
                 "`{chord}` is not a keystroke gpui can parse"
             );
         }
@@ -410,20 +480,18 @@ mod tests {
         }
     }
 
-    /// The claim `secondary-` rests on: on this host it is the platform key,
-    /// so every converted binding still fires on the keys it used to.
     #[test]
-    fn secondary_is_the_platform_key_here() {
-        let secondary = Keystroke::parse("secondary-c").expect("parses");
-        let expected = if cfg!(target_os = "macos") {
-            "cmd-c"
-        } else {
-            "ctrl-c"
-        };
-
-        assert_eq!(
-            secondary.modifiers,
-            Keystroke::parse(expected).expect("parses").modifiers
-        );
+    fn secondary_follows_the_host_operating_system() {
+        for (os, expected) in [
+            (gpui::OperatingSystem::Mac, "cmd-c"),
+            (gpui::OperatingSystem::Linux, "ctrl-c"),
+            (gpui::OperatingSystem::Windows, "ctrl-c"),
+        ] {
+            let secondary = Keystroke::parse_with_os("secondary-c", os).expect("parses");
+            assert_eq!(
+                secondary.modifiers,
+                Keystroke::parse(expected).expect("parses").modifiers
+            );
+        }
     }
 }

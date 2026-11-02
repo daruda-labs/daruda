@@ -29,7 +29,19 @@ pub(crate) fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("escape", Cancel, context),
         KeyBinding::new("enter", Confirm { secondary: false }, context),
-        KeyBinding::new("secondary-enter", Confirm { secondary: true }, context),
+        KeyBinding::load(
+            "secondary-enter",
+            Box::new(Confirm { secondary: true }),
+            context.map(|value| {
+                gpui::KeyBindingContextPredicate::parse(value)
+                    .expect("valid key context")
+                    .into()
+            }),
+            false,
+            None,
+            cx,
+        )
+        .expect("valid widget keybinding"),
         KeyBinding::new("up", SelectUp, context),
         KeyBinding::new("down", SelectDown, context),
     ]);
@@ -460,7 +472,7 @@ where
                     this.selected_index = Some(ix);
                     this.on_action_confirm(
                         &Confirm {
-                            secondary: e.modifiers().secondary(),
+                            secondary: e.modifiers().secondary(cx),
                         },
                         window,
                         cx,
@@ -488,7 +500,7 @@ where
         let scroll_handle = self.scroll_handle.clone();
 
         v_flex()
-            .flex_grow()
+            .flex_grow(1.)
             .relative()
             .size_full()
             .when_some(self.options.max_height, |this, h| this.max_h(h))

@@ -308,7 +308,7 @@ consult the version-matched zed source before changing the implementation.
 GPUI is
 `vendor/zed/crates/gpui/` (pinned source plus daruda patches); other zed
 crates at that revision are in
-`~/.cargo/git/checkouts/zed-a70e2ad075855582/193b55a/crates/`.
+`~/.cargo/git/checkouts/zed-a70e2ad075855582/decd239/crates/`.
 Do not use a standalone clone of a different revision.
 
 ## Verification

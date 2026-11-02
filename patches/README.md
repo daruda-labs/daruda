@@ -15,30 +15,11 @@ The dependency policy checks these declarations in addition to retained patches.
 
 ## Compiler Compatibility Dependencies
 
-`gpui-stacksafe-1.patch` raises the generated GPUI workspace's `stacksafe`
-requirement to `1.0.3`. This removes the retired `proc-macro-error2` and
-`proc-macro-error-attr2` dependencies, including the private `proc_macro`
-re-export rejected by future Rust versions. GPUI uses `StackSafe::new` and
-`#[stacksafe]` in `elements/div.rs` and `taffy.rs`; those APIs and the stack
-growth behavior are retained. The removed optional `derive-visitor` integration
-is unused. Regenerate with `tools/vendor_gpui`, just like the other GPUI patches.
+The pinned GPUI uses upstream `stacksafe` 1.x; no compatibility patch is
+needed for the retired 0.1 macro dependencies.
 
-`block-inhabited-class.patch` fixes `block 0.1.6`'s uninhabited foreign static
-without changing its public API. The class is an opaque `repr(C)` struct rather
-than an empty enum. Only its address is used as the block header's class pointer;
-the foreign allocation is never read as a Rust value. Cargo selects the patched
-copy under `vendor/block` for every consumer, including Cocoa and Metal.
-The patch also spells out the existing C ABI, explicitly retains edition 2015,
-and replaces the test helper's retired `gcc` build dependency with `cc`.
-The exact source revision and retained files are recorded in `vendor/block/UPSTREAM`.
-Upstream declares MIT in its manifest and provides no separate license file.
-
-To refresh that copy, export the retained paths from the recorded revision,
-apply `patches/block-inhabited-class.patch` from the copy's root, and preserve
-`UPSTREAM`. Compare the result with `vendor/block`; do not edit Cargo's registry
-cache. On macOS, `cargo test --manifest-path vendor/block/Cargo.toml` exercises
-the upstream C interop, stack-to-heap copy, and captured-value drop tests.
-Remove this override when a compatible upstream release fixes the declaration.
+The current dependency graph no longer contains `block` 0.1.6; its old
+uninhabited-static compatibility override is unnecessary.
 
 ## GPUI patches — `gpui-*.patch`
 
@@ -140,53 +121,15 @@ from being decisive even on an unpatched checkout. Both are wanted: the
 patch fixes the cause, the block column means a build against an
 unpatched gpui does not show a collapsed list item.
 
-## `gpui-test-window-handle.patch`
+## Upstream GPUI fixes retained by the pin
 
-Applied into `vendor/zed` by `tools/vendor_gpui` as above; the marker
-`No platform window backs a test window` is what to look for there.
+The pinned revision includes the nested deferred-draw reuse fix and its
+`test_nested_deferred_draws_with_reused_views` regression test. Deferred
+prepaint ranges refer to the stable draw vector across nested rounds.
 
-`TestWindow`'s `HasWindowHandle` / `HasDisplayHandle`
-(`crates/gpui/src/platform/test/window.rs`) **return
-`HandleError::Unavailable` instead of panicking with `unimplemented!`**.
-
-`raw-window-handle` 0.6 gives a handle provider `Unavailable` for exactly
-this case — a window with no platform handle to lend — so the trait
-contract already says to report it, not abort. The panic made any code
-that probes for a native handle untestable: `platform::window_controls::
-compact` sizes the macOS caption buttons from `Workspace::new`, already
-returns early on `Err`, and still failed every test that builds a
-Workspace through the production constructor (23 at the time, in
-`window_registry` and `telegram_ops`). Upstream has the same
-`unimplemented!` at the pinned rev.
-
-## `gpui-nested-deferred-reuse.patch`
-
-Applied into `vendor/zed` by `tools/vendor_gpui` as above; the marker
-`The draws are processed in place` is what to look for there.
-
-A backport of upstream zed's fix to `Window::prepaint_deferred_draws`
-(`crates/gpui/src/window.rs`): **deferred draws are processed in place
-instead of being moved out of `next_frame.deferred_draws` for each round.**
-
-`prepaint_index` snapshots that vector's length. At the pinned rev each
-round `mem::take`s the vector and appends the draws back afterwards, so a
-range recorded *during* a round, for a nested deferred draw or a cached
-view inside one, indexes a transient vector. On the next frame
-`reuse_prepaint` slices the rebuilt vector with those indices, grafts the
-wrong draws onto the reused subtree, and the dispatch tree's debug
-assertion panics: `node N was not part of the reused subtree A..B`.
-
-daruda gets there with any dropdown inside a popover inside a cached
-view. The agent-chat View panel is one: its fold rules are dropdown
-menus inside the Activity Bar popover, inside the cached `AgentChatView`.
-A debug build panicked with exactly that message. A release build skips
-the assertion and grafts the wrong draws without saying so.
-
-Guarded by upstream's own `test_nested_deferred_draws_with_reused_views`
-(`crates/gpui/src/elements/deferred.rs`), ported with one change: the
-pinned rev has no `Entity::cached`, so it goes through `AnyView::from`.
-With the `window.rs` hunk reverted it fails with the same message. Drop
-this patch when the pin moves past upstream's fix.
+`TestWindow` returns `HandleError::NotSupported` for native window/display
+handles rather than panicking. Both fixes are upstream; no local patches
+are applied for these paths.
 
 ## `gpui-component-input-state-ime-selection.patch`
 
@@ -810,6 +753,26 @@ scroll container), `a_long_menu_stays_above_its_chip_in_a_short_window`,
 
 ---
 
+## GPUI revision compatibility in vendored consumers
+
+The widget and flow versions remain unchanged when updating GPUI. Preserve
+these API adaptations when re-vendoring:
+
+- `gpui_component`: explicit `flex_grow(1.)` / `flex_shrink(1.)`,
+  `Modifiers::secondary(cx)`, `AnyView::into_any_element`, and
+  `KeyBinding::load` for host-dependent `secondary-` aliases, and
+  `LineWrapper::wrap_line` with `IndentAdjustment::SameIndent` to preserve
+  continuation indentation.
+- `gpui_component/src/dialog.rs`: propagate an unhandled Confirm action in
+  custom-body dialogs so focused buttons receive the activation key down
+  required by GPUI before key release.
+- Both vendored consumers use `ScrollEvent` / `on_scroll` in place of the
+  deprecated wheel-only names.
+- `ferrum_flow/src/plugins/background.rs`: pass the tile bounds as both
+  clipping and image bounds to `Window::paint_image`.
+- The workspace enables `rust-embed/include-exclude` explicitly for assets;
+  GPUI no longer supplies this feature transitively.
+
 ## `vendor/ferrum-flow/ferrum_flow/` — vendored, **seven source patches**
 
 Provenance for a vendored crate, plus the source deltas it now carries.
@@ -848,7 +811,7 @@ upstream's in four ways, none of which touch source:
    `priority = -1`, matching the "vendored upstream, do not lint" stance
    used for `gpui_component`. The `priority` is load-bearing: without it
    the one lint deliberately left armed (below) is buried by the groups.
-4. `rust-version = "1.97"` plus `incompatible_msrv = "deny"` — unlike
+4. `rust-version = "1.98.1"` plus `incompatible_msrv = "deny"` — unlike
    `gpui_component`, this crate declares the floor. The manifest is
    daruda's own file, so declaring it costs nothing when re-vendoring,
    and it lets `cargo clippy -p ferrum_flow` catch a std API newer than

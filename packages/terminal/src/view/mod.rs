@@ -89,13 +89,29 @@ const KEY_CONTEXT: &str = "Terminal";
 static KEY_BINDINGS: Once = Once::new();
 
 fn ensure_key_bindings(cx: &mut App) {
+    fn binding<A: gpui::Action>(keys: &str, action: A, cx: &App) -> KeyBinding {
+        KeyBinding::load(
+            keys,
+            Box::new(action),
+            Some(
+                gpui::KeyBindingContextPredicate::parse(KEY_CONTEXT)
+                    .expect("valid key context")
+                    .into(),
+            ),
+            false,
+            None,
+            cx,
+        )
+        .expect("valid terminal keybinding")
+    }
+
     KEY_BINDINGS.call_once(|| {
         cx.bind_keys([
             KeyBinding::new("tab", Tab, Some(KEY_CONTEXT)),
             KeyBinding::new("shift-tab", TabPrev, Some(KEY_CONTEXT)),
-            KeyBinding::new("secondary-=", ZoomIn, Some(KEY_CONTEXT)),
-            KeyBinding::new("secondary--", ZoomOut, Some(KEY_CONTEXT)),
-            KeyBinding::new("secondary-0", ResetZoom, Some(KEY_CONTEXT)),
+            binding("secondary-=", ZoomIn, cx),
+            binding("secondary--", ZoomOut, cx),
+            binding("secondary-0", ResetZoom, cx),
             // Spelled the same way as `surface::keybindings`'s
             // SHORTCUT_TOGGLE_FULL_SCREEN, which registers this action
             // globally — the app crate cannot be imported from here, so the
@@ -109,10 +125,10 @@ fn ensure_key_bindings(cx: &mut App) {
                 ToggleFullscreen,
                 Some(KEY_CONTEXT),
             ),
-            KeyBinding::new("secondary-k", ClearBuffer, Some(KEY_CONTEXT)),
-            KeyBinding::new("secondary-shift-k", ClearScrollback, Some(KEY_CONTEXT)),
-            KeyBinding::new("secondary-end", ScrollToBottom, Some(KEY_CONTEXT)),
-            KeyBinding::new("secondary-f", SearchOpen, Some(KEY_CONTEXT)),
+            binding("secondary-k", ClearBuffer, cx),
+            binding("secondary-shift-k", ClearScrollback, cx),
+            binding("secondary-end", ScrollToBottom, cx),
+            binding("secondary-f", SearchOpen, cx),
             KeyBinding::new(
                 if cfg!(target_os = "macos") {
                     "cmd-g"
@@ -146,21 +162,13 @@ fn ensure_key_bindings(cx: &mut App) {
             // iTerm2 convention — Cmd+Up / Cmd+Down conflict with macOS
             // document-navigation defaults on some focused elements, so
             // use the shift variant to match iTerm2's "Mark Navigation".
-            KeyBinding::new("secondary-shift-up", PromptJumpPrev, Some(KEY_CONTEXT)),
-            KeyBinding::new("secondary-shift-down", PromptJumpNext, Some(KEY_CONTEXT)),
+            binding("secondary-shift-up", PromptJumpPrev, cx),
+            binding("secondary-shift-down", PromptJumpNext, cx),
             // Navigate between executed commands (FTCS C boundaries).
-            KeyBinding::new("secondary-shift-alt-up", CommandJumpPrev, Some(KEY_CONTEXT)),
-            KeyBinding::new(
-                "secondary-shift-alt-down",
-                CommandJumpNext,
-                Some(KEY_CONTEXT),
-            ),
+            binding("secondary-shift-alt-up", CommandJumpPrev, cx),
+            binding("secondary-shift-alt-down", CommandJumpNext, cx),
             // Copy the last command's output (FTCS E/F or C/D fallback).
-            KeyBinding::new(
-                "secondary-shift-c",
-                CopyLastCommandOutput,
-                Some(KEY_CONTEXT),
-            ),
+            binding("secondary-shift-c", CopyLastCommandOutput, cx),
         ]);
     });
 }

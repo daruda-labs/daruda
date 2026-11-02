@@ -1,8 +1,5 @@
 https://github.com/zed-industries/zed
-193b55aa3aa71accf0dcd78709ee164a8ca42d54
+decd2399b180b64dea2a4182f9ac63545a45e7a3
 gpui-notify-lost-wakeup.patch
 gpui-held-key-keeps-modality.patch
 gpui-text-wrap-cache.patch
-gpui-test-window-handle.patch
-gpui-nested-deferred-reuse.patch
-gpui-stacksafe-1.patch

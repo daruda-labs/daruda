@@ -140,7 +140,7 @@ fn toast_pill(
             div()
                 .flex()
                 .flex_col()
-                .flex_grow()
+                .flex_grow(1.)
                 .min_w(px(0.0))
                 .child(
                     div()

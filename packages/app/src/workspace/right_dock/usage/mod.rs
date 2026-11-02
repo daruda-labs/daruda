@@ -414,7 +414,7 @@ fn header(
         ))
         .child(
             div()
-                .flex_grow()
+                .flex_grow(1.)
                 .text_size(px(theme::USAGE_TITLE_FONT_SIZE))
                 .font_weight(gpui::FontWeight::SEMIBOLD)
                 .text_color(t.text_primary)

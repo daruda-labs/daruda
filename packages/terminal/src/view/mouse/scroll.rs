@@ -6,7 +6,7 @@ use super::*;
 impl TerminalView {
     pub(in crate::view) fn on_scroll_wheel(
         &mut self,
-        event: &ScrollWheelEvent,
+        event: &ScrollEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {

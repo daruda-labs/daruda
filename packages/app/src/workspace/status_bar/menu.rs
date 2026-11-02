@@ -309,8 +309,8 @@ pub(super) fn section_row(mark: Option<AnyElement>, label: SharedString, cx: &Ap
 mod tests {
     use super::*;
     use gpui::{
-        Bounds, Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase,
-        VisualTestContext, point, size,
+        Bounds, Modifiers, ScrollDelta, ScrollEvent, TestAppContext, TouchPhase, VisualTestContext,
+        point, size,
     };
     use std::cell::Cell;
     use std::rc::Rc;
@@ -508,7 +508,8 @@ mod tests {
     /// Wheels the menu down over its first body row.
     fn scroll_menu_body(vcx: &mut VisualTestContext) {
         let row = vcx.debug_bounds("probe-row-0").expect("opened");
-        vcx.simulate_event(ScrollWheelEvent {
+        vcx.simulate_event(ScrollEvent {
+            source: gpui::ScrollSource::Pointer,
             position: row.center(),
             delta: ScrollDelta::Pixels(point(px(0.), px(-100.))),
             modifiers: Modifiers::default(),

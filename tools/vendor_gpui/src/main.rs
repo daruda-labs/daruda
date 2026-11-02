@@ -8,9 +8,6 @@ const PATCHES: &[&str] = &[
     "gpui-notify-lost-wakeup.patch",
     "gpui-held-key-keeps-modality.patch",
     "gpui-text-wrap-cache.patch",
-    "gpui-test-window-handle.patch",
-    "gpui-nested-deferred-reuse.patch",
-    "gpui-stacksafe-1.patch",
 ];
 
 fn run(command: &mut Command) -> Result<()> {

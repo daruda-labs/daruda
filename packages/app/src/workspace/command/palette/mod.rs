@@ -250,12 +250,16 @@ mod tests {
                 let bound: Vec<String> = binding
                     .keystrokes()
                     .iter()
-                    .map(|k| k.inner().unparse())
+                    .map(|k| k.inner().unparse(cx.platform_info().os))
                     .collect();
                 let shown: Vec<String> = entry
                     .shortcut
                     .split_whitespace()
-                    .map(|k| gpui::Keystroke::parse(k).expect("valid shortcut").unparse())
+                    .map(|k| {
+                        gpui::Keystroke::parse_with_os(k, cx.platform_info().os)
+                            .expect("valid shortcut")
+                            .unparse(cx.platform_info().os)
+                    })
                     .collect();
                 assert_eq!(shown, bound, "palette entry `{id}`");
                 checked += 1;

@@ -174,7 +174,7 @@ async fn diff_editor_keeps_seeded_rows_and_paints_full_height(cx: &mut TestAppCo
             AvailableSpace::Definite(px(800.)),
             AvailableSpace::MinContent,
         ),
-        |_, _| gpui::AnyView::from(probe.clone()),
+        |_, _| gpui::AnyView::from(probe.clone()).into_element(),
     );
 
     let wrapper = cx

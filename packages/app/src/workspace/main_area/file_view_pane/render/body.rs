@@ -5,7 +5,7 @@
 //! compute `scroll_max == 0` and scrolling would silently break.
 
 use crate::ui::theme;
-use gpui::{AnyElement, Context, IntoElement, ScrollWheelEvent, div, prelude::*, px};
+use gpui::{AnyElement, Context, IntoElement, ScrollEvent, div, prelude::*, px};
 
 use super::content_element::{FileViewerContentElement, RowColors};
 use super::markdown::render_md_body;
@@ -235,7 +235,7 @@ fn render_raw_body(
     let mut col = div()
         .flex()
         .flex_col()
-        .on_scroll_wheel(move |event: &ScrollWheelEvent, window, cx| {
+        .on_scroll(move |event: &ScrollEvent, window, cx| {
             let delta_y = event.delta.pixel_delta(window.line_height()).y;
             if delta_y == px(0.) {
                 return;

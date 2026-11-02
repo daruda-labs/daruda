@@ -816,7 +816,7 @@ pub(crate) fn drive(
                 } else {
                     theme::CONTROL_TARGET_SIZE / 2.0
                 };
-                window.draw(cx).clear();
+                window.draw(cx).clear(cx);
                 window.dispatch_event(
                     gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
                         position: gpui::point(

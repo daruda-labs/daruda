@@ -2,5 +2,5 @@
 # releases, so a newer local toolchain passes code that CI rejects.
 # scripts/rust-version.sh rejects a channel that differs from the Rust floor.
 [toolchain]
-channel = "1.97"
+channel = "1.98.1"
 components = ["clippy", "rustfmt"]

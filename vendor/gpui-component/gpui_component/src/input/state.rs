@@ -7,7 +7,7 @@ use gpui::{
     Action, App, AppContext, Bounds, ClipboardItem, Context, Entity, EntityInputHandler,
     EventEmitter, FocusHandle, Focusable, HighlightStyle, InteractiveElement as _, IntoElement,
     KeyBinding, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ParentElement as _, Pixels, Point, Render, ScrollHandle, ScrollWheelEvent, SharedString,
+    ParentElement as _, Pixels, Point, Render, ScrollEvent, ScrollHandle, SharedString,
     Styled as _, Subscription, Task, UTF16Selection, Window, actions, div, point,
     prelude::FluentBuilder as _, px,
 };
@@ -148,14 +148,22 @@ pub(crate) fn init(cx: &mut App) {
             },
             Some(CONTEXT),
         ),
-        KeyBinding::new(
+        KeyBinding::load(
             "secondary-enter",
-            Enter {
+            Box::new(Enter {
                 secondary: true,
                 newline: false,
-            },
-            Some(CONTEXT),
-        ),
+            }),
+            Some(CONTEXT).map(|value| {
+                gpui::KeyBindingContextPredicate::parse(value)
+                    .expect("valid key context")
+                    .into()
+            }),
+            false,
+            None,
+            cx,
+        )
+        .expect("valid widget keybinding"),
         KeyBinding::new("escape", Escape, Some(CONTEXT)),
         KeyBinding::new("up", MoveUp, Some(CONTEXT)),
         KeyBinding::new("down", MoveDown, Some(CONTEXT)),
@@ -1728,7 +1736,7 @@ impl InputState {
 
     pub(super) fn on_scroll_wheel(
         &mut self,
-        event: &ScrollWheelEvent,
+        event: &ScrollEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -2711,7 +2719,7 @@ impl Render for InputState {
             .id("input-state")
             .flex_1()
             .when(self.mode.is_multi_line(), |this| this.h_full())
-            .flex_grow()
+            .flex_grow(1.)
             .overflow_x_hidden()
             .child(TextElement::new(cx.entity().clone()).placeholder(self.placeholder.clone()))
             .children(self.diagnostic_popover.clone())

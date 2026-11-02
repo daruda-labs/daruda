@@ -178,8 +178,14 @@ impl Plugin for BackgroundPlugin {
         let el = canvas(
             move |_, _, _| bitmap,
             move |bounds, bitmap, window, _cx| {
-                let _ =
-                    window.paint_image(bounds, Corners::default(), Arc::clone(&bitmap), 0, false);
+                let _ = window.paint_image(
+                    bounds,
+                    bounds,
+                    Corners::default(),
+                    Arc::clone(&bitmap),
+                    0,
+                    false,
+                );
             },
         )
         .absolute()

@@ -304,8 +304,8 @@ mod thumb_pointer_tests {
 
     use gpui::{
         Bounds, Context, IntoElement, Modifiers, MouseButton, MouseDownEvent, MouseExitEvent,
-        MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, ScrollDelta, ScrollHandle,
-        ScrollWheelEvent, TestAppContext, TouchPhase, VisualTestContext, Window, WindowBounds,
+        MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, ScrollDelta, ScrollEvent,
+        ScrollHandle, TestAppContext, TouchPhase, VisualTestContext, Window, WindowBounds,
         WindowOptions, div, point, prelude::*, px, size,
     };
 
@@ -725,7 +725,8 @@ mod thumb_pointer_tests {
     #[gpui::test]
     fn wheel_over_track_still_scrolls_content(cx: &mut TestAppContext) {
         let mut rig = rig(cx, 1, CONTENT_H);
-        rig.vcx.simulate_event(ScrollWheelEvent {
+        rig.vcx.simulate_event(ScrollEvent {
+            source: gpui::ScrollSource::Pointer,
             position: point(x_strip(WINDOW_W), px(200.)),
             delta: ScrollDelta::Pixels(point(px(0.), px(-100.))),
             modifiers: Modifiers::default(),

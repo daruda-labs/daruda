@@ -192,7 +192,7 @@ async fn large_output_embed_is_capped_and_shapes_only_visible_rows(cx: &mut Test
             AvailableSpace::Definite(px(800.)),
             AvailableSpace::MinContent,
         ),
-        |_, _| gpui::AnyView::from(probe.clone()),
+        |_, _| gpui::AnyView::from(probe.clone()).into_element(),
     );
 
     let wrapper = cx
@@ -483,8 +483,9 @@ fn transcript_scroll_range(
 
 /// One downward wheel notch over the embed's centre.
 fn wheel_down_over_embed(vcx: &mut gpui::VisualTestContext, embed: gpui::Bounds<gpui::Pixels>) {
-    use gpui::{ScrollDelta, ScrollWheelEvent};
-    vcx.simulate_event(ScrollWheelEvent {
+    use gpui::{ScrollDelta, ScrollEvent};
+    vcx.simulate_event(ScrollEvent {
+        source: gpui::ScrollSource::Pointer,
         position: embed.center(),
         delta: ScrollDelta::Pixels(point(px(0.), px(-120.))),
         ..Default::default()

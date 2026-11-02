@@ -110,7 +110,7 @@ pub(super) fn render(
         .flex_none()
         .overflow_hidden()
         .cursor(gpui::CursorStyle::OpenHand)
-        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+        .on_scroll(|_, _, cx| cx.stop_propagation())
         .when_some(run.execution.graph.view(), |d, graph| {
             d.child(
                 AnyView::from(graph.canvas.clone())

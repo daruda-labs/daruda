@@ -3,7 +3,7 @@
 //! `tracked_entities` after an out-of-element read.
 
 use super::*;
-use gpui::{ScrollDelta, ScrollWheelEvent, TouchPhase, VisualTestContext, point, px};
+use gpui::{ScrollDelta, ScrollEvent, TouchPhase, VisualTestContext, point, px};
 
 fn active_terminal_view(ws: &Workspace) -> gpui::Entity<daruda_terminal::view::TerminalView> {
     let pane = ws
@@ -34,7 +34,8 @@ fn feed_scrollback(
 }
 
 fn wheel_up(cx: &mut VisualTestContext) {
-    cx.simulate_event(ScrollWheelEvent {
+    cx.simulate_event(ScrollEvent {
+        source: gpui::ScrollSource::Pointer,
         position: point(px(600.), px(300.)),
         delta: ScrollDelta::Lines(point(0., 3.)),
         modifiers: Default::default(),

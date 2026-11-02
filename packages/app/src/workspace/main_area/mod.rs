@@ -49,8 +49,8 @@ use super::Workspace;
 fn split_cell(is_horizontal: bool, ratio: f32, child_el: AnyElement) -> gpui::Div {
     let base = div()
         .flex_basis(gpui::relative(ratio))
-        .flex_shrink()
-        .flex_grow();
+        .flex_shrink(1.)
+        .flex_grow(1.);
     if is_horizontal {
         base.h_full().min_w(px(theme::RENDER_MIN_DIM))
     } else {

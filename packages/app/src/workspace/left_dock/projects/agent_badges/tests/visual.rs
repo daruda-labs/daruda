@@ -55,9 +55,9 @@ fn capture_idle_and_completed_grids() {
         Arc::new(gpui::NoopTextSystem::new()),
         Arc::new(()),
         || {
-            Some(Box::new(
-                gpui_macos::metal_renderer::MetalHeadlessRenderer::new(),
-            ))
+            Ok(Some(Box::new(
+                gpui_macos::metal_renderer::MetalHeadlessRenderer::new()?,
+            )))
         },
     );
     app.update(init_dot_theme);
@@ -71,12 +71,14 @@ fn capture_idle_and_completed_grids() {
             },
         )
         .unwrap();
-    app.update_window(window.into(), |_, window, cx| window.draw(cx).clear())
+    app.update_window(window.into(), |_, window, cx| window.draw(cx).clear(cx))
         .unwrap();
     let before = app.capture_screenshot(window.into()).unwrap();
     let green_pixels = |pixels: &[u8]| {
         pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|pixel| {
                 pixel[1] > pixel[0].saturating_add(20) && pixel[1] > pixel[2].saturating_add(10)
             })
@@ -88,7 +90,7 @@ fn capture_idle_and_completed_grids() {
         view.outcomes[1] = None;
         cx.notify();
     });
-    app.update_window(window.into(), |_, window, cx| window.draw(cx).clear())
+    app.update_window(window.into(), |_, window, cx| window.draw(cx).clear(cx))
         .unwrap();
     let after = app.capture_screenshot(window.into()).unwrap();
     assert_eq!(green_pixels(after.as_raw()), 0);
@@ -134,9 +136,9 @@ fn capture_working_perimeter_cycle() {
         Arc::new(gpui::NoopTextSystem::new()),
         Arc::new(()),
         || {
-            Some(Box::new(
-                gpui_macos::metal_renderer::MetalHeadlessRenderer::new(),
-            ))
+            Ok(Some(Box::new(
+                gpui_macos::metal_renderer::MetalHeadlessRenderer::new()?,
+            )))
         },
     );
     app.update(init_dot_theme);
@@ -152,7 +154,7 @@ fn capture_working_perimeter_cycle() {
     for tick in 0..=8 {
         app.update(|cx| cx.set_global(crate::ui::StatusPulseClock { tick }));
         view.update(&mut app, |_, cx| cx.notify());
-        app.update_window(window.into(), |_, window, cx| window.draw(cx).clear())
+        app.update_window(window.into(), |_, window, cx| window.draw(cx).clear(cx))
             .unwrap();
         let frame = app.capture_screenshot(window.into()).unwrap();
         frame
@@ -221,9 +223,9 @@ fn capture_status_icon_themes_and_live_switch() {
         Arc::new(gpui::NoopTextSystem::new()),
         Arc::new(crate::assets::DarudaAssets),
         || {
-            Some(Box::new(
-                gpui_macos::metal_renderer::MetalHeadlessRenderer::new(),
-            ))
+            Ok(Some(Box::new(
+                gpui_macos::metal_renderer::MetalHeadlessRenderer::new()?,
+            )))
         },
     );
     app.update(|cx| {
@@ -268,7 +270,7 @@ fn capture_status_icon_themes_and_live_switch() {
                 cx.set_global(crate::ui::StatusPulseClock { tick: 0 });
             });
             view.update(&mut app, |_, cx| cx.notify());
-            app.update_window(window.into(), |_, window, cx| window.draw(cx).clear())
+            app.update_window(window.into(), |_, window, cx| window.draw(cx).clear(cx))
                 .unwrap();
             let frame = app.capture_screenshot(window.into()).unwrap();
             frame

@@ -2,8 +2,8 @@ use std::{any::Any, collections::HashMap, time::Duration};
 
 use gpui::{
     AnyElement, Bounds, Context, Div, ElementId, InteractiveElement as _, KeyDownEvent, KeyUpEvent,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollWheelEvent, Stateful,
-    Styled, Window, div, rgb,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollEvent, Stateful, Styled,
+    Window, div, rgb,
 };
 
 use crate::{
@@ -814,7 +814,7 @@ pub enum InputEvent {
     MouseMove(MouseMoveEvent),
     MouseUp(MouseUpEvent),
 
-    Wheel(ScrollWheelEvent),
+    Wheel(ScrollEvent),
 
     Hover(bool),
 }

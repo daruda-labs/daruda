@@ -466,6 +466,10 @@ impl RenderOnce for Dialog {
                                             }
                                         } else if has_footer {
                                             window.close_dialog(cx);
+                                        } else {
+                                            // Custom bodies own their Enter handling, including
+                                            // focused buttons that activate on key release.
+                                            cx.propagate();
                                         }
                                     }
                                 })

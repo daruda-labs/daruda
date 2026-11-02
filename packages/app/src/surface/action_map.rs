@@ -36,7 +36,7 @@ pub fn apply_keybinding_overrides(
     macro_rules! bind {
         ($key:expr, $name:expr, $cx:expr, $( $action_name:expr => $action:expr ),+ $(,)?) => {
             match $name {
-                $( $action_name => { $cx.bind_keys([KeyBinding::new($key, $action, None)]); } )+
+                $( $action_name => { $cx.bind_keys([KeyBinding::load($key, Box::new($action), None, false, None, $cx).expect("valid keybinding override")]); } )+
                 _ => {}
             }
         };
@@ -62,7 +62,15 @@ pub fn apply_keybinding_overrides(
         if let Some(stripped) = name_str.strip_prefix("open_settings.")
             && let Some(section) = daruda_config::BuiltinSection::from_slug(stripped)
         {
-            cx.bind_keys([KeyBinding::new(key_str, OpenSettings(section), None)]);
+            cx.bind_keys([KeyBinding::load(
+                key_str,
+                Box::new(OpenSettings(section)),
+                None,
+                false,
+                None,
+                cx,
+            )
+            .expect("valid keybinding override")]);
             continue;
         }
 

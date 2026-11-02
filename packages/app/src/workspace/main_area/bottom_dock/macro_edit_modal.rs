@@ -652,7 +652,7 @@ mod tests {
             let formatted = format_keystroke_for_keymap(&ks);
             // Re-parse should succeed.
             assert!(
-                Keystroke::parse(&formatted).is_ok(),
+                Keystroke::parse_with_os(&formatted, gpui::OperatingSystem::Unknown).is_ok(),
                 "{} -> {}",
                 s,
                 formatted

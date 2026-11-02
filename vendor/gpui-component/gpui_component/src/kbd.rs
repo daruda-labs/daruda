@@ -244,7 +244,9 @@ mod tests {
             assert_eq!(Kbd::format(&Keystroke::parse("cmd-+").unwrap()), "⌘+");
             assert_eq!(Kbd::format(&Keystroke::parse("cmd-enter").unwrap()), "⌘⏎");
             assert_eq!(
-                Kbd::format(&Keystroke::parse("secondary-f12").unwrap()),
+                Kbd::format(
+                    &Keystroke::parse_with_os("secondary-f12", gpui::OperatingSystem::Mac).unwrap()
+                ),
                 "⌘F12"
             );
             assert_eq!(

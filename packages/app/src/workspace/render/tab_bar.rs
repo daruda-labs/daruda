@@ -207,7 +207,7 @@ impl Workspace {
             .mx(px(theme::TAB_MARGIN_X))
             .min_w(px(theme::TAB_MIN_WIDTH))
             .max_w(px(theme::TAB_MAX_WIDTH))
-            .flex_grow()
+            .flex_grow(1.)
             .flex_basis(px(0.0))
             .overflow_hidden()
             .whitespace_nowrap()

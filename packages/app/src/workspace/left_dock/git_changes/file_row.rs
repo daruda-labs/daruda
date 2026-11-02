@@ -218,7 +218,7 @@ pub(super) fn unified_file_row(
                 .overflow_hidden()
                 .child(
                     div()
-                        .flex_shrink()
+                        .flex_shrink(1.)
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .text_size(px(snap.metrics.text(theme::LANE_SUB_FONT_SIZE)))

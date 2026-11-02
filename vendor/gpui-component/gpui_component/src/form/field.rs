@@ -53,7 +53,7 @@ impl RenderOnce for FieldBuilder {
         match self {
             FieldBuilder::String(value) => value.into_any_element(),
             FieldBuilder::Element(builder) => builder(window, cx),
-            FieldBuilder::View(view) => view.into_any(),
+            FieldBuilder::View(view) => view.into_any_element(),
         }
     }
 }

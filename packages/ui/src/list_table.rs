@@ -27,7 +27,7 @@ impl Column {
         match self {
             Self::Fixed(_) => cell.flex_none().truncate(),
             Self::FixedUnclipped(_) => cell.flex_none(),
-            Self::Flexible(_) => cell.flex_grow().flex_shrink_0(),
+            Self::Flexible(_) => cell.flex_grow(1.).flex_shrink_0(),
         }
     }
 }

@@ -32,7 +32,7 @@ daruda locally. For a short product overview and first run instructions, see
 | macOS | 12.0 Monterey or later; Apple Silicon and Intel supported |
 | Linux | x86_64 `.deb` and portable tar.gz; CI builds, tests, and smoke-tests the window under Xvfb and sway; a real desktop is still unverified; requires the system libraries in `scripts/linux/build-deps.txt` (fontconfig, X11/XCB, xkbcommon, Wayland, GLib) and a Vulkan driver |
 | Windows | Experimental native MSVC build; GUI runtime still needs desktop verification |
-| Rust | 1.97 through rustup; `rust-toolchain.toml` pins local checks and CI |
+| Rust | 1.98.1 through rustup; `rust-toolchain.toml` pins local checks and CI |
 | Zig | 0.14.1; `./scripts/bootstrap-zig.sh` installs the pinned version on macOS and Linux, `bootstrap-zig.ps1` on Windows |
 | Xcode | Required on macOS; Command Line Tools alone lack the `metal` shader compiler GPUI's build runs |
 | jq | Required by `scripts/build-app.sh` and the Rust floor reader |
