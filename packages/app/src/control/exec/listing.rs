@@ -34,6 +34,7 @@ pub(crate) fn brief(cx: &mut App) -> BriefSummary {
     BriefSummary {
         working: count(&rows, |s| s.activity == Activity::Working),
         awaiting_permission: count(&rows, |s| s.activity == Activity::AwaitingPermission),
+        awaiting_answer: count(&rows, |s| s.activity == Activity::AwaitingAnswer),
         error: count(&rows, |s| s.health == Health::Error),
         total: rows.len() as u32,
     }

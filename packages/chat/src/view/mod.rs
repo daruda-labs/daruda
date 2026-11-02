@@ -440,6 +440,8 @@ pub struct AgentChatView {
     /// (`PermissionRequested` / `respond_permission` / teardown); holds every
     /// outstanding id since permission requests can run in parallel.
     pub(super) pending_permissions: HashSet<u64>,
+    /// Questions the agent asked and waits on — see [`questions::Questions`].
+    pub(super) questions: questions::Questions,
     pub(super) permission_session: u64,
     /// Permission ids relayed to the current phone for this connection.
     /// Cleared on recipient change or session teardown; the periodic sweep
@@ -646,6 +648,7 @@ mod host_commands;
 mod host_surface;
 pub(super) mod list_sync;
 mod pane_choices;
+pub(crate) mod questions;
 mod queue_ops;
 pub use attachments::display_prompt;
 mod overage_notice;

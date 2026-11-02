@@ -4,6 +4,7 @@ mod dispatch;
 mod lifecycle;
 mod notices;
 mod protocol;
+mod questions;
 
 use super::*;
 use crate::model::ChatItem;

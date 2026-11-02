@@ -650,6 +650,7 @@ fn map_activity(state: ActivityState) -> Activity {
         ActivityState::Idle => Activity::Idle,
         ActivityState::Working => Activity::Working,
         ActivityState::AwaitingPermission => Activity::AwaitingPermission,
+        ActivityState::AwaitingAnswer => Activity::AwaitingAnswer,
     }
 }
 

@@ -105,6 +105,11 @@ fn main() {
                     };
                     handle.respond_permission(id, decision);
                 }
+                AcpEvent::QuestionAsked { id, question } => {
+                    // Never sent: this example claims no question support.
+                    eprintln!("[question] {question:?}");
+                    handle.respond_question(id, daruda_acp::QuestionAnswer::Decline);
+                }
                 AcpEvent::TurnEnded { stop_reason, .. } => {
                     turns_completed += 1;
                     eprintln!("[turn {turns_completed} ended] stop_reason={stop_reason}");

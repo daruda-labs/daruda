@@ -19,6 +19,7 @@ pub(in crate::workspace) enum OrchestratorChipState {
     Idle,
     Working,
     AwaitingPermission,
+    AwaitingAnswer,
     Failed,
 }
 
@@ -34,6 +35,7 @@ impl OrchestratorChipState {
             ActivityState::Idle => Self::Idle,
             ActivityState::Working => Self::Working,
             ActivityState::AwaitingPermission => Self::AwaitingPermission,
+            ActivityState::AwaitingAnswer => Self::AwaitingAnswer,
         }
     }
 
@@ -61,6 +63,12 @@ impl OrchestratorChipState {
                 metrics::ORCHESTRATOR_PERMISSION_GLYPH,
                 t.orchestrator_permission,
                 s::orchestrator::awaiting_permission(),
+            ),
+            // The same "needs you" signal as a permission; only the words differ.
+            Self::AwaitingAnswer => (
+                metrics::ORCHESTRATOR_PERMISSION_GLYPH,
+                t.orchestrator_permission,
+                s::orchestrator::awaiting_answer(),
             ),
             Self::Failed => (
                 metrics::ORCHESTRATOR_FAILED_GLYPH,
@@ -131,6 +139,21 @@ mod tests {
                 assert!(!tooltip.is_empty(), "{expected:?} has no tooltip");
                 colors.push((expected, color));
             }
+            // A question is the permission's "needs you" signal in other
+            // words: same glyph and colour, its own tooltip.
+            assert_eq!(
+                OrchestratorChipState::from_activity(ActivityState::AwaitingAnswer, &connected),
+                OrchestratorChipState::AwaitingAnswer
+            );
+            let (answer_glyph, answer_color, answer_tooltip) =
+                OrchestratorChipState::AwaitingAnswer.appearance(cx);
+            let (permission_glyph, permission_color, permission_tooltip) =
+                OrchestratorChipState::AwaitingPermission.appearance(cx);
+            assert_eq!(
+                (answer_glyph, answer_color),
+                (permission_glyph, permission_color)
+            );
+            assert_ne!(answer_tooltip, permission_tooltip);
             assert_eq!(
                 OrchestratorChipState::from_activity(ActivityState::Working, &error),
                 OrchestratorChipState::Failed,

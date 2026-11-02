@@ -88,6 +88,12 @@ impl AgentChatView {
     pub fn last_reconciled_busy(&self) -> bool {
         self.activity.span.is_busy()
     }
+
+    /// Whether the turn in flight is the phone's: a prompt relayed from it
+    /// started the turn, and its outcome is owed back there.
+    pub fn phone_owns_turn(&self) -> bool {
+        self.phone_turn_state.is_some()
+    }
 }
 
 impl PromptQueue {

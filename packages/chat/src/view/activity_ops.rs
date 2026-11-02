@@ -121,6 +121,9 @@ impl AgentChatView {
         if self.has_pending_permission() {
             return ActivityState::AwaitingPermission;
         }
+        if self.has_pending_question() {
+            return ActivityState::AwaitingAnswer;
+        }
         if self.activity.span.is_busy() {
             ActivityState::Working
         } else {
@@ -164,11 +167,15 @@ impl AgentChatView {
     }
 
     /// The pane's derived activity — the single source of the badge label. A
-    /// pending permission takes precedence (it needs the user, not the agent);
-    /// otherwise the agent is [`ActivityState::Working`] while [`Self::is_busy`].
+    /// pending permission or question takes precedence (it needs the user, not
+    /// the agent); otherwise the agent is [`ActivityState::Working`] while
+    /// [`Self::is_busy`].
     pub fn activity_state(&self) -> ActivityState {
         if self.has_pending_permission() {
             return ActivityState::AwaitingPermission;
+        }
+        if self.has_pending_question() {
+            return ActivityState::AwaitingAnswer;
         }
         if self.is_busy() {
             ActivityState::Working

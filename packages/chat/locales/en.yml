@@ -191,6 +191,21 @@ agent_chat:
   # Shown on a permission card whose turn was cancelled before the user
   # decided, in place of the chosen-option line.
   permission_cancelled: "Cancelled."
+  # The panel pinned under the conversation while the agent waits on an
+  # answer to a question it asked mid-turn.
+  question_title: "Question"
+  # Beside the title when more questions wait behind the one shown.
+  question_more: "%{count} more waiting"
+  # Opens a free-text box under a question's options.
+  # A picked option chip: a check as well as the active fill.
+  question_picked: "✓ %{label}"
+  question_type_answer: "Type an answer…"
+  question_text_placeholder: "Your answer"
+  question_yes: "Yes"
+  question_no: "No"
+  question_submit: "Send answer"
+  # Tells the agent the person chose not to answer.
+  question_skip: "Skip"
   # Elapsed run time under a minute, e.g. "5s". The unit is part of the
   # translation: a bare number with a hardcoded `s` reads as English in every
   # locale, and this label sits beside translated text.

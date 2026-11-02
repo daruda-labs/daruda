@@ -109,7 +109,7 @@ fn initial_model_settles_before_mode_and_connected() {
         .unbounded_send(Command::Prompt("queued during connect".into()))
         .unwrap();
     let (event_tx, mut event_rx) = unbounded::<AcpEvent>();
-    let permission_parks: PermissionParks = Arc::new(Mutex::new(HashMap::new()));
+    let parks = Parks::default();
 
     smol::block_on(async {
         let connection = smol::spawn(run_connection(
@@ -122,7 +122,7 @@ fn initial_model_settles_before_mode_and_connected() {
             Vec::new(),
             command_rx,
             event_tx,
-            permission_parks,
+            parks,
         ));
 
         let (modes, config_options) = loop {
@@ -231,7 +231,7 @@ fn a_resumed_session_applies_the_requested_mode() {
 
     let (command_tx, command_rx) = unbounded::<Command>();
     let (event_tx, mut event_rx) = unbounded::<AcpEvent>();
-    let permission_parks: PermissionParks = Arc::new(Mutex::new(HashMap::new()));
+    let parks = Parks::default();
 
     smol::block_on(async {
         let connection = smol::spawn(run_connection(
@@ -244,7 +244,7 @@ fn a_resumed_session_applies_the_requested_mode() {
             Vec::new(),
             command_rx,
             event_tx,
-            permission_parks,
+            parks,
         ));
 
         let modes = loop {
@@ -314,7 +314,7 @@ fn first_usage_from(agent: impl ConnectTo<Client> + 'static) -> crate::model::Us
         .unbounded_send(Command::Prompt("hi".into()))
         .unwrap();
     let (event_tx, mut event_rx) = unbounded::<AcpEvent>();
-    let permission_parks: PermissionParks = Arc::new(Mutex::new(HashMap::new()));
+    let parks = Parks::default();
     smol::block_on(async {
         let connection = smol::spawn(run_connection(
             ClientCapabilitiesView::default(),
@@ -326,7 +326,7 @@ fn first_usage_from(agent: impl ConnectTo<Client> + 'static) -> crate::model::Us
             Vec::new(),
             command_rx,
             event_tx,
-            permission_parks,
+            parks,
         ));
         let usage = loop {
             match next_event_within(&mut event_rx).await {

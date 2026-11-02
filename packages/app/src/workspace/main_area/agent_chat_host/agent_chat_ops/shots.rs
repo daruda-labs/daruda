@@ -313,6 +313,47 @@ impl Workspace {
         );
     }
 
+    /// A question pinned under the seeded conversation. `form` shows the
+    /// several-field form, with its "Other" box open and a pick made, rather
+    /// than the single select with a second question waiting behind it.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_agent_chat_question_for_shot(
+        &mut self,
+        form: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_agent_chat_pane_seeded(
+            None,
+            move |v, window, cx| {
+                v.seed_transcript(
+                    daruda_chat::shot_transcript::sample_transcript(),
+                    window,
+                    cx,
+                );
+                if form {
+                    v.seed_questions_for_shot(
+                        vec![daruda_chat::shot_transcript::shot_question_form()],
+                        cx,
+                    );
+                    v.pick_question_option(0, "question_0".into(), "Clippy".into(), cx);
+                    v.set_question_flag(0, "question_1".into(), true, cx);
+                    v.open_question_text(0, "question_0_custom".into(), window, cx);
+                } else {
+                    v.seed_questions_for_shot(
+                        vec![
+                            daruda_chat::shot_transcript::shot_question(),
+                            daruda_chat::shot_transcript::shot_question_form(),
+                        ],
+                        cx,
+                    );
+                }
+            },
+            window,
+            cx,
+        );
+    }
+
     #[cfg(feature = "screenshot")]
     pub(in crate::workspace) fn open_agent_chat_diff_for_shot(
         &mut self,

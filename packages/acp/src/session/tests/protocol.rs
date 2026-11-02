@@ -41,7 +41,7 @@ fn required_resume_wire_never_sends_session_new() {
                 Vec::new(),
                 command_rx,
                 event_tx,
-                Arc::new(Mutex::new(HashMap::new())),
+                Parks::default(),
             )
             .await;
             assert!(result.is_err());
@@ -106,7 +106,7 @@ fn transport_eof_during_initialize_or_prompt_terminates_without_turn_failed() {
                     Vec::new(),
                     command_rx,
                     event_tx,
-                    Arc::new(Mutex::new(HashMap::new())),
+                    Parks::default(),
                 )
                 .await
                 .map_err(|error| match error {
@@ -231,15 +231,15 @@ fn cancelled_decision_maps_to_cancelled_outcome() {
 
 #[test]
 fn respond_permission_unparks_the_waiting_handler() {
-    let parks: PermissionParks = Arc::new(Mutex::new(HashMap::new()));
+    let parks = Parks::default();
     let (command_tx, _command_rx) = unbounded::<Command>();
     let handle = AcpSessionHandle {
         commands: command_tx,
-        permission_parks: parks.clone(),
+        parks: parks.clone(),
     };
 
     let (decision_tx, decision_rx) = oneshot::channel();
-    parks.lock().unwrap().insert(7, decision_tx);
+    parks.permissions.lock().unwrap().insert(7, decision_tx);
 
     handle.respond_permission(
         7,
@@ -255,7 +255,10 @@ fn respond_permission_unparks_the_waiting_handler() {
             option_id: "ok".to_string()
         }
     );
-    assert!(parks.lock().unwrap().is_empty(), "id must be consumed");
+    assert!(
+        parks.permissions.lock().unwrap().is_empty(),
+        "id must be consumed"
+    );
 }
 
 #[test]
@@ -459,11 +462,10 @@ fn config_options_from_protocol_maps_select_options() {
 
 #[test]
 fn respond_permission_for_unknown_id_is_a_noop() {
-    let parks: PermissionParks = Arc::new(Mutex::new(HashMap::new()));
     let (command_tx, _command_rx) = unbounded::<Command>();
     let handle = AcpSessionHandle {
         commands: command_tx,
-        permission_parks: parks,
+        parks: Parks::default(),
     };
     // Must not panic.
     handle.respond_permission(99, PermissionDecision::Cancelled);

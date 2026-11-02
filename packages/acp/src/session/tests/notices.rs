@@ -99,7 +99,7 @@ fn protocol_notices_preserve_delivery_order_without_ending_the_turn() {
             Vec::new(),
             command_rx,
             event_tx,
-            Arc::new(Mutex::new(HashMap::new())),
+            Parks::default(),
         ));
         loop {
             match next_event_within(&mut events)

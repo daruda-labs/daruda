@@ -24,6 +24,7 @@ pub mod image_lightbox;
 mod links;
 mod mermaid;
 mod plan;
+mod question;
 mod row;
 mod status_icon;
 mod tail_row;
@@ -318,6 +319,7 @@ pub(super) fn render(view: &AgentChatView, cx: &mut Context<AgentChatView>) -> i
         .child(bar)
         .child(body)
         .children(host_cards::host_card_strip(content, cx))
+        .children(question::question_panel(content, cx))
         // The plan region is a flex-none sibling below the `flex_1` body, so it
         // claims its own space and the conversation shrinks to fit. `None` when
         // the agent has published no plan, costing no vertical space.

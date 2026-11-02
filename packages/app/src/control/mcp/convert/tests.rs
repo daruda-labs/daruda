@@ -197,6 +197,7 @@ fn a_successful_outcome_renders_as_structured_content() {
     let out: ControlOutcome = Ok(ControlResult::Brief(BriefSummary {
         working: 1,
         awaiting_permission: 0,
+        awaiting_answer: 0,
         error: 0,
         total: 3,
     }));

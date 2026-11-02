@@ -203,6 +203,7 @@ impl AgentChatView {
         finalize_streaming(&mut self.items);
         cancel_pending_tools(&mut self.items);
         cancel_pending_permission(self, cx);
+        self.cancel_pending_questions(cx);
         cancel_pending_plan_entries(&mut self.plan);
     }
 

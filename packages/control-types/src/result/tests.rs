@@ -40,6 +40,20 @@ fn sample_summary() -> ChatSummary {
     }
 }
 
+/// Each activity has a fixed wire name: a caller tells a question from a
+/// permission by it.
+#[test]
+fn every_activity_has_its_wire_name() {
+    for (activity, wire) in [
+        (Activity::Idle, "idle"),
+        (Activity::Working, "working"),
+        (Activity::AwaitingPermission, "awaiting_permission"),
+        (Activity::AwaitingAnswer, "awaiting_answer"),
+    ] {
+        assert_eq!(serde_json::to_value(activity).unwrap(), wire);
+    }
+}
+
 #[test]
 fn listing_round_trips_through_json() {
     let listing = Listing {
@@ -65,6 +79,7 @@ fn result_round_trips_through_json() {
     let result = ControlResult::Brief(BriefSummary {
         working: 2,
         awaiting_permission: 1,
+        awaiting_answer: 0,
         error: 0,
         total: 5,
     });
@@ -150,6 +165,7 @@ fn every_result_variant_round_trips_through_json() {
         ControlResult::Brief(BriefSummary {
             working: 1,
             awaiting_permission: 2,
+            awaiting_answer: 0,
             error: 3,
             total: 6,
         }),

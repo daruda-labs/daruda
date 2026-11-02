@@ -250,6 +250,12 @@ pub(crate) enum ScreenshotScenario {
     /// Paired with [`Self::AgentChatPlan`] because the question is whether the
     /// cut step is distinguishable from both the done one and the untouched one.
     AgentChatPlanStopped,
+    /// A question the agent asked mid-turn, pinned under the conversation with
+    /// a second one waiting behind it.
+    AgentChatQuestion,
+    /// The several-field question form, with a pick made and its "Other" box
+    /// open, so Send and a text field show.
+    AgentChatQuestionForm,
     /// The tail window's boundary row with nothing floating over it. The pair
     /// with [`Self::AgentChatTailOpen`] is the only way to judge the one thing
     /// the row exists to say — whether its two states are distinguishable —
@@ -877,6 +883,16 @@ pub(crate) fn drive(
         ScreenshotScenario::AgentChatPlanStopped => {
             workspace.update(cx, |ws, cx| {
                 ws.open_agent_chat_plan_for_shot(true, window, cx)
+            });
+        }
+        ScreenshotScenario::AgentChatQuestion => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_question_for_shot(false, window, cx)
+            });
+        }
+        ScreenshotScenario::AgentChatQuestionForm => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_question_for_shot(true, window, cx)
             });
         }
         ScreenshotScenario::AgentChatFold => {

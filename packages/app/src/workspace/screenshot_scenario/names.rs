@@ -115,6 +115,9 @@ const NAME_AGENT_CHAT_SOLE_REPLY: &str = "agent-chat-sole-reply";
 const NAME_AGENT_CHAT_PLAN: &str = "agent-chat-plan";
 const NAME_AGENT_CHAT_RUNNING_TOOL: &str = "agent-chat-running-tool";
 const NAME_AGENT_CHAT_PLAN_STOPPED: &str = "agent-chat-plan-stopped";
+/// CLI tokens for the pinned question panel.
+const NAME_AGENT_CHAT_QUESTION: &str = "agent-chat-question";
+const NAME_AGENT_CHAT_QUESTION_FORM: &str = "agent-chat-question-form";
 /// CLI tokens for a stretch of work narrated thought by thought — settled, mid-turn
 /// on a thought with no call after it yet, and filtered down to its thoughts.
 const NAME_AGENT_CHAT_THOUGHTS: &str = "agent-chat-thoughts";
@@ -347,6 +350,8 @@ impl ScreenshotScenario {
             NAME_AGENT_CHAT_PLAN => Some(Self::AgentChatPlan),
             NAME_AGENT_CHAT_RUNNING_TOOL => Some(Self::AgentChatRunningTool),
             NAME_AGENT_CHAT_PLAN_STOPPED => Some(Self::AgentChatPlanStopped),
+            NAME_AGENT_CHAT_QUESTION => Some(Self::AgentChatQuestion),
+            NAME_AGENT_CHAT_QUESTION_FORM => Some(Self::AgentChatQuestionForm),
             NAME_AGENT_CHAT_TAIL => Some(Self::AgentChatTail),
             NAME_AGENT_CHAT_TAIL_OPEN => Some(Self::AgentChatTailOpen),
             NAME_AGENT_CHAT_GROUP_TAIL => Some(Self::AgentChatGroupTail),

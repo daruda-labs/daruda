@@ -9,7 +9,7 @@ use super::*;
 fn a_resume_replays_a_subagent_before_the_session_is_connected() {
     let (command_tx, command_rx) = unbounded::<Command>();
     let (event_tx, mut event_rx) = unbounded::<AcpEvent>();
-    let permission_parks: PermissionParks = Arc::new(Mutex::new(HashMap::new()));
+    let parks = Parks::default();
 
     smol::block_on(async move {
         let connection = smol::spawn(run_connection(
@@ -22,7 +22,7 @@ fn a_resume_replays_a_subagent_before_the_session_is_connected() {
             Vec::new(),
             command_rx,
             event_tx,
-            permission_parks,
+            parks,
         ));
 
         // The loop exits at `Connected`, so everything counted here
@@ -70,7 +70,7 @@ fn a_resume_replays_a_subagent_before_the_session_is_connected() {
 fn a_native_subagent_arrives_as_a_launch_card_with_its_child() {
     let (command_tx, command_rx) = unbounded::<Command>();
     let (event_tx, mut event_rx) = unbounded::<AcpEvent>();
-    let permission_parks: PermissionParks = Arc::new(Mutex::new(HashMap::new()));
+    let parks = Parks::default();
 
     smol::block_on(async move {
         let connection = smol::spawn(run_connection(
@@ -83,7 +83,7 @@ fn a_native_subagent_arrives_as_a_launch_card_with_its_child() {
             Vec::new(),
             command_rx,
             event_tx,
-            permission_parks,
+            parks,
         ));
 
         loop {
@@ -137,7 +137,7 @@ fn a_native_subagent_arrives_as_a_launch_card_with_its_child() {
 fn a_legacy_delegation_is_reported_once_even_behind_an_untypable_update() {
     let (command_tx, command_rx) = unbounded::<Command>();
     let (event_tx, mut event_rx) = unbounded::<AcpEvent>();
-    let permission_parks: PermissionParks = Arc::new(Mutex::new(HashMap::new()));
+    let parks = Parks::default();
 
     smol::block_on(async move {
         let connection = smol::spawn(run_connection(
@@ -150,7 +150,7 @@ fn a_legacy_delegation_is_reported_once_even_behind_an_untypable_update() {
             Vec::new(),
             command_rx,
             event_tx,
-            permission_parks,
+            parks,
         ));
 
         loop {
@@ -202,10 +202,10 @@ fn a_legacy_delegation_is_reported_once_even_behind_an_untypable_update() {
 fn a_parked_permission_request_does_not_stall_update_dispatch() {
     let (command_tx, command_rx) = unbounded::<Command>();
     let (event_tx, mut event_rx) = unbounded::<AcpEvent>();
-    let permission_parks: PermissionParks = Arc::new(Mutex::new(HashMap::new()));
+    let parks = Parks::default();
     let handle = AcpSessionHandle {
         commands: command_tx,
-        permission_parks: permission_parks.clone(),
+        parks: parks.clone(),
     };
 
     smol::block_on(async move {
@@ -219,7 +219,7 @@ fn a_parked_permission_request_does_not_stall_update_dispatch() {
             Vec::new(),
             command_rx,
             event_tx,
-            permission_parks,
+            parks,
         ));
 
         loop {
@@ -286,10 +286,10 @@ fn a_parked_permission_request_does_not_stall_update_dispatch() {
 fn connected_carries_the_program_the_agent_reported() {
     let (command_tx, command_rx) = unbounded::<Command>();
     let (event_tx, mut event_rx) = unbounded::<AcpEvent>();
-    let permission_parks: PermissionParks = Arc::new(Mutex::new(HashMap::new()));
+    let parks = Parks::default();
     let handle = AcpSessionHandle {
         commands: command_tx,
-        permission_parks: permission_parks.clone(),
+        parks: parks.clone(),
     };
 
     smol::block_on(async move {
@@ -303,7 +303,7 @@ fn connected_carries_the_program_the_agent_reported() {
             Vec::new(),
             command_rx,
             event_tx,
-            permission_parks,
+            parks,
         ));
 
         let program = loop {
@@ -332,10 +332,10 @@ fn connected_carries_the_program_the_agent_reported() {
 fn the_program_arrives_before_any_update() {
     let (command_tx, command_rx) = unbounded::<Command>();
     let (event_tx, mut event_rx) = unbounded::<AcpEvent>();
-    let permission_parks: PermissionParks = Arc::new(Mutex::new(HashMap::new()));
+    let parks = Parks::default();
     let handle = AcpSessionHandle {
         commands: command_tx,
-        permission_parks: permission_parks.clone(),
+        parks: parks.clone(),
     };
 
     smol::block_on(async move {
@@ -349,7 +349,7 @@ fn the_program_arrives_before_any_update() {
             Vec::new(),
             command_rx,
             event_tx,
-            permission_parks,
+            parks,
         ));
 
         let mut identified_at: Option<usize> = None;
@@ -392,10 +392,10 @@ fn the_program_arrives_before_any_update() {
 fn connected_carries_the_agents_advertised_login_methods() {
     let (command_tx, command_rx) = unbounded::<Command>();
     let (event_tx, mut event_rx) = unbounded::<AcpEvent>();
-    let permission_parks: PermissionParks = Arc::new(Mutex::new(HashMap::new()));
+    let parks = Parks::default();
     let handle = AcpSessionHandle {
         commands: command_tx,
-        permission_parks: permission_parks.clone(),
+        parks: parks.clone(),
     };
 
     smol::block_on(async move {
@@ -409,7 +409,7 @@ fn connected_carries_the_agents_advertised_login_methods() {
             Vec::new(),
             command_rx,
             event_tx,
-            permission_parks,
+            parks,
         ));
 
         let login_methods = loop {

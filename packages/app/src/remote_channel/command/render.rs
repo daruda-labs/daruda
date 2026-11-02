@@ -140,9 +140,10 @@ fn render_result(result: &ControlResult, state: &CommandState) -> RenderedReply 
             StopDisposition::Stopped => s::control::flow_stopped(),
             StopDisposition::AlreadyIdle => s::control::flow_stop_already_idle(),
         }),
+        // "Waiting" on the phone is whatever waits on the person.
         ControlResult::Brief(brief) => plain(s::control::brief(
             brief.working,
-            brief.awaiting_permission,
+            brief.awaiting_permission + brief.awaiting_answer,
             brief.error,
             brief.total,
         )),
@@ -416,6 +417,7 @@ fn state_badge(summary: &ChatSummary) -> String {
             Activity::Idle => s::control::state_idle(),
             Activity::Working => s::control::state_working(),
             Activity::AwaitingPermission => s::control::state_awaiting_permission(),
+            Activity::AwaitingAnswer => s::control::state_awaiting_answer(),
         },
     };
     s::control::listing_state(&glyph)

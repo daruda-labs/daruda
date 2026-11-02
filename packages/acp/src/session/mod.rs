@@ -61,10 +61,12 @@ use std::time::Duration;
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
     AuthCapabilities, BooleanConfigOptionCapabilities, CancelNotification, ClientCapabilities,
-    ClientSessionCapabilities, InitializeRequest, LoadSessionRequest, McpServer, NewSessionRequest,
-    PromptRequest, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    SelectedPermissionOutcome, SessionConfigOptionValue, SessionConfigOptionsCapabilities,
-    SessionId, SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest, StopReason,
+    ClientSessionCapabilities, CreateElicitationRequest, ElicitationCapabilities,
+    ElicitationFormCapabilities, InitializeRequest, LoadSessionRequest, McpServer,
+    NewSessionRequest, PromptRequest, RequestPermissionOutcome, RequestPermissionRequest,
+    RequestPermissionResponse, SelectedPermissionOutcome, SessionConfigOptionValue,
+    SessionConfigOptionsCapabilities, SessionId, SessionUpdate, SetSessionConfigOptionRequest,
+    SetSessionModeRequest, StopReason,
 };
 #[cfg(test)]
 use agent_client_protocol::schema::v1::{ContentBlock, TextContent};
@@ -90,12 +92,28 @@ use crate::native_subagents::{NativeSubagentRouter, Routed};
 /// handler once the host calls [`AcpSessionHandle::respond_permission`].
 type PermissionParks = Arc<Mutex<HashMap<u64, oneshot::Sender<PermissionDecision>>>>;
 
+/// The same, for questions the host received as [`AcpEvent::QuestionAsked`]
+/// and answers through [`AcpSessionHandle::respond_question`].
+type QuestionParks = Arc<Mutex<HashMap<u64, oneshot::Sender<crate::question::QuestionAnswer>>>>;
+
+/// Every request the agent is waiting on the host for, shared by the handle
+/// that answers them and the connection that parked them.
+#[derive(Clone, Default)]
+pub(super) struct Parks {
+    pub(super) permissions: PermissionParks,
+    pub(super) questions: QuestionParks,
+}
+
 /// Optional presentation contracts fulfilled by the host consuming this session.
 /// Headless consumers retain agent-message fallbacks unless they opt in.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ClientCapabilitiesView {
     pub notices: bool,
     pub compaction: bool,
+    /// The host renders [`AcpEvent::QuestionAsked`] and answers it. Claimed
+    /// as form elicitation, which is what lets Claude ask through
+    /// `AskUserQuestion` instead of ending its turn with a question in text.
+    pub questions: bool,
 }
 
 /// Whether failing to restore may create a different conversation.
@@ -287,6 +305,14 @@ pub enum AcpEvent {
         id: u64,
         request: Box<RequestPermissionRequest>,
     },
+    /// The agent asked the person a question mid-turn. The turn stays open
+    /// until the host calls [`AcpSessionHandle::respond_question`] with the
+    /// matching `id`. Sent only to a host that claimed
+    /// [`ClientCapabilitiesView::questions`].
+    QuestionAsked {
+        id: u64,
+        question: crate::question::QuestionRequest,
+    },
     /// A `session/prompt` turn completed; carries the protocol stop reason.
     /// `completed_normally` distinguishes a normal completion (any stop reason
     /// other than `Cancelled`) from a client-initiated cancellation, so the host
@@ -381,13 +407,25 @@ enum Command {
 /// channel) tells the connection task to shut down.
 pub struct AcpSessionHandle {
     commands: UnboundedSender<Command>,
-    permission_parks: PermissionParks,
+    parks: Parks,
 }
 
 /// Test-only view of a detached handle's command channel: what the host sent
 /// through it, and whether the host still holds it.
 #[cfg(any(test, feature = "test-support"))]
 pub struct HandleProbe(UnboundedReceiver<Command>);
+
+/// Test-only view of one parked question: the answer the host sent, if any.
+#[cfg(any(test, feature = "test-support"))]
+pub struct QuestionProbe(oneshot::Receiver<crate::question::QuestionAnswer>);
+
+#[cfg(any(test, feature = "test-support"))]
+impl QuestionProbe {
+    /// The host's answer, or `None` while the question is still open.
+    pub fn answer(&mut self) -> Option<crate::question::QuestionAnswer> {
+        self.0.try_recv().ok().flatten()
+    }
+}
 
 #[cfg(any(test, feature = "test-support"))]
 impl HandleProbe {
@@ -418,9 +456,21 @@ impl AcpSessionHandle {
         let (commands, command_rx) = unbounded::<Command>();
         let handle = Self {
             commands,
-            permission_parks: Arc::new(Mutex::new(HashMap::new())),
+            parks: Parks::default(),
         };
         (handle, HandleProbe(command_rx))
+    }
+
+    /// Park question `id` as the connection would on `elicitation/create`,
+    /// and hand back where the host's answer lands.
+    pub fn park_question_for_test(&self, id: u64) -> QuestionProbe {
+        let (answer_tx, answer_rx) = oneshot::channel();
+        self.parks
+            .questions
+            .lock()
+            .expect("question parks mutex poisoned")
+            .insert(id, answer_tx);
+        QuestionProbe(answer_rx)
     }
 }
 
@@ -494,7 +544,8 @@ impl AcpSessionHandle {
     /// resolved, or the turn was cancelled).
     pub fn respond_permission(&self, id: u64, decision: PermissionDecision) {
         let sender = self
-            .permission_parks
+            .parks
+            .permissions
             .lock()
             .expect("permission parks mutex poisoned")
             .remove(&id);
@@ -502,6 +553,22 @@ impl AcpSessionHandle {
             // The receiver is gone only if the handler already unparked (e.g.
             // the connection dropped); nothing to do in that case.
             let _ = sender.send(decision);
+        }
+    }
+
+    /// Answer a question the host received as [`AcpEvent::QuestionAsked`].
+    /// A no-op if the id is unknown (already answered, or the connection
+    /// went away).
+    pub fn respond_question(&self, id: u64, answer: crate::question::QuestionAnswer) {
+        let sender = self
+            .parks
+            .questions
+            .lock()
+            .expect("question parks mutex poisoned")
+            .remove(&id);
+        if let Some(sender) = sender {
+            // SILENT-OK: the handler already unparked (the connection dropped).
+            let _ = sender.send(answer);
         }
     }
 }
@@ -592,11 +659,11 @@ pub fn connect_prepared_session_with_capabilities(
 
     let (command_tx, command_rx) = unbounded::<Command>();
     let (event_tx, event_rx) = unbounded::<AcpEvent>();
-    let permission_parks: PermissionParks = Arc::new(Mutex::new(HashMap::new()));
+    let parks = Parks::default();
 
     let handle = AcpSessionHandle {
         commands: command_tx,
-        permission_parks: permission_parks.clone(),
+        parks: parks.clone(),
     };
 
     let task_event_tx = event_tx.clone();
@@ -613,7 +680,7 @@ pub fn connect_prepared_session_with_capabilities(
             mcp_servers,
             command_rx,
             task_event_tx.clone(),
-            permission_parks,
+            parks,
         )
         .await
         {

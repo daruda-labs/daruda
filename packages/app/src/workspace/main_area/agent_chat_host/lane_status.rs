@@ -25,7 +25,9 @@ fn session_status_of(
         | AgentSessionStatus::Connecting
         | AgentSessionStatus::Handshaking(_) => Some(SessionStatus::Connecting),
         AgentSessionStatus::Connected => Some(match activity {
-            ActivityState::AwaitingPermission => SessionStatus::NeedsAttention,
+            ActivityState::AwaitingPermission | ActivityState::AwaitingAnswer => {
+                SessionStatus::NeedsAttention
+            }
             ActivityState::Working => SessionStatus::Working,
             ActivityState::Idle => SessionStatus::Idle,
         }),
@@ -49,10 +51,11 @@ mod tests {
 
     use super::*;
 
-    const ACTIVITIES: [ActivityState; 3] = [
+    const ACTIVITIES: [ActivityState; 4] = [
         ActivityState::Idle,
         ActivityState::Working,
         ActivityState::AwaitingPermission,
+        ActivityState::AwaitingAnswer,
     ];
 
     /// Until the pane is connected its activity has nothing to say.

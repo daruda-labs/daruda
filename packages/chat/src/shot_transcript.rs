@@ -792,3 +792,85 @@ mod tests {
         assert_eq!(ids.len(), unique.len());
     }
 }
+
+/// The question `AskUserQuestion` asks for one choice: options with their
+/// descriptions, and the marked "Other" box beside them.
+pub fn shot_question() -> daruda_acp::QuestionRequest {
+    use daruda_acp::{QuestionField, QuestionFieldKind, QuestionOption};
+    let option = |value: &str, description: &str| QuestionOption {
+        value: value.into(),
+        label: value.into(),
+        description: Some(description.into()),
+    };
+    daruda_acp::QuestionRequest {
+        message: "Which storage should the session cache use?".into(),
+        tool_call_id: Some("toolu_shot".into()),
+        fields: vec![
+            QuestionField {
+                key: "question_0".into(),
+                title: Some("Cache".into()),
+                description: None,
+                required: false,
+                kind: QuestionFieldKind::SingleSelect(vec![
+                    option("Redis", "Shared across instances"),
+                    option("In-memory", "Fastest; lost on restart"),
+                    option("SQLite", "Survives restarts on one host"),
+                ]),
+                companion_of: None,
+            },
+            QuestionField {
+                key: "question_0_custom".into(),
+                title: Some("Other".into()),
+                description: None,
+                required: false,
+                kind: QuestionFieldKind::Text,
+                companion_of: Some("question_0".into()),
+            },
+        ],
+    }
+}
+
+/// A form of several fields, which waits for Send: a required multi-select
+/// and a yes/no.
+pub fn shot_question_form() -> daruda_acp::QuestionRequest {
+    use daruda_acp::{QuestionField, QuestionFieldKind, QuestionOption};
+    let option = |value: &str| QuestionOption {
+        value: value.into(),
+        label: value.into(),
+        description: None,
+    };
+    daruda_acp::QuestionRequest {
+        message: "Please answer the following questions.".into(),
+        tool_call_id: Some("toolu_shot_form".into()),
+        fields: vec![
+            QuestionField {
+                key: "question_0".into(),
+                title: Some("Which checks should run before merge?".into()),
+                description: None,
+                required: true,
+                kind: QuestionFieldKind::MultiSelect(vec![
+                    option("Unit tests"),
+                    option("Clippy"),
+                    option("Screenshot tests"),
+                ]),
+                companion_of: None,
+            },
+            QuestionField {
+                key: "question_0_custom".into(),
+                title: Some("Other".into()),
+                description: None,
+                required: false,
+                kind: QuestionFieldKind::Text,
+                companion_of: Some("question_0".into()),
+            },
+            QuestionField {
+                key: "question_1".into(),
+                title: Some("Open a draft pull request?".into()),
+                description: None,
+                required: false,
+                kind: QuestionFieldKind::Boolean,
+                companion_of: None,
+            },
+        ],
+    }
+}

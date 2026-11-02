@@ -22,6 +22,8 @@ pub enum Activity {
     Idle,
     Working,
     AwaitingPermission,
+    /// The agent asked the person a question mid-turn and waits on it.
+    AwaitingAnswer,
 }
 
 /// Whether the pane can be talked to at all. Distinct from [`Activity`] —
@@ -345,6 +347,9 @@ pub struct TaskEntry {
 pub struct BriefSummary {
     pub working: u32,
     pub awaiting_permission: u32,
+    /// Chats whose agent asked the person a question and waits on it.
+    #[serde(default)]
+    pub awaiting_answer: u32,
     pub error: u32,
     /// Open agent-chat panes across every window.
     pub total: u32,

@@ -27,6 +27,7 @@ pub use prompt::{AttachmentContent, PromptAttachment};
 mod prepared;
 pub use prepared::{AdapterCli, PreparedAdapter};
 pub(crate) mod output_highlight;
+pub mod question;
 pub mod session;
 mod stop_reason;
 pub use stop_reason::{EarlyStop, TurnStop};
@@ -65,12 +66,16 @@ pub use model::{
 };
 pub use native_subagents::{NativeSubagentRouter, Routed};
 pub use node::{NodeError, NodeProgress, NodeRuntime, command_diagnostic, ensure_node};
-#[cfg(any(test, feature = "test-support"))]
-pub use session::HandleProbe;
+pub use question::{
+    QuestionAnswer, QuestionField, QuestionFieldKind, QuestionOption, QuestionRequest,
+    QuestionValue,
+};
 pub use session::{
     AcpEvent, AcpSessionHandle, ClientCapabilitiesView, ConnectPhase, InfoFieldChange,
     PermissionDecision, SessionResume, connect_agent_session, connect_agent_session_with_model,
     connect_prepared_session, connect_prepared_session_with_capabilities, connect_session,
     stdio_mcp_server,
 };
+#[cfg(any(test, feature = "test-support"))]
+pub use session::{HandleProbe, QuestionProbe};
 pub use wire_log::{Replay, ReplayError, agent_id_from_path, replay_log};

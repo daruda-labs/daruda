@@ -67,6 +67,16 @@ values replace. Later summary chunks append even after terminal status.
 Compaction never infers token usage, deletes history, or settles a prompt.
 Wire-log replay uses the same reducer, including child-session identity.
 
+`elicitation.form` is advertised only by hosts opting into
+`ClientCapabilitiesView::questions`; the chat host does. A form elicitation
+becomes `AcpEvent::QuestionAsked` and parks, like a permission request, until
+`respond_question` answers it, so the turn stays open while the person
+decides. Claude's adapter enables `AskUserQuestion` only behind this claim;
+without it the model ends its turn with the question in text. A form with a
+field this crate cannot render, a URL elicitation, or any request to a host that
+did not opt in is declined at once rather than parked, because nothing would
+ever answer it. Flow's headless runner does not opt in.
+
 **Implemented but not advertised: `_meta.terminal_output`.** A vendor-private,
 non-standard claude-agent-acp flag. Setting it makes a Bash result *content-less*
 (`content: [{type:"terminal"}]`) and moves the bytes to

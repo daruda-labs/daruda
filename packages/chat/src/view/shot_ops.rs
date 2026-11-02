@@ -64,6 +64,19 @@ impl AgentChatView {
         cx.notify();
     }
 
+    /// Put `questions` in front of the person as if the agent had asked them,
+    /// with no session to answer to.
+    pub fn seed_questions_for_shot(
+        &mut self,
+        questions: Vec<daruda_acp::QuestionRequest>,
+        cx: &mut Context<Self>,
+    ) {
+        for (id, question) in questions.into_iter().enumerate() {
+            self.ask_question(id as u64, question);
+        }
+        cx.notify();
+    }
+
     /// Leave the filter on its tab but its popover shut, so the chip on
     /// the response bar is what shows.
     pub fn select_filter_tab_for_shot(&mut self, cx: &mut Context<Self>) {

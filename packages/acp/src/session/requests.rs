@@ -90,6 +90,13 @@ pub(super) fn client_capabilities(presentation: ClientCapabilitiesView) -> Clien
     ClientCapabilities::new()
         .meta(meta)
         .auth(AuthCapabilities::new().terminal(true))
+        // Form only: a URL elicitation sends the person to a page this host
+        // has no way to present, so it stays unclaimed.
+        .elicitation(
+            presentation
+                .questions
+                .then(|| ElicitationCapabilities::new().form(ElicitationFormCapabilities::new())),
+        )
         .session(
             ClientSessionCapabilities::new()
                 .compaction(

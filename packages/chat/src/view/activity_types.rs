@@ -62,6 +62,8 @@ pub enum ActivityState {
     Idle,
     Working,
     AwaitingPermission,
+    /// The agent asked the person a question and waits on the answer.
+    AwaitingAnswer,
 }
 
 /// How a tool-group summary names each category: `Compact` is the icon and

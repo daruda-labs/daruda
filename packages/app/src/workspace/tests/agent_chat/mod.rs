@@ -7,6 +7,7 @@ mod composer;
 mod config;
 mod overage;
 mod panes;
+mod questions;
 mod restore;
 
 use daruda_store::project::PaneCwd;

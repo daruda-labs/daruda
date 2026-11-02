@@ -72,12 +72,13 @@ pub(super) async fn run_connection(
     mcp_servers: Vec<McpServer>,
     command_rx: UnboundedReceiver<Command>,
     event_tx: UnboundedSender<AcpEvent>,
-    permission_parks: PermissionParks,
+    parks: Parks,
 ) -> Result<(), AcpClientError> {
     let resume = resume.into();
     let notif_tx = event_tx.clone();
     let perm_event_tx = event_tx.clone();
     let next_permission_id = Arc::new(AtomicU64::new(0));
+    let questions_rendered = capabilities.questions;
     // Owns the session's mode state for the whole connection; see
     // `crate::mode_tracker` for why mode can't be forwarded as it arrives.
     let mode_tracker = ModeTracker::default();
@@ -160,7 +161,7 @@ pub(super) async fn run_connection(
         )
         .on_receive_request(
             {
-                let permission_parks = permission_parks.clone();
+                let permission_parks = parks.permissions.clone();
                 let next_permission_id = next_permission_id.clone();
                 let perm_event_tx = perm_event_tx.clone();
                 async move |request: RequestPermissionRequest, responder, connection| {
@@ -189,6 +190,44 @@ pub(super) async fn run_connection(
                     connection.spawn(async move {
                         let decision = decision_rx.await.unwrap_or(PermissionDecision::Cancelled);
                         responder.respond(decision.into_response())
+                    })
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let question_parks = parks.questions.clone();
+                let next_question_id = Arc::new(AtomicU64::new(0));
+                let question_event_tx = event_tx.clone();
+                async move |request: CreateElicitationRequest, responder, connection| {
+                    // A host that never claimed questions, or a form with a
+                    // field it has no control for, is answered at once: a
+                    // decline lets the agent ask another way, where a parked
+                    // request nobody renders would hold the turn open forever.
+                    let question = questions_rendered
+                        .then(|| crate::question::QuestionRequest::from_protocol(&request))
+                        .flatten();
+                    let Some(question) = question else {
+                        return responder
+                            .respond(crate::question::QuestionAnswer::Decline.into_response());
+                    };
+                    let id = next_question_id.fetch_add(1, Ordering::Relaxed);
+                    let (answer_tx, answer_rx) = oneshot::channel();
+                    question_parks
+                        .lock()
+                        .expect("question parks mutex poisoned")
+                        .insert(id, answer_tx);
+                    let _ =
+                        question_event_tx.unbounded_send(AcpEvent::QuestionAsked { id, question });
+                    // Parked off the dispatch task for the reason the
+                    // permission handler is; a dropped sender (host gone)
+                    // cancels.
+                    connection.spawn(async move {
+                        let answer = answer_rx
+                            .await
+                            .unwrap_or(crate::question::QuestionAnswer::Cancel);
+                        responder.respond(answer.into_response())
                     })
                 }
             },

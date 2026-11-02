@@ -56,13 +56,33 @@ impl Workspace {
         let Some(view) = self.agent_chat_view(pane_id).cloned() else {
             return PumpStep::Stop;
         };
-        // A mirror answers nothing; a replayed permission is cancelled on the
-        // spot so the adapter is never left waiting on it.
-        if view.read(cx).is_read_only()
-            && let daruda_acp::AcpEvent::PermissionRequested { id, .. } = &event
+        // A mirror answers nothing; a replayed permission or question is
+        // cancelled on the spot so the adapter is never left waiting on it.
+        if view.read(cx).is_read_only() {
+            match &event {
+                daruda_acp::AcpEvent::PermissionRequested { id, .. } => {
+                    if let Some(handle) = view.read(cx).any_handle() {
+                        handle.respond_permission(*id, daruda_acp::PermissionDecision::Cancelled);
+                    }
+                    return PumpStep::Continue;
+                }
+                daruda_acp::AcpEvent::QuestionAsked { id, .. } => {
+                    if let Some(handle) = view.read(cx).any_handle() {
+                        handle.respond_question(*id, daruda_acp::QuestionAnswer::Cancel);
+                    }
+                    return PumpStep::Continue;
+                }
+                _ => {}
+            }
+        }
+        // The form is shown at the desktop only. A turn nobody there started
+        // declines it, and the agent asks in its reply instead — which the
+        // phone relay and the orchestrator's notice already carry.
+        if let daruda_acp::AcpEvent::QuestionAsked { id, .. } = &event
+            && self.question_has_no_one_to_answer(pane_id, &view, cx)
         {
             if let Some(handle) = view.read(cx).any_handle() {
-                handle.respond_permission(*id, daruda_acp::PermissionDecision::Cancelled);
+                handle.respond_question(*id, daruda_acp::QuestionAnswer::Decline);
             }
             return PumpStep::Continue;
         }
@@ -190,6 +210,38 @@ impl Workspace {
             return PumpStep::Release;
         }
         PumpStep::Continue
+    }
+}
+
+impl Workspace {
+    /// Whether the turn a question arrived in was started away from the
+    /// desktop: relayed from the phone, or a task run the orchestrator or the
+    /// phone started. Those callers read the agent's reply, never this form.
+    fn question_has_no_one_to_answer(
+        &self,
+        pane_id: PaneId,
+        view: &gpui::Entity<daruda_chat::view::AgentChatView>,
+        cx: &gpui::App,
+    ) -> bool {
+        if view.read(cx).phone_owns_turn() {
+            return true;
+        }
+        let Some(exec) = crate::runs::RunsHost::pane_execution(self.run_pane(pane_id), cx) else {
+            return false;
+        };
+        cx.global::<crate::runs::GlobalTasks>()
+            .get(&exec.task_id)
+            .is_some_and(|task| {
+                task.current_exec() == Some(exec)
+                    && !task.lifecycle.is_terminal()
+                    && matches!(
+                        task.started_by,
+                        Some(
+                            daruda_store::tasks::StartedBy::Orchestrator
+                                | daruda_store::tasks::StartedBy::Phone
+                        )
+                    )
+            })
     }
 }
 

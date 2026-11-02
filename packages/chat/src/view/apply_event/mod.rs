@@ -129,6 +129,9 @@ impl AgentChatView {
                 self.pending_permissions.insert(id);
                 changes.phone_turn_action = PhoneTurnAction::Answer;
             }
+            AcpEvent::QuestionAsked { id, question } => {
+                self.ask_question(id, question);
+            }
             AcpEvent::TurnEnded { .. } | AcpEvent::TurnFailed(_)
                 if self.queue.turn.awaiting_cancel_ack() =>
             {

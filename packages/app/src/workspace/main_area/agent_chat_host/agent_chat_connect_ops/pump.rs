@@ -264,6 +264,7 @@ impl Workspace {
                         ClientCapabilitiesView {
                             notices: true,
                             compaction: true,
+                            questions: true,
                         },
                     )
                 })

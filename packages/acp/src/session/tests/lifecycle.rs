@@ -77,10 +77,10 @@ async fn start_session() -> Session {
         );
     let (commands, command_rx) = unbounded();
     let (event_tx, mut events) = unbounded();
-    let permission_parks = Arc::new(Mutex::new(HashMap::new()));
+    let parks = Parks::default();
     let handle = AcpSessionHandle {
         commands,
-        permission_parks: permission_parks.clone(),
+        parks: parks.clone(),
     };
     let task = smol::spawn(run_connection(
         ClientCapabilitiesView::default(),
@@ -92,7 +92,7 @@ async fn start_session() -> Session {
         Vec::new(),
         command_rx,
         event_tx,
-        permission_parks,
+        parks,
     ));
     loop {
         match within(events.next()).await.expect("connection event") {
