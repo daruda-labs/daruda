@@ -90,7 +90,7 @@ similar = { workspace = true }
 shell-words = { workspace = true }
 toml = { workspace = true }
 toml_edit = { workspace = true }
-usvg = { version = "0.45.0", default-features = false }
+usvg = { version = "0.49.0", default-features = false }
 unicode-segmentation = { workspace = true }
 url = { workspace = true }
 ureq = { workspace = true, default-features = false, features = ["rustls", "json"] }
@@ -117,14 +117,14 @@ notify = { workspace = true, default-features = false, features = ["macos_fseven
 # (XScreenSaverQueryInfo); `allow-unsafe-code` is required by x11rb's FFI shims.
 # Already in the dependency tree via gpui_platform -> gpui_linux's x11 feature,
 # so this only turns on one more extension — no new crate download.
-x11rb = { version = "0.13.1", features = ["screensaver", "allow-unsafe-code"] }
+x11rb = { version = "0.14.0", features = ["screensaver", "allow-unsafe-code"] }
 # No Linux-specific feature needed — notify's inotify backend is unconditional;
 # `macos_fsevent` is the only opt-in OS backend (default-enabled upstream,
 # hence disabling default-features + opting back in only on macOS above).
 notify = { workspace = true, default-features = false }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-tray-icon = { version = "0.21.3", default-features = false }
+tray-icon = { version = "0.26.1", default-features = false }
 raw-window-handle = { workspace = true }
 windows_api = { package = "windows", version = "0.62.2", features = ["Data_Xml_Dom", "UI_Notifications", "Foundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_System_WinRT", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_Storage_EnhancedStorage", "Win32_Storage_FileSystem", "Win32_UI_WindowsAndMessaging"] }
 uds_windows = "1.2.1"

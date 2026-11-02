@@ -488,7 +488,7 @@ impl SyntaxHighlighter {
                 continue;
             }
 
-            for cap in query_match.captures {
+            for cap in query_match.captures() {
                 let node = cap.node;
 
                 let Some(highlight_name) = query.capture_names().get(cap.index as usize) else {
@@ -572,7 +572,7 @@ impl SyntaxHighlighter {
 
         let mut last_end = start_offset;
         while let Some(m) = matches.next() {
-            for cap in m.captures {
+            for cap in m.captures() {
                 let cap_node = cap.node;
 
                 let node_range: Range<usize> =
@@ -614,7 +614,7 @@ impl SyntaxHighlighter {
         let mut language_name: Option<SharedString> = None;
         let mut content_node = None;
 
-        for capture in query_match.captures {
+        for capture in query_match.captures() {
             let index = Some(capture.index);
             if index == content_capture_index {
                 content_node = Some(capture.node);

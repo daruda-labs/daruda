@@ -43,7 +43,7 @@ use crate::preparation::process::output;
 /// Pinned Node.js version for the managed install. A single pinned version keeps
 /// the download URL and integrity check deterministic; bump it periodically to a
 /// current LTS. Matches the version zed pins so the URL is known-good.
-const MANAGED_NODE_VERSION: &str = "v24.11.0";
+const MANAGED_NODE_VERSION: &str = "v24.22.2";
 
 /// Minimum acceptable system Node.js version. Below this, a system install is
 /// treated as absent and the managed runtime is used instead — old Node.js

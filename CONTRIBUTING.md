@@ -33,7 +33,7 @@ daruda locally. For a short product overview and first run instructions, see
 | Linux | x86_64 `.deb` and portable tar.gz; CI builds, tests, and smoke-tests the window under Xvfb and sway; a real desktop is still unverified; requires the system libraries in `scripts/linux/build-deps.txt` (fontconfig, X11/XCB, xkbcommon, Wayland, GLib) and a Vulkan driver |
 | Windows | Experimental native MSVC build; GUI runtime still needs desktop verification |
 | Rust | 1.98.1 through rustup; `rust-toolchain.toml` pins local checks and CI |
-| Zig | 0.14.1; `./scripts/bootstrap-zig.sh` installs the pinned version on macOS and Linux, `bootstrap-zig.ps1` on Windows |
+| Zig | 0.17.0; `./scripts/bootstrap-zig.sh` installs the pinned version on macOS and Linux, `bootstrap-zig.ps1` on Windows |
 | Xcode | Required on macOS; Command Line Tools alone lack the `metal` shader compiler GPUI's build runs |
 | jq | Required by `scripts/build-app.sh` and the Rust floor reader |
 
@@ -81,17 +81,17 @@ On macOS and Linux, install the pinned Zig version:
 ./scripts/bootstrap-zig.sh
 ```
 
-Alternatively, install Zig 0.14.1 manually and either put `zig` on `PATH` or
+Alternatively, install Zig 0.17.0 manually and either put `zig` on `PATH` or
 export `ZIG` with the absolute path to the executable.
 
 For a Windows native build, install Git for Windows, Rust (MSVC toolchain),
 Visual Studio 2022 Build Tools with the C++ workload and Windows SDK, and
-Zig 0.14.1. These tools can be installed from PowerShell:
+Zig 0.17.0. These tools can be installed from PowerShell:
 
 ```powershell
 winget install --id Microsoft.VisualStudio.2022.BuildTools --exact --source winget --override "--wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
 winget install --id Rustlang.Rustup --exact --source winget
-winget install --id zig.zig --version 0.14.1 --exact --source winget
+winget install --id zig.zig --version 0.17.0 --exact --source winget
 ```
 
 Open a new PowerShell session so the updated PATH is available, then run:
@@ -545,10 +545,9 @@ After the configuration reaches main, inspect the first update job and PR to
 confirm indirect updates and unchanged Git revisions; `lockfile-only` does not
 promise the same complete refresh as `cargo update`.
 
-The merman alpha integration pins its `dugong` and `manatee` layout dependencies:
-their stable releases removed APIs the alpha renderer still calls. Keep these
-pins and bot exclusions until the stable renderer's theme and measurement API
-migration passes the rendered conformance suite and visual verification.
+Merman uses its typed SVG renderer and tracks its layout dependencies transitively.
+Upgrade its presentation, measurement, and output policies together, retaining
+rendered conformance and visual verification for both Markdown hosts.
 
 The Zed revision, generated GPUI tree, and retained patches are upgraded as one
 integration. Ghostty submodule updates require their terminal and FFI checks.
@@ -842,7 +841,7 @@ daruda/
 │   └── vt_dump/                # headless VT diagnostic CLI
 ├── vendor/                     # third-party sources, one directory per upstream
 │   ├── block/                  # patched block crate
-│   ├── ghostty/                # Ghostty v1.2.3 submodule
+│   ├── ghostty/                # Ghostty v1.4.0 submodule
 │   ├── zed/                    # patched GPUI; regenerate with tools/vendor_gpui
 │   ├── gpui-component/         # vendored gpui-component crates
 │   └── ferrum-flow/            # vendored node-graph canvas

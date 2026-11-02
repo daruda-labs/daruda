@@ -196,6 +196,166 @@ fn a_list_item_continuation_keeps_the_full_width(cx: &mut TestAppContext) {
     );
 }
 
+/// One markdown body as an agent-chat transcript row lays it out: a `list`
+/// row (measured at min-content height) centers a width-capped column, and
+/// the body is a direct child of a flex column, as under a fold header.
+struct ReadingRowProbe {
+    text: SharedString,
+    width: Pixels,
+    rows: gpui::ListState,
+}
+
+impl Render for ReadingRowProbe {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        let text = self.text.clone();
+        let width = self.width;
+        div().size_full().child(
+            gpui::list(self.rows.clone(), move |_ix, _window, _cx| {
+                div()
+                    .w_full()
+                    .flex()
+                    .justify_center()
+                    .child(
+                        div().w_full().min_w_0().max_w(width).child(
+                            div()
+                                .debug_selector(|| "markdown-probe".into())
+                                .w_full()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .child(super::markdown("probe", text.clone(), copy_tooltips())),
+                        ),
+                    )
+                    .into_any_element()
+            })
+            .size_full(),
+        )
+    }
+}
+
+/// One window whose reading column can be resized between reads, so a width
+/// sweep does not open a window per step.
+fn reading_row_window(
+    cx: &mut TestAppContext,
+    text: &SharedString,
+) -> (gpui::Entity<ReadingRowProbe>, VisualTestContext) {
+    let bounds = Bounds::new(point(px(0.), px(0.)), size(px(1400.), px(4000.)));
+    let opts = WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        ..Default::default()
+    };
+    let text = text.clone();
+    let window = cx
+        .update(|cx| {
+            cx.open_window(opts, |_window, cx| {
+                cx.new(|_cx| ReadingRowProbe {
+                    text,
+                    width: px(0.),
+                    rows: gpui::ListState::new(1, gpui::ListAlignment::Top, px(1000.)),
+                })
+            })
+        })
+        .expect("window opens");
+    let probe = window.root(cx).expect("probe root");
+    (probe, VisualTestContext::from_window(window.into(), cx))
+}
+
+fn reading_row_height(
+    probe: &gpui::Entity<ReadingRowProbe>,
+    vcx: &mut VisualTestContext,
+    width: Pixels,
+) -> Pixels {
+    vcx.update(|_, cx| {
+        probe.update(cx, |probe, cx| {
+            probe.width = width;
+            // The list caches the row's measured height; a new column width
+            // must re-measure it.
+            probe.rows.reset(1);
+            cx.notify();
+        })
+    });
+    vcx.run_until_parked();
+    vcx.update(|window, _| window.refresh());
+    vcx.run_until_parked();
+    vcx.debug_bounds("markdown-probe")
+        .expect("markdown probe painted")
+        .size
+        .height
+}
+
+/// A nested list sized while its row asked for a min-content width was laid
+/// out at zero width, wrapping one word per line: taffy turns that probe
+/// definite for a flex-column child with a `min-width`, and both the body (in
+/// its host's column) and the nested-list wrapper (in the item's column) had
+/// one. taffy reuses a cached size whenever its width equals the width later
+/// asked for, so where the column is exactly as wide as the content the tall
+/// height stuck, opening a gap under the parent bullet. The sweep crosses the
+/// wrap point, so the exact-fit width is probed whatever the font: a wider
+/// column never needs more height than the narrowest one.
+#[gpui::test]
+fn a_nested_item_that_exactly_fills_its_line_opens_no_gap(cx: &mut TestAppContext) {
+    init_gpui_component(cx);
+    let text: SharedString = "- **Rest**:\n  - Chapter six decisions: keep the guard in D4, then add D7 and D8 to the list.\n".into();
+
+    let (probe, mut vcx) = reading_row_window(cx, &text);
+    let narrowest = reading_row_height(&probe, &mut vcx, px(300.));
+    for w in 301..=1000 {
+        let height = reading_row_height(&probe, &mut vcx, px(w as f32));
+        assert!(
+            height <= narrowest,
+            "a {w}px column is taller than a 300px one: {height:?} > {narrowest:?}"
+        );
+    }
+}
+
+/// A full-width body placed directly in a flex row with a sibling: an
+/// unbreakable token must not hold the body at its min-content width and push
+/// the sibling past the row.
+struct FlexRowProbe;
+
+impl Render for FlexRowProbe {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .w(px(200.))
+            .flex()
+            .child(super::markdown(
+                "probe",
+                "Path: /a/very/long/unbreakable/path/segment/that/exceeds/the/row",
+                copy_tooltips(),
+            ))
+            .child(
+                div()
+                    .debug_selector(|| "row-tail".into())
+                    .flex_none()
+                    .w(px(20.))
+                    .h(px(10.)),
+            )
+    }
+}
+
+#[gpui::test]
+fn a_full_width_body_shrinks_inside_a_flex_row(cx: &mut TestAppContext) {
+    init_gpui_component(cx);
+    let bounds = Bounds::new(point(px(0.), px(0.)), size(px(800.), px(400.)));
+    let opts = WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        ..Default::default()
+    };
+    let window = cx
+        .update(|cx| cx.open_window(opts, |_window, cx| cx.new(|_cx| FlexRowProbe)))
+        .expect("window opens");
+    let mut vcx = VisualTestContext::from_window(window.into(), cx);
+    vcx.run_until_parked();
+    vcx.update(|window, _| window.refresh());
+    vcx.run_until_parked();
+
+    let tail = vcx.debug_bounds("row-tail").expect("tail painted");
+    assert!(
+        tail.right() <= px(200.),
+        "the body's min-content width pushed its sibling out of the row: {tail:?}"
+    );
+}
+
 /// The body size the reported defects were visible at. Any size works for the
 /// properties below; 13px happened to sit within a quarter pixel of the old
 /// absolute `rems(1.3)` line, which is why they went unnoticed at the default.

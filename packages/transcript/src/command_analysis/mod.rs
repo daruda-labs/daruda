@@ -100,7 +100,13 @@ fn parse(source: &str, language: Language) -> Option<Tree> {
     let mut parser = Parser::new();
     parser.set_language(&language).ok()?;
     let start = Instant::now();
-    let mut cancelled = |_: &tree_sitter::ParseState| start.elapsed() > PARSE_BUDGET;
+    let mut cancelled = |_: &tree_sitter::ParseState| {
+        if start.elapsed() > PARSE_BUDGET {
+            std::ops::ControlFlow::Break(())
+        } else {
+            std::ops::ControlFlow::Continue(())
+        }
+    };
     let tree = parser.parse_with_options(
         &mut |offset, _| &source.as_bytes()[offset..],
         None,

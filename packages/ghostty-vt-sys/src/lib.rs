@@ -4,8 +4,8 @@ pub struct ghostty_vt_bytes_t {
     pub len: usize,
 }
 
-pub const PINNED_GHOSTTY_TAG: &str = "v1.2.3";
-pub const PINNED_ZIG_VERSION: &str = "0.14.1";
+pub const PINNED_GHOSTTY_TAG: &str = "v1.4.0";
+pub const PINNED_ZIG_VERSION: &str = "0.17.0";
 
 unsafe extern "C" {
     pub fn ghostty_vt_terminal_new(

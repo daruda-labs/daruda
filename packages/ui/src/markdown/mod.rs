@@ -10,8 +10,8 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, App, ElementId, Hsla, IntoElement, Pixels, RenderOnce, SharedString, Styled as _,
-    Window, relative,
+    AnyElement, App, ElementId, Hsla, IntoElement, ParentElement as _, Pixels, RenderOnce,
+    SharedString, Styled as _, Window, div, relative,
 };
 use gpui_component::ActiveTheme as _;
 use gpui_component::text::{TextView, TextViewStyle};
@@ -230,7 +230,19 @@ impl RenderOnce for Markdown {
                 cx,
             )
         });
-        view
+        if !self.full_width {
+            return view.into_any_element();
+        }
+        // WORKAROUND: taffy 0.15.1 lays a flex-column child with a `min-width`
+        // out at that width under a min-content probe and reuses the height at
+        // an exact-fit width (`patches/README.md`, nested list gap) - GPUI pins
+        // taffy, so the block wrapper keeps `min_w_0` off the caller's column.
+        // Clipping x still zeroes its automatic minimum width in a flex row.
+        div()
+            .w_full()
+            .overflow_x_hidden()
+            .child(view)
+            .into_any_element()
     }
 }
 

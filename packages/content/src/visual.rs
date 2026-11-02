@@ -127,7 +127,7 @@ pub fn render_mermaid_raster(source: &str, palette: &crate::MermaidPalette) -> O
 /// Split out so anything inspecting the diagram (tests, the label geometry pass)
 /// sees exactly what ships.
 pub(super) fn render_mermaid_svg(source: &str, palette: &crate::MermaidPalette) -> Option<String> {
-    use super::mermaid_host_theme::{mermaid_render_profile, mermaid_svg_render_options};
+    use super::mermaid_host_theme::mermaid_render_profile;
 
     // Fix up classDef/style/rect declarations merman-render would otherwise
     // leave contrast-unsafe (a light author-declared fill under daruda's
@@ -140,15 +140,7 @@ pub(super) fn render_mermaid_svg(source: &str, palette: &crate::MermaidPalette) 
         // Unconditional: the profile decides the diagram's colours, but it also
         // carries the settings resvg needs to paint any label at all.
         let profile = mermaid_render_profile(source, palette);
-        merman::render::HeadlessRenderer::new()
-            .with_svg_options(mermaid_svg_render_options())
-            // Layout has to reserve the width this app's own text stack paints,
-            // not what merman's Trebuchet MS table estimates for Hangul.
-            .with_text_measurer(super::mermaid_text_measurer::host_text_measurer())
-            .with_host_theme(&profile)
-            .render_svg_sync(source)
-            .ok()
-            .flatten()
+        profile.render(source).ok().flatten()
     }))
     .ok()
     .flatten()

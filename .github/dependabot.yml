@@ -16,10 +16,6 @@ updates:
     ignore:
       - dependency-name: "gpui*"
       - dependency-name: sum_tree
-      # The alpha renderer's API migration includes its layout engines.
-      - dependency-name: "merman*"
-      - dependency-name: dugong
-      - dependency-name: manatee
     groups:
       acp:
         patterns:

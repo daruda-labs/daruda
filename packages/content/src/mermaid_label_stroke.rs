@@ -159,18 +159,14 @@ mod tests {
 
     /// The real production case: a state diagram whose `classDef` also sets
     /// `stroke:` on a highlighted node renders its label with no stroke
-    /// once this pass runs.
+    /// once this pass runs. Current merman no longer leaks the stroke here,
+    /// so this only guards the shipped output; the synthetic fixtures above
+    /// carry the reproduction.
     #[test]
     fn real_state_diagram_classdef_stroke_no_longer_bleeds_into_the_label() {
         let source = "stateDiagram-v2\n  [*] --> Idle\n  Idle --> Running\n  Running --> [*]\n  class Running highlighted\n  classDef highlighted fill:#d4f8d4,stroke:#2d8a2d,stroke-width:2px\n";
         let palette = crate::test_palette();
         let svg = crate::visual::render_mermaid_svg(source, &palette).expect("svg");
-
-        let before = resvg::usvg::Tree::from_str(&svg, &options()).expect("parses");
-        assert!(
-            first_span_stroke(&before).is_some(),
-            "expected the real diagram to reproduce the bug before the fix"
-        );
 
         let fixed = suppress_label_text_stroke(&svg);
         let after = resvg::usvg::Tree::from_str(&fixed, &options()).expect("parses");

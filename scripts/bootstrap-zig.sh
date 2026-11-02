@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="${ROOT_DIR}/.context/zig"
-VERSION="0.14.1"
+VERSION="0.17.0"
 
 mkdir -p "${OUT_DIR}"
 
@@ -39,16 +39,16 @@ esac
 # From https://ziglang.org/download/index.json for ${VERSION}.
 case "${zig_arch}-${zig_os}" in
   x86_64-macos)
-    expected_sha="b0f8bdfb9035783db58dd6c19d7dea89892acc3814421853e5752fe4573e5f43"
+    expected_sha="4f9a1c5269aa17ebda5e6d3c2b89d6cbf36f7d2b22a0306e9ab98f25f95529c6"
     ;;
   aarch64-macos)
-    expected_sha="39f3dc5e79c22088ce878edc821dedb4ca5a1cd9f5ef915e9b3cc3053e8faefa"
+    expected_sha="b607e9b9234790a008116ae5bdb71c6243b84b9fb42a53a9e70fde41c06c536a"
     ;;
   x86_64-linux)
-    expected_sha="24aeeec8af16c381934a6cd7d95c807a8cb2cf7df9fa40d359aa884195c4716c"
+    expected_sha="1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026"
     ;;
   aarch64-linux)
-    expected_sha="f7a654acc967864f7a050ddacfaa778c7504a0eca8d2b678839c21eea47c992b"
+    expected_sha="9e8d11661d4ae3bd57702a3832781e23ad151dde5798e16a5ccd503f65234ff8"
     ;;
   *)
     # Unreachable while the two cases above cover both normalized values —

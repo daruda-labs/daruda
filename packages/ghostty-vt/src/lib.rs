@@ -194,7 +194,7 @@ pub fn encode_key_named(
     Some(out)
 }
 
-/// Default scrollback row limit — matches ghostty's built-in default.
+/// Default scrollback row limit. Zero disables Ghostty's scrollback.
 pub const DEFAULT_MAX_SCROLLBACK: usize = 10_000;
 
 impl Terminal {

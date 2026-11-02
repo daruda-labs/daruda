@@ -1,38 +1,50 @@
 //! The diagram pipeline end to end: merman layout → host theme → SVG → resvg
 //! raster.
 
-/// Width of the first `<rect>` in a rendered single-node flowchart — the
-/// node box the renderer sized from its text estimate.
-fn first_node_rect_width(source: &str) -> f64 {
-    let svg = merman::render::HeadlessRenderer::new()
-        .render_svg_resvg_safe_sync(source)
-        .expect("merman should render")
-        .expect("diagram should be detected");
+/// Area reserved for the first node, including wrapped label lines.
+fn first_node_rect_area(source: &str) -> f64 {
+    let request = merman::SvgRequest {
+        pipeline: Some(merman::svg::SvgPipeline::resvg_safe()),
+        ..Default::default()
+    };
+    let engine = merman::Engine::new().with_site_config(merman::MermaidConfig::from_value(
+        serde_json::json!({"htmlLabels": false}),
+    ));
+    let output = merman::Renderer::new()
+        .with_engine(engine)
+        .render(merman::RenderRequest::svg(
+            source,
+            merman::OperationControl::default(),
+            request,
+        ))
+        .expect("merman should render");
+    let merman::RenderOutput::Svg(Some(output)) = output else {
+        panic!("diagram should be detected")
+    };
+    let svg = output.svg();
     let rect = svg
         .find("<rect")
         .expect("flowchart should emit a node rect");
-    let attr = svg[rect..]
-        .find("width=\"")
-        .expect("rect should have width")
-        + rect
-        + 7;
-    let end = svg[attr..].find('"').expect("unterminated width") + attr;
-    svg[attr..end].parse().expect("numeric width")
+    let rect = &svg[rect..svg[rect..].find('>').unwrap() + rect];
+    let dimension = |name: &str| -> f64 {
+        let start = rect.find(&format!("{name}=\"")).expect("node dimension") + name.len() + 2;
+        let end = rect[start..].find('"').expect("dimension end") + start;
+        rect[start..end].parse().expect("numeric dimension")
+    };
+    dimension("width") * dimension("height")
 }
 
-/// East Asian Wide glyphs advance closer to a full em than Latin glyphs, so a
-/// Hangul label must measure meaningfully wider than a same-length Latin one
-/// — a renderer that regresses to a flat per-character ratio silently clips
-/// CJK labels (the previous vendored renderer needed a local patch for
-/// exactly this).
+/// Wide glyphs require more space even when the renderer caps node width
+/// and wraps the longer label onto extra lines.
 #[test]
-fn mermaid_renderer_sizes_east_asian_labels_wider_than_latin() {
-    let hangul = first_node_rect_width("flowchart TD\n  A[가나다라마바]\n");
-    let latin = first_node_rect_width("flowchart TD\n  A[abcdef]\n");
+fn mermaid_renderer_reserves_more_space_for_east_asian_labels() {
+    let hangul = first_node_rect_area(
+        "flowchart TD\n  A[가나다라마바가나다라마바가나다라마바가나다라마바]\n",
+    );
+    let latin = first_node_rect_area("flowchart TD\n  A[abcdefabcdefabcdefabcdef]\n");
     assert!(
         hangul > latin,
-        "6 Hangul glyphs must measure wider than 6 Latin ones \
-         (hangul={hangul}, latin={latin}) — East Asian width handling is broken"
+        "wide glyphs must reserve more space (hangul={hangul}, latin={latin})"
     );
 }
 

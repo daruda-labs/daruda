@@ -281,9 +281,22 @@ fn run(
     let refresh_kind = ProcessRefreshKind::nothing()
         .with_exe(UpdateKind::OnlyIfNotSet)
         .with_cmd(UpdateKind::OnlyIfNotSet);
-    let system = RefCell::new(System::new_with_specifics(
-        RefreshKind::nothing().with_processes(refresh_kind),
-    ));
+    let system =
+        match System::new_with_specifics(RefreshKind::nothing().with_processes(refresh_kind)) {
+            Ok(system) => RefCell::new(system),
+            Err(error) => {
+                daruda_store::observability::log_writer::LogWriter::log(
+                    daruda_store::observability::error_report::ErrorReport::new(
+                        "Cannot initialize PTY process tracking",
+                    )
+                    .at(file!(), line!())
+                    .with_context("error", error.to_string())
+                    .dedup("pty_tracker.initialize")
+                    .build(),
+                );
+                return;
+            }
+        };
 
     // Resolve once up front in case sessions already exist; panes
     // register shortly after spawn and poke again.

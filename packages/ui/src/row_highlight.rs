@@ -218,7 +218,7 @@ fn highlight_lines(
     }
 
     let mut highlighter = Highlighter::new();
-    let Ok(events) = highlighter.highlight(config, src.as_bytes(), None, |_| None) else {
+    let Ok(events) = highlighter.highlight(config, src.as_bytes(), None, None, |_| None) else {
         return out;
     };
 

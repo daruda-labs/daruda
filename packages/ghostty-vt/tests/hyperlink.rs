@@ -52,3 +52,29 @@ fn url_ids_trim_trailing_blanks_like_text() {
     assert_ne!(ids[0], 0, "the link must land on 'a'");
     assert_eq!(ids[1], 0, "'b' is outside the link");
 }
+
+/// Clearing a small scrollback must retain cursor-owned style and link data
+/// even when the page containing their original IDs is pruned.
+#[test]
+fn clearing_pruned_scrollback_preserves_cursor_hyperlink_and_style() {
+    let mut terminal = Terminal::with_scrollback(10, 3, 0).unwrap();
+    for _ in 0..128 {
+        terminal.feed(b"\x1b[0m\x1b]8;;\x07").unwrap();
+        for _ in 0..32 {
+            terminal.feed(b"abcdefghij\r\n").unwrap();
+        }
+        terminal
+            .feed(b"\x1b[H\x1b[1m\x1b]8;;https://example.com\x07\x1b[22Jy")
+            .unwrap();
+        assert_eq!(
+            terminal.hyperlink_at(1, 1).as_deref(),
+            Some("https://example.com")
+        );
+        let styles = terminal.dump_viewport_row_cell_styles(0).unwrap();
+        assert_ne!(
+            styles[0].flags & 0x02,
+            0,
+            "cursor remains bold after clearing"
+        );
+    }
+}

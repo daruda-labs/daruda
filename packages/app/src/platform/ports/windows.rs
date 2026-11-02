@@ -32,7 +32,7 @@ pub(super) fn scan() -> io::Result<Vec<super::ListeningPort>> {
     let mut pids: Vec<_> = listeners.iter().map(|row| Pid::from_u32(row.pid)).collect();
     pids.sort_unstable();
     pids.dedup();
-    let mut system = System::new();
+    let mut system = System::new().map_err(io::Error::other)?;
     system.refresh_processes_specifics(
         ProcessesToUpdate::Some(&pids),
         true,

@@ -214,6 +214,12 @@ Three groups of changes captured in a single diff:
 
 ---
 
+## Taffy patch release
+
+`gpui-taffy-patch-release.patch` advances GPUI's generated workspace from
+Taffy 0.15.0 to 0.15.1 while retaining the pinned Zed revision. Regenerate
+through `tools/vendor_gpui`; do not edit the generated manifest directly.
+
 ## `vendor/gpui-component/gpui_component/Cargo.toml` - shared command grammars
 
 The Bash and Python grammars match the app's command-analysis dependencies:
@@ -556,6 +562,47 @@ in both appearances.
 
 ---
 
+## `vendor/gpui-component/gpui_component/src/text/node.rs` — vendored, **nested list gap**
+
+Applied in place, on the same terms as the sections above. Both workarounds
+remain with Taffy 0.15.1. Remove them together only after the rendered regression
+test passes without either delta.
+
+### Why
+
+When a flex container is sized under a min-content cross size, taffy's
+`determine_flex_base_size` replaces each child's `MinContent` cross space with
+`Definite(min-width)` whenever the child has a cross-axis minimum. In a flex
+column, a `min_w_0()` child is therefore laid out at zero width, wrapping its
+prose one word, or one CJK glyph, per line.
+
+taffy's cache then reuses a size whenever the requested known width equals a
+cached width. The inflated height is cached with the content's natural width.
+If the final column is exactly as wide as that content, the zero-width height
+becomes the element's height. In a list item, the lead line's `flex_1` absorbs
+the surplus, leaving a screen-tall gap between a parent bullet and its nested
+list. Agent chat reaches this path: a `list` row centers a width-capped column,
+and the reply is a direct child of a fold row's flex column.
+
+### What diverges
+
+| Delta | Where |
+|---|---|
+| The indented wrapper for a list item's nested list, continuation prose, or block child has no `min_w_0()`. The item's column stretch already caps the width, so unbreakable tokens, code blocks, tables, and deeper lists keep the same geometry. | `text/node.rs` |
+| `daruda_ui::markdown` wraps a full-width `TextView` in a block `div().w_full().overflow_x_hidden()`, so a caller's flex column never sees the view's `min_w_0()`. Clipping x keeps a zero automatic minimum width in a flex row without adding a cross-axis minimum. | `packages/ui/src/markdown/mod.rs` (`// WORKAROUND:`) |
+
+### Re-vendor procedure
+
+Do not re-add a cross-axis minimum to that wrapper. In
+`packages/ui/src/markdown/tests.rs`,
+`a_nested_item_that_exactly_fills_its_line_opens_no_gap` sweeps a reading-row
+column across the nested line's wrap point and fails if any wider column is
+taller than the narrowest one. Dropping either delta fails it. After a taffy
+upgrade, remove both deltas and re-run the test; drop the workarounds only if
+it still passes.
+
+---
+
 ## `vendor/gpui-component/gpui_component/` — vendored, **a raw mouse listener names its button**
 
 Applied in place across six files, on the same terms as the sections above.
@@ -757,6 +804,9 @@ scroll container), `a_long_menu_stays_above_its_chip_in_a_short_window`,
 
 The widget and flow versions remain unchanged when updating GPUI. Preserve
 these API adaptations when re-vendoring:
+
+- The workspace uses tree-sitter 0.27. `gpui_component` accesses query captures
+  through `QueryMatch::captures()` rather than the removed public field.
 
 - `gpui_component`: explicit `flex_grow(1.)` / `flex_shrink(1.)`,
   `Modifiers::secondary(cx)`, `AnyView::into_any_element`, and

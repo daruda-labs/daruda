@@ -3,3 +3,4 @@ decd2399b180b64dea2a4182f9ac63545a45e7a3
 gpui-notify-lost-wakeup.patch
 gpui-held-key-keeps-modality.patch
 gpui-text-wrap-cache.patch
+gpui-taffy-patch-release.patch

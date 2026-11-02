@@ -8,27 +8,24 @@ and agent chat. The host resolves visual tokens; this package processes content.
 `merman` is a normal crates.io dependency (MIT/Apache-2.0), validated against
 upstream Mermaid.js SVG baselines. It has no daruda-side vendor patch.
 
-The alpha integration exact-pins merman, dugong, and manatee. Stable layout
-releases removed APIs used by the alpha renderer, and stable merman replaces
-the host-theme and text-measurement APIs. Upgrade this family in one migration,
-including conformance tests and PNG inspection; remove the temporary direct
-layout dependencies and Dependabot exclusions when that migration passes.
+Merman uses the stable typed SVG API. Layout dependencies remain transitive;
+do not pin dugong or manatee independently. Upgrades include conformance tests
+and PNG inspection of labels, authored colors, and host colors.
 
-- Host theming uses renderer-level site config, not a document directive.
+- Host theming uses resolved presentation defaults, not a document directive.
   `mermaid_host_theme` builds a profile from `MermaidPalette`; the UI resolves
   those palette values in `daruda_ui::mermaid_palette`.
-- `visual::render_mermaid_svg` applies the profile through `with_host_theme`.
+- `visual::render_mermaid_svg` applies the profile through a resolved `Presentation`.
 - A source declaring `theme`, `themeVariables`, or `themeCSS` in an
   `%%{init}%%` directive or leading YAML frontmatter's `config:` opts out of
-  host colors via `source_declares_own_theme`. Merman's site config overrides
-  document config wholesale, rather than merging per field.
+  host colors via `source_declares_own_theme`; rasterizer policy still applies.
 - Sources tuning only layout or behavior retain host colors.
 - The opt-out is color-only. Always apply `mermaid_render_profile`, including
   `htmlLabels: false` and the `ResvgSafe` pipeline. Resvg cannot paint
   `<foreignObject>` labels; omitting the profile leaves every label blank.
 - Both `file_view_pane::file_content` and `daruda_chat::reconcile` use
   `visual::render_mermaid_raster`, which reaches
-  `merman::render::HeadlessRenderer::render_svg_sync`.
+  `merman::Renderer::render` with a typed `SvgRequest`.
 
 ## Shared Markdown Behavior
 

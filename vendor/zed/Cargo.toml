@@ -240,7 +240,7 @@ rev = "decd2399b180b64dea2a4182f9ac63545a45e7a3"
 
 [workspace.dependencies.taffy]
 default-features = false
-version = "=0.15.0"
+version = "=0.15.1"
 
 [workspace.dependencies.usvg]
 default-features = false

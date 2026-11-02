@@ -1216,16 +1216,15 @@ impl Node {
                             // for blocks that were previously dropped, so a
                             // fenced code block inside a list item now renders.
                             //
-                            // `min_w_0` overrides the flex default `min-width:
-                            // auto` so the wrapper shrinks to the list's width
-                            // instead of laying its child out at intrinsic
-                            // max-content width and overflowing / clipping at
-                            // wider panes (the same width-dependent class the
-                            // lead-paragraph and table-cell patches fix).
+                            // No `min_w_0`: the item is a column, so width is its
+                            // cross axis and the stretch already caps it. A cross
+                            // minimum makes taffy turn a min-content probe into a
+                            // zero-width one, and that height can be reused for the
+                            // real width (`patches/README.md`, nested list gap).
                             ListItemChildLayout::NestedList
                             | ListItemChildLayout::ContinuationParagraph
                             | ListItemChildLayout::Block => {
-                                items.push(v_flex().ml(rems(1.)).min_w_0().children(blocks));
+                                items.push(v_flex().ml(rems(1.)).children(blocks));
                             }
                         }
                         start = end;

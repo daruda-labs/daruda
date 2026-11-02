@@ -11,15 +11,68 @@
 
 use crate::MermaidPalette;
 
-/// The merman profile a diagram renders under: daruda's colours unless the
-/// source declares its own theme, plus the rasterizer settings either way.
-///
-/// Applied unconditionally — skipping the profile to honour an author's theme
-/// also drops [`resvg_compatible_profile`], which blanks every label.
+/// Host colors and the SVG output contract are independent so authored themes
+/// can opt out of colors while retaining labels compatible with resvg.
+pub(super) struct MermaidRenderProfile {
+    pub(super) theme: Option<merman::svg::HostTheme>,
+    pub(super) output: merman::svg::SvgOutputPolicy,
+    pub(super) site_config: serde_json::Value,
+}
+
+impl MermaidRenderProfile {
+    pub(super) fn render(
+        &self,
+        source: &str,
+    ) -> Result<Option<String>, merman::render::RenderError> {
+        use merman::svg::{
+            MeasurementProfileId, Presentation, SvgEnvironment, TextMeasurementPolicy,
+            TextMeasurementProfile, TextMeasurementProfileIdentity,
+        };
+        use merman::{
+            Engine, MermaidConfig, OperationControl, RenderOutput, RenderRequest, Renderer,
+            SvgRequest,
+        };
+        let mut presentation = Presentation::new();
+        if let Some(theme) = &self.theme {
+            presentation = presentation.with_theme(theme.clone());
+        }
+        let presentation = presentation.resolve();
+        let engine = presentation.materialize_engine(
+            Engine::new().with_site_config(MermaidConfig::from_value(self.site_config.clone())),
+        );
+        let identity = TextMeasurementProfileIdentity::new(
+            MeasurementProfileId::new("daruda-hangul").expect("static measurement profile id"),
+            "1",
+        )
+        .expect("static measurement profile version");
+        let measurement = TextMeasurementPolicy::uniform(TextMeasurementProfile::new(
+            identity,
+            super::mermaid_text_measurer::host_text_measurer(),
+        ));
+        let request = SvgRequest {
+            environment: SvgEnvironment::deterministic().with_text_measurement_policy(measurement),
+            options: mermaid_svg_render_options(),
+            pipeline: Some(self.output.pipeline()),
+            presentation: presentation.render_policy(),
+            ..SvgRequest::default()
+        };
+        match Renderer::new()
+            .with_engine(engine)
+            .render(RenderRequest::svg(
+                source,
+                OperationControl::default(),
+                request,
+            ))? {
+            RenderOutput::Svg(output) => Ok(output.map(|output| output.svg().to_owned())),
+            _ => Ok(None),
+        }
+    }
+}
+
 pub(super) fn mermaid_render_profile(
     source: &str,
     palette: &MermaidPalette,
-) -> merman::render::HostThemeProfile {
+) -> MermaidRenderProfile {
     if source_declares_own_theme(source) {
         mermaid_author_theme_profile()
     } else {
@@ -27,117 +80,79 @@ pub(super) fn mermaid_render_profile(
     }
 }
 
-/// The settings resvg compatibility demands of every diagram, whatever its
-/// colours.
-///
-/// `htmlLabels` off because resvg has no `<foreignObject>` support — HTML
-/// labels rasterize as boxes and arrows with no text, and SVG text is also what
-/// lets a `classDef color:` reach the glyphs. It must be the root flag;
-/// flowchart labels ignore the deprecated `flowchart.htmlLabels`. `ResvgSafe`
-/// is the fallback if a source turns `htmlLabels` back on itself.
-fn resvg_compatible_profile() -> merman::render::HostThemeProfileBuilder {
-    merman::render::HostThemeProfile::builder()
-        .site_config("htmlLabels", false)
-        .output(resvg_compatible_output())
-}
-
-/// The output half of [`resvg_compatible_profile`], separate so the host-themed
-/// profile extends it rather than restating the pipeline from its own preset.
-fn resvg_compatible_output() -> merman::render::HostThemeOutput {
-    merman::render::HostThemeOutput {
-        pipeline: merman::render::HostThemePipelinePreset::ResvgSafe,
-        ..merman::render::HostThemeOutput::default()
+fn mermaid_author_theme_profile() -> MermaidRenderProfile {
+    MermaidRenderProfile {
+        theme: None,
+        output: merman::svg::SvgOutputPolicy {
+            preset: merman::svg::SvgPipelinePreset::ResvgSafe,
+            ..Default::default()
+        },
+        site_config: serde_json::json!({"htmlLabels": false}),
     }
 }
 
-/// Profile for a source that picked its own colours: rasterizer settings only.
-///
-/// Every field merman's `compile` reads for its `has_profile_theme_input` gate
-/// stays default, so the compiled site config carries no `theme` / `darkMode`
-/// to override the author's with. `css_override_policy` stays `Preserve` —
-/// stripping `!important` exists to let host CSS win, and there is none here.
-fn mermaid_author_theme_profile() -> merman::render::HostThemeProfile {
-    resvg_compatible_profile().build()
-}
-
-/// Build the merman host-theme profile matching daruda's active appearance
-/// (`palette`), so every diagram type — not just flowchart nodes — picks up
-/// daruda's actual surface/text/border/note/actor colors instead of leaving
-/// diagram-specific elements (sequence notes/actors, pie background, ...) on
-/// mermaid's own hardcoded light defaults. The root background is force-
-/// patched to `transparent` regardless of which diagram renderer produced
-/// the SVG — the rewrite is what stops the hardcoded-white leak many diagram
-/// types don't route through `themeVariables`, and transparency (rather than
-/// an opaque `canvas` fill) lets the host surface show through, matching the
-/// translucent-tint design language of agent-chat cards. Node/label fills
-/// stay opaque (`MermaidPalette` flattens them against `canvas`) so text
-/// keeps a solid backing.
-pub(super) fn mermaid_host_theme_profile(
-    palette: &MermaidPalette,
-) -> merman::render::HostThemeProfile {
-    resvg_compatible_profile()
-        .appearance(if palette.dark {
-            merman::render::HostThemeAppearance::Dark
-        } else {
-            merman::render::HostThemeAppearance::Light
-        })
-        .roles(merman::render::HostThemeRoles {
-            canvas: Some(palette.background.clone()),
-            surface: Some(palette.primary_color.clone()),
-            surface_alt: Some(palette.secondary_color.clone()),
-            surface_muted: Some(palette.surface_muted.clone()),
-            text: Some(palette.primary_text_color.clone()),
-            subtle_text: Some(palette.line_color.clone()),
-            border: Some(palette.primary_border_color.clone()),
-            line: Some(palette.line_color.clone()),
-            edge_label_background: Some(palette.background.clone()),
-            cluster_background: Some(palette.cluster_background.clone()),
-            cluster_border: Some(palette.primary_border_color.clone()),
-            note_background: Some(palette.note_background.clone()),
-            note_border: Some(palette.warning.clone()),
-            note_text: Some(palette.note_text.clone()),
-            actor_background: Some(palette.primary_color.clone()),
-            actor_border: Some(palette.primary_border_color.clone()),
-            actor_text: Some(palette.primary_text_color.clone()),
-            activation_background: Some(palette.activation_background.clone()),
-            activation_border: Some(palette.primary_border_color.clone()),
-            error: Some(palette.error.clone()),
-            warning: Some(palette.warning.clone()),
-            success: Some(palette.success.clone()),
-        })
-        // Mindmap/timeline sections, pie slices, and git-graph branches don't
-        // read from `roles` at all — they cycle a categorical `series_palette`
-        // (`cScaleN`/`git{N}`/`pie{N}`). Left empty, merman's "base" theme
-        // auto-derives those from `surface`, compounding into more
-        // near-black boxes on top of the ones `roles` already covers. daruda
-        // has no categorical palette of its own, so borrow merman's — tuned
-        // by its own authors for the same "editor preview on a dark/light
-        // host" case this is.
-        .series_palette(if palette.dark {
+pub(super) fn mermaid_host_theme_profile(palette: &MermaidPalette) -> MermaidRenderProfile {
+    use merman::svg::{HostTheme, HostThemeAppearance, ThemeRole};
+    let mut theme = HostTheme::new().with_appearance(if palette.dark {
+        HostThemeAppearance::Dark
+    } else {
+        HostThemeAppearance::Light
+    });
+    for (role, color) in [
+        (ThemeRole::Canvas, &palette.background),
+        (ThemeRole::Surface, &palette.primary_color),
+        (ThemeRole::SurfaceAlt, &palette.secondary_color),
+        (ThemeRole::SurfaceMuted, &palette.surface_muted),
+        (ThemeRole::Text, &palette.primary_text_color),
+        (ThemeRole::SubtleText, &palette.line_color),
+        (ThemeRole::Border, &palette.primary_border_color),
+        (ThemeRole::Line, &palette.line_color),
+        (ThemeRole::EdgeLabelBackground, &palette.background),
+        (ThemeRole::ClusterBackground, &palette.cluster_background),
+        (ThemeRole::ClusterBorder, &palette.primary_border_color),
+        (ThemeRole::NoteBackground, &palette.note_background),
+        (ThemeRole::NoteBorder, &palette.warning),
+        (ThemeRole::NoteText, &palette.note_text),
+        (ThemeRole::ActorBackground, &palette.primary_color),
+        (ThemeRole::ActorBorder, &palette.primary_border_color),
+        (ThemeRole::ActorText, &palette.primary_text_color),
+        (
+            ThemeRole::ActivationBackground,
+            &palette.activation_background,
+        ),
+        (ThemeRole::ActivationBorder, &palette.primary_border_color),
+        (ThemeRole::Error, &palette.error),
+        (ThemeRole::Warning, &palette.warning),
+        (ThemeRole::Success, &palette.success),
+    ] {
+        theme = theme
+            .try_with_role(role, color.clone())
+            .expect("host palette contains CSS colors");
+    }
+    theme = theme
+        .try_with_series_palette(if palette.dark {
             MERMAID_SERIES_PALETTE_DARK
         } else {
             MERMAID_SERIES_PALETTE_LIGHT
         })
-        // `Color(transparent)` rewrites per-diagram hardcoded backgrounds by
-        // clearing them (usvg parses the non-standard root `background-color`;
-        // `transparent` yields an alpha-0 fill). `None` would skip the
-        // postprocessor and let hardcoded whites through. Stripping
-        // `!important` is what lets the scoped host CSS win.
-        .output(merman::render::HostThemeOutput {
-            root_background: merman::render::HostThemeRootBackground::Color(
-                MERMAID_ROOT_BACKGROUND.to_owned(),
-            ),
-            css_override_policy: merman::render::CssOverridePolicy::StripExistingImportant,
+        .expect("static series palette contains CSS colors");
+    MermaidRenderProfile {
+        theme: Some(theme),
+        output: merman::svg::SvgOutputPolicy {
+            preset: merman::svg::SvgPipelinePreset::ResvgSafe,
+            root_background_color: Some(MERMAID_ROOT_BACKGROUND.to_owned()),
+            css_override_policy: merman::svg::CssOverridePolicy::StripExistingImportant,
             scoped_css: Some(mermaid_host_scoped_css(palette)),
-            ..resvg_compatible_output()
-        })
-        .build()
+            ..Default::default()
+        },
+        site_config: serde_json::json!({"htmlLabels": false}),
+    }
 }
 
-pub(super) fn mermaid_svg_render_options() -> merman::render::SvgRenderOptions {
-    merman::render::SvgRenderOptions {
+pub(super) fn mermaid_svg_render_options() -> merman::svg::SvgRenderOptions {
+    merman::svg::SvgRenderOptions {
         viewbox_padding: MERMAID_VIEWBOX_PADDING,
-        ..merman::render::SvgRenderOptions::default()
+        ..merman::svg::SvgRenderOptions::default()
     }
 }
 

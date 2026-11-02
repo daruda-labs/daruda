@@ -75,9 +75,7 @@ futures = "0.3.34"
 hex = "0.4"
 humantime = "2"
 image = { version = "0.25", default-features = false }
-# WORKAROUND: GPUI's async-tar -> xattr 0.2.3 uses Linux ENOATTR, removed in
-# libc 0.2.190. Keep this pin until the upstream dependency is upgraded.
-libc = "=0.2.189"
+libc = "0.2.191"
 log = "0.4"
 lsp-types = { version = "0.97.0", features = ["proposed"] }
 notify = { version = "8.2.0", default-features = false }
@@ -102,13 +100,13 @@ similar = "3"
 smallvec = { version = "1.15", features = ["const_new"] }
 smol = "2"
 syn = "2"
-sysinfo = "0.39"
+sysinfo = "0.40.1"
 tempfile = "3"
 thiserror = "2"
 toml = "1"
 toml_edit = "0.25"
 tracing = "0.1.41"
-tree-sitter = "0.25.4"
+tree-sitter = "0.27.1"
 tree-sitter-bash = "0.25.1"
 tree-sitter-python = "0.25.0"
 tree-sitter-yaml = "0.7.1"

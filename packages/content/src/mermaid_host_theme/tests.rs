@@ -24,13 +24,22 @@ fn test_palette() -> MermaidPalette {
 fn mermaid_host_theme_profile_matches_appearance_and_palette() {
     let palette = test_palette();
     let dark = mermaid_host_theme_profile(&palette);
-    assert_eq!(dark.appearance, merman::render::HostThemeAppearance::Dark);
     assert_eq!(
-        dark.roles.canvas.as_deref(),
+        dark.theme.as_ref().unwrap().appearance(),
+        Some(merman::svg::HostThemeAppearance::Dark)
+    );
+    assert_eq!(
+        dark.theme
+            .as_ref()
+            .unwrap()
+            .role(merman::svg::ThemeRole::Canvas),
         Some(palette.background.as_str())
     );
     assert_eq!(
-        dark.roles.text.as_deref(),
+        dark.theme
+            .as_ref()
+            .unwrap()
+            .role(merman::svg::ThemeRole::Text),
         Some(palette.primary_text_color.as_str())
     );
 
@@ -38,8 +47,8 @@ fn mermaid_host_theme_profile_matches_appearance_and_palette() {
     light.dark = false;
     let light_profile = mermaid_host_theme_profile(&light);
     assert_eq!(
-        light_profile.appearance,
-        merman::render::HostThemeAppearance::Light
+        light_profile.theme.as_ref().unwrap().appearance(),
+        Some(merman::svg::HostThemeAppearance::Light)
     );
 }
 
@@ -53,12 +62,22 @@ fn mermaid_host_theme_profile_matches_appearance_and_palette() {
 fn mermaid_host_theme_profile_always_sets_a_series_palette() {
     assert!(
         !mermaid_host_theme_profile(&test_palette())
-            .series_palette
+            .theme
+            .as_ref()
+            .unwrap()
+            .series_palette()
             .is_empty()
     );
     let mut light = test_palette();
     light.dark = false;
-    assert!(!mermaid_host_theme_profile(&light).series_palette.is_empty());
+    assert!(
+        !mermaid_host_theme_profile(&light)
+            .theme
+            .as_ref()
+            .unwrap()
+            .series_palette()
+            .is_empty()
+    );
 }
 
 /// Regression guard: the root background must be patched to
@@ -70,8 +89,8 @@ fn mermaid_host_theme_profile_patches_root_background_transparent() {
     assert_eq!(
         mermaid_host_theme_profile(&test_palette())
             .output
-            .root_background,
-        merman::render::HostThemeRootBackground::Color("transparent".to_owned())
+            .root_background_color,
+        Some("transparent".to_owned())
     );
 }
 
@@ -79,7 +98,7 @@ fn mermaid_host_theme_profile_patches_root_background_transparent() {
 fn mermaid_svg_render_options_reserve_extra_edge_padding() {
     let opts = mermaid_svg_render_options();
     assert_eq!(opts.viewbox_padding, MERMAID_VIEWBOX_PADDING);
-    assert!(opts.viewbox_padding > merman::render::SvgRenderOptions::default().viewbox_padding);
+    assert!(opts.viewbox_padding > merman::svg::SvgRenderOptions::default().viewbox_padding);
 }
 
 #[test]
@@ -152,14 +171,13 @@ fn rendered_mermaid_svg_uses_host_scoped_css_for_lines_text_and_titles() {
             "#merman .classDiagramTitleText",
         ),
     ] {
-        let svg = merman::render::HeadlessRenderer::new()
-            .with_svg_options(mermaid_svg_render_options())
-            .with_host_theme(&profile)
-            .render_svg_sync(source)
+        let svg = profile
+            .render(source)
             .expect("merman should render")
             .expect("diagram should be detected");
         assert!(
-            svg.contains(expected),
+            svg.replace("; }", ";}")
+                .contains(&expected.replace("; }", ";}")),
             "{name} scoped override missing {expected:?} from SVG: {svg}"
         );
         assert!(
@@ -173,10 +191,7 @@ fn rendered_mermaid_svg_uses_host_scoped_css_for_lines_text_and_titles() {
 fn rendered_gantt_svg_overrides_hardcoded_black_axis_labels() {
     let palette = test_palette();
     let profile = mermaid_host_theme_profile(&palette);
-    let svg = merman::render::HeadlessRenderer::new()
-        .with_svg_options(mermaid_svg_render_options())
-        .with_host_theme(&profile)
-        .render_svg_sync(
+    let svg = profile.render(
             "gantt\n  title 데이터 보관 정책 검증\n  dateFormat YYYY-MM-DD\n  axisFormat %m/%d\n  section Hot\n  Redis TTL 상태 :active, r1, 2026-07-31, 2d\n",
         )
         .expect("merman should render")
@@ -200,10 +215,8 @@ fn rendered_gantt_svg_overrides_hardcoded_black_axis_labels() {
 fn rendered_flowchart_preserves_classdef_label_colors() {
     let palette = test_palette();
     let profile = mermaid_host_theme_profile(&palette);
-    let svg = merman::render::HeadlessRenderer::new()
-        .with_svg_options(mermaid_svg_render_options())
-        .with_host_theme(&profile)
-        .render_svg_sync(
+    let svg = profile
+        .render(
             r##"flowchart TB
   subgraph API["API Gateway"]
 A1["Ingress<br/>rate limit"]
@@ -250,7 +263,8 @@ S3[("Object Store<br/>parquet")]
         ".store tspan{fill:#3d2c00;}",
     ] {
         assert!(
-            svg.contains(expected),
+            svg.replace("; }", ";}")
+                .contains(&expected.replace("; }", ";}")),
             "classDef text color rule missing {expected:?}: {svg}"
         );
     }
@@ -262,10 +276,8 @@ fn rendered_light_mermaid_svg_keeps_host_text_color_for_readability() {
     palette.dark = false;
     palette.primary_text_color = "#fafafa".to_owned();
     let profile = mermaid_host_theme_profile(&palette);
-    let svg = merman::render::HeadlessRenderer::new()
-        .with_svg_options(mermaid_svg_render_options())
-        .with_host_theme(&profile)
-        .render_svg_sync(
+    let svg = profile
+        .render(
             "sequenceDiagram\n  participant Agent\n  participant API\n  Agent->>API: heartbeat\n",
         )
         .expect("merman should render")
@@ -341,8 +353,8 @@ fn every_profile_carries_the_rasterizer_settings() {
             "htmlLabels must stay off for: {source}"
         );
         assert_eq!(
-            profile.output.pipeline,
-            merman::render::HostThemePipelinePreset::ResvgSafe,
+            profile.output.preset,
+            merman::svg::SvgPipelinePreset::ResvgSafe,
             "resvg-safe pipeline must stay on for: {source}"
         );
     }
@@ -354,22 +366,9 @@ fn author_theme_profile_keeps_rasterizer_settings_and_no_colours() {
         "%%{init: {'theme': 'neutral'}}%%\ngraph TD\nA-->B",
         &test_palette(),
     );
-    // Every input merman's `has_profile_theme_input` gate reads has to stay
-    // empty, or `compile()` injects `theme: base` over the author's own.
-    assert_eq!(
-        profile.appearance,
-        merman::render::HostThemeAppearance::Light
-    );
-    assert_eq!(profile.roles, merman::render::HostThemeRoles::default());
-    assert!(profile.series_palette.is_empty());
-    assert!(profile.theme_variables.is_empty());
-    assert!(profile.font_family.is_none());
-    assert!(profile.font_size.is_none());
+    assert!(profile.theme.is_none());
     assert!(profile.output.scoped_css.is_none());
-    assert_eq!(
-        profile.output.root_background,
-        merman::render::HostThemeRootBackground::None
-    );
+    assert!(profile.output.root_background_color.is_none());
 }
 
 /// Frontmatter is the spelling mermaid recommends over `%%{init}%%`, and

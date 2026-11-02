@@ -1,30 +1,13 @@
 //! Text measurement merman uses for mermaid layout, corrected for Hangul.
 //!
-//! merman's vendored metrics reproduce Trebuchet MS almost exactly (within
-//! 0.01px for Latin), but Trebuchet MS has no Hangul, so the table falls back to
-//! an estimate — roughly 0.86em per syllable — while the rasterizer resolves a
-//! real Korean face and advances a full em. Layout therefore reserves ~14% too
-//! little width for Korean text: a state node's label runs past its box, and an
-//! edge label's band comes out narrower than its glyphs.
-//!
-//! This measurer delegates every measurement to merman's own, then adds the
-//! difference for the Hangul syllables in the string. The per-syllable numbers
-//! are both *measured*, not assumed:
-//!
-//! - what merman thinks a syllable advances — asked of the delegate itself,
-//! - what it really advances — probed once through the same usvg text stack that
-//!   rasterizes, because Korean faces are not all full-width (Apple SD Gothic
-//!   Neo advances ~0.82em where Arial Unicode MS advances 1.0em).
-//!
-//! So the correction is zero for text without Hangul, and collapses to zero on
-//! its own if merman ever ships real Hangul metrics.
+//! The deterministic measurer supplies wrapping and Unicode widths. Match its
+//! Hangul advance to the font selected by the same usvg stack that paints the
+//! output. When both already agree, the correction is zero.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use merman::render::{
-    TextMeasurer, TextMetrics, TextStyle, VendoredFontMetricsTextMeasurer, WrapMode,
-};
+use merman::svg::{DeterministicTextMeasurer, TextMeasurer, TextMetrics, TextStyle, WrapMode};
 
 /// Hangul Syllables. The Jamo blocks are left alone: merman already advances
 /// those a full em, matching the rasterizer.
@@ -43,9 +26,20 @@ pub(super) fn host_text_measurer() -> std::sync::Arc<dyn TextMeasurer + Send + S
     std::sync::Arc::new(HangulCorrectedMeasurer::default())
 }
 
-#[derive(Default)]
 struct HangulCorrectedMeasurer {
-    delegate: VendoredFontMetricsTextMeasurer,
+    delegate: DeterministicTextMeasurer,
+    /// Painted syllable advance in em. Injectable so tests can exercise the
+    /// correction on hosts whose fonts already agree with the delegate.
+    painted_em: fn(&TextStyle) -> Option<f64>,
+}
+
+impl Default for HangulCorrectedMeasurer {
+    fn default() -> Self {
+        Self {
+            delegate: DeterministicTextMeasurer::default(),
+            painted_em: painted_syllable_advance_em,
+        }
+    }
 }
 
 impl HangulCorrectedMeasurer {
@@ -59,7 +53,7 @@ impl HangulCorrectedMeasurer {
         if syllables == 0 {
             return 0.0;
         }
-        let Some(painted_em) = painted_syllable_advance_em(style) else {
+        let Some(painted_em) = (self.painted_em)(style) else {
             return 0.0;
         };
         let assumed = self.assumed_syllable_advance_px(style);
@@ -122,21 +116,6 @@ impl TextMeasurer for HangulCorrectedMeasurer {
         self.scaled(
             self.delegate
                 .measure_wrapped(text, style, max_width, wrap_mode),
-            text,
-            style,
-        )
-    }
-
-    fn measure_wrapped_raw(
-        &self,
-        text: &str,
-        style: &TextStyle,
-        max_width: Option<f64>,
-        wrap_mode: WrapMode,
-    ) -> TextMetrics {
-        self.scaled(
-            self.delegate
-                .measure_wrapped_raw(text, style, max_width, wrap_mode),
             text,
             style,
         )
@@ -214,6 +193,59 @@ impl TextMeasurer for HangulCorrectedMeasurer {
         self.delegate
             .measure_svg_simple_text_bbox_height_px(text, style)
     }
+
+    // The delegate overrides the operations below with its own geometry; the
+    // trait defaults would route them through a different DOM shape. The
+    // streaming `begin_*` probes stay `None` so every line reaches these
+    // corrected complete measurements.
+
+    fn measure_svg_preserved_raw_text_bbox_width_px(&self, text: &str, style: &TextStyle) -> f64 {
+        self.delegate
+            .measure_svg_preserved_raw_text_bbox_width_px(text, style)
+            + self.hangul_deficit_px(text, style)
+    }
+
+    fn measure_svg_preserved_tspan_text_bbox_width_px(&self, text: &str, style: &TextStyle) -> f64 {
+        self.delegate
+            .measure_svg_preserved_tspan_text_bbox_width_px(text, style)
+            + self.hangul_deficit_px(text, style)
+    }
+
+    fn measure_canvas_text_width_px(&self, text: &str, style: &TextStyle) -> f64 {
+        self.delegate.measure_canvas_text_width_px(text, style)
+            + self.hangul_deficit_px(text, style)
+    }
+
+    fn measure_html_line_width_px(&self, text: &str, style: &TextStyle) -> f64 {
+        self.delegate.measure_html_line_width_px(text, style) + self.hangul_deficit_px(text, style)
+    }
+
+    fn measure_mermaid_calculate_text_dimensions(
+        &self,
+        text: &str,
+        style: &TextStyle,
+    ) -> TextMetrics {
+        self.corrected(
+            self.delegate
+                .measure_mermaid_calculate_text_dimensions(text, style),
+            text,
+            style,
+        )
+    }
+
+    fn measure_html_line_height_px(&self, text: &str, style: &TextStyle) -> f64 {
+        self.delegate.measure_html_line_height_px(text, style)
+    }
+
+    fn measure_svg_raw_text_bbox_height_px(&self, text: &str, style: &TextStyle) -> f64 {
+        self.delegate
+            .measure_svg_raw_text_bbox_height_px(text, style)
+    }
+
+    fn measure_svg_tspan_text_bbox_height_px(&self, text: &str, style: &TextStyle) -> f64 {
+        self.delegate
+            .measure_svg_tspan_text_bbox_height_px(text, style)
+    }
 }
 
 /// Advance of one Hangul syllable, in em, as the rasterizer's font stack paints
@@ -286,10 +318,19 @@ mod tests {
         }
     }
 
+    /// A rasterizer that paints syllables wider than the delegate assumes, so
+    /// the correction is exercised even where the host fonts already agree.
+    fn widened() -> HangulCorrectedMeasurer {
+        HangulCorrectedMeasurer {
+            painted_em: |_| Some(1.25),
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn latin_text_is_measured_exactly_as_merman_would() {
         let corrected = HangulCorrectedMeasurer::default();
-        let plain = VendoredFontMetricsTextMeasurer::default();
+        let plain = DeterministicTextMeasurer::default();
         for text in ["schedule tick", "payload received", "Ingest pipeline", ""] {
             assert_eq!(
                 corrected.measure(text, &style()).width,
@@ -310,7 +351,7 @@ mod tests {
     #[test]
     fn han_and_kana_are_not_touched_because_merman_already_agrees() {
         let corrected = HangulCorrectedMeasurer::default();
-        let plain = VendoredFontMetricsTextMeasurer::default();
+        let plain = DeterministicTextMeasurer::default();
         for text in ["漢字", "ひらがな", "カタカナ", "。！"] {
             assert_eq!(
                 corrected.measure(text, &style()).width,
@@ -328,7 +369,7 @@ mod tests {
     #[test]
     fn the_correction_matches_what_the_rasterizer_advances() {
         let corrected = HangulCorrectedMeasurer::default();
-        let plain = VendoredFontMetricsTextMeasurer::default();
+        let plain = DeterministicTextMeasurer::default();
         let label = "스케줄틱발생";
         let family = style().font_family.unwrap_or_default();
         let before = plain.measure(label, &style()).width;
@@ -337,11 +378,7 @@ mod tests {
         let twice = probe_ink_width(&label.repeat(2), &family).expect("probe lays out");
         let advanced = f64::from(twice - once) / PROBE_FONT_SIZE * style().font_size;
 
-        assert!(
-            before < advanced,
-            "fixture must reproduce the overflow: merman reserved {before}px \
-             where the rasterizer advances {advanced}px"
-        );
+        assert!(before.is_finite() && before > 0.0);
         // Shaping is linear in size, so what is left is float rounding between
         // merman's table and usvg's — one percent is generous.
         let off = (after - advanced).abs();
@@ -356,8 +393,8 @@ mod tests {
     /// is the same number of syllables either way.
     #[test]
     fn spaces_are_left_to_merman() {
-        let corrected = HangulCorrectedMeasurer::default();
-        let plain = VendoredFontMetricsTextMeasurer::default();
+        let corrected = widened();
+        let plain = DeterministicTextMeasurer::default();
         let spaced = "스케줄 틱 발생";
         let tight = "스케줄틱발생";
 
@@ -379,8 +416,8 @@ mod tests {
     /// line, so it holds regardless of how the correction is computed.
     #[test]
     fn a_wrapped_label_is_not_widened_by_the_syllables_on_its_other_lines() {
-        let corrected = HangulCorrectedMeasurer::default();
-        let plain = VendoredFontMetricsTextMeasurer::default();
+        let corrected = widened();
+        let plain = DeterministicTextMeasurer::default();
         let text = "백그라운드 수집기가 큐를 폴링하여 스키마를 검증하고 저장합니다";
         let narrow = Some(100.0);
         let wrapped = plain.measure_wrapped(text, &style(), narrow, WrapMode::SvgLike);
@@ -411,7 +448,7 @@ mod tests {
 
     #[test]
     fn a_wrapped_label_is_never_wider_than_the_same_label_unwrapped() {
-        let corrected = HangulCorrectedMeasurer::default();
+        let corrected = widened();
         let text = "데이터 보관 정책 검증 진행 중";
         let wrapped = corrected
             .measure_wrapped(text, &style(), Some(100.0), WrapMode::SvgLike)
@@ -427,10 +464,10 @@ mod tests {
 
     #[test]
     fn the_correction_scales_with_the_number_of_syllables() {
-        let corrected = HangulCorrectedMeasurer::default();
+        let corrected = widened();
         let one = corrected.hangul_deficit_px("가", &style());
         let four = corrected.hangul_deficit_px("가가가가", &style());
-        assert!(one > 0.0, "expected merman to under-measure a syllable");
+        assert!(one > 0.0, "the fixture must be corrected at all");
         assert!(
             (four - 4.0 * one).abs() < 0.01,
             "deficit must be additive ({one} per syllable, but four gave {four})"
@@ -439,7 +476,7 @@ mod tests {
 
     #[test]
     fn jamo_are_left_alone() {
-        let corrected = HangulCorrectedMeasurer::default();
+        let corrected = widened();
         assert_eq!(corrected.hangul_deficit_px("ㄱㄴㄷ", &style()), 0.0);
     }
 
@@ -454,11 +491,90 @@ mod tests {
 
     #[test]
     fn height_is_never_corrected() {
-        let corrected = HangulCorrectedMeasurer::default();
-        let plain = VendoredFontMetricsTextMeasurer::default();
+        let corrected = widened();
+        let plain = DeterministicTextMeasurer::default();
         assert_eq!(
             corrected.measure("스케줄", &style()).height,
             plain.measure("스케줄", &style()).height
         );
+    }
+
+    /// One measurement operation, applied to either measurer.
+    type Probe = fn(&dyn TextMeasurer, &str, &TextStyle) -> f64;
+
+    /// Every operation the delegate specializes must reach it: a trait default
+    /// would measure Latin text through a different DOM shape.
+    #[test]
+    fn latin_text_matches_the_delegate_on_every_specialized_operation() {
+        let corrected = widened();
+        let plain = DeterministicTextMeasurer::default();
+        let s = style();
+        let text = "Ingest  pipeline\ttick";
+        let widths: [(&str, Probe); 9] = [
+            ("preserved raw", |m, t, s| {
+                m.measure_svg_preserved_raw_text_bbox_width_px(t, s)
+            }),
+            ("preserved tspan", |m, t, s| {
+                m.measure_svg_preserved_tspan_text_bbox_width_px(t, s)
+            }),
+            ("canvas", |m, t, s| m.measure_canvas_text_width_px(t, s)),
+            ("html line width", |m, t, s| {
+                m.measure_html_line_width_px(t, s)
+            }),
+            ("html line height", |m, t, s| {
+                m.measure_html_line_height_px(t, s)
+            }),
+            ("raw height", |m, t, s| {
+                m.measure_svg_raw_text_bbox_height_px(t, s)
+            }),
+            ("tspan height", |m, t, s| {
+                m.measure_svg_tspan_text_bbox_height_px(t, s)
+            }),
+            ("calculate width", |m, t, s| {
+                m.measure_mermaid_calculate_text_dimensions(t, s).width
+            }),
+            ("calculate height", |m, t, s| {
+                m.measure_mermaid_calculate_text_dimensions(t, s).height
+            }),
+        ];
+        for (name, measure) in widths {
+            assert_eq!(
+                measure(&corrected, text, &s),
+                measure(&plain, text, &s),
+                "{name} must match the delegate"
+            );
+        }
+    }
+
+    #[test]
+    fn hangul_is_widened_on_every_single_line_width_operation() {
+        let corrected = widened();
+        let plain = DeterministicTextMeasurer::default();
+        let s = style();
+        let text = "스케줄틱";
+        let deficit = corrected.hangul_deficit_px(text, &s);
+        assert!(deficit > 0.0, "the fixture must be corrected at all");
+        let widths: [(&str, Probe); 5] = [
+            ("preserved raw", |m, t, s| {
+                m.measure_svg_preserved_raw_text_bbox_width_px(t, s)
+            }),
+            ("preserved tspan", |m, t, s| {
+                m.measure_svg_preserved_tspan_text_bbox_width_px(t, s)
+            }),
+            ("canvas", |m, t, s| m.measure_canvas_text_width_px(t, s)),
+            ("html line width", |m, t, s| {
+                m.measure_html_line_width_px(t, s)
+            }),
+            ("calculate width", |m, t, s| {
+                m.measure_mermaid_calculate_text_dimensions(t, s).width
+            }),
+        ];
+        for (name, measure) in widths {
+            let added = measure(&corrected, text, &s) - measure(&plain, text, &s);
+            assert!(
+                (added - deficit).abs() < 0.01,
+                "{name} added {added}px, expected {deficit}px"
+            );
+        }
     }
 }

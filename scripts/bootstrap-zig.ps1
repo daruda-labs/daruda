@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path $PSScriptRoot -Parent
-$version = '0.14.1'
+$version = '0.17.0'
 $destination = Join-Path $repoRoot ".context/zig/$version"
 $executable = Join-Path $destination 'zig.exe'
 
@@ -15,8 +15,8 @@ if (Test-Path -LiteralPath $executable) {
 
 # Archive checksums from https://ziglang.org/download/index.json.
 $archive = switch ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture) {
-    'X64' { @{ Arch = 'x86_64'; Sha256 = '554f5378228923ffd558eac35e21af020c73789d87afeabf4bfd16f2e6feed2c' } }
-    'Arm64' { @{ Arch = 'aarch64'; Sha256 = 'b5aac0ccc40dd91e8311b1f257717d8e3903b5fefb8f659de6d65a840ad1d0e7' } }
+    'X64' { @{ Arch = 'x86_64'; Sha256 = 'b5663f69581dcf391293fbf16c06cb80d81d806545ce618b4d0bab7f0eb8c428' } }
+    'Arm64' { @{ Arch = 'aarch64'; Sha256 = '0a59d91fa1cb40cf068e9b0954434ce973500c7a2ea749f1e01af62cdab52d26' } }
     default { throw 'This installer supports Windows x86_64 and ARM64. Install Zig manually on other architectures.' }
 }
 

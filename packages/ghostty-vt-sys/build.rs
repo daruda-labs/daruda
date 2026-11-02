@@ -2,9 +2,8 @@ use std::path::PathBuf;
 use std::process::Command;
 
 mod build_target;
-mod darwin_archive;
 
-const ZIG_VERSION: &str = "0.14.1";
+const ZIG_VERSION: &str = "0.17.0";
 
 fn main() {
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
@@ -16,14 +15,17 @@ fn main() {
     let ghostty_dir = workspace_root.join("vendor/ghostty");
     println!("cargo:rerun-if-env-changed=ZIG");
     println!("cargo:rerun-if-env-changed=PATH");
+    println!("cargo:rerun-if-env-changed=MACOSX_DEPLOYMENT_TARGET");
     println!(
         "cargo:rerun-if-changed={}",
         ghostty_dir.join("src").display()
     );
-    println!(
-        "cargo:rerun-if-changed={}",
-        ghostty_dir.join("build.zig.zon").display()
-    );
+    for input in ["build.zig", "build.zig.zon", "pkg"] {
+        println!(
+            "cargo:rerun-if-changed={}",
+            ghostty_dir.join(input).display()
+        );
+    }
     println!(
         "cargo:rerun-if-changed={}",
         manifest_dir.join("include/ghostty_vt.h").display()
@@ -76,48 +78,30 @@ fn main() {
     let arch = std::env::var("CARGO_CFG_TARGET_ARCH").expect("target architecture");
     let os = std::env::var("CARGO_CFG_TARGET_OS").expect("target OS");
     let abi = std::env::var("CARGO_CFG_TARGET_ENV").expect("target ABI");
-    let target = build_target::zig_target(&arch, &os, &abi).unwrap_or_else(|e| panic!("{e}"));
+    let macos_deployment_target = std::env::var("MACOSX_DEPLOYMENT_TARGET").ok();
+    let target = build_target::zig_target(&arch, &os, &abi, macos_deployment_target.as_deref())
+        .unwrap_or_else(|e| panic!("{e}"));
 
     let mut cmd = Command::new(&zig);
     cmd.current_dir(manifest_dir.join("zig"))
         .arg("build")
         .arg("-Doptimize=ReleaseFast")
         .arg(format!("-Dtarget={target}"))
-        .arg(format!(
-            "-Dghostty-source={}",
-            ghostty_dir.join("src").display()
-        ))
         .arg("--cache-dir")
         .arg(out_dir.join("zig-cache"))
+        // Zig otherwise fetches dependencies into `zig/zig-pkg` beside
+        // build.zig.zon, a source-tree path shared by concurrent builds.
+        .arg("--pkg-dir")
+        .arg(out_dir.join("zig-pkg"))
         .arg("--prefix")
         .arg(&prefix);
-
-    // Force Zig to use its bundled libSystem.tbd instead of the Xcode SDK on
-    // macOS. Zig 0.14.1's LLD cannot parse macOS 26 (Xcode 26.4) SDK stubs:
-    // the SDK declares `arm64e-macos` targets while LLD only matches
-    // `aarch64-macos`, surfacing as undefined `_abort` / `_malloc` symbols.
-    // ghostty_vt is a pure VT parser with no direct macOS API calls, so the
-    // bundled libSystem suffices. Remove once ghostty supports Zig 0.16+
-    // (tracking: https://codeberg.org/ziglang/zig/issues/31658,
-    // https://github.com/ghostty-org/ghostty/issues/12228).
-    // The Unicode generators link on the host even when cross-compiling.
-    if cfg!(target_os = "macos") {
-        cmd.env("DEVELOPER_DIR", "/dev/null");
-    }
 
     let status = cmd.status().expect("failed to invoke zig");
     if !status.success() {
         panic!("zig build failed");
     }
 
-    let mut lib_dir = prefix.join("lib");
-    if cfg!(target_os = "macos") && os == "macos" {
-        // WORKAROUND: Zig 0.14.1 does not align Mach-O archive members to 8 bytes.
-        // Ghostty pins this toolchain; use Apple's archiver until Zig can be upgraded.
-        let native_dir = prefix.join("darwin-lib");
-        darwin_archive::repack(&lib_dir.join("libghostty_vt.a"), &native_dir);
-        lib_dir = native_dir;
-    }
+    let lib_dir = prefix.join("lib");
 
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     println!("cargo:rustc-link-lib=static=ghostty_vt");

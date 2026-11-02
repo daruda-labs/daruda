@@ -1,0 +1,11 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -240,7 +240,7 @@
+ 
+ [workspace.dependencies.taffy]
+ default-features = false
+-version = "=0.15.0"
++version = "=0.15.1"
+ 
+ [workspace.dependencies.usvg]
+ default-features = false

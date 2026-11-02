@@ -44,21 +44,21 @@ runs:
       uses: actions/cache@v5
       with:
         path: .context/zig
-        key: zig-0.14.1-${{ runner.os }}-${{ runner.arch }}
+        key: zig-0.17.0-${{ runner.os }}-${{ runner.arch }}
 
-    - name: Install Zig 0.14.1
+    - name: Install Zig 0.17.0
       if: runner.os != 'Windows'
       shell: bash
       run: |
         ./scripts/bootstrap-zig.sh
-        echo "$GITHUB_WORKSPACE/.context/zig/0.14.1" >> "$GITHUB_PATH"
+        echo "$GITHUB_WORKSPACE/.context/zig/0.17.0" >> "$GITHUB_PATH"
 
-    - name: Install Zig 0.14.1
+    - name: Install Zig 0.17.0
       if: runner.os == 'Windows'
       shell: pwsh
       run: |
         ./scripts/bootstrap-zig.ps1
-        Add-Content $env:GITHUB_PATH "$env:GITHUB_WORKSPACE\.context\zig\0.14.1"
+        Add-Content $env:GITHUB_PATH "$env:GITHUB_WORKSPACE\.context\zig\0.17.0"
 
     - name: Fetch locked dependencies and verify GPUI source
       shell: bash
