@@ -134,7 +134,8 @@ pub enum LifecycleKind {
 }
 
 impl LifecycleKind {
-    /// A run has ended; only `Reopened` or `Deleted` leave these.
+    /// A run has ended. `Reopened` and `Deleted` leave these, and `Continued`
+    /// leaves `Done` and a chosen `Interrupted` for a new run of the same task.
     pub fn is_terminal(self) -> bool {
         matches!(
             self,

@@ -117,6 +117,22 @@ impl AgentChatView {
         self.send_prompt_text_inner(text, PromptOrigin::InApp, None, EditSource::External, cx)
     }
 
+    /// Submit a prompt the orchestrator sent. Queued and sent like a person's,
+    /// but never taken as a person continuing an ended task run.
+    pub fn send_orchestrator_prompt_text(
+        &mut self,
+        text: String,
+        cx: &mut Context<Self>,
+    ) -> PromptDispatch {
+        self.send_prompt_text_inner(
+            text,
+            PromptOrigin::Orchestrator,
+            None,
+            EditSource::External,
+            cx,
+        )
+    }
+
     /// Send a literal host notice only if it can reach the wire now. It never
     /// queues, so it cannot pass parked or queued user prompts. `NotNow` and
     /// `ReadOnly` leave the composer edit, the queue and the phone watch
@@ -307,25 +323,43 @@ impl AgentChatView {
             self.fail_prompt_handoff(task, cx);
             return false;
         }
-        self.report_sent(task, cx);
+        self.report_sent(task, origin, &text, cx);
         self.start_dispatched_turn();
         self.echo_attached_prompt(text, &attachments, cx);
         self.arm_phone_turn_if(origin);
         true
     }
 
-    /// Tell the host a task's prompt was just handed to the live session.
-    /// Called right after the handle send on both dispatch paths.
-    fn report_sent(&self, task: Option<ExecutionRef>, cx: &mut Context<Self>) {
-        if let Some(task) = task {
-            self.emit_task_event(
-                AgentChatEvent::PromptSent {
-                    task,
-                    session_id: self.session_id.clone(),
-                },
-                cx,
-            );
-        }
+    /// Tell the host what was just handed to the live session: a task's
+    /// prompt, or a person's. Called right after the handle send on both
+    /// dispatch paths.
+    fn report_sent(
+        &self,
+        task: Option<ExecutionRef>,
+        origin: PromptOrigin,
+        text: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let session_id = self.session_id.clone();
+        let started_by = match origin {
+            PromptOrigin::InApp => daruda_store::tasks::StartedBy::Desktop,
+            PromptOrigin::Telegram => daruda_store::tasks::StartedBy::Phone,
+            PromptOrigin::Orchestrator | PromptOrigin::Internal => {
+                if let Some(task) = task {
+                    self.emit_task_event(AgentChatEvent::PromptSent { task, session_id }, cx);
+                }
+                return;
+            }
+        };
+        let event = match task {
+            Some(task) => AgentChatEvent::PromptSent { task, session_id },
+            None => AgentChatEvent::PersonPromptSent {
+                started_by,
+                prompt: text.to_owned(),
+                session_id,
+            },
+        };
+        self.emit_task_event(event, cx);
     }
 
     /// Tell the host which task prompts were discarded unsent. Silent when
@@ -586,7 +620,7 @@ impl AgentChatView {
             return;
         }
         self.activate_queued_prompt(&drained, cx);
-        self.report_sent(drained.task, cx);
+        self.report_sent(drained.task, drained.origin, &drained.text, cx);
         cx.notify();
     }
 

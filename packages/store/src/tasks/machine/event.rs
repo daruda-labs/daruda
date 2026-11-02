@@ -155,6 +155,16 @@ pub enum TaskEvent {
         exec: ExecutionRef,
         at: DateTime<Utc>,
     },
+    /// A person continued the conversation of the run that just ended: a new
+    /// run of the same task, in the same lane and session, whose prompt is
+    /// what they said.
+    Continued {
+        prior: ExecutionRef,
+        execution_id: String,
+        started_by: StartedBy,
+        prompt: String,
+        at: DateTime<Utc>,
+    },
     /// `run_in` is computed by the host, e.g. the lane the last run created.
     Reopened {
         id: TaskId,
@@ -249,6 +259,7 @@ pub enum EventKind {
     CancelRequested,
     LaneLost,
     Reconciled,
+    Continued,
     Reopened,
 }
 
@@ -279,6 +290,7 @@ impl TaskEvent {
             Self::CancelRequested { .. } => EventKind::CancelRequested,
             Self::LaneLost { .. } => EventKind::LaneLost,
             Self::Reconciled { .. } => EventKind::Reconciled,
+            Self::Continued { .. } => EventKind::Continued,
             Self::Reopened { .. } => EventKind::Reopened,
         }
     }
@@ -300,6 +312,8 @@ impl TaskEvent {
             | Self::CancelRequested { exec, .. }
             | Self::LaneLost { exec, .. }
             | Self::Reconciled { exec, .. } => Some(exec),
+            // The run it continues: only the current one may be continued.
+            Self::Continued { prior, .. } => Some(prior),
             Self::Imported { .. }
             | Self::Created { .. }
             | Self::Edited { .. }
@@ -342,6 +356,7 @@ impl TaskEvent {
             | Self::CancelRequested { exec, .. }
             | Self::LaneLost { exec, .. }
             | Self::Reconciled { exec, .. } => Some(&exec.task_id),
+            Self::Continued { prior, .. } => Some(&prior.task_id),
         }
     }
 }

@@ -81,6 +81,7 @@ impl Workspace {
             AgentChatEvent::HostCardChosen { .. }
             | AgentChatEvent::PermissionSettled { .. }
             | AgentChatEvent::PromptSent { .. }
+            | AgentChatEvent::PersonPromptSent { .. }
             | AgentChatEvent::PromptsDropped { .. } => {}
         }
     }
@@ -120,6 +121,20 @@ fn on_app_chat_event(
         AgentChatEvent::PromptSent { task, session_id } => {
             crate::runs::RunsHost::prompt_sent(task.clone(), session_id.clone(), cx)
         }
+        AgentChatEvent::PersonPromptSent {
+            started_by,
+            prompt,
+            session_id,
+        } => crate::runs::RunsHost::person_prompt_sent(
+            crate::runs::RunPane {
+                workspace: pane.workspace,
+                pane: pane.pane,
+            },
+            session_id.clone(),
+            *started_by,
+            prompt.clone(),
+            cx,
+        ),
         AgentChatEvent::PromptsDropped { tasks, reason } => {
             use daruda_chat::view::PromptDropReason;
             use daruda_store::tasks::machine::UndeliveredReason;

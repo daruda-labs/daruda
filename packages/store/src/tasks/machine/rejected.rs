@@ -36,4 +36,10 @@ pub enum TaskRejected {
     DuplicateSubtask { id: TaskId, subtask_id: String },
     #[error("task {id}: a subtask title cannot be blank")]
     BlankSubtaskTitle { id: TaskId },
+    /// Only a finished or deliberately stopped Agent Chat run with a known
+    /// session can be continued.
+    #[error("task {id}: its last run cannot be continued")]
+    NotContinuable { id: TaskId },
+    #[error("task {id}: that execution id is already used")]
+    DuplicateExecution { id: TaskId },
 }

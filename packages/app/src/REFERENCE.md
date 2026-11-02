@@ -313,6 +313,16 @@ is terminal retain their relay. This prevents the child final answer and the
 orchestrator summary from both reaching the phone. Direct `/task` does not gain
 an omitted-scope result or a new completion-delivery guarantee.
 
+That manual continuation is recorded as the task's next run. When a person's
+prompt (typed, or relayed from their phone) reaches the wire in the pane of an
+Agent Chat run that ended `Done` or was stopped by a person or the usage limit,
+`RunsHost::person_prompt_sent` commits `TaskEvent::Continued` and rebinds the
+pane to the new run once it is committed; a restored pane is matched by the
+run's session. The new run is started by Desktop or Phone, so its relay and
+watch scope are those of a run that person started; the ended run and its
+result stay as they ended. Orchestrator-sent prompts and host notices never
+continue a run. Terminal (CLI) runs are not continued.
+
 ## `surface/`
 
 App-shell constants and binding glue — app/process name, user-visible labels (menu / landing / dock), keyboard shortcut string constants, the binding→display formatter, and the config-override → GPUI `Action` resolver. Pure strings + no sibling imports (except the action map, which reaches into workspace action types).

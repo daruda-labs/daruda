@@ -177,7 +177,7 @@ impl Workspace {
                         view.update(cx, |v, cx| v.send_prompt_text_for_telegram(text, cx))
                     }
                     (UserPromptOrigin::Orchestrator, _) => {
-                        view.update(cx, |v, cx| v.send_external_prompt_text(text, cx))
+                        view.update(cx, |v, cx| v.send_orchestrator_prompt_text(text, cx))
                     }
                     (UserPromptOrigin::InApp, Some(task)) => {
                         view.update(cx, |v, cx| v.send_task_prompt_text(text, task, cx))

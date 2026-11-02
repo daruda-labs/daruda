@@ -94,7 +94,7 @@ fn review_regression_delivery_and_durable_history_use_the_dispatch_description()
         serde_json::json!({"title":"original", "prompt":"original prompt"})
     );
     assert_eq!(record.spec.title, "next");
-    assert_eq!(<TaskMachine as daruda_store::tasks::Machine>::SCHEMA, 4);
+    assert_eq!(<TaskMachine as daruda_store::tasks::Machine>::SCHEMA, 5);
 }
 
 #[test]

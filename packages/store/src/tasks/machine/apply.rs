@@ -96,6 +96,7 @@ fn apply_to(record: &mut TaskRecord, event: &TaskEvent) {
             record.description = Some(super::ExecutionDescription {
                 title: record.spec.title.clone(),
                 prompt: record.spec.prompt.clone(),
+                continued: false,
             });
             record.started_by = *started_by;
             record.started_at = Some(*at);
@@ -240,6 +241,39 @@ fn apply_to(record: &mut TaskRecord, event: &TaskEvent) {
                 (_, worktree) => undelivered(exec, worktree, UndeliveredReason::AppRestart),
             };
             finish(record, next, None, *at);
+        }
+        TaskEvent::Continued {
+            prior,
+            execution_id,
+            started_by,
+            prompt,
+            at,
+        } => {
+            // The ended run's record already holds its own copy of the
+            // execution, so this one is reused for the new run: same session,
+            // agent, account and lane, under a new id.
+            if let (Some(worktree), Some(run)) = (
+                record.lifecycle.worktree().map(ToOwned::to_owned),
+                record.execution.as_mut(),
+            ) {
+                run.id.clone_from(execution_id);
+                record.lifecycle = Lifecycle::Running {
+                    exec: ExecutionRef {
+                        task_id: prior.task_id.clone(),
+                        execution_id: execution_id.clone(),
+                    },
+                    worktree,
+                };
+                record.description = Some(super::ExecutionDescription {
+                    title: record.spec.title.clone(),
+                    prompt: prompt.clone(),
+                    continued: true,
+                });
+                record.started_by = Some(*started_by);
+                record.started_at = Some(*at);
+                record.finished_at = None;
+                record.updated_at = *at;
+            }
         }
         TaskEvent::Reopened { run_in, at, .. } => {
             record.lifecycle = Lifecycle::Backlog;

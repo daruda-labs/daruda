@@ -299,6 +299,24 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let Some(exec) = self.task_chat_execution(pane_id, cx) else {
+            // A continued run binds its pane before its write lands, so a turn
+            // that ends first finds the pane ahead of the log: settle once the
+            // log has caught up.
+            if !RunsHost::settled(cx)
+                && RunsHost::pane_execution(self.run_pane(pane_id), cx).is_some()
+            {
+                let caught_up = RunsHost::barrier(cx);
+                cx.spawn(async move |ws, cx| {
+                    caught_up.await;
+                    // SILENT-OK: a closed window's panes have no run to settle.
+                    let _ = ws.update(cx, |ws, cx| {
+                        if let Some(exec) = ws.task_chat_execution(pane_id, cx) {
+                            RunsHost::settle_execution(exec, outcome, result, cx);
+                        }
+                    });
+                })
+                .detach();
+            }
             return;
         };
         RunsHost::settle_execution(exec, outcome, result, cx);

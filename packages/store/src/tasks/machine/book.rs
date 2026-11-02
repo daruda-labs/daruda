@@ -62,6 +62,18 @@ impl TaskSpec {
 pub struct ExecutionDescription {
     pub title: String,
     pub prompt: String,
+    /// A person continued an earlier run's conversation: `prompt` is what
+    /// they said, not the task's own prompt.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub continued: bool,
+}
+
+impl EndedExecution {
+    /// Whether a person continuing the conversation started this run, rather
+    /// than the task being started.
+    pub fn is_continuation(&self) -> bool {
+        self.description.as_ref().is_some_and(|d| d.continued)
+    }
 }
 
 /// A finished execution, retained independently of the next attempt.
@@ -83,6 +95,9 @@ pub struct EndedExecution {
     pub result: Option<String>,
 }
 
+/// Recent ended runs kept per task. The latest run the task itself was
+/// started for is kept beyond this, so a conversation continued turn after
+/// turn cannot push the task's own result out.
 const ENDED_EXECUTIONS_LIMIT: usize = 5;
 
 /// One task as the log knows it.
@@ -113,11 +128,18 @@ pub struct TaskRecord {
 impl TaskRecord {
     pub(super) fn retain_ended(&mut self, ended: EndedExecution) {
         self.ended_executions.push(ended);
-        let excess = self
+        let len = self.ended_executions.len();
+        let recent = len.saturating_sub(ENDED_EXECUTIONS_LIMIT);
+        let anchor = self
             .ended_executions
-            .len()
-            .saturating_sub(ENDED_EXECUTIONS_LIMIT);
-        self.ended_executions.drain(..excess);
+            .iter()
+            .rposition(|run| !run.is_continuation());
+        let mut index = 0;
+        self.ended_executions.retain(|_| {
+            let keep = index >= recent || Some(index) == anchor;
+            index += 1;
+            keep
+        });
     }
 
     pub fn id(&self) -> &str {
@@ -133,6 +155,25 @@ impl TaskRecord {
     /// The execution events must name to act on this record.
     pub fn current_exec(&self) -> Option<&ExecutionRef> {
         self.lifecycle.exec()
+    }
+
+    /// Whether a person can continue the last run's conversation as a new
+    /// run: it finished, or a person or the usage limit stopped it, in an
+    /// Agent Chat whose session is known. A failed run is retried instead.
+    pub fn is_continuable(&self) -> bool {
+        let stopped_by_choice = match &self.lifecycle {
+            super::Lifecycle::Done { .. } => true,
+            super::Lifecycle::Interrupted { cause, .. } => matches!(
+                cause,
+                super::InterruptCause::UserStop | super::InterruptCause::ExtraUsage
+            ),
+            _ => false,
+        };
+        stopped_by_choice
+            && self.execution.as_ref().is_some_and(|run| {
+                matches!(run.source, crate::tasks::TaskExecutionSource::AgentChat)
+                    && run.session_id.is_some()
+            })
     }
 }
 

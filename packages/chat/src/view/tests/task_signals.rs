@@ -374,3 +374,70 @@ fn parking_on_stop_is_not_a_drop(cx: &mut TestAppContext) {
 
     assert!(log.borrow().is_empty(), "got {:?}", log.borrow());
 }
+
+/// Each person prompt a pane reported, and who sent it.
+type PersonLog = Rc<RefCell<Vec<(daruda_store::tasks::StartedBy, String)>>>;
+
+/// The person prompts a pane reports, and who sent each.
+fn observed_people(cx: &mut TestAppContext) -> (Entity<AgentChatView>, PersonLog) {
+    let handle = make_test_view(cx);
+    cx.run_until_parked();
+    let view = handle.root(cx).expect("the view's window is open");
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let sink = log.clone();
+    cx.update(|cx| {
+        cx.subscribe(&view, move |_, event: &AgentChatEvent, _| {
+            if let AgentChatEvent::PersonPromptSent {
+                started_by, prompt, ..
+            } = event
+            {
+                sink.borrow_mut().push((*started_by, prompt.clone()));
+            }
+        })
+        .detach();
+    });
+    (view, log)
+}
+
+/// What a person sends — typed here or relayed from their phone — is
+/// reported when it reaches the wire, a queued one only once it is drained.
+/// The orchestrator's prompts and host notices are not a person's.
+#[gpui::test]
+fn only_a_persons_prompt_is_reported_as_theirs(cx: &mut TestAppContext) {
+    use daruda_store::tasks::StartedBy;
+    let (view, log) = observed_people(cx);
+    let _probe = connect(&view, cx);
+    view.update(cx, |v, cx| {
+        v.send_prompt_text("typed".into(), cx);
+        v.set_turn_idle();
+        v.send_orchestrator_prompt_text("from the orchestrator".into(), cx);
+        v.set_turn_idle();
+        assert_eq!(
+            v.try_send_internal_prompt_text("a notice".into(), cx),
+            crate::view::InternalDispatch::Sent
+        );
+        v.set_turn_idle();
+        v.send_task_prompt_text("the task's own".into(), run("t1"), cx);
+        v.set_turn_idle();
+        v.send_prompt_text_for_telegram("from the phone".into(), cx);
+        assert_eq!(
+            v.send_prompt_text("queued".into(), cx),
+            PromptDispatch::Queued
+        );
+    });
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            (StartedBy::Desktop, "typed".to_string()),
+            (StartedBy::Phone, "from the phone".to_string()),
+        ]
+    );
+    view.update(cx, |v, cx| {
+        v.set_turn_idle();
+        v.pump_pending_prompt(cx);
+    });
+    assert_eq!(
+        log.borrow().last(),
+        Some(&(StartedBy::Desktop, "queued".to_string()))
+    );
+}

@@ -38,6 +38,7 @@ pub(super) fn allowed(from: LifecycleKind, event: EventKind) -> bool {
         E::CancelRequested | E::Reconciled => {
             matches!(from, L::Preparing | L::Dispatching | L::Running)
         }
+        E::Continued => matches!(from, L::Done | L::Interrupted),
         E::Reopened => from.is_terminal(),
     }
 }
@@ -133,6 +134,7 @@ fn check_payload(record: &TaskRecord, event: &TaskEvent) -> Result<(), TaskRejec
         {
             Err(TaskRejected::NotCliExecution { id: id() })
         }
+        TaskEvent::Continued { execution_id, .. } => check_continued(record, execution_id),
         TaskEvent::Reconciled { .. }
             if record.lifecycle.kind() == LifecycleKind::Running
                 && is_cli
@@ -152,4 +154,22 @@ fn check_payload(record: &TaskRecord, event: &TaskEvent) -> Result<(), TaskRejec
         }
         _ => Ok(()),
     }
+}
+
+/// Only a conversation that can go on is continued — see
+/// [`TaskRecord::is_continuable`] — and only under an unused execution id.
+fn check_continued(record: &TaskRecord, execution_id: &str) -> Result<(), TaskRejected> {
+    let id = || record.id().to_owned();
+    if !record.is_continuable() {
+        return Err(TaskRejected::NotContinuable { id: id() });
+    }
+    let reused = record.current_exec().map(|e| e.execution_id.as_str()) == Some(execution_id)
+        || record
+            .ended_executions
+            .iter()
+            .any(|ended| ended.exec.execution_id == execution_id);
+    if reused {
+        return Err(TaskRejected::DuplicateExecution { id: id() });
+    }
+    Ok(())
 }

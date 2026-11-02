@@ -46,6 +46,15 @@ pub enum AgentChatEvent {
         task: ExecutionRef,
         session_id: Option<String>,
     },
+    /// A prompt a person sent — typed here or relayed from their phone — just
+    /// reached the wire. Not sent for a task's own prompt, a host notice or
+    /// the orchestrator's. The host decides whether it continues an ended
+    /// task run.
+    PersonPromptSent {
+        started_by: daruda_store::tasks::StartedBy,
+        prompt: String,
+        session_id: Option<String>,
+    },
     /// Task prompts left the queue without ever being sent. Only tagged
     /// prompts are listed, and the event is skipped when none were dropped.
     PromptsDropped {

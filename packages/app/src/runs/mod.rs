@@ -9,6 +9,7 @@
 
 mod cli;
 mod cli_result;
+mod continuation;
 mod delivery;
 mod effects;
 mod flows;

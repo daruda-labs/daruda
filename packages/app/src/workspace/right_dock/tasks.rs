@@ -183,13 +183,16 @@ fn state_indicator(state: &Lifecycle, cx: &gpui::App) -> (&'static str, Hsla) {
 }
 
 // ---------------------------------------------------------------------------
-// Duration cell — `now - created_at` or `finished_at - created_at`
+// Duration cell — the current run's `now - started_at` or `finished_at - started_at`
 // ---------------------------------------------------------------------------
 
-/// Inline span showing the task's run duration — live while it starts or
-/// runs (re-rendered by `spawn_task_live_tick`), frozen at
-/// `finished_at - created_at` for terminal states, dropped for
-/// `Backlog`. Formatting reuses `format_duration_compact`.
+/// Inline span showing the current run's duration — live while it starts or
+/// runs (re-rendered by `spawn_task_live_tick`), frozen at `finished_at -
+/// started_at` for terminal states, dropped for `Backlog`. Measured from the
+/// run's start, not the task's creation: a task created yesterday and
+/// continued now has been working for minutes. A record from before runs
+/// kept their start falls back to its creation. Formatting reuses
+/// `format_duration_compact`.
 fn duration_cell(
     task: &TaskRecord,
     snap: &RightDockSnapshot,
@@ -201,7 +204,8 @@ fn duration_cell(
         _ if live => *snap.now,
         _ => task.finished_at.unwrap_or(*snap.now),
     };
-    let elapsed = (end - task.spec.created_at).to_std().ok()?;
+    let started = task.started_at.unwrap_or(task.spec.created_at);
+    let elapsed = (end - started).to_std().ok()?;
     if elapsed.as_secs() == 0 && !live {
         // A near-instant terminal transition (cancel-before-start) is
         // not worth a "0s" badge — drop the cell entirely so the row

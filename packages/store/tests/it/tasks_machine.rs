@@ -292,6 +292,13 @@ fn sample(kind: EventKind) -> TaskEvent {
         EventKind::CancelRequested => TaskEvent::CancelRequested { exec, at: t },
         EventKind::LaneLost => TaskEvent::LaneLost { exec, at: t },
         EventKind::Reconciled => TaskEvent::Reconciled { exec, at: t },
+        EventKind::Continued => TaskEvent::Continued {
+            prior: exec,
+            execution_id: "run-2".into(),
+            started_by: daruda_store::tasks::StartedBy::Desktop,
+            prompt: "also fix the tests".into(),
+            at: t,
+        },
         EventKind::Reopened => TaskEvent::Reopened {
             id,
             run_in: TaskRunIn::NewWorktree,
@@ -415,6 +422,10 @@ const TABLE: &[(EventKind, [Cell; 9])] = &[
         ],
     ),
     (
+        EventKind::Continued,
+        [No, No, No, No, To(L::Running), No, No, No, To(L::Running)],
+    ),
+    (
         EventKind::Reopened,
         [
             No,
@@ -458,7 +469,8 @@ fn every_state_event_pair_matches_the_table() {
         for (from, cell) in COLUMNS.into_iter().zip(row) {
             // A running CLI run is left to its tracker; the AgentChat
             // fixture exercises the table's Reconciled row.
-            let source = if kind == EventKind::Reconciled {
+            // `Continued` only continues an Agent Chat run.
+            let source = if matches!(kind, EventKind::Reconciled | EventKind::Continued) {
                 Source::Chat
             } else {
                 Source::Cli
@@ -1289,8 +1301,165 @@ fn an_undelivered_reason_round_trips_through_the_task_log() {
 }
 
 #[test]
-fn execution_descriptions_require_schema_four() {
-    assert_eq!(TaskMachine::SCHEMA, 4);
+fn continued_runs_require_schema_five() {
+    assert_eq!(TaskMachine::SCHEMA, 5);
+}
+
+fn continued(prior: &str, run: &str, seconds: i64) -> TaskEvent {
+    TaskEvent::Continued {
+        prior: exec_of(prior),
+        execution_id: run.into(),
+        started_by: daruda_store::tasks::StartedBy::Desktop,
+        prompt: format!("follow-up {run}"),
+        at: at(seconds),
+    }
+}
+
+fn settle_done(book: &mut TasksBook, run: &str, seconds: i64) {
+    commit(
+        book,
+        TaskEvent::Settled {
+            exec: exec_of(run),
+            outcome: SettleOutcome::Completed {
+                end_reason: SessionEndReason::Stop,
+            },
+            result: Some(format!("answer {run}")),
+            at: at(seconds),
+        },
+    );
+}
+
+/// A continuation is a new run of the same task, in the same lane and
+/// session, that leaves the run it continues exactly as it ended.
+#[test]
+fn a_continuation_runs_again_and_keeps_the_ended_run() {
+    let mut book = running_book(Source::Chat, RUN);
+    commit(
+        &mut book,
+        TaskEvent::ExecutionSessionBound {
+            exec: exec(),
+            session_id: SESSION.into(),
+            at: at(2),
+        },
+    );
+    settle_done(&mut book, RUN, 3);
+    let ended = task(&book).ended_executions.clone();
+
+    commit(&mut book, continued(RUN, "run-2", 4));
+    let record = task(&book);
+    assert_eq!(
+        record.lifecycle,
+        Lifecycle::Running {
+            exec: exec_of("run-2"),
+            worktree: worktree(),
+        }
+    );
+    let run = record.execution.as_ref().expect("a run");
+    assert_eq!(run.id, "run-2");
+    assert_eq!(run.session_id.as_deref(), Some(SESSION));
+    assert_eq!(run.source, TaskExecutionSource::AgentChat);
+    let description = record.description.as_ref().expect("described");
+    assert_eq!(description.prompt, "follow-up run-2");
+    assert!(description.continued);
+    assert_eq!(
+        record.started_by,
+        Some(daruda_store::tasks::StartedBy::Desktop)
+    );
+    assert_eq!(record.started_at, Some(at(4)));
+    assert_eq!(record.finished_at, None);
+    assert_eq!(record.ended_executions, ended, "the ended run is untouched");
+
+    settle_done(&mut book, "run-2", 5);
+    let record = task(&book);
+    assert_eq!(record.ended_executions.len(), 2);
+    assert_eq!(
+        record.ended_executions[0].result.as_deref(),
+        Some("answer run-1")
+    );
+    assert!(record.ended_executions[1].is_continuation());
+    assert_eq!(
+        record.ended_executions[1].result.as_deref(),
+        Some("answer run-2")
+    );
+}
+
+/// Only a conversation that can go on is continued: a finished run, or one a
+/// person or the usage limit stopped, in an Agent Chat whose session is known.
+#[test]
+fn only_a_chat_run_that_stopped_by_choice_is_continued() {
+    let continuable = |lifecycle: Lifecycle, source: Source, session: Option<&str>| {
+        let mut record = record(L::Done, source);
+        record.lifecycle = lifecycle;
+        if let Some(run) = record.execution.as_mut() {
+            run.session_id = session.map(str::to_owned);
+        }
+        TaskMachine::check(&book_of(vec![record]), &continued(RUN, "run-2", 4))
+    };
+    let interrupted = |cause| Lifecycle::Interrupted {
+        exec: Some(exec()),
+        worktree: worktree(),
+        cause,
+    };
+    for cause in [InterruptCause::UserStop, InterruptCause::ExtraUsage] {
+        assert_eq!(
+            continuable(interrupted(cause), Source::Chat, Some(SESSION)),
+            Ok(())
+        );
+    }
+    let refused = Err(TaskRejected::NotContinuable { id: ID.into() });
+    for cause in [InterruptCause::LaneGone, InterruptCause::AppRestart] {
+        assert_eq!(
+            continuable(interrupted(cause), Source::Chat, Some(SESSION)),
+            refused
+        );
+    }
+    let done = lifecycle(L::Done, Source::Chat);
+    assert_eq!(
+        continuable(done.clone(), Source::Cli, Some(SESSION)),
+        refused
+    );
+    assert_eq!(continuable(done.clone(), Source::Chat, None), refused);
+    assert_eq!(
+        TaskMachine::check(
+            &book(L::Done, Source::Chat),
+            &continued("run-0", "run-2", 4)
+        ),
+        Err(TaskRejected::StaleExecution { id: ID.into() }),
+        "only the current run is continued"
+    );
+    assert_eq!(
+        TaskMachine::check(&book(L::Done, Source::Chat), &continued(RUN, RUN, 4)),
+        Err(TaskRejected::DuplicateExecution { id: ID.into() })
+    );
+}
+
+/// Every turn of a continued conversation is a run; the task's own latest
+/// run stays in the history however many follow.
+#[test]
+fn the_tasks_own_run_outlives_its_continuations() {
+    let mut book = running_book(Source::Chat, RUN);
+    commit(
+        &mut book,
+        TaskEvent::ExecutionSessionBound {
+            exec: exec(),
+            session_id: SESSION.into(),
+            at: at(2),
+        },
+    );
+    settle_done(&mut book, RUN, 3);
+    let mut prior = RUN.to_owned();
+    for turn in 2..10 {
+        let run = format!("run-{turn}");
+        commit(&mut book, continued(&prior, &run, 10 * turn));
+        settle_done(&mut book, &run, 10 * turn + 1);
+        prior = run;
+    }
+    let ids: Vec<_> = task(&book)
+        .ended_executions
+        .iter()
+        .map(|e| e.exec.execution_id.clone())
+        .collect();
+    assert_eq!(ids, ["run-1", "run-5", "run-6", "run-7", "run-8", "run-9"]);
 }
 
 #[test]
@@ -1397,7 +1566,7 @@ fn provenance_survives_log_reopening_and_an_old_machine_refuses_it() {
             RunLog::<OldTaskMachine, _>::open(FileBackend::new(dir.path()), "old"),
             Err(OpenError::TooNew {
                 what: Versioned::Schema,
-                found: 4,
+                found: 5,
                 supported: 2
             })
         ));
