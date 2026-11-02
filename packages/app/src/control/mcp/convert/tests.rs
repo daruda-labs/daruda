@@ -369,6 +369,9 @@ fn dummy_for(schema: &Value) -> Value {
     {
         return example.clone();
     }
+    if let Some(first) = schema["enum"].as_array().and_then(|values| values.first()) {
+        return first.clone();
+    }
     match schema["type"].as_str() {
         Some("integer") => serde_json::json!(1),
         Some("object") => schema["properties"]
@@ -386,6 +389,62 @@ fn dummy_for(schema: &Value) -> Value {
         Some("string") => serde_json::json!(uuid::Uuid::nil()),
         other => panic!("unhandled schema type: {other:?}"),
     }
+}
+
+#[test]
+fn task_create_reads_its_optional_fields() {
+    let args = serde_json::json!({
+        "workspace": workspace_json(),
+        "project": 1,
+        "title": "t",
+        "prompt": "p",
+        "branch": "feat/x",
+        "notes": "n",
+        "surface": "terminal",
+    });
+    let Command::Gated(GatedCommand::TaskCreate { task, .. }) =
+        to_command(ToolId::TaskCreate, &args).unwrap()
+    else {
+        panic!("create");
+    };
+    assert_eq!(task.branch.as_deref(), Some("feat/x"));
+    assert_eq!(task.notes.as_deref(), Some("n"));
+    assert_eq!(
+        task.surface,
+        Some(daruda_store::tasks::TaskAgentSurface::Terminal)
+    );
+    let mut bad = args.clone();
+    bad["surface"] = "shell".into();
+    assert_eq!(
+        to_command(ToolId::TaskCreate, &bad),
+        Err(ConvertError::BadArgument { name: "surface" })
+    );
+}
+
+#[test]
+fn flow_run_passes_an_optional_profile_through() {
+    let worktree = serde_json::json!({"workspace": workspace_json(), "project": 1, "worktree": 2});
+    for profile in [None, Some("cheap")] {
+        let mut args = serde_json::json!({"name": "ship", "worktree": worktree});
+        if let Some(profile) = profile {
+            args["profile"] = profile.into();
+        }
+        let Command::Immediate(ResolvedCommand::Flow(ResolvedFlowCommand::Run {
+            profile: actual,
+            ..
+        })) = to_command(ToolId::FlowRun, &args).unwrap()
+        else {
+            panic!("run");
+        };
+        assert_eq!(actual.as_deref(), profile);
+    }
+    assert_eq!(
+        to_command(
+            ToolId::FlowRun,
+            &serde_json::json!({"name": "ship", "worktree": worktree, "profile": 3})
+        ),
+        Err(ConvertError::BadArgument { name: "profile" })
+    );
 }
 
 #[test]

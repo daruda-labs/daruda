@@ -58,7 +58,13 @@ pub(crate) fn run_command(
                 let lane = crate::control::exec::first_lane_offering(&name, cx)?;
                 crate::control::exec::run(
                     crate::control::spec::ResolvedCommand::Flow(
-                        crate::control::spec::ResolvedFlowCommand::Run { name, lane },
+                        // The phone's grammar names no profile; a flow that
+                        // declares some is refused as needing one.
+                        crate::control::spec::ResolvedFlowCommand::Run {
+                            name,
+                            lane,
+                            profile: None,
+                        },
                     ),
                     crate::control::exec::CommandOrigin::Phone,
                     cx,

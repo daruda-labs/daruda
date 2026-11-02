@@ -49,6 +49,16 @@ fn flow_row_menu(
         false,
         move |ws, window, cx| ws.edit_browsed_flow_name(lane, &edit_path, window, cx),
     );
+    // A repository flow is already where a move would put it.
+    let move_to_repo = (origin != crate::workspace::flow_paths::FlowOrigin::Repo).then(|| {
+        let move_path = path.clone();
+        ws_popup_menu_item(
+            ws.clone(),
+            strings::flow::row_menu_move_to_repo(),
+            false,
+            move |ws, window, cx| ws.ask_before_moving(lane, move_path.clone(), window, cx),
+        )
+    });
     let delete_path = path;
     let delete_name = name;
     let delete = ws_popup_menu_item(
@@ -67,7 +77,10 @@ fn flow_row_menu(
             );
         },
     );
-    vec![edit_name, rename, delete]
+    [Some(edit_name), Some(rename), move_to_repo, Some(delete)]
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
 fn run_button(

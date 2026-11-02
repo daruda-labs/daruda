@@ -10,8 +10,8 @@ fn agents() -> Vec<daruda_config::AgentDefinition> {
 }
 
 #[test]
-fn nineteen_tools_are_exposed() {
-    assert_eq!(ToolTable::all(&agents()).describe().len(), 19);
+fn twenty_tools_are_exposed() {
+    assert_eq!(ToolTable::all(&agents()).describe().len(), 20);
 }
 
 #[test]
@@ -75,6 +75,7 @@ fn every_tool_id_has_a_row() {
         ToolId::ChatNew,
         ToolId::FlowList,
         ToolId::FlowRun,
+        ToolId::FlowValidate,
         ToolId::FlowStop,
     ] {
         assert!(TABLE.iter().any(|t| t.id == id), "{id:?} has no row");

@@ -130,6 +130,12 @@ fn render_result(result: &ControlResult, state: &CommandState) -> RenderedReply 
             plain(rows.join("\n"))
         }
         ControlResult::FlowStarting { name, .. } => plain(s::control::flow_starting(name)),
+        ControlResult::FlowValidated { issues, .. } if issues.is_empty() => {
+            plain(s::control::flow_valid())
+        }
+        ControlResult::FlowValidated { issues, .. } => {
+            plain(s::control::flow_invalid(issues.len()))
+        }
         ControlResult::FlowStopped { disposition, .. } => plain(match disposition {
             StopDisposition::Stopped => s::control::flow_stopped(),
             StopDisposition::AlreadyIdle => s::control::flow_stop_already_idle(),
@@ -279,6 +285,9 @@ pub(crate) fn render_error(error: &ControlError) -> String {
         ControlError::FlowNeedsInteraction { name } => {
             s::control::error_flow_needs_interaction(name)
         }
+        ControlError::FlowUnknownProfile { name, profile } => {
+            s::control::error_flow_unknown_profile(name, profile)
+        }
         ControlError::RunMismatch => s::control::error_run_mismatch(),
         ControlError::NoActiveLane => s::control::error_no_active_lane(),
         ControlError::OrchestratorDisabled => s::control::error_orchestrator_disabled(),
@@ -296,6 +305,7 @@ pub(crate) fn render_error(error: &ControlError) -> String {
         // argument. The detail is in the log and in the MCP result.
         ControlError::LaneCreateFailed { .. } => s::control::error_lane_create_failed(),
         ControlError::LaneNameInvalid => s::control::error_lane_name_invalid(),
+        ControlError::TaskBranchTaken => s::control::error_task_branch_taken(),
         ControlError::ApprovalUnavailable => s::control::error_approval_unavailable(),
         ControlError::ApprovalsPending => s::control::error_approvals_pending(),
         ControlError::TaskNotFound => s::control::error_task_not_found(),

@@ -216,6 +216,19 @@ pub struct FlowEntry {
     /// windows on different repositories can both offer `ship.yaml` and mean
     /// different things.
     pub lane: LaneHandle,
+    /// The profiles the file declares, in the order the desktop offers them.
+    /// A flow that declares any runs only with one of them named.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub profiles: Vec<String>,
+}
+
+/// One problem a flow check found, in the engine's fixed English.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlowIssue {
+    /// The node it is about; `None` for the file or the worktree as a whole.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<String>,
+    pub message: String,
 }
 
 /// A worktree, addressed across the whole process.
@@ -371,6 +384,12 @@ pub enum ControlResult {
         /// Which worktree it started in. The command names no target, so this
         /// is the only place the answer says where the run landed.
         lane: LaneHandle,
+    },
+    /// What a flow check found. Empty `issues` means the text would run in
+    /// `lane` as written.
+    FlowValidated {
+        lane: LaneHandle,
+        issues: Vec<FlowIssue>,
     },
     /// A run the caller asked to end. `AlreadyIdle` is an `Ok`: nothing was
     /// running, which is the state a stop was asking for.
@@ -529,11 +548,16 @@ pub enum ControlError {
         name: String,
         reason: FlowNotStartedReason,
     },
-    /// The flow declares profiles, requiring selection in a desktop dialog.
-    /// Runtime permission questions do not refuse a start; a profile choice
-    /// is the only input the control surface cannot supply.
+    /// The flow declares profiles and the command named none. Runtime
+    /// permission questions do not refuse a start; a profile is the only
+    /// choice a start cannot make for itself.
     FlowNeedsInteraction {
         name: String,
+    },
+    /// The command named a profile the flow does not declare.
+    FlowUnknownProfile {
+        name: String,
+        profile: String,
     },
     /// The requested execution no longer owns this worktree.
     RunMismatch,
@@ -552,6 +576,9 @@ pub enum ControlError {
     /// The card went unanswered. Silence is not consent; retrying or bypassing
     /// the approval is not permitted.
     ApprovalTimedOut,
+    /// A worktree of the task's project already has the branch the task
+    /// names checked out, so creating one for it at Start would fail.
+    TaskBranchTaken,
     /// The agent has created as many worktrees as it may. Refused before the
     /// card, since there is nothing to ask about.
     AgentLimitReached,
@@ -639,7 +666,10 @@ impl std::fmt::Display for ControlError {
                 write!(f, "flow did not start: {name}: {reason}")
             }
             Self::FlowNeedsInteraction { name } => {
-                write!(f, "flow needs a profile chosen on the desktop: {name}")
+                write!(f, "flow needs a profile named: {name}")
+            }
+            Self::FlowUnknownProfile { name, profile } => {
+                write!(f, "flow {name} declares no profile {profile}")
             }
             Self::RunMismatch => write!(f, "the requested run no longer owns this worktree"),
             Self::NoActiveLane => write!(f, "no active lane"),
@@ -651,6 +681,12 @@ impl std::fmt::Display for ControlError {
                 f,
                 "the approval went unanswered; silence is not consent. Do not retry or bypass the approval"
             ),
+            Self::TaskBranchTaken => {
+                write!(
+                    f,
+                    "another worktree already has the task's branch checked out"
+                )
+            }
             Self::AgentLimitReached => write!(f, "agent worktree budget spent"),
             Self::QueueFull => write!(f, "prompt queue full"),
             Self::TargetReadOnly => write!(f, "chat is read-only"),

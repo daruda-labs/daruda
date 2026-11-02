@@ -64,6 +64,7 @@ const TOOLS: &str = "\
 - daruda_run_wait — wait for ended or blocked run handles (required timeout, at most 110 seconds)
 - daruda_run_status — query current progress or retained results without marking them reported
 - daruda_flow_list, daruda_flow_run, daruda_flow_stop — the saved flows
+- daruda_flow_validate — check flow YAML against a worktree without saving or running it
 - daruda_task_list — every task, by project, with its status
 - daruda_task_create — a new task in a project's backlog
 - daruda_task_start, daruda_task_stop — run a backlog task, or cancel one
@@ -125,7 +126,7 @@ mod tests {
     fn every_advertised_tool_appears() {
         let text = briefing("daruda-x");
         let tools = crate::control::mcp::tools::table_for_test();
-        assert_eq!(tools.len(), 19);
+        assert_eq!(tools.len(), 20);
         for tool in tools {
             assert!(
                 text.contains(tool.name),

@@ -1131,6 +1131,35 @@ fn task_editor_saves_an_existing_lane_without_a_base(cx: &mut TestAppContext) {
     .unwrap();
 }
 
+/// A lane that leaves the project between picking and Save refuses the save
+/// out loud: a silent refusal leaves a Save button that seems to do nothing.
+#[gpui::test]
+fn task_editor_says_why_a_lane_gone_since_picking_refuses_the_save(cx: &mut TestAppContext) {
+    let (_root, window, ws) = build_workspace_with_project(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_task_editor(None, window, cx);
+            let editor = ws
+                .task_detail_id()
+                .expect("the Tasks page holds the editor");
+            let title = ws.task_editor(editor).unwrap().title_input.clone();
+            title.update(cx, |s, cx| s.set_value("Orphaned", window, cx));
+            ws.set_task_run_in(editor, RunInChoice::ExistingLane, cx);
+            let project = ws.active.project;
+            ws.project_for_mut(project).unwrap().lanes.clear();
+            assert!(ws.commit_task_form(editor, cx).is_none());
+            assert_eq!(records(cx).len(), 0, "nothing was created");
+            let toasts: Vec<_> = ws.error_toasts(cx).iter().collect();
+            assert_eq!(toasts.len(), 1);
+            assert_eq!(
+                toasts[0].report.title,
+                crate::surface::strings::task::save_refused_title()
+            );
+        });
+    })
+    .unwrap();
+}
+
 /// A started task's branch is its own lane's; that must not block edits.
 #[gpui::test]
 fn task_editor_saves_a_running_task_whose_lane_holds_its_branch(cx: &mut TestAppContext) {

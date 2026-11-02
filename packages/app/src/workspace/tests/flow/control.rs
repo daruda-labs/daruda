@@ -186,6 +186,7 @@ async fn an_unknown_flow_name_is_refused(cx: &mut TestAppContext) {
                 ws.control_flow_run(
                     ws.active,
                     "nope",
+                    None,
                     daruda_flow::request::StartedBy::Phone,
                     true,
                     cx
@@ -212,6 +213,7 @@ async fn a_name_resolves_with_or_without_its_extension(cx: &mut TestAppContext) 
                     ws.control_flow_run(
                         ws.active,
                         name,
+                        None,
                         daruda_flow::request::StartedBy::Phone,
                         true,
                         cx
@@ -294,6 +296,7 @@ async fn ask_flow_starts_with_a_question(
             ResolvedCommand::Flow(ResolvedFlowCommand::Run {
                 name: "ship".into(),
                 lane: target,
+                profile: None,
             }),
             origin,
             cx,
@@ -357,6 +360,7 @@ async fn a_flow_declaring_profiles_is_refused_before_desktop_selection(cx: &mut 
                 ws.control_flow_run(
                     ws.active,
                     "ship",
+                    None,
                     daruda_flow::request::StartedBy::Phone,
                     true,
                     cx
@@ -365,6 +369,136 @@ async fn a_flow_declaring_profiles_is_refused_before_desktop_selection(cx: &mut 
                     name: "ship.yaml".into()
                 })
             );
+        });
+    })
+    .expect("window is live");
+}
+
+/// A command-only flow that declares a profile, so a named profile can start
+/// a real run without an agent.
+const COMMAND_WITH_PROFILES: &str = "\
+version: 1
+profiles:
+  cheap:
+    agent:
+      model: haiku
+nodes:
+  - id: check
+    kind: command
+    run: \"true\"
+";
+
+/// The listing says which profiles a caller may name, so a refusal for
+/// naming none is never the first place it learns there were any.
+#[gpui::test]
+async fn a_listed_flow_names_the_profiles_it_declares(cx: &mut TestAppContext) {
+    let (_lane, ws, _path, _wh) = workspace_with_a_flow(cx, WITH_PROFILES);
+    ws.read_with(cx, |ws, _| {
+        let flows = ws.control_flow_list();
+        let ship = flows
+            .iter()
+            .find(|e| e.name == "ship.yaml")
+            .expect("ship is listed");
+        assert_eq!(ship.profiles, vec!["cheap".to_string()]);
+    });
+}
+
+/// A profile the file does not declare is refused, not run under the
+/// defaults it would otherwise silently fall back to.
+#[gpui::test]
+async fn an_undeclared_profile_is_refused(cx: &mut TestAppContext) {
+    for flow in [WITH_PROFILES, COMMAND_ONLY] {
+        let (_lane, ws, _path, wh) = workspace_with_a_flow(cx, flow);
+        cx.update_window(wh.into(), |_, _, cx| {
+            ws.update(cx, |ws, cx| {
+                assert_eq!(
+                    ws.control_flow_run(
+                        ws.active,
+                        "ship",
+                        Some("dear"),
+                        daruda_flow::request::StartedBy::Orchestrator,
+                        true,
+                        cx
+                    ),
+                    Err(ControlError::FlowUnknownProfile {
+                        name: "ship.yaml".into(),
+                        profile: "dear".into(),
+                    })
+                );
+            });
+        })
+        .expect("window is live");
+    }
+}
+
+/// Naming one of the declared profiles is what lets a control caller start a
+/// flow the desktop would have asked about.
+#[gpui::test]
+async fn a_declared_profile_starts_the_flow(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let (_lane, ws, _path, wh) = workspace_with_a_flow(cx, COMMAND_WITH_PROFILES);
+    cx.update_window(wh.into(), |_, _, cx| {
+        ws.update(cx, |ws, cx| {
+            let started = ws
+                .control_flow_run(
+                    ws.active,
+                    "ship",
+                    Some("cheap"),
+                    daruda_flow::request::StartedBy::Orchestrator,
+                    true,
+                    cx,
+                )
+                .expect("a declared profile needs no desktop choice");
+            assert_eq!(started.entry.profiles, vec!["cheap".to_string()]);
+            assert!(!ws.overlays.flow_picker.is_open());
+        });
+    })
+    .expect("window is live");
+}
+
+/// Unsaved text gets the same verdict a saved file would, the worktree's own
+/// checks included, and nothing is written while it is checked.
+#[gpui::test]
+async fn validating_text_reports_every_issue_without_saving(cx: &mut TestAppContext) {
+    let (_lane, ws, _path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    cx.update_window(wh.into(), |_, _, cx| {
+        ws.update(cx, |ws, cx| {
+            let lane = ws.active;
+            assert_eq!(
+                ws.control_flow_validate(lane, ONE_AGENT, None, None, cx),
+                Ok(Vec::new())
+            );
+            let unknown_agent = ONE_AGENT.replace("id: claude", "id: nobody");
+            let issues = ws
+                .control_flow_validate(lane, &unknown_agent, None, None, cx)
+                .expect("an answer");
+            assert!(
+                issues.iter().any(|i| i.node.as_deref() == Some("design")),
+                "an agent the worktree lacks is the node's problem: {issues:?}"
+            );
+            let unparsable = ws
+                .control_flow_validate(lane, "nodes: [", None, None, cx)
+                .expect("an answer");
+            assert_eq!(unparsable.len(), 1, "{unparsable:?}");
+            assert_eq!(unparsable[0].node, None);
+            assert_eq!(
+                ws.control_flow_validate(lane, ONE_AGENT, None, Some("nope"), cx),
+                Err(ControlError::FlowNotFound {
+                    name: "nope".into()
+                })
+            );
+            assert_eq!(
+                ws.control_flow_validate(lane, ONE_AGENT, None, Some("ship"), cx),
+                Ok(Vec::new()),
+                "an existing flow's directory anchors the text"
+            );
+            let sources = ws.flow_sources_for(lane).expect("sources");
+            let names: Vec<_> = sources
+                .list_flows()
+                .into_iter()
+                .map(|f| flow_paths::flow_label(&f.path))
+                .collect();
+            assert_eq!(names, vec!["ship.yaml".to_string()], "nothing was saved");
         });
     })
     .expect("window is live");
@@ -381,6 +515,7 @@ async fn a_flow_that_will_not_run_is_answered_not_reported_as_started(cx: &mut T
                 ws.control_flow_run(
                     ws.active,
                     "ship",
+                    None,
                     daruda_flow::request::StartedBy::Phone,
                     true,
                     cx
@@ -428,6 +563,7 @@ async fn a_runnable_flow_starts_and_names_the_file_that_ran(cx: &mut TestAppCont
                 .control_flow_run(
                     ws.active,
                     "ship",
+                    None,
                     daruda_flow::request::StartedBy::Phone,
                     true,
                     cx,
@@ -461,6 +597,7 @@ async fn a_lane_already_running_a_flow_refuses_the_next(cx: &mut TestAppContext)
                 ws.control_flow_run(
                     ws.active,
                     "ship",
+                    None,
                     daruda_flow::request::StartedBy::Phone,
                     true,
                     cx
@@ -499,6 +636,7 @@ async fn a_flow_runs_in_the_named_worktree_not_the_active_one(cx: &mut TestAppCo
                 ws.control_flow_run(
                     active,
                     "deploy",
+                    None,
                     daruda_flow::request::StartedBy::Phone,
                     true,
                     cx
@@ -513,6 +651,7 @@ async fn a_flow_runs_in_the_named_worktree_not_the_active_one(cx: &mut TestAppCo
                 .control_flow_run(
                     other,
                     "deploy",
+                    None,
                     daruda_flow::request::StartedBy::Phone,
                     true,
                     cx,
@@ -545,6 +684,7 @@ async fn a_worktree_that_is_gone_is_not_reported_as_a_missing_flow(cx: &mut Test
                 ws.control_flow_run(
                     gone,
                     "ship",
+                    None,
                     daruda_flow::request::StartedBy::Phone,
                     true,
                     cx
@@ -571,6 +711,7 @@ async fn a_named_worktree_already_running_refuses_without_a_dialog(cx: &mut Test
                 ws.control_flow_run(
                     other,
                     "deploy",
+                    None,
                     daruda_flow::request::StartedBy::Phone,
                     true,
                     cx
@@ -969,7 +1110,7 @@ async fn started_run_reports_its_outcome(
     let run_id = cx
         .update_window(wh.into(), |_, _, cx| {
             ws.update(cx, |ws, cx| {
-                ws.control_flow_run(ws.active, "ship", origin.flow_started_by(), true, cx)
+                ws.control_flow_run(ws.active, "ship", None, origin.flow_started_by(), true, cx)
                     .expect("dispatched")
                     .run_id
             })
@@ -1055,6 +1196,7 @@ async fn a_cancelled_phone_started_run_still_reports_back(cx: &mut TestAppContex
             ws.control_flow_run(
                 ws.active,
                 "ship",
+                None,
                 daruda_flow::request::StartedBy::Phone,
                 true,
                 cx,
@@ -1346,6 +1488,7 @@ async fn a_worktree_held_by_another_process_names_its_run(cx: &mut TestAppContex
             ws.control_flow_run(
                 ws.active,
                 "ship",
+                None,
                 daruda_flow::request::StartedBy::Phone,
                 true,
                 cx
@@ -1387,6 +1530,7 @@ nodes:
             ws.control_flow_run(
                 ws.active,
                 name,
+                None,
                 daruda_flow::request::StartedBy::Phone,
                 true,
                 cx,
@@ -1450,6 +1594,7 @@ async fn a_flow_start_response_names_the_execution_dispatched(cx: &mut TestAppCo
             ResolvedCommand::Flow(ResolvedFlowCommand::Run {
                 name: "ship".into(),
                 lane: target,
+                profile: None,
             }),
             exec::CommandOrigin::Orchestrator,
             cx,
@@ -1532,6 +1677,7 @@ async fn a_refused_start_tells_the_control_caller_why(cx: &mut TestAppContext) {
         let refused = ws.control_flow_run(
             ws.active,
             "ship",
+            None,
             daruda_flow::request::StartedBy::Phone,
             true,
             cx,
@@ -1571,6 +1717,7 @@ async fn a_desktop_resume_of_a_phone_started_run_stays_off_the_phone(cx: &mut Te
         ws.control_flow_run(
             ws.active,
             "ship",
+            None,
             daruda_flow::request::StartedBy::Phone,
             true,
             cx,

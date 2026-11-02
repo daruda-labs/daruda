@@ -303,6 +303,9 @@ pub(crate) enum ScreenshotScenario {
     /// of the three sentences, and the only way to see whether it still reads
     /// as a sentence inside the dialog rather than as a wall.
     FlowDeleteConfirm,
+    /// The move-to-repository confirmation for a personal flow that would take
+    /// the place of a project flow of the same name: the body at its longest.
+    FlowMoveConfirm,
     /// The rename dialog after a refused name: the reason sits under the field
     /// and the dialog stays up. Only a submit reaches that state.
     FlowRenameRefused,
@@ -421,6 +424,23 @@ pub(crate) fn drive(
                 std::path::PathBuf::from(FLOW_DELETE_SAMPLE_NAME),
                 FLOW_DELETE_SAMPLE_NAME,
                 crate::workspace::flow_paths::FlowOrigin::Repo,
+                workspace.downgrade(),
+                window,
+                cx,
+            );
+        }
+        ScreenshotScenario::FlowMoveConfirm => {
+            workspace.update(cx, |ws, cx| ws.reveal_flows_panel(cx));
+            let lane = workspace.read(cx).active_ref();
+            let plan = crate::workspace::flow_move_ops::FlowMovePlan {
+                to: std::path::PathBuf::from(FLOW_DELETE_SAMPLE_NAME),
+                origin: crate::workspace::flow_paths::FlowOrigin::Global,
+                shadows: vec![crate::workspace::flow_paths::FlowOrigin::Project],
+            };
+            crate::workspace::flow_move_ops::open_move_dialog(
+                lane,
+                std::path::PathBuf::from(FLOW_DELETE_SAMPLE_NAME),
+                &plan,
                 workspace.downgrade(),
                 window,
                 cx,
@@ -698,6 +718,8 @@ pub(crate) fn drive(
                 crate::surface::strings::control::approval_task_create(
                     "Add desktop approvals",
                     "Daruda",
+                    crate::surface::strings::control::approval_task_in_new_branch("feat/approvals"),
+                    crate::surface::strings::control::approval_task_as_chat(),
                 ),
                 Delivery::Presence { away: false },
                 cx,

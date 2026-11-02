@@ -10,6 +10,7 @@ use crate::control::spec::GatedCommand;
 use crate::runs::GlobalTasks;
 use crate::surface::strings as s;
 use crate::telegram::bridge::PaneRef;
+use daruda_store::tasks::TaskAgentSurface;
 
 use super::{Dispatch, Pending, in_lane_window, in_pane_window, in_project_window, in_task_window};
 
@@ -122,17 +123,15 @@ fn guard_gated(cmd: &GatedCommand, cx: &mut App) -> Result<(), ControlError> {
         GatedCommand::ChatNew { lane, .. } => {
             in_lane_window(*lane, cx, |_ws, _window, _cx| Ok(())).map(|_| ())
         }
+        // The same checks the create runs once approved, so a branch the
+        // Task editor would refuse is answered before the card asks about it.
         GatedCommand::TaskCreate {
             workspace,
             project,
-            title,
-            ..
-        } => {
-            if title.trim().is_empty() {
-                return Err(ControlError::TaskTitleEmpty);
-            }
-            in_project_window(*workspace, *project, cx, |_ws, _window, _cx| Ok(()))
-        }
+            task,
+        } => in_project_window(*workspace, *project, cx, |ws, _window, _cx| {
+            ws.control_task_spec(*project, task.clone()).map(|_| ())
+        }),
         // Only a start that creates a worktree spends the budget, as
         // `daruda_worktree_create` does; an existing one is already there.
         GatedCommand::TaskStart { task } => {
@@ -186,14 +185,31 @@ fn approval_summary(cmd: &GatedCommand, cx: &mut App) -> String {
         GatedCommand::TaskCreate {
             workspace,
             project,
-            title,
-            ..
+            task,
         } => {
-            let name = in_project_window(*workspace, *project, cx, |ws, _window, _cx| {
-                Ok(ws.control_project_name(*project))
+            let (name, location) = in_project_window(*workspace, *project, cx, |ws, _, _| {
+                let location = match task.worktree {
+                    Some(lane) => {
+                        s::control::approval_task_in_worktree(ws.control_lane_name(lane.lane_ref()))
+                    }
+                    None => match task
+                        .branch
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|b| !b.is_empty())
+                    {
+                        Some(branch) => s::control::approval_task_in_new_branch(branch),
+                        None => s::control::approval_task_in_new_worktree(),
+                    },
+                };
+                Ok((ws.control_project_name(*project), location))
             })
             .unwrap_or_default();
-            s::control::approval_task_create(title.trim(), &name)
+            let surface = match task.surface.unwrap_or_default() {
+                TaskAgentSurface::AgentChat => s::control::approval_task_as_chat(),
+                TaskAgentSurface::Terminal => s::control::approval_task_as_terminal(),
+            };
+            s::control::approval_task_create(task.title.trim(), &name, &location, &surface)
         }
         GatedCommand::TaskStart { task } => s::control::approval_task_start(task_title(task, cx)),
         GatedCommand::TaskOpen { task } => s::control::approval_task_open(task_title(task, cx)),
@@ -211,21 +227,13 @@ async fn perform_gated(
         GatedCommand::TaskCreate {
             workspace,
             project,
-            title,
-            prompt,
-            worktree,
+            task,
         } => {
             // Answered once the task is in the log, so a start or a listing
             // the caller sends next finds it.
             let created = cx.update(|cx| {
                 in_project_window(workspace, project, cx, |ws, _window, cx| {
-                    ws.control_task_create(
-                        project,
-                        &title,
-                        prompt.clone(),
-                        worktree.map(LaneHandle::lane_ref),
-                        cx,
-                    )
+                    ws.control_task_create(project, task.clone(), cx)
                 })
             })?;
             return created

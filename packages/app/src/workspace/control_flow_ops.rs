@@ -1,9 +1,10 @@
 //! Running a flow through the phone or orchestrator control surface.
 //!
 //! A flow answers to different rules than a chat: it is addressed by worktree
-//! rather than by pane, only one may run in a worktree at a time, and profile
-//! selection still requires the desktop picker. Runtime permission questions
-//! are supported on desktop and eligible remote channels; the first answer wins.
+//! rather than by pane, only one may run in a worktree at a time, and a file
+//! that declares profiles runs only with one of them named. Runtime permission
+//! questions are supported on desktop and eligible remote channels; the first
+//! answer wins.
 //!
 //! Listing is the exception that takes no target — every open window
 //! contributes its active worktree's set and each row says which, so there is
@@ -14,11 +15,12 @@ use std::path::Path;
 use gpui::Context;
 
 use crate::control::result::{
-    ControlError, FlowEntry, FlowNotStartedReason, FlowOriginKind, LaneHandle, StopDisposition,
+    ControlError, FlowEntry, FlowIssue, FlowNotStartedReason, FlowOriginKind, LaneHandle,
+    StopDisposition,
 };
 use crate::workspace::Workspace;
 use crate::workspace::flow_ops::FlowStartRefused;
-use crate::workspace::flow_paths::{FlowOrigin, FoundFlow, flow_label};
+use crate::workspace::flow_paths::{FlowOrigin, FoundFlow, flow_label, project_flows_dir};
 use crate::workspace::flow_request::{FlowSelection, FlowSubmitError};
 use daruda_control_types::runs::RunHandle;
 use daruda_store::project::LaneRef;
@@ -47,6 +49,7 @@ impl Workspace {
                         name: flow_label(&found.path),
                         origin: map_origin(found.origin),
                         lane: LaneHandle::new(self.uuid(), self.active),
+                        profiles: declared_profiles(&found.path),
                     })
                     .collect()
             })
@@ -62,15 +65,16 @@ impl Workspace {
     ///
     /// Every start refusal is returned to the caller. Runtime permission
     /// questions use the shared desktop/remote answer path. A worktree that
-    /// is gone has nowhere to put a run; profile selection needs the picker,
-    /// which this control surface does not expose; a lane
-    /// runs one flow at a time, enforced by an on-disk lock the engine takes
-    /// only after dispatch; and a flow that does not pass its own static
-    /// checks is refused as written.
+    /// is gone has nowhere to put a run; a file that declares profiles needs
+    /// one of them named, and a name it does not declare is refused rather
+    /// than run under the defaults; a lane runs one flow at a time, enforced
+    /// by an on-disk lock the engine takes only after dispatch; and a flow
+    /// that does not pass its own static checks is refused as written.
     pub(crate) fn control_flow_run(
         &mut self,
         lane: LaneRef,
         name: &str,
+        profile: Option<&str>,
         started_by: daruda_flow::request::StartedBy,
         solicited: bool,
         cx: &mut Context<Self>,
@@ -84,8 +88,18 @@ impl Workspace {
                     name: name.to_string(),
                 })?;
         let label = flow_label(&found.path);
-        if needs_profile_choice(&found.path) {
-            return Err(ControlError::FlowNeedsInteraction { name: label });
+        let profiles = declared_profiles(&found.path);
+        match profile {
+            None if !profiles.is_empty() => {
+                return Err(ControlError::FlowNeedsInteraction { name: label });
+            }
+            Some(profile) if !profiles.iter().any(|p| p == profile) => {
+                return Err(ControlError::FlowUnknownProfile {
+                    name: label,
+                    profile: profile.to_string(),
+                });
+            }
+            _ => {}
         }
         // The engine takes the on-disk lock only once the run has started, so
         // a lane another process holds is refused here, where it is still an
@@ -97,7 +111,7 @@ impl Workspace {
             });
         }
         // Same check `Validate Flow…` runs: no lock, no run directory.
-        match self.check_flow(lane, &found.path, None, cx) {
+        match self.check_flow(lane, &found.path, profile, cx) {
             Ok(issues) if issues.is_empty() => {}
             Ok(_) => return Err(ControlError::FlowRefused { name: label }),
             Err(e) => {
@@ -108,7 +122,7 @@ impl Workspace {
         let submitted = self.submit_flow_run(
             lane,
             &found.path,
-            None,
+            profile,
             &FlowSelection::default(),
             (started_by, solicited),
             cx,
@@ -124,8 +138,68 @@ impl Workspace {
             name: label,
             origin: map_origin(found.origin),
             lane: LaneHandle::new(self.uuid(), lane),
+            profiles,
         };
         Ok(FlowStarted { entry, run_id })
+    }
+
+    /// Every problem `text` would have as a flow of `lane`, found without
+    /// saving or running it: the same check `Validate Flow…` runs, so a
+    /// clean answer means the file would start there as written.
+    ///
+    /// `name` names an existing flow whose directory relative prompt files
+    /// resolve against; without one the text is checked where a new flow is
+    /// created. A refusal that comes from the worktree rather than the text
+    /// (a remote agent, a launch that cannot be built) is reported as an
+    /// issue too: the text will not run there either way.
+    pub(crate) fn control_flow_validate(
+        &mut self,
+        lane: LaneRef,
+        text: &str,
+        profile: Option<&str>,
+        name: Option<&str>,
+        cx: &mut Context<Self>,
+    ) -> Result<Vec<FlowIssue>, ControlError> {
+        if self.lane_for(lane).is_none() {
+            return Err(ControlError::TargetGone);
+        }
+        let path = match name {
+            Some(name) => {
+                self.resolve_flow_name_in(lane, name)
+                    .ok_or_else(|| ControlError::FlowNotFound {
+                        name: name.to_string(),
+                    })?
+                    .path
+            }
+            None => {
+                let root = self
+                    .project_for(lane.project)
+                    .map(|p| p.root.clone())
+                    .ok_or(ControlError::TargetGone)?;
+                project_flows_dir(&self.data_dir, &root).join(DRAFT_FLOW_FILE)
+            }
+        };
+        let issues = match self.check_flow_text(lane, text, &path, profile, cx) {
+            Ok(issues) => issues,
+            Err(FlowSubmitError::Load(daruda_flow::FlowError::Validate(issues))) => issues,
+            Err(FlowSubmitError::Invalid(issues)) => issues,
+            Err(FlowSubmitError::NoLane | FlowSubmitError::LaneUnresolvable { .. }) => {
+                return Err(ControlError::TargetGone);
+            }
+            Err(other) => {
+                return Ok(vec![FlowIssue {
+                    node: None,
+                    message: submit_problem(other),
+                }]);
+            }
+        };
+        Ok(issues
+            .into_iter()
+            .map(|issue| FlowIssue {
+                node: issue.node.map(|node| node.to_string()),
+                message: issue.message,
+            })
+            .collect())
     }
 
     /// Stop the run `lane` holds.
@@ -233,6 +307,34 @@ fn refusal_answer(
     ControlError::FlowNotStarted { name, reason }
 }
 
+/// The file name unsaved text is checked under. Only its directory matters:
+/// that is what the text's relative prompt files resolve against.
+const DRAFT_FLOW_FILE: &str = "draft.yaml";
+
+/// A check's refusal that is not a list of issues, in the fixed English an
+/// MCP answer carries. Paths stay in the desktop's log.
+fn submit_problem(error: FlowSubmitError) -> String {
+    let reason = match error {
+        FlowSubmitError::Load(error) => return error.to_string(),
+        FlowSubmitError::RemoteLane { agent } => FlowNotStartedReason::RemoteLane { agent },
+        FlowSubmitError::AgentLaunchRefused { agent, .. } => {
+            FlowNotStartedReason::AgentLaunchRefused { agent }
+        }
+        FlowSubmitError::UnusableSessionHost { agent, .. } => {
+            FlowNotStartedReason::SessionHostUnusable { agent }
+        }
+        FlowSubmitError::NoLane => FlowNotStartedReason::NoLane,
+        FlowSubmitError::LaneUnresolvable { .. } => FlowNotStartedReason::LaneUnresolvable,
+        FlowSubmitError::Read { .. } => FlowNotStartedReason::ReadFailed,
+        FlowSubmitError::Resume(_) => FlowNotStartedReason::ResumeRefused,
+        FlowSubmitError::LockHeld { .. } => return "worktree is locked by another run".into(),
+        FlowSubmitError::Invalid(issues) => {
+            return format!("the flow has {} validation problem(s)", issues.len());
+        }
+    };
+    reason.to_string()
+}
+
 /// The single conversion between the workspace-private flow origin and the
 /// control surface's own enum, for the same reason [`map_activity`] exists.
 fn map_origin(origin: FlowOrigin) -> FlowOriginKind {
@@ -243,14 +345,15 @@ fn map_origin(origin: FlowOrigin) -> FlowOriginKind {
     }
 }
 
-/// A file declaring profiles makes the desktop picker ask which one to run.
+/// The profiles the file at `path` declares, in the order the desktop picker
+/// offers them.
 ///
-/// A file that cannot be read or parsed answers `false`: the run that follows
+/// A file that cannot be read or parsed answers none: the run that follows
 /// fails on the same read and names it properly, and refusing here would
-/// report a parse error as an interaction problem.
-fn needs_profile_choice(path: &Path) -> bool {
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return false;
-    };
-    daruda_flow::load::profiles(&text).is_ok_and(|profiles| !profiles.is_empty())
+/// report a parse error as a profile problem.
+fn declared_profiles(path: &Path) -> Vec<String> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| daruda_flow::load::profiles(&text).ok())
+        .unwrap_or_default()
 }

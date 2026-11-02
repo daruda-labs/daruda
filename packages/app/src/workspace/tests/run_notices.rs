@@ -551,8 +551,16 @@ async fn workspace_flow_and_two_tasks_return_one_pointer_group(cx: &mut TestAppC
     let mut task_chats = Vec::new();
     for title in ["first task", "second task"] {
         let created = fixture.workspace.update(cx, |ws, cx| {
-            ws.control_task_create(lane.project, title, "do the work".into(), Some(lane), cx)
-                .unwrap()
+            ws.control_task_create(
+                lane.project,
+                crate::test_support::new_task(
+                    title,
+                    "do the work",
+                    Some(crate::control::result::LaneHandle::new(ws.uuid(), lane)),
+                ),
+                cx,
+            )
+            .unwrap()
         });
         cx.run_until_parked();
         let task = created.await.unwrap();
@@ -590,6 +598,7 @@ async fn workspace_flow_and_two_tasks_return_one_pointer_group(cx: &mut TestAppC
                 ResolvedCommand::Flow(ResolvedFlowCommand::Run {
                     name: "notice".into(),
                     lane: LaneHandle::new(fixture.workspace.read(cx).uuid(), lane),
+                    profile: None,
                 }),
                 CommandOrigin::Orchestrator,
                 cx,

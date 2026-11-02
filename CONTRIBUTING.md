@@ -627,7 +627,7 @@ after settle and forces a repaint before capture.
 | Transcript boundaries | `agent-chat-tail[-open]`, `agent-chat-group-tail[-open]`, `agent-chat-subagent-tail[-open]` |
 | CLI transcript | `agent-chat-cli-running`, `agent-chat-cli-ended` |
 | Task editor | `task-editor`, `task-editor-preview`, `task-editor-saving` (checklist disabled during save), `task-editor-running`, `task-editor-disk-copy` |
-| Flows | `flow-picker`, `flow-profile-picker`, `flow-running`, `flow-asking`, `flow-resumable`, `flow-delete-confirm`, `flow-rename-refused` |
+| Flows | `flow-picker`, `flow-profile-picker`, `flow-running`, `flow-asking`, `flow-resumable`, `flow-delete-confirm`, `flow-move-confirm`, `flow-rename-refused` |
 | Flow graph | `flow-graph`, `flow-graph-running`, `flow-graph-form[-refused]`, `flow-graph-pinned`, `flow-graph-authoring`, `flow-run-detail` |
 
 Bracketed forms summarize related names, not literal CLI arguments. The

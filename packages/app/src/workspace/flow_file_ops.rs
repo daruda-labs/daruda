@@ -480,7 +480,7 @@ fn load_failure_detail(error: &daruda_flow::FlowError) -> String {
 /// and by the time a write runs it is a claim about the past. Here the kernel
 /// checks and writes as one, so nothing can arrive in between and be
 /// overwritten — and a flow outside a repository has no copy anywhere else.
-fn write_new_file(path: &Path, contents: &str) -> std::io::Result<()> {
+pub(in crate::workspace) fn write_new_file(path: &Path, contents: &str) -> std::io::Result<()> {
     use std::io::Write as _;
     let mut file = std::fs::OpenOptions::new()
         .write(true)

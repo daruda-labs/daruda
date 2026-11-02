@@ -215,3 +215,20 @@ pub(crate) fn once_released<T>(mut take: impl FnMut() -> T, held: impl Fn(&T) ->
         std::thread::sleep(FLOCK_RETRY_INTERVAL);
     }
 }
+
+/// A `daruda_task_create` request naming only a title, a prompt and where the
+/// task runs; `None` has Start create a worktree.
+pub(crate) fn new_task(
+    title: &str,
+    prompt: &str,
+    worktree: Option<crate::control::result::LaneHandle>,
+) -> crate::control::spec::NewTask {
+    crate::control::spec::NewTask {
+        title: title.into(),
+        prompt: prompt.into(),
+        worktree,
+        branch: None,
+        notes: None,
+        surface: None,
+    }
+}

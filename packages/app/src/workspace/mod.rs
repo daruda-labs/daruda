@@ -50,6 +50,7 @@ mod flow_context;
 mod flow_events;
 mod flow_file_ops;
 pub(in crate::workspace) mod flow_history;
+pub(in crate::workspace) mod flow_move_ops;
 mod flow_navigation;
 mod flow_ops;
 mod flow_paths;
@@ -89,6 +90,7 @@ pub(crate) mod status_bar;
 mod status_bar_ops;
 pub(in crate::workspace) mod sync;
 mod tab_indicator;
+pub(in crate::workspace) mod task_draft;
 #[cfg(test)]
 mod tests;
 mod toast_layer;
@@ -215,6 +217,7 @@ actions!(
         ValidateFlow,
         ShowFlowGraph,
         ReloadFlowGraph,
+        MoveFlowToRepository,
         ActivateLane1,
         ActivateLane2,
         ActivateLane3,

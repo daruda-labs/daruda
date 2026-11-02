@@ -29,6 +29,7 @@ pub(in crate::workspace) enum FormField {
     Output,
     Fix,
     Rerun,
+    MaxTurns,
 }
 
 /// One refusal, pinned to the box it is about.
@@ -86,13 +87,13 @@ fn field_for(kind: &ValidationKind) -> Option<FormField> {
         K::UnsupportedSchemaKeyword { .. } | K::SchemaKeywordOnWrongKind { .. } => return None,
         // A pin lives in the pane, not in any box of this form.
         K::PinnedNodeInRerun { .. } => return None,
-        // `continue_until` and `max_turns` are written in the YAML editor, so
-        // there is no box here to point at — the same as `output_schema`.
+        K::MaxTurnsIsZero => FormField::MaxTurns,
+        // `continue_until` is written in the YAML editor, so there is no box
+        // here to point at — the same as `output_schema`.
         K::ContinueUntilWithoutObjectSchema
         | K::ContinueUntilFieldNotDeclared { .. }
         | K::ContinueUntilFieldNotRequired { .. }
-        | K::ContinueUntilValueNotAllowed { .. }
-        | K::MaxTurnsIsZero => return None,
+        | K::ContinueUntilValueNotAllowed { .. } => return None,
         // About the flow, not about a box.
         // A selection is about the run, not about any box on a node.
         K::UnknownUntil { .. }
@@ -132,6 +133,16 @@ mod tests {
             crate::surface::strings::flow::issue(&ValidationKind::AgentIdWithoutMode),
             "the wording is the one wording site's, not a second copy"
         );
+    }
+
+    #[test]
+    fn a_zero_turn_budget_points_at_its_box() {
+        let notes = notes_for(
+            &[issue(Some("design"), ValidationKind::MaxTurnsIsZero)],
+            &"design".into(),
+        );
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].field, FormField::MaxTurns);
     }
 
     #[test]

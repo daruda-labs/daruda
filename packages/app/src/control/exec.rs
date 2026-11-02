@@ -80,12 +80,17 @@ pub(crate) fn run(cmd: ResolvedCommand, origin: CommandOrigin, cx: &mut App) -> 
         // One window, one worktree: the caller named it, so there is nothing
         // to search and nothing that could start in a place it did not ask
         // for.
-        ResolvedCommand::Flow(ResolvedFlowCommand::Run { name, lane }) => {
+        ResolvedCommand::Flow(ResolvedFlowCommand::Run {
+            name,
+            lane,
+            profile,
+        }) => {
             let solicited = origin.is_solicited(cx);
             in_lane_window(lane, cx, |ws, _window, cx| {
                 ws.control_flow_run(
                     lane.lane_ref(),
                     &name,
+                    profile.as_deref(),
                     origin.flow_started_by(),
                     solicited,
                     cx,
@@ -112,6 +117,21 @@ pub(crate) fn run(cmd: ResolvedCommand, origin: CommandOrigin, cx: &mut App) -> 
                 }
             })
         }
+        ResolvedCommand::Flow(ResolvedFlowCommand::Validate {
+            lane,
+            text,
+            profile,
+            name,
+        }) => in_lane_window(lane, cx, |ws, _window, cx| {
+            ws.control_flow_validate(
+                lane.lane_ref(),
+                &text,
+                profile.as_deref(),
+                name.as_deref(),
+                cx,
+            )
+        })
+        .map(|issues| ControlResult::FlowValidated { lane, issues }),
         ResolvedCommand::Flow(ResolvedFlowCommand::Stop { lane, run }) => {
             in_lane_window(lane, cx, |ws, _window, cx| {
                 ws.control_flow_stop(lane.lane_ref(), run.as_ref(), cx)

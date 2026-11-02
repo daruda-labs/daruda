@@ -73,14 +73,36 @@ async fn an_empty_title_refuses_before_the_card(cx: &mut gpui::TestAppContext) {
             GatedCommand::TaskCreate {
                 workspace: project.workspace,
                 project: project.project,
-                title: "  ".into(),
-                prompt: "p".into(),
-                worktree: None,
+                task: crate::test_support::new_task("  ", "p", None),
             },
             crate::control::exec::CommandOrigin::Orchestrator,
             cx,
         ));
         assert_eq!(outcome, Err(ControlError::TaskTitleEmpty));
+        assert_eq!(crate::control::approval::waiting_count_for_test(cx), 0);
+    });
+}
+
+/// A branch the Task editor would refuse is refused here too, and before the
+/// card: no answer the user gives could make git accept it.
+#[gpui::test]
+async fn a_bad_branch_refuses_before_the_card(cx: &mut gpui::TestAppContext) {
+    let fixture = workspace_with_agent_chat(cx);
+    let (_, project) = project_of(&fixture, cx);
+    let _outbound = cx.update(pair_bridge);
+    cx.update(|cx| {
+        let mut task = crate::test_support::new_task("Bad branch", "p", None);
+        task.branch = Some("a..b".into());
+        let outcome = ready(run_gated(
+            GatedCommand::TaskCreate {
+                workspace: project.workspace,
+                project: project.project,
+                task,
+            },
+            crate::control::exec::CommandOrigin::Orchestrator,
+            cx,
+        ));
+        assert_eq!(outcome, Err(ControlError::LaneNameInvalid));
         assert_eq!(crate::control::approval::waiting_count_for_test(cx), 0);
     });
 }
@@ -96,9 +118,12 @@ async fn an_approved_create_adds_a_backlog_task_to_that_project(cx: &mut gpui::T
             GatedCommand::TaskCreate {
                 workspace: project.workspace,
                 project: project.project,
-                title: " Fix login ".into(),
-                prompt: "p".into(),
-                worktree: None,
+                task: crate::control::spec::NewTask {
+                    branch: Some("feat/login".into()),
+                    notes: Some("for later".into()),
+                    surface: Some(daruda_store::tasks::TaskAgentSurface::Terminal),
+                    ..crate::test_support::new_task(" Fix login ", "p", None)
+                },
             },
             crate::control::exec::CommandOrigin::Orchestrator,
             cx,
@@ -118,6 +143,12 @@ async fn an_approved_create_adds_a_backlog_task_to_that_project(cx: &mut gpui::T
         assert_eq!(created.spec.title, "Fix login");
         assert_eq!(created.lifecycle, Lifecycle::Backlog);
         assert_eq!(created.spec.run_in, TaskRunIn::NewWorktree);
+        assert_eq!(created.spec.branch_name, "feat/login");
+        assert_eq!(created.spec.notes, "for later");
+        assert_eq!(
+            created.spec.agent_surface,
+            daruda_store::tasks::TaskAgentSurface::Terminal
+        );
     });
 }
 
@@ -246,8 +277,16 @@ async fn an_approved_start_answers_with_its_worktree_and_chat(cx: &mut gpui::Tes
         .workspace
         .read_with(cx, |ws, _| (ws.uuid(), ws.control_active_lane()));
     let created = fixture.workspace.update(cx, |ws, cx| {
-        ws.control_task_create(lane.project, "Here", "p".into(), Some(lane), cx)
-            .expect("created")
+        ws.control_task_create(
+            lane.project,
+            crate::test_support::new_task(
+                "Here",
+                "p",
+                Some(crate::control::result::LaneHandle::new(ws.uuid(), lane)),
+            ),
+            cx,
+        )
+        .expect("created")
     });
     cx.run_until_parked();
     let task = created.await.expect("recorded");
@@ -314,8 +353,16 @@ async fn a_phone_task_start_records_phone_provenance(cx: &mut gpui::TestAppConte
         .workspace
         .read_with(cx, |ws, _| ws.control_active_lane());
     let created = fixture.workspace.update(cx, |ws, cx| {
-        ws.control_task_create(lane.project, "Phone", "p".into(), Some(lane), cx)
-            .unwrap()
+        ws.control_task_create(
+            lane.project,
+            crate::test_support::new_task(
+                "Phone",
+                "p",
+                Some(crate::control::result::LaneHandle::new(ws.uuid(), lane)),
+            ),
+            cx,
+        )
+        .unwrap()
     });
     cx.run_until_parked();
     let task = created.await.unwrap();

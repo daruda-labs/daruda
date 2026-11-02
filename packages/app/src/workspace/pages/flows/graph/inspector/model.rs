@@ -241,7 +241,7 @@ impl InspectorModel {
         if notes.iter().any(|note| {
             matches!(
                 note.field,
-                FormField::Cwd | FormField::Fix | FormField::Rerun
+                FormField::Cwd | FormField::Fix | FormField::Rerun | FormField::MaxTurns
             )
         }) {
             ui.settings_open = true;

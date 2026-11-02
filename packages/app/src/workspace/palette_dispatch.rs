@@ -10,8 +10,8 @@ use super::command::picker_key::picker_keystroke;
 use super::{
     ClosePane, CloseTab, EditTask, EditWindowTitle, FocusNextPane, FocusPaneDown, FocusPaneLeft,
     FocusPaneRight, FocusPaneUp, FocusPrevPane, InstallAgentHooks, MoveActiveProjectToGroup,
-    MoveTabLeft, MoveTabRight, NewGroup, NewSkill, NewTab, NewTask, NextTab, OpenAgentChat,
-    OpenCommandHistory, OpenProjectConfig, OpenSettings, PrevTab, ReloadFlowGraph,
+    MoveFlowToRepository, MoveTabLeft, MoveTabRight, NewGroup, NewSkill, NewTab, NewTask, NextTab,
+    OpenAgentChat, OpenCommandHistory, OpenProjectConfig, OpenSettings, PrevTab, ReloadFlowGraph,
     RenameActiveProject, RunFlow, ShowFlowGraph, ShowLeftDockFiles, ShowLeftDockGit,
     ShowLeftDockLanes, SplitDown, SplitRight, SwitchRightPanelFlows, SwitchRightPanelSkills,
     SwitchRightPanelTasks, SwitchRightPanelTools, SwitchRightPanelUsage, ToggleBottomDock,
@@ -134,6 +134,9 @@ impl Workspace {
                 "validate_flow" => self.on_validate_flow(&ValidateFlow, window, cx),
                 "show_flow_graph" => self.on_show_flow_graph(&ShowFlowGraph, window, cx),
                 "reload_flow_graph" => self.on_reload_flow_graph(&ReloadFlowGraph, window, cx),
+                "move_flow_to_repository" => {
+                    self.on_move_flow_to_repository(&MoveFlowToRepository, window, cx)
+                }
                 "focus_next_pane" => self.on_focus_next_pane(&FocusNextPane, window, cx),
                 "focus_prev_pane" => self.on_focus_prev_pane(&FocusPrevPane, window, cx),
                 "focus_pane_left" => self.on_focus_pane_left(&FocusPaneLeft, window, cx),

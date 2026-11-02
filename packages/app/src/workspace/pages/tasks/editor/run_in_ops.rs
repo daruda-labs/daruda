@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use daruda_store::project::{LaneKind, ProjectUuid};
+use daruda_store::project::ProjectUuid;
 use daruda_store::tasks::{Lifecycle, TaskRecord, TaskRunIn, TasksBook};
 use gpui::{Context, SharedString};
 
@@ -89,12 +89,7 @@ impl Workspace {
         if validation != BranchValidation::Valid || !editable {
             return validation;
         }
-        let branch = text.trim();
-        let taken = self
-            .task_project_lanes(project)
-            .iter()
-            .any(|lane| matches!(&lane.kind, LaneKind::Git { branch: Some(b), .. } if b == branch));
-        if taken {
+        if self.task_branch_checked_out(project, text.trim()) {
             BranchValidation::Exists
         } else {
             validation

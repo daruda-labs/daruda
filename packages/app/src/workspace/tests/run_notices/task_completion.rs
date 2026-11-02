@@ -130,8 +130,16 @@ async fn task_completion(
         .workspace
         .read_with(cx, |ws, _| ws.control_active_lane());
     let created = fixture.workspace.update(cx, |ws, cx| {
-        ws.control_task_create(lane.project, "Fast task", "work".into(), Some(lane), cx)
-            .unwrap()
+        ws.control_task_create(
+            lane.project,
+            crate::test_support::new_task(
+                "Fast task",
+                "work",
+                Some(crate::control::result::LaneHandle::new(ws.uuid(), lane)),
+            ),
+            cx,
+        )
+        .unwrap()
     });
     cx.run_until_parked();
     let task = created.await.unwrap();

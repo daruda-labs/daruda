@@ -53,6 +53,19 @@ pub enum ResolvedFlowCommand {
     Run {
         name: String,
         lane: crate::result::LaneHandle,
+        /// One of the profiles the file declares. `None` runs a file that
+        /// declares none; a file that declares some needs one named.
+        profile: Option<String>,
+    },
+    /// Check flow YAML against `lane` without saving or running it: the
+    /// static rules and the worktree's own (its agents, prompt files).
+    /// `name` is an existing flow whose directory relative prompt files
+    /// resolve against; `None` is the directory a new flow is created in.
+    Validate {
+        lane: crate::result::LaneHandle,
+        text: String,
+        profile: Option<String>,
+        name: Option<String>,
     },
     /// Stop the worktree, optionally only if this execution still owns it.
     Stop {
@@ -172,19 +185,31 @@ pub enum GatedCommand {
         lane: crate::result::LaneHandle,
         agent: Option<String>,
     },
-    /// A Backlog task in `project`. With `worktree` it runs in that existing
-    /// worktree; without, Start creates one.
+    /// A Backlog task in `project`.
     TaskCreate {
         workspace: daruda_store::project::WorkspaceUuid,
         project: daruda_store::project::ProjectId,
-        title: String,
-        prompt: String,
-        worktree: Option<crate::result::LaneHandle>,
+        task: NewTask,
     },
     /// Start a Backlog task, and wait until it is running.
     TaskStart { task: String },
     /// Bring up the chat a task's run belongs to.
     TaskOpen { task: String },
+}
+
+/// The task [`GatedCommand::TaskCreate`] adds, as the caller named it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NewTask {
+    pub title: String,
+    pub prompt: String,
+    /// Runs in this existing worktree; `None` has Start create one.
+    pub worktree: Option<crate::result::LaneHandle>,
+    /// The branch a created worktree checks out; `None` keeps the task's
+    /// default. Ignored with `worktree`, which has its own.
+    pub branch: Option<String>,
+    pub notes: Option<String>,
+    /// `None` is the default a task the desktop form creates gets.
+    pub surface: Option<daruda_store::tasks::TaskAgentSurface>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

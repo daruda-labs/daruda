@@ -124,6 +124,7 @@ command:
   retry_task: "Retry Task…"
   right_panel_flows: "Open Flows"
   reload_flow_graph: "Reload Flow Graph"
+  move_flow_to_repository: "Move Flow to Repository…"
   right_panel_skills: "Right Panel: Skills"
   right_panel_tasks: "Open Tasks"
   right_panel_tools: "Right Panel: Tools"
@@ -442,6 +443,11 @@ task:
   edit_run_in_lane_busy: "Task “%{title}” is already running in this worktree."
   # A new-worktree branch that a registered lane already checks out.
   edit_branch_exists: "A worktree already uses this branch — choose Existing to run there."
+  # Why Save did not create the task, when the form passed its own checks
+  # but the project or worktree changed underneath it.
+  save_refused_title: "The task was not saved"
+  save_project_gone: "Its project is no longer open in this window."
+  save_lane_gone: "The selected worktree is no longer part of this project. Pick another one."
   # Field label for the base-lane selector on the Task editor.
   edit_base_label: "Base"
   # Trailing suffix on the option that maps to "no explicit base
@@ -1887,6 +1893,16 @@ flow:
   create_failed_title: "Could not create the flow"
   rename_failed_title: "Could not rename the flow"
   delete_failed_title: "Could not delete the flow"
+  # Moving a flow from the project or personal folder into the worktree's
+  # `.daruda/flows/`, where it is committed with the repository.
+  row_menu_move_to_repo: "Move to Repository…"
+  move_confirm_title: "Move this flow into the repository?"
+  move_confirm_body: "%{name} (%{origin}) will be moved into this worktree's .daruda/flows/. Other worktrees and other people see it only once it is committed."
+  # Appended to the body once per scope holding a flow of the same file name.
+  move_confirm_shadows: "In this worktree it will take the place of the %{origin} flow with the same file name."
+  move_confirm_ok: "Move"
+  move_failed_title: "Could not move the flow"
+  move_taken: "The repository already has a flow named %{name}; rename one of them first."
   # Why an edit was not written. The title is the same for all three refusals —
   # the file is untouched either way, and the reason follows as the message.
   edit_refused_title: "This change was not saved"
@@ -2226,6 +2242,9 @@ control:
   # refused. It promises the outcome instead, which
   # `Workspace::settle_flow_run` then delivers.
   flow_starting: "Starting %{name}. You'll get the outcome when it ends."
+  # Unreachable from a phone today; the match over results is exhaustive.
+  flow_valid: "The flow would run as written."
+  flow_invalid: "The flow has %{count} problem(s)."
   error_unknown_command: "Unknown command: /%{input}"
   error_unknown_command_did_you_mean: "Unknown command: /%{input} — did you mean /%{suggestion}?"
   error_missing_argument: "Missing argument. %{usage}"
@@ -2244,6 +2263,7 @@ control:
   # not resolve; the path stays on the desktop.
   flow_reason_lane_unresolvable: "That worktree folder could not be read"
   error_flow_needs_interaction: "%{name} needs a profile chosen on the desktop before it can start."
+  error_flow_unknown_profile: "%{name} declares no profile named %{profile}."
   error_no_active_lane: "No active worktree."
   usage_use: "Usage: /use <number> or /use -"
   usage_say: "Usage: /say <number> <message>"
@@ -2301,11 +2321,19 @@ control:
   error_queue_full: "That chat already has too many prompts waiting."
   error_lane_create_failed: "The worktree could not be created. daruda has the reason."
   error_lane_name_invalid: "That is not a usable branch name."
+  error_task_branch_taken: "Another worktree already has that branch checked out."
   error_approvals_pending: "Too many approvals are already waiting. Answer one first."
   error_approval_unavailable: "daruda could not ask for approval — no desktop or remote channel is available."
   error_lane_create_busy: "A worktree is already being created in that repository. Try again in a moment."
   error_self_target_refused: "That would have the agent prompt itself."
-  approval_task_create: "daruda wants to add the task %{title} to %{project}. Allow?"
+  # `location` is one of the approval_task_in_* phrases, `surface` one of
+  # the approval_task_as_* ones.
+  approval_task_create: "daruda wants to add the task %{title} to %{project}, to run %{location} %{surface}. Allow?"
+  approval_task_in_new_worktree: "in a new worktree"
+  approval_task_in_new_branch: "in a new worktree on the branch %{branch}"
+  approval_task_in_worktree: "in the worktree %{lane}"
+  approval_task_as_chat: "as an agent chat"
+  approval_task_as_terminal: "in a Claude terminal"
   approval_task_start: "daruda wants to start the task %{title}. Allow?"
   approval_task_open: "daruda wants to open the chat of the task %{title}. Allow?"
   task_created: "Task added."

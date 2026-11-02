@@ -32,6 +32,7 @@ pub(crate) enum ToolId {
     ChatNew,
     FlowList,
     FlowRun,
+    FlowValidate,
     FlowStop,
     TaskList,
     TaskCreate,
@@ -266,6 +267,27 @@ fn flow_stop_properties() -> serde_json::Value {
     })
 }
 
+fn flow_validate_properties() -> serde_json::Value {
+    serde_json::json!({
+        "text": {
+            "type": "string",
+            "description": "The flow's YAML, as it would be saved.",
+        },
+        "worktree": lane_ref_schema(),
+        "profile": {
+            "type": "string",
+            "description": "One of the profiles the text declares, to check it merged \
+                            under that profile.",
+        },
+        "name": {
+            "type": "string",
+            "description": "An existing flow from daruda_flow_list whose directory the \
+                            text's relative prompt files resolve against. Omit for a new \
+                            flow.",
+        },
+    })
+}
+
 fn flow_run_properties() -> serde_json::Value {
     serde_json::json!({
         "name": {
@@ -273,6 +295,11 @@ fn flow_run_properties() -> serde_json::Value {
             "description": "Flow file name, from daruda_flow_list. The extension is optional.",
         },
         "worktree": lane_ref_schema(),
+        "profile": {
+            "type": "string",
+            "description": "One of the `profiles` the daruda_flow_list row names. Required \
+                            when the row lists any; omit it otherwise.",
+        },
     })
 }
 
@@ -309,6 +336,21 @@ fn task_create_properties() -> serde_json::Value {
             "description": "What the agent that runs the task is asked to do.",
         },
         "worktree": worktree,
+        "branch": {
+            "type": "string",
+            "description": "Branch the worktree Start creates checks out. Omit for the \
+                            task's default; ignored with `worktree`, which keeps its own.",
+        },
+        "notes": {
+            "type": "string",
+            "description": "Notes kept with the task for the person; not sent to the agent.",
+        },
+        "surface": {
+            "type": "string",
+            "enum": ["agent_chat", "terminal"],
+            "description": "Run the task as an agent chat (the default) or in a Claude \
+                            terminal.",
+        },
     })
 }
 
@@ -458,7 +500,8 @@ static TABLE: &[Tool] = &[
         name: "daruda_flow_list",
         description: "List the flows that can be run right now: every open window's \
                       active worktree contributes its own, so the same name can appear \
-                      twice with a different `lane`.",
+                      twice with a different `lane`. A row's `profiles` are the ones \
+                      daruda_flow_run accepts for it.",
         gate: Gate::Open,
         properties: no_properties,
         required: &[],
@@ -471,14 +514,27 @@ static TABLE: &[Tool] = &[
                       was listed under, and the same name in two of them is two \
                       different flows. Flows with permission = ask are supported: questions \
                       can be answered on the desktop or phone, and the first answer wins. \
-                      Flows requiring profile selection are still refused. Reports that \
-                      it started, not that it finished. \
+                      A flow whose row lists `profiles` needs one of them as `profile`; \
+                      a profile can change the permission mode its agents run under. \
+                      Reports that it started, not that it finished. \
                       End your turn after it: a notice with the outcome arrives on its \
                       own when the run ends or is blocked. Do not follow it with \
                       daruda_run_wait unless the person asked you to wait.",
         gate: Gate::Open,
         properties: flow_run_properties,
         required: &["name", "worktree"],
+    },
+    Tool {
+        id: ToolId::FlowValidate,
+        name: "daruda_flow_validate",
+        description: "Check flow YAML against one worktree without saving or running it: \
+                      its schema and graph, and what only that worktree can answer — \
+                      whether each agent it names is configured there and whether its \
+                      prompt files exist. Answers with every issue found; an empty list \
+                      means it would run as written. Read-only.",
+        gate: Gate::Open,
+        properties: flow_validate_properties,
+        required: &["text", "worktree"],
     },
     Tool {
         id: ToolId::FlowStop,

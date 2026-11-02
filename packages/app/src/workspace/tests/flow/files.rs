@@ -512,3 +512,168 @@ async fn a_flow_that_comes_back_is_drawn_again(cx: &mut TestAppContext) {
         "with the flow's nodes on it"
     );
 }
+
+/// A created flow moved into the repository is listed from there, keeps its
+/// graph open on the moved file, and leaves nothing behind where it was.
+#[gpui::test]
+async fn moving_a_flow_into_the_repository_keeps_its_graph(cx: &mut TestAppContext) {
+    let (lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.create_flow_in(ws.active, "made here", window, cx)
+    });
+    vcx.run_until_parked();
+    let from = ws
+        .read_with(&vcx, |ws, cx| {
+            ws.open_graph()
+                .map(|(_, _, view)| view.read(cx).path().to_path_buf())
+        })
+        .expect("the created flow is open");
+    let plan = ws
+        .read_with(&vcx, |ws, _| ws.flow_move_plan(ws.active, &from))
+        .expect("a project flow can move");
+    assert_eq!(
+        plan.origin,
+        crate::workspace::flow_paths::FlowOrigin::Project
+    );
+    assert!(plan.shadows.is_empty());
+
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.move_flow_to_repository(ws.active, &from, window, cx)
+    });
+    vcx.run_until_parked();
+
+    let to = crate::workspace::flow_paths::flows_dir(lane.path()).join(from.file_name().unwrap());
+    assert!(!from.exists(), "the original is gone");
+    assert!(to.exists(), "the copy is in the repository");
+    let open = ws.read_with(&vcx, |ws, cx| {
+        ws.open_graph()
+            .map(|(_, _, view)| view.read(cx).path().to_path_buf())
+    });
+    assert_eq!(open, Some(to.clone()), "the graph follows the copy");
+    let listed = ws.read_with(&vcx, |ws, _| {
+        ws.flow_sources()
+            .expect("sources")
+            .list_flows()
+            .into_iter()
+            .find(|f| f.path == to)
+            .map(|f| f.origin)
+    });
+    assert_eq!(listed, Some(crate::workspace::flow_paths::FlowOrigin::Repo));
+    assert_eq!(
+        ws.read_with(&vcx, |ws, _| ws.flow_move_plan(ws.active, &to)),
+        None,
+        "a repository flow has nowhere further to move"
+    );
+}
+
+/// A repository flow of the same name is never overwritten, and the plan
+/// names every other scope the moved copy would take the place of.
+#[gpui::test]
+async fn a_move_refuses_a_taken_name_and_names_what_it_would_hide(cx: &mut TestAppContext) {
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    let (global, project) = ws.read_with(&vcx, |ws, _| {
+        let sources = ws.flow_sources().expect("sources");
+        (
+            sources.global.clone(),
+            sources.project.clone().expect("project dir"),
+        )
+    });
+    for dir in [&global, &project] {
+        std::fs::create_dir_all(dir).unwrap();
+    }
+    let mine = global.join("ship.yaml");
+    std::fs::write(&mine, "version: 1\nname: mine\nnodes: []\n").unwrap();
+    std::fs::write(project.join("ship.yaml"), ONE_AGENT).unwrap();
+
+    let plan = ws
+        .read_with(&vcx, |ws, _| ws.flow_move_plan(ws.active, &mine))
+        .expect("a personal flow can move");
+    assert_eq!(
+        plan.shadows,
+        vec![crate::workspace::flow_paths::FlowOrigin::Project]
+    );
+
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.move_flow_to_repository(ws.active, &mine, window, cx)
+    });
+    vcx.run_until_parked();
+    assert!(mine.exists(), "a refused move keeps the original");
+    assert_eq!(
+        std::fs::read_to_string(&flow_path).unwrap(),
+        ONE_AGENT,
+        "and does not touch the repository's flow"
+    );
+}
+
+/// The row menu and the palette both ask from inside the workspace's own
+/// update; asking must not read the workspace through its entity again.
+#[gpui::test]
+async fn asking_to_move_a_flow_opens_the_question(cx: &mut TestAppContext) {
+    use crate::ui::WindowExt as _;
+    let (_lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.create_flow_in(ws.active, "asked", window, cx)
+    });
+    vcx.run_until_parked();
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.on_move_flow_to_repository(&crate::workspace::MoveFlowToRepository, window, cx)
+    });
+    vcx.run_until_parked();
+    assert!(vcx.update(|window, cx| window.has_active_dialog(cx)));
+}
+
+/// A shared flow open for another worktree does not follow a move made from
+/// this one: the copy is in this worktree's repository, not that one's.
+#[gpui::test]
+async fn a_move_from_another_lane_leaves_the_open_graph_reporting_its_file_gone(
+    cx: &mut TestAppContext,
+) {
+    let (_lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    let other = tempfile::tempdir().expect("tempdir");
+    let (global, other_lane) = ws.update(&mut vcx, |ws, _| {
+        let global = ws
+            .flow_sources()
+            .expect("sources")
+            .global
+            .join("shared.yaml");
+        std::fs::create_dir_all(global.parent().unwrap()).unwrap();
+        std::fs::write(&global, ONE_AGENT).unwrap();
+        let id = ws.alloc_id();
+        let project = ws.active.project;
+        ws.project_for_mut(project)
+            .unwrap()
+            .lanes
+            .push(crate::lane::Lane::git(
+                id,
+                other.path().to_path_buf(),
+                Some("other".into()),
+                other.path().to_path_buf(),
+                other.path().to_path_buf(),
+                0,
+            ));
+        (global, daruda_store::project::LaneRef { project, lane: id })
+    });
+    let view = ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(ws.active, &global, window, cx);
+        ws.open_graph().map(|(_, _, view)| view).unwrap()
+    });
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.move_flow_to_repository(other_lane, &global, window, cx)
+    });
+    vcx.run_until_parked();
+    assert!(!global.exists());
+    assert!(
+        crate::workspace::flow_paths::flows_dir(other.path())
+            .join("shared.yaml")
+            .exists()
+    );
+    let (path, unreadable) = view.read_with(&vcx, |v, _| {
+        (v.path().to_path_buf(), v.unreadable_for_test().is_some())
+    });
+    assert_eq!(path, global, "not pointed at another worktree's file");
+    assert!(unreadable, "and says its file is gone");
+}

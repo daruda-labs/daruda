@@ -5,18 +5,19 @@
 //! control vocabulary. That translation lives inside `crate::workspace`
 //! because the answers' types do.
 
-use chrono::Utc;
 use gpui::{Context, Window};
 
 use daruda_store::project::{LaneRef, ProjectId, ProjectUuid};
-use daruda_store::tasks::{ExecutionRef, Lifecycle, StartedBy, TaskRunIn, TaskSpec};
+use daruda_store::tasks::{ExecutionRef, Lifecycle, StartedBy, TaskSpec};
 
 use crate::control::result::{ControlError, TaskProject};
+use crate::control::spec::NewTask;
 use crate::runs::{GlobalTasks, TaskCommitError, TaskIntent};
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::right_dock::task_chat_ops::TaskChatError;
 use crate::workspace::right_dock::task_start::{TaskStartError, TaskStarted};
+use crate::workspace::task_draft::{DraftError, DraftLocation, TaskDraft};
 
 /// A started execution, its worktree, and its chat when it has one.
 pub(crate) type ControlTaskStart = Result<(ExecutionRef, LaneRef, Option<PaneId>), ControlError>;
@@ -43,40 +44,56 @@ impl Workspace {
         self.project_by_uuid(uuid).is_some()
     }
 
-    /// Add a Backlog task to `project`, running in `worktree` when one is
-    /// named. Saved like one the form creates, with the form's defaults.
-    /// Answers once the task is in the log, so the caller's next command
-    /// finds it.
-    pub(crate) fn control_task_create(
-        &mut self,
+    /// The spec `daruda_task_create` would add, checked as the Task editor
+    /// checks its own: the same branch rules and the same project's lanes.
+    /// Pure, so the approval guard can ask before the card is shown.
+    pub(crate) fn control_task_spec(
+        &self,
         project: ProjectId,
-        title: &str,
-        prompt: String,
-        worktree: Option<LaneRef>,
-        cx: &mut Context<Self>,
-    ) -> Result<gpui::Task<Result<String, ControlError>>, ControlError> {
-        let title = title.trim();
-        if title.is_empty() {
-            return Err(ControlError::TaskTitleEmpty);
-        }
+        request: NewTask,
+    ) -> Result<TaskSpec, ControlError> {
         let uuid = self
             .project_for(project)
             .map(|p| p.uuid)
             .ok_or(ControlError::TargetGone)?;
         // A worktree of another project would leave the task pointing at a
         // repository it does not belong to.
-        let run_in = match worktree {
-            None => TaskRunIn::NewWorktree,
-            Some(lane) if lane.project == project => TaskRunIn::ExistingLane {
-                path: self
-                    .lane_for(lane)
+        let location = match request.worktree.map(|lane| lane.lane_ref()) {
+            None => DraftLocation::NewWorktree { base: None },
+            Some(lane) if lane.project == project => DraftLocation::ExistingLane(
+                self.lane_for(lane)
                     .map(|l| l.path.clone())
                     .ok_or(ControlError::TargetGone)?,
-            },
+            ),
             Some(_) => return Err(ControlError::TargetGone),
         };
-        let mut spec = TaskSpec::new(uuid, title.to_owned(), prompt, None, Utc::now());
-        spec.run_in = run_in;
+        let draft = TaskDraft {
+            title: request.title,
+            prompt: request.prompt,
+            notes: request.notes.unwrap_or_default(),
+            branch: request.branch.unwrap_or_default(),
+            location,
+            agent_surface: request.surface.unwrap_or_default(),
+            auto_execute: true,
+        };
+        self.task_spec_from(uuid, draft).map_err(|e| match e {
+            DraftError::TitleEmpty => ControlError::TaskTitleEmpty,
+            DraftError::ProjectNotOpen | DraftError::LaneNotInProject => ControlError::TargetGone,
+            DraftError::BranchInvalid => ControlError::LaneNameInvalid,
+            DraftError::BranchTaken => ControlError::TaskBranchTaken,
+        })
+    }
+
+    /// Add a Backlog task to `project`, saved like one the form creates.
+    /// Answers once the task is in the log, so the caller's next command
+    /// finds it.
+    pub(crate) fn control_task_create(
+        &mut self,
+        project: ProjectId,
+        request: NewTask,
+        cx: &mut Context<Self>,
+    ) -> Result<gpui::Task<Result<String, ControlError>>, ControlError> {
+        let spec = self.control_task_spec(project, request)?;
         let id = spec.id.clone();
         let created = self.propose_task_command(TaskIntent::Create { spec }, cx);
         Ok(cx.spawn(async move |_, _| created.await.map(|_| id).map_err(control_commit_error)))

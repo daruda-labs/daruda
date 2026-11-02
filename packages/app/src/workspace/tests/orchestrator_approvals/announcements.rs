@@ -52,9 +52,7 @@ async fn delayed_announcement(kind: Announcement, cx: &mut TestAppContext) {
                 let created = fixture.workspace.update(cx, |ws, cx| {
                     ws.control_task_create(
                         lane.project,
-                        "Announcement",
-                        "do the work".into(),
-                        Some(lane.lane_ref()),
+                        crate::test_support::new_task("Announcement", "do the work", Some(lane)),
                         cx,
                     )
                     .unwrap()

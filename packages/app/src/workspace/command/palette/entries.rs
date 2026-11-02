@@ -68,6 +68,11 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
         shortcut: "",
     },
     PaletteEntry {
+        id: "move_flow_to_repository",
+        label: s::command::move_flow_to_repository,
+        shortcut: "",
+    },
+    PaletteEntry {
         id: "open_settings",
         label: s::command::settings,
         shortcut: k::SHORTCUT_SETTINGS,

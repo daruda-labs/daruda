@@ -96,6 +96,14 @@ pub(in crate::workspace) struct FlowSelection {
     pub pinned: Vec<daruda_flow::NodeId>,
 }
 
+/// The flow a request is assembled from: a saved file, or text that would
+/// live at `path` — the path anchors its relative prompt files and history.
+#[derive(Clone, Copy)]
+enum FlowText<'a> {
+    File(&'a Path),
+    Draft { text: &'a str, path: &'a Path },
+}
+
 struct FlowAgentCatalog {
     launches: HashMap<String, LaunchSpec>,
     accounts: HashMap<String, daruda_flow::session::SessionAccount>,
@@ -210,7 +218,7 @@ impl Workspace {
     ) -> Result<FlowSubmission, FlowSubmitError> {
         let submission = self.assemble_flow_request(
             lane_ref,
-            flow_path,
+            FlowText::File(flow_path),
             profile,
             selection,
             FlowPurpose::Run,
@@ -244,9 +252,32 @@ impl Workspace {
     ) -> Result<Vec<daruda_flow::error::ValidationIssue>, FlowSubmitError> {
         // The whole flow, always: ✓ answers "could this file run", and a
         // question about a slice of it is not that question.
+        self.check_flow_source(lane_ref, FlowText::File(flow_path), profile, cx)
+    }
+
+    /// [`Self::check_flow`] for text that is not saved: `path` is where it
+    /// would live, so relative prompt files resolve as they would there.
+    pub(in crate::workspace) fn check_flow_text(
+        &mut self,
+        lane_ref: daruda_store::project::LaneRef,
+        text: &str,
+        path: &Path,
+        profile: Option<&str>,
+        cx: &mut Context<Self>,
+    ) -> Result<Vec<daruda_flow::error::ValidationIssue>, FlowSubmitError> {
+        self.check_flow_source(lane_ref, FlowText::Draft { text, path }, profile, cx)
+    }
+
+    fn check_flow_source(
+        &mut self,
+        lane_ref: daruda_store::project::LaneRef,
+        source: FlowText<'_>,
+        profile: Option<&str>,
+        cx: &mut Context<Self>,
+    ) -> Result<Vec<daruda_flow::error::ValidationIssue>, FlowSubmitError> {
         let submission = self.assemble_flow_request(
             lane_ref,
-            flow_path,
+            source,
             profile,
             &FlowSelection::default(),
             FlowPurpose::Validate,
@@ -363,7 +394,7 @@ impl Workspace {
     fn assemble_flow_request(
         &mut self,
         lane_ref: daruda_store::project::LaneRef,
-        flow_path: &Path,
+        source: FlowText<'_>,
         profile: Option<&str>,
         selection: &FlowSelection,
         purpose: FlowPurpose,
@@ -372,10 +403,16 @@ impl Workspace {
         // The engine derives its lock from `cwd`; resolving it here is the
         // pre-flight refusal, and the key the run is held under.
         let (cwd, tree) = self.lane_tree(lane_ref)?;
-        let text = std::fs::read_to_string(flow_path).map_err(|e| FlowSubmitError::Read {
-            path: flow_path.to_path_buf(),
-            message: e.to_string(),
-        })?;
+        let (text, flow_path) = match source {
+            FlowText::File(path) => {
+                let text = std::fs::read_to_string(path).map_err(|e| FlowSubmitError::Read {
+                    path: path.to_path_buf(),
+                    message: e.to_string(),
+                })?;
+                (std::borrow::Cow::Owned(text), path)
+            }
+            FlowText::Draft { text, path } => (std::borrow::Cow::Borrowed(text), path),
+        };
         let loaded = daruda_flow::load(&text, profile).map_err(FlowSubmitError::Load)?;
 
         // Here and not at the surface that asked: which past run holds a

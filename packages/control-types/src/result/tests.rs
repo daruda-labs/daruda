@@ -117,6 +117,14 @@ fn every_result_variant_round_trips_through_json() {
                 name: "ship.yaml".into(),
                 origin: FlowOriginKind::Repo,
                 lane: sample_lane().target,
+                profiles: vec!["fast".into()],
+            }],
+        },
+        ControlResult::FlowValidated {
+            lane: sample_lane().target,
+            issues: vec![FlowIssue {
+                node: Some("design".into()),
+                message: "unknown agent".into(),
             }],
         },
         ControlResult::FlowStarting {
@@ -257,11 +265,16 @@ fn every_error_variant_round_trips_through_json() {
         ControlError::FlowNeedsInteraction {
             name: "ship.yaml".into(),
         },
+        ControlError::FlowUnknownProfile {
+            name: "ship.yaml".into(),
+            profile: "slow".into(),
+        },
         ControlError::RunMismatch,
         ControlError::NoActiveLane,
         ControlError::OrchestratorDisabled,
         ControlError::OrchestratorUnresolvable,
         ControlError::OrchestratorUnavailable,
+        ControlError::TaskBranchTaken,
         ControlError::ApprovalRefused,
         ControlError::ApprovalTimedOut,
         ControlError::AgentLimitReached,

@@ -201,7 +201,7 @@ app-exit card cleanup and restart durability remain outside this contract.
 
 ### Result queries, waits and delivery
 
-The orchestrator's nineteen MCP tools include `daruda_run_status` and
+The orchestrator's twenty MCP tools include `daruda_run_status` and
 `daruda_run_wait`. These result tools are MCP-only; phone commands retain their
 existing surface. Status reads progress or results without consuming events.
 Both tools accept explicit handles from any origin, including older persisted

@@ -478,33 +478,39 @@ fn execution_section(
         );
     if form.settings_open() {
         let body = form.body_states(cx);
-        section =
-            section
-                .child(field_column(
-                    s::flow::form_timeout_label(),
-                    form.timeout_choice.clone(),
-                    cx,
-                ))
-                .children((body.kind == KindChoice::Agent).then(|| {
-                    field_column(s::flow::form_turns_label(), form.turns_choice.clone(), cx)
-                }))
-                .child(field_with_note(
+        section = section
+            .child(field_column(
+                s::flow::form_timeout_label(),
+                form.timeout_choice.clone(),
+                cx,
+            ))
+            .children((body.kind == KindChoice::Agent).then(|| {
+                field_with_note(
                     form,
-                    super::notes::FormField::Cwd,
-                    s::flow::form_cwd_label(),
+                    super::notes::FormField::MaxTurns,
+                    s::flow::form_turns_label(),
                     None,
-                    field(form.cwd_state(), cx, 24),
+                    form.turns_choice.clone(),
                     cx,
-                ))
-                .child(fail_section(
-                    body.on_fail,
-                    if body.kind == KindChoice::Agent {
-                        FailShape::Retry
-                    } else {
-                        FailShape::Repair
-                    },
-                    cx,
-                ));
+                )
+            }))
+            .child(field_with_note(
+                form,
+                super::notes::FormField::Cwd,
+                s::flow::form_cwd_label(),
+                None,
+                field(form.cwd_state(), cx, 24),
+                cx,
+            ))
+            .child(fail_section(
+                body.on_fail,
+                if body.kind == KindChoice::Agent {
+                    FailShape::Retry
+                } else {
+                    FailShape::Repair
+                },
+                cx,
+            ));
     }
     section
 }

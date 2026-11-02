@@ -372,8 +372,16 @@ mod tests {
         let fixture = crate::test_support::workspace_with_agent_chat(cx);
         let created = fixture.workspace.update(cx, |ws, cx| {
             let lane = ws.control_active_lane();
-            ws.control_task_create(lane.project, "Here", "p".into(), Some(lane), cx)
-                .expect("created")
+            ws.control_task_create(
+                lane.project,
+                crate::test_support::new_task(
+                    "Here",
+                    "p",
+                    Some(crate::control::result::LaneHandle::new(ws.uuid(), lane)),
+                ),
+                cx,
+            )
+            .expect("created")
         });
         cx.run_until_parked();
         let task = created.await.expect("recorded");
@@ -455,8 +463,12 @@ mod tests {
         cx.run_until_parked();
         let created = fixture.workspace.update(cx, |ws, cx| {
             let project = ws.control_active_lane().project;
-            ws.control_task_create(project, "Clash", "p".into(), None, cx)
-                .expect("created")
+            ws.control_task_create(
+                project,
+                crate::test_support::new_task("Clash", "p", None),
+                cx,
+            )
+            .expect("created")
         });
         cx.run_until_parked();
         let task = created.await.expect("recorded");

@@ -2,15 +2,16 @@
 //! runs, and propose it to the task log.
 
 use crate::runs::TaskIntent;
-use chrono::Utc;
 use daruda_store::tasks::machine::TaskEdit;
-use daruda_store::tasks::{TaskId, TaskRunIn, TaskSpec};
+use daruda_store::tasks::{TaskId, TaskRunIn};
 use futures::FutureExt as _;
 use gpui::{Context, Window};
 
 use super::TaskEditorId;
 use super::state::{RunInChoice, TaskEditValues};
 use crate::workspace::Workspace;
+use crate::workspace::task_draft::{DraftError, DraftLocation, TaskDraft};
+use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 
 impl Workspace {
     /// Commit the form as shown, including a typed-but-unsubmitted subtask
@@ -109,21 +110,26 @@ impl Workspace {
                 // A new task belongs to the project the form names; with none
                 // open, it has nowhere to run.
                 let project = form.project?;
-                let now = Utc::now();
-                let mut spec = TaskSpec::new(
-                    project,
-                    values.title.clone(),
-                    values.prompt.clone(),
-                    base_path.clone(),
-                    now,
-                );
-                if let Some(branch) = branch {
-                    spec.branch_name = branch;
-                }
-                spec.run_in = run_in.unwrap_or_default();
-                spec.notes = values.notes.clone();
-                spec.auto_execute = values.auto_execute;
-                spec.agent_surface = values.agent_surface;
+                let location = match run_in? {
+                    TaskRunIn::NewWorktree => DraftLocation::NewWorktree { base: base_path },
+                    TaskRunIn::ExistingLane { path } => DraftLocation::ExistingLane(path),
+                };
+                let draft = TaskDraft {
+                    title: values.title.clone(),
+                    prompt: values.prompt.clone(),
+                    notes: values.notes.clone(),
+                    branch: values.branch.clone(),
+                    location,
+                    agent_surface: values.agent_surface,
+                    auto_execute: values.auto_execute,
+                };
+                let spec = match self.task_spec_from(project, draft) {
+                    Ok(spec) => spec,
+                    Err(refused) => {
+                        self.report_task_draft_refusal(editor_id, refused, project, values, cx);
+                        return None;
+                    }
+                };
                 let new_id = spec.id.clone();
                 // One log, one queue: the subtasks follow their task in order.
                 commits.push(self.propose_task_command(TaskIntent::Create { spec }, cx));
@@ -201,6 +207,42 @@ impl Workspace {
             && self
                 .task_editor(editor_id)
                 .is_some_and(|editor| !editor.is_dirty(cx))
+    }
+
+    /// Say why a new task was not saved. The branch reasons go under the
+    /// branch field, as the keystroke check would have put them; the rest
+    /// have no field to sit under.
+    fn report_task_draft_refusal(
+        &mut self,
+        editor_id: TaskEditorId,
+        refused: DraftError,
+        project: daruda_store::project::ProjectUuid,
+        values: &TaskEditValues,
+        cx: &mut Context<Self>,
+    ) {
+        let message = match refused {
+            DraftError::BranchInvalid | DraftError::BranchTaken => {
+                let validation = self.branch_validation_for(&values.branch, true, Some(project));
+                if let Some(te) = self.task_editor_mut(editor_id) {
+                    te.branch_validation = validation;
+                }
+                cx.notify();
+                return;
+            }
+            // The form refuses an empty title before it gets here.
+            DraftError::TitleEmpty => return,
+            DraftError::ProjectNotOpen => crate::surface::strings::task::save_project_gone(),
+            DraftError::LaneNotInProject => crate::surface::strings::task::save_lane_gone(),
+        };
+        self.report_error(
+            ErrorReport::new(crate::surface::strings::task::save_refused_title())
+                .severity(ErrorSeverity::Warning)
+                .message(message)
+                .dedup("tasks.editor.save_refused")
+                .at(file!(), line!())
+                .build(),
+            cx,
+        );
     }
 
     pub(super) fn set_task_editor_pending_save(

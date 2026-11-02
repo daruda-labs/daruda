@@ -16,7 +16,7 @@ use serde_json::Value;
 
 use crate::control::mcp::tools::ToolId;
 use crate::control::result::{ControlOutcome, LaneHandle};
-use crate::control::spec::{GatedCommand, ResolvedCommand, ResolvedFlowCommand};
+use crate::control::spec::{GatedCommand, NewTask, ResolvedCommand, ResolvedFlowCommand};
 use crate::telegram::bridge::PaneRef;
 
 /// Why a call could not become a command. Reported as a tool error, not a
@@ -114,7 +114,16 @@ pub(crate) fn to_command(id: ToolId, args: &Value) -> Result<Command, ConvertErr
         ToolId::FlowRun => Command::Immediate(ResolvedCommand::Flow(ResolvedFlowCommand::Run {
             name: string_arg(args, "name")?,
             lane: lane_arg(args, "worktree")?,
+            profile: optional_string_arg(args, "profile")?,
         })),
+        ToolId::FlowValidate => {
+            Command::Immediate(ResolvedCommand::Flow(ResolvedFlowCommand::Validate {
+                lane: lane_arg(args, "worktree")?,
+                text: string_arg(args, "text")?,
+                profile: optional_string_arg(args, "profile")?,
+                name: optional_string_arg(args, "name")?,
+            }))
+        }
         ToolId::ChatAsk => Command::Waiting(ResolvedCommand::AskPane {
             target: pane_arg(args, "target")?,
             text: string_arg(args, "text")?,
@@ -142,9 +151,14 @@ pub(crate) fn to_command(id: ToolId, args: &Value) -> Result<Command, ConvertErr
         ToolId::TaskCreate => Command::Gated(GatedCommand::TaskCreate {
             workspace: uuid_arg(args, "workspace")?,
             project: u64_arg(args, "project")?,
-            title: string_arg(args, "title")?,
-            prompt: string_arg(args, "prompt")?,
-            worktree: optional_lane_arg(args, "worktree")?,
+            task: NewTask {
+                title: string_arg(args, "title")?,
+                prompt: string_arg(args, "prompt")?,
+                worktree: optional_lane_arg(args, "worktree")?,
+                branch: optional_string_arg(args, "branch")?,
+                notes: optional_string_arg(args, "notes")?,
+                surface: optional_surface_arg(args, "surface")?,
+            },
         }),
         ToolId::TaskStart => Command::Gated(GatedCommand::TaskStart {
             task: string_arg(args, "task")?,
@@ -226,6 +240,19 @@ fn optional_string_arg(args: &Value, name: &'static str) -> Result<Option<String
             .as_str()
             .map(|s| Some(s.to_owned()))
             .ok_or(ConvertError::BadArgument { name }),
+    }
+}
+
+/// A task surface by its wire name, the one `TaskAgentSurface` serializes as.
+fn optional_surface_arg(
+    args: &Value,
+    name: &'static str,
+) -> Result<Option<daruda_store::tasks::TaskAgentSurface>, ConvertError> {
+    match args.get(name) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => serde_json::from_value(value.clone())
+            .map(Some)
+            .map_err(|_| ConvertError::BadArgument { name }),
     }
 }
 

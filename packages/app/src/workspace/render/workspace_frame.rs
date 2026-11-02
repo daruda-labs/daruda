@@ -286,6 +286,7 @@ impl Workspace {
             .on_action(cx.listener(Self::on_validate_flow))
             .on_action(cx.listener(Self::on_show_flow_graph))
             .on_action(cx.listener(Self::on_reload_flow_graph))
+            .on_action(cx.listener(Self::on_move_flow_to_repository))
             .on_action(cx.listener(Self::on_show_left_dock_worktrees))
             .on_action(cx.listener(Self::on_show_left_dock_git))
             .on_action(cx.listener(Self::on_show_left_dock_files))

@@ -66,6 +66,7 @@ async fn a_flow_captures_solicitation_before_reentering_its_workspace(cx: &mut T
             ResolvedCommand::Flow(ResolvedFlowCommand::Run {
                 name: "solicited".into(),
                 lane: LaneHandle::new(fixture.workspace.read(cx).uuid(), lane),
+                profile: None,
             }),
             CommandOrigin::Orchestrator,
             cx,
@@ -116,8 +117,16 @@ async fn a_task_keeps_solicitation_after_its_approval_and_phone_turn_close(
         .workspace
         .read_with(cx, |ws, _| ws.control_active_lane());
     let created = fixture.workspace.update(cx, |ws, cx| {
-        ws.control_task_create(lane.project, "Solicited", "work".into(), Some(lane), cx)
-            .unwrap()
+        ws.control_task_create(
+            lane.project,
+            crate::test_support::new_task(
+                "Solicited",
+                "work",
+                Some(crate::control::result::LaneHandle::new(ws.uuid(), lane)),
+            ),
+            cx,
+        )
+        .unwrap()
     });
     cx.run_until_parked();
     let task = created.await.unwrap();
