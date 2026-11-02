@@ -432,6 +432,15 @@ async fn expanded_menu_changes_visible_rows_and_keeps_the_pane_inset_shallow(
         second
     );
     let badge = vcx.debug_bounds(first_badge_selector).unwrap();
+    let second_badge_selector: &'static str = Box::leak(
+        format!("dock-pane-badge-{}-{}-{second}", lane.project, lane.lane).into_boxed_str(),
+    );
+    let second_badge = vcx.debug_bounds(second_badge_selector).unwrap();
+    assert_eq!(
+        second_badge.left() - badge.right(),
+        px(crate::ui::theme::STATUS_BADGES_ROW_GAP),
+        "badge spacing must not include additional horizontal padding"
+    );
     vcx.simulate_click(badge.center(), Default::default());
     vcx.run_until_parked();
     assert!(
@@ -445,6 +454,11 @@ async fn expanded_menu_changes_visible_rows_and_keeps_the_pane_inset_shallow(
     // WORKAROUND: cached GPUI paint does not replay debug bounds; refresh test geometry.
     vcx.update(|window, _| window.refresh());
     vcx.run_until_parked();
+    assert_eq!(
+        vcx.debug_bounds(first_badge_selector).unwrap(),
+        badge,
+        "changing the focused pane must not resize or move its badge"
+    );
     let lane_row = vcx.debug_bounds(lane_selector).unwrap();
     vcx.simulate_mouse_down(
         lane_row.center(),

@@ -70,6 +70,7 @@ pub const FOLDER_OPEN: &str = "icons/lucide/folder-open.svg";
 pub const EMPTY_WORKTREE: &str = "icons/empty-worktree.svg";
 pub const SESSION: &str = "icons/lucide/message-square.svg";
 pub const SKILL: &str = "icons/lucide/file-text.svg";
+pub const FILE_VIEWER: &str = "icons/lucide/file-text.svg";
 pub const SERVER: &str = "icons/lucide/server.svg";
 
 /// Explicit pixels keep controls independent of font and button size tiers.

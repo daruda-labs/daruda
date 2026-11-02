@@ -93,7 +93,7 @@ impl Workspace {
                     neutral_icon: match &pane.content {
                         PaneContent::Terminal(_) => icons::TERMINAL,
                         PaneContent::AgentChat(_) => icons::SESSION,
-                        PaneContent::File(_) => icons::RADIO_OFF,
+                        PaneContent::File(_) => icons::FILE_VIEWER,
                     },
                     title: if include_titles {
                         pane.title(cx)

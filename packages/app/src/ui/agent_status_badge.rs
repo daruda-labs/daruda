@@ -111,9 +111,6 @@ pub struct AgentStatusBadge {
     content: BadgeContent,
     size: IndicatorSize,
     color: Hsla,
-    /// When true, the indicator is wrapped in a 1 px outline
-    /// ring marking it as the session attached to the focused tab.
-    active: bool,
     metrics: theme::UiMetrics,
 }
 
@@ -130,7 +127,6 @@ impl AgentStatusBadge {
             content: BadgeContent::Status(status),
             size,
             color,
-            active: false,
             metrics: theme::UiMetrics::default(),
         }
     }
@@ -157,12 +153,6 @@ impl AgentStatusBadge {
     /// Use the host surface's artwork size without changing its status shape.
     pub fn with_metrics(mut self, metrics: theme::UiMetrics) -> Self {
         self.metrics = metrics;
-        self
-    }
-
-    /// Wrap the indicator with an outline ring for the focused session.
-    pub fn active(mut self) -> Self {
-        self.active = true;
         self
     }
 }
@@ -197,7 +187,7 @@ impl RenderOnce for AgentStatusBadge {
                 .into()
             })
             .unwrap_or(default_color);
-        let inner = if let Some(frame) = artwork.and_then(|art| art.frame(tick)) {
+        if let Some(frame) = artwork.and_then(|art| art.frame(tick)) {
             crate::status_icon_themes::render::frame(frame.clone(), dim, color)
         } else if base == crate::status_icon_themes::Base::Icons
             || matches!(self.content, BadgeContent::Disconnected)
@@ -212,32 +202,8 @@ impl RenderOnce for AgentStatusBadge {
                 SessionStatus::ExecutingTool => quadrant_grid(dim, color, tick),
                 SessionStatus::Failed => failed_grid(dim, color),
             }
-        };
-        if self.active {
-            wrap_active(inner, dim, cx).into_any_element()
-        } else {
-            inner
         }
     }
-}
-
-/// Wrap the rendered indicator in an outline ring. The outer frame
-/// is `outer = inner + STATUS_BADGE_ACTIVE_OUTER_PAD * 2` so the
-/// `border_1` sits a hair outside the indicator without occluding it.
-fn wrap_active(inner: gpui::AnyElement, inner_size: Pixels, cx: &App) -> impl IntoElement {
-    let outer_px: f32 = inner_size.into();
-    let outer = px(outer_px + theme::STATUS_BADGE_ACTIVE_OUTER_PAD * 2.0);
-    div()
-        .flex_none()
-        .w(outer)
-        .h(outer)
-        .rounded_full()
-        .border_1()
-        .border_color(theme::current(cx).status_badge_active_outline)
-        .flex()
-        .items_center()
-        .justify_center()
-        .child(inner)
 }
 
 // ── Idle ─────────────────────────────────────────────────────────────────────

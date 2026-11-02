@@ -118,13 +118,7 @@ impl Render for WorkingIndicators {
             .children(
                 [IndicatorSize::Leading, IndicatorSize::Badge]
                     .into_iter()
-                    .flat_map(|size| {
-                        [false, true].map(|active| {
-                            let badge =
-                                AgentStatusBadge::for_status(SessionStatus::Working, size, cx);
-                            if active { badge.active() } else { badge }
-                        })
-                    }),
+                    .map(|size| AgentStatusBadge::for_status(SessionStatus::Working, size, cx)),
             )
     }
 }

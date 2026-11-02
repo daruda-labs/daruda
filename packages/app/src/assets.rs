@@ -433,6 +433,7 @@ mod tests {
             SESSION,
             EMPTY_WORKTREE,
             SKILL,
+            FILE_VIEWER,
             SERVER,
         ] {
             let bytes = DarudaAssets.load(path).unwrap().unwrap();

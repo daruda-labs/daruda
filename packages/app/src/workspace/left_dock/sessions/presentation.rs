@@ -145,13 +145,7 @@ fn badge(lane: LaneRef, pane: &PaneSnapshot, snap: &LeftDockSnapshot, cx: &App) 
             .then(|| crate::ui::AgentStatusBadge::disconnected(IndicatorSize::Badge, cx))
     });
     let indicator = if let Some(status_badge) = badge {
-        let status_badge = status_badge.with_metrics(metrics);
-        if current {
-            status_badge.active()
-        } else {
-            status_badge
-        }
-        .into_any_element()
+        status_badge.with_metrics(metrics).into_any_element()
     } else {
         crate::ui::icons::icon(pane.neutral_icon)
             .with_size(px(metrics.icon(theme::STATUS_INDICATOR_BADGE_SIZE)))
@@ -167,6 +161,9 @@ fn badge(lane: LaneRef, pane: &PaneSnapshot, snap: &LeftDockSnapshot, cx: &App) 
     let workspace = snap.workspace.clone();
     let key_workspace = workspace.clone();
     let pane_id = pane.pane;
+    let artwork_size = metrics.icon(theme::STATUS_INDICATOR_BADGE_SIZE);
+    let inset = metrics.space(theme::PAD_XS);
+    let target_height = artwork_size + inset * 2.0;
     div()
         .id(SharedString::from(format!(
             "dock-pane-badge-{}-{}-{pane_id}",
@@ -175,6 +172,9 @@ fn badge(lane: LaneRef, pane: &PaneSnapshot, snap: &LeftDockSnapshot, cx: &App) 
         .debug_selector(move || format!("dock-pane-badge-{}-{}-{pane_id}", lane.project, lane.lane))
         .focusable()
         .tab_stop(true)
+        .relative()
+        .w(px(artwork_size))
+        .h(px(target_height))
         .flex_none()
         .flex()
         .items_center()
@@ -183,6 +183,18 @@ fn badge(lane: LaneRef, pane: &PaneSnapshot, snap: &LeftDockSnapshot, cx: &App) 
         .hover(|style| style.bg(t.lane_row_hover_bg))
         .cursor_pointer()
         .child(indicator)
+        .when(current, |badge| {
+            badge.child(
+                div()
+                    .absolute()
+                    .bottom_0()
+                    .left_0()
+                    .w(px(artwork_size))
+                    .h(px(theme::GAP_XS))
+                    .rounded(px(theme::RADIUS_XS))
+                    .bg(theme::PRIMARY),
+            )
+        })
         .tooltip(crate::ui::tooltip::text(title))
         .on_click(move |_, window, cx| {
             cx.stop_propagation();

@@ -231,11 +231,13 @@ pub(in crate::workspace::left_dock) fn pane_indicator(
     }
 }
 
-const UNCONNECTED_CHAT_ICON_SIZE: f32 = 14.0;
+/// Lucide outlines fill more of their box than Material symbols, so the file
+/// glyph is drawn smaller to sit at the terminal glyph's visual weight.
+const LUCIDE_PANE_ICON_SIZE: f32 = 14.0;
 
 fn neutral_indicator(icon: &'static str, metrics: theme::UiMetrics, cx: &gpui::App) -> AnyElement {
-    let artwork_size = if icon == ui::icons::SESSION {
-        UNCONNECTED_CHAT_ICON_SIZE
+    let artwork_size = if icon == ui::icons::FILE_VIEWER {
+        LUCIDE_PANE_ICON_SIZE
     } else {
         theme::CONTROL_ICON_SIZE
     };
