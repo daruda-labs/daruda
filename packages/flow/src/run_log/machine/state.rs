@@ -62,6 +62,8 @@ pub struct StartFacts {
     pub(crate) until: Option<NodeId>,
     pub(crate) pinned: Vec<NodeId>,
     pub(crate) profile: Option<String>,
+    #[serde(default)]
+    pub(crate) inputs: crate::input::InputValues,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -184,6 +186,11 @@ impl FlowRunState {
             .order
             .iter()
             .filter_map(|id| self.nodes.get_key_value(id))
+    }
+
+    /// The values the run's inputs took, as it recorded them at its start.
+    pub fn inputs(&self) -> &crate::input::InputValues {
+        &self.start.inputs
     }
 
     /// Whether `gate`'s repair is running its fix session.

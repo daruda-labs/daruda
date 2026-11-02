@@ -270,6 +270,7 @@ fn a_node_never_gets_longer_than_the_run_has_left() {
     };
     let _ = smol::block_on(run_flow(
         RunInputs {
+            inputs: Default::default(),
             pinned: Vec::new(),
             until: None,
             loaded: &loaded,
@@ -372,6 +373,7 @@ fn a_node_after_a_long_wait_is_not_handed_a_dead_budget() {
     };
     let _ = smol::block_on(run_flow(
         RunInputs {
+            inputs: Default::default(),
             pinned: Vec::new(),
             until: None,
             loaded: &loaded,

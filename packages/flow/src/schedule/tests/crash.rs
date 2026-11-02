@@ -71,6 +71,7 @@ pub(super) fn process_asking<B: LogBackend + Send + 'static>(
         RunPhase::Ended(_) => return Process::AlreadyEnded,
         RunPhase::Fresh => FlowRunStore::spawn(log, &run_dir, None).and_then(|store| {
             let started = FlowRunEvent::RunStarted {
+                inputs: Default::default(),
                 started_by: None,
                 nodes: crate::run_log::node_starts(loaded),
                 until: None,
@@ -93,6 +94,7 @@ pub(super) fn process_asking<B: LogBackend + Send + 'static>(
     };
     let report = smol::block_on(run_flow(
         RunInputs {
+            inputs: Default::default(),
             loaded,
             flow_dir: dir,
             cwd: dir,

@@ -787,6 +787,7 @@ nodes:
         };
         for event in [
             FlowRunEvent::RunStarted {
+                inputs: Default::default(),
                 started_by: None,
                 nodes: crate::run_log::node_starts(&loaded),
                 until: None,

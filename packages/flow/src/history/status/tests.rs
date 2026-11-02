@@ -64,6 +64,7 @@ fn invalidated_results_do_not_hide_the_replacement_attempt() {
     };
     let status = || RunHistory::read(root.path()).unwrap().node_status(&node);
     commit(FlowRunEvent::RunStarted {
+        inputs: Default::default(),
         started_by: None,
         nodes: vec![
             NodeStart {

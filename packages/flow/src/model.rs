@@ -23,6 +23,8 @@ pub struct Flow {
     /// The agent a repair's `fix` session runs as. `None` means the file
     /// names no unambiguous repair agent — legal only when it never repairs.
     pub default_agent: Option<AgentSpec>,
+    /// The parameters a run is given; see [`crate::input`].
+    pub inputs: Vec<crate::input::InputDecl>,
     pub nodes: Vec<Node>,
 }
 

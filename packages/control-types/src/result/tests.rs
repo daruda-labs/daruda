@@ -133,6 +133,14 @@ fn every_result_variant_round_trips_through_json() {
                 origin: FlowOriginKind::Repo,
                 lane: sample_lane().target,
                 profiles: vec!["fast".into()],
+                inputs: vec![FlowInputEntry {
+                    name: "pr".into(),
+                    kind: FlowInputKind::Number,
+                    description: None,
+                    required: true,
+                    default: None,
+                    choices: Vec::new(),
+                }],
             }],
         },
         ControlResult::FlowValidated {
@@ -284,6 +292,13 @@ fn every_error_variant_round_trips_through_json() {
         ControlError::FlowUnknownProfile {
             name: "ship.yaml".into(),
             profile: "slow".into(),
+        },
+        ControlError::FlowInputsRefused {
+            name: "review.yaml".into(),
+            problems: vec![FlowInputProblem {
+                input: "pr".into(),
+                problem: FlowInputProblemKind::Missing,
+            }],
         },
         ControlError::RunMismatch,
         ControlError::NoActiveLane,
@@ -533,4 +548,25 @@ fn flow_locked_names_its_holder_as_a_handle() {
     );
     let unknown = serde_json::to_value(&old).expect("serializes");
     assert!(unknown.get("held_by").is_none(), "{unknown}");
+}
+
+#[test]
+fn an_inputs_refusal_names_each_problem() {
+    let error = ControlError::FlowInputsRefused {
+        name: "review.yaml".into(),
+        problems: vec![
+            FlowInputProblem {
+                input: "pr".into(),
+                problem: FlowInputProblemKind::Missing,
+            },
+            FlowInputProblem {
+                input: "focus".into(),
+                problem: FlowInputProblemKind::Invalid,
+            },
+        ],
+    };
+    assert_eq!(
+        error.to_string(),
+        "flow review.yaml refused its inputs: pr is required; focus has a value its type refuses"
+    );
 }

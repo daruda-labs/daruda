@@ -222,6 +222,69 @@ pub struct FlowEntry {
     /// A flow that declares any runs only with one of them named.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub profiles: Vec<String>,
+    /// The inputs the file declares, in the order the desktop offers them.
+    /// A run names values for them; a required one with no default has to
+    /// be named.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inputs: Vec<FlowInputEntry>,
+}
+
+/// One declared input of a flow, as a caller needs it to name a value.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlowInputEntry {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub kind: FlowInputKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub required: bool,
+    /// The default as the text a template would render.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<String>,
+    /// The values a `choice` input allows.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub choices: Vec<String>,
+}
+
+/// What a value of a flow input may be. Mirrors the engine's `InputType`;
+/// the single conversion lives in the app's `workspace::control_flow_ops`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FlowInputKind {
+    String,
+    Number,
+    Boolean,
+    Choice,
+}
+
+/// One input value a flow start refused.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlowInputProblem {
+    pub input: String,
+    pub problem: FlowInputProblemKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FlowInputProblemKind {
+    /// Required, with no default, and no value was named.
+    Missing,
+    /// The flow declares no input by that name.
+    NotDeclared,
+    /// The value does not fit the input's type or choices.
+    Invalid,
+}
+
+impl std::fmt::Display for FlowInputProblem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let input = &self.input;
+        match self.problem {
+            FlowInputProblemKind::Missing => write!(f, "{input} is required"),
+            FlowInputProblemKind::NotDeclared => write!(f, "{input} is not declared"),
+            FlowInputProblemKind::Invalid => write!(f, "{input} has a value its type refuses"),
+        }
+    }
 }
 
 /// One problem a flow check found, in the engine's fixed English.
@@ -564,6 +627,12 @@ pub enum ControlError {
         name: String,
         profile: String,
     },
+    /// The values named for the flow's inputs do not satisfy its
+    /// declarations. Reported before dispatch, like `FlowRefused`.
+    FlowInputsRefused {
+        name: String,
+        problems: Vec<FlowInputProblem>,
+    },
     /// The requested execution no longer owns this worktree.
     RunMismatch,
     NoActiveLane,
@@ -675,6 +744,16 @@ impl std::fmt::Display for ControlError {
             }
             Self::FlowUnknownProfile { name, profile } => {
                 write!(f, "flow {name} declares no profile {profile}")
+            }
+            Self::FlowInputsRefused { name, problems } => {
+                write!(f, "flow {name} refused its inputs: ")?;
+                for (ix, problem) in problems.iter().enumerate() {
+                    if ix > 0 {
+                        write!(f, "; ")?;
+                    }
+                    write!(f, "{problem}")?;
+                }
+                Ok(())
             }
             Self::RunMismatch => write!(f, "the requested run no longer owns this worktree"),
             Self::NoActiveLane => write!(f, "no active lane"),

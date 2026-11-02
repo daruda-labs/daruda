@@ -599,6 +599,7 @@ async fn workspace_flow_and_two_tasks_return_one_pointer_group(cx: &mut TestAppC
                     name: "notice".into(),
                     lane: LaneHandle::new(fixture.workspace.read(cx).uuid(), lane),
                     profile: None,
+                    inputs: Default::default(),
                 }),
                 CommandOrigin::Orchestrator,
                 cx,

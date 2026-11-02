@@ -67,6 +67,7 @@ async fn a_flow_captures_solicitation_before_reentering_its_workspace(cx: &mut T
                 name: "solicited".into(),
                 lane: LaneHandle::new(fixture.workspace.read(cx).uuid(), lane),
                 profile: None,
+                inputs: Default::default(),
             }),
             CommandOrigin::Orchestrator,
             cx,

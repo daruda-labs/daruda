@@ -36,6 +36,7 @@ impl Run<'_> {
             run_dir: self.run_dir,
             output,
             node_outputs: &self.node_outputs,
+            inputs: &self.inputs,
             failure,
             attempts: evidence,
         };

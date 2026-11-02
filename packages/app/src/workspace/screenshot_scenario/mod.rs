@@ -24,6 +24,29 @@ mod names;
 /// never presses the button — so it names no real file.
 const FLOW_DELETE_SAMPLE_NAME: &str = "deploy.yaml";
 
+/// The inputs form's sample: one input of each type, a required one and a
+/// multiline one, as a PR review flow would declare them. Nothing runs — a
+/// capture never presses Run.
+const FLOW_INPUTS_SAMPLE: &str = "\
+version: 1
+inputs:
+  pr:
+    type: number
+    description: The pull request to review
+    required: true
+  focus:
+    type: choice
+    choices: [security, speed, clarity]
+    default: clarity
+  fix:
+    type: boolean
+    description: Push fixes for what the review finds
+  notes:
+    multiline: true
+    description: Anything the reviewer should know
+nodes: []
+";
+
 /// A wide sample diagram (two side-by-side subgraphs) — the shape that
 /// exercises the lightbox's horizontal scroll/clamp path, not just the
 /// common single-column case.
@@ -315,6 +338,9 @@ pub(crate) enum ScreenshotScenario {
     /// The rename dialog after a refused name: the reason sits under the field
     /// and the dialog stays up. Only a submit reaches that state.
     FlowRenameRefused,
+    /// The values a flow's declared inputs take, asked before it runs: one
+    /// control per type, which only a capture can check the layout of.
+    FlowInputs,
     /// A flow parked on a permission question, with the Flows panel showing.
     /// The buttons a person has to read and hit — the one part of `ask` no
     /// state test can look at, and a surface that needs visual verification.
@@ -408,6 +434,24 @@ pub(crate) fn drive(
         }
         ScreenshotScenario::FlowProfilePicker => {
             workspace.update(cx, |ws, cx| ws.ask_flow_profile_for_shot(cx));
+        }
+        ScreenshotScenario::FlowInputs => {
+            let lane = workspace.read(cx).active_ref();
+            let decls = daruda_flow::parse::parse_flow_file(FLOW_INPUTS_SAMPLE)
+                .map(|file| file.inputs)
+                .unwrap_or_default();
+            let _form = crate::workspace::flow_inputs_modal::FlowInputsModal::open(
+                workspace.downgrade(),
+                crate::workspace::flow_inputs_modal::PendingFlowRun {
+                    lane,
+                    path: std::path::PathBuf::from("pr-review.yaml"),
+                    profile: None,
+                    selection: Default::default(),
+                },
+                decls,
+                window,
+                cx,
+            );
         }
         ScreenshotScenario::FlowRunning => {
             workspace.update(cx, |ws, cx| ws.seed_flow_run_for_shot(false, cx));

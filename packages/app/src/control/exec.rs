@@ -84,6 +84,7 @@ pub(crate) fn run(cmd: ResolvedCommand, origin: CommandOrigin, cx: &mut App) -> 
             name,
             lane,
             profile,
+            inputs,
         }) => {
             let solicited = origin.is_solicited(cx);
             in_lane_window(lane, cx, |ws, _window, cx| {
@@ -91,8 +92,8 @@ pub(crate) fn run(cmd: ResolvedCommand, origin: CommandOrigin, cx: &mut App) -> 
                     lane.lane_ref(),
                     &name,
                     profile.as_deref(),
-                    origin.flow_started_by(),
-                    solicited,
+                    &inputs,
+                    (origin.flow_started_by(), solicited),
                     cx,
                 )
             })

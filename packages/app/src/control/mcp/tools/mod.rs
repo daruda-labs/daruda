@@ -300,6 +300,15 @@ fn flow_run_properties() -> serde_json::Value {
             "description": "One of the `profiles` the daruda_flow_list row names. Required \
                             when the row lists any; omit it otherwise.",
         },
+        "inputs": {
+            "type": "object",
+            "description": "Values for the `inputs` the daruda_flow_list row names, by input \
+                            name. A `required` input without a `default` must be given; a \
+                            `choice` takes one of its `choices`. Omit for a flow with none.",
+            "additionalProperties": {
+                "description": "A string, number or boolean. Null leaves the input unset.",
+            },
+        },
     })
 }
 
@@ -501,7 +510,8 @@ static TABLE: &[Tool] = &[
         description: "List the flows that can be run right now: every open window's \
                       active worktree contributes its own, so the same name can appear \
                       twice with a different `lane`. A row's `profiles` are the ones \
-                      daruda_flow_run accepts for it.",
+                      daruda_flow_run accepts for it, and its `inputs` the values \
+                      daruda_flow_run takes for it.",
         gate: Gate::Open,
         properties: no_properties,
         required: &[],
@@ -516,6 +526,7 @@ static TABLE: &[Tool] = &[
                       can be answered on the desktop or phone, and the first answer wins. \
                       A flow whose row lists `profiles` needs one of them as `profile`; \
                       a profile can change the permission mode its agents run under. \
+                      A row's `inputs` are given as `inputs`, by name. \
                       Reports that it started, not that it finished. \
                       End your turn after it: a notice with the outcome arrives on its \
                       own when the run ends or is blocked. Do not follow it with \

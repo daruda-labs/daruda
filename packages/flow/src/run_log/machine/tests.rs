@@ -11,6 +11,7 @@ fn id(name: &str) -> NodeId {
 
 fn started() -> FlowRunEvent {
     FlowRunEvent::RunStarted {
+        inputs: Default::default(),
         started_by: None,
         nodes: vec![
             NodeStart {
@@ -387,6 +388,7 @@ fn a_fix_asks_as_its_gate_only_while_it_runs() {
 #[test]
 fn a_pin_counts_as_passed_and_cannot_be_lost() {
     let (state, _) = run(vec![FlowRunEvent::RunStarted {
+        inputs: Default::default(),
         started_by: None,
         nodes: vec![NodeStart {
             id: id("design"),
@@ -697,7 +699,7 @@ fn current_schema_accepts_legacy_logs_and_schema_one_refuses_new_logs() {
         RunLog::<SchemaOne, _>::open(backend, "old"),
         Err(OpenError::TooNew {
             what: Versioned::Schema,
-            found: 3,
+            found: 4,
             supported: 1
         })
     ));

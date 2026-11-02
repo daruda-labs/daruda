@@ -104,7 +104,11 @@ impl Workspace {
         // Pressing Run is the person having acted on whatever the cards were
         // saying about pins that went away.
         view.update(cx, |view, cx| view.forget_unpinned(cx));
-        let selection = crate::workspace::flow_request::FlowSelection { until, pinned };
+        let selection = crate::workspace::flow_request::FlowSelection {
+            until,
+            pinned,
+            inputs: None,
+        };
         // A refusal has already said so on screen — this caller is the graph's
         // ▶, and the person pressing it is looking at that toast.
         let _refused_on_screen =

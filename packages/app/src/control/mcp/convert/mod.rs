@@ -115,6 +115,7 @@ pub(crate) fn to_command(id: ToolId, args: &Value) -> Result<Command, ConvertErr
             name: string_arg(args, "name")?,
             lane: lane_arg(args, "worktree")?,
             profile: optional_string_arg(args, "profile")?,
+            inputs: input_values_arg(args, "inputs")?,
         })),
         ToolId::FlowValidate => {
             Command::Immediate(ResolvedCommand::Flow(ResolvedFlowCommand::Validate {
@@ -241,6 +242,34 @@ fn optional_string_arg(args: &Value, name: &'static str) -> Result<Option<String
             .map(|s| Some(s.to_owned()))
             .ok_or(ConvertError::BadArgument { name }),
     }
+}
+
+/// A flow's input values by name, each scalar as the text a form field
+/// would hold: the engine reads numbers and booleans back out of it.
+/// Absent or null is none, for the whole object or one input; a nested
+/// value is refused.
+fn input_values_arg(
+    args: &Value,
+    name: &'static str,
+) -> Result<std::collections::BTreeMap<String, String>, ConvertError> {
+    let object = match args.get(name) {
+        None | Some(Value::Null) => return Ok(Default::default()),
+        Some(Value::Object(object)) => object,
+        Some(_) => return Err(ConvertError::BadArgument { name }),
+    };
+    object
+        .iter()
+        .filter(|(_, value)| !value.is_null())
+        .map(|(key, value)| {
+            let text = match value {
+                Value::String(text) => text.clone(),
+                Value::Number(number) => number.to_string(),
+                Value::Bool(flag) => flag.to_string(),
+                _ => return Err(ConvertError::BadArgument { name }),
+            };
+            Ok((key.clone(), text))
+        })
+        .collect()
 }
 
 /// A task surface by its wire name, the one `TaskAgentSurface` serializes as.

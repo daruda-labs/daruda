@@ -84,6 +84,26 @@ pub(super) fn render(
                     },
                     cx,
                 )),
+        )
+        .when_some(
+            history.state().and_then(|state| {
+                let declared = history.flow().map(|flow| flow.inputs.as_slice());
+                inputs_line(state.inputs(), declared.unwrap_or_default())
+            }),
+            |summary, line| {
+                summary.child(
+                    div()
+                        .min_w_0()
+                        .pb(px(theme::PAD_XL))
+                        .child(
+                            div()
+                                .text_size(px(theme::FONT_SIZE_SM))
+                                .text_color(t.text_muted)
+                                .child(s::flow::run_inputs()),
+                        )
+                        .child(div().truncate().child(line)),
+                )
+            },
         );
     let graph = div()
         .h(px(palette::FLOW_RUN_GRAPH_H))
@@ -188,6 +208,34 @@ pub(super) fn render(
         .into_any_element()
 }
 
+/// The run's input values on one line, in the order the flow declares them
+/// (any it no longer declares after, by name); `None` for a run that took
+/// none. Line breaks in a value read as spaces, since the line is a summary
+/// and the value is whole in the run log.
+fn inputs_line(
+    inputs: &daruda_flow::input::InputValues,
+    declared: &[daruda_flow::input::InputDecl],
+) -> Option<String> {
+    if inputs.is_empty() {
+        return None;
+    }
+    let declared_names = declared.iter().map(|decl| decl.name.as_str());
+    let rest = inputs
+        .keys()
+        .map(String::as_str)
+        .filter(|name| !declared.iter().any(|decl| decl.name == *name));
+    let line = declared_names
+        .chain(rest)
+        .filter_map(|name| {
+            let value = inputs.get(name)?.as_text();
+            let value = value.replace("\r\n", " ").replace(['\n', '\r'], " ");
+            Some(format!("{name} = {value}"))
+        })
+        .collect::<Vec<_>>()
+        .join(" · ");
+    Some(line)
+}
+
 fn metric(label: String, value: String, cx: &gpui::App) -> AnyElement {
     div()
         .flex_1()
@@ -202,4 +250,27 @@ fn metric(label: String, value: String, cx: &gpui::App) -> AnyElement {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use daruda_flow::input::{InputValue, InputValues};
+
+    #[test]
+    fn inputs_read_as_one_line_in_declared_order() {
+        assert_eq!(super::inputs_line(&InputValues::new(), &[]), None);
+        let declared = daruda_flow::parse::parse_flow_file(
+            "version: 1\ninputs:\n  pr: {}\n  notes: {}\n  fix: {}\nnodes: []\n",
+        )
+        .unwrap()
+        .inputs;
+        let inputs: InputValues = [
+            ("pr".to_string(), InputValue::Text("1234".into())),
+            ("fix".to_string(), InputValue::Bool(false)),
+            ("notes".to_string(), InputValue::Text("a\r\nb\nc".into())),
+            ("gone".to_string(), InputValue::Text("x".into())),
+        ]
+        .into();
+        assert_eq!(
+            super::inputs_line(&inputs, &declared).as_deref(),
+            Some("pr = 1234 · notes = a b c · fix = false · gone = x")
+        );
+    }
+}

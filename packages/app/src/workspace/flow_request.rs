@@ -94,6 +94,10 @@ pub(in crate::workspace) struct FlowSelection {
     /// files: which past run holds one cannot be answered until the profile
     /// is known, and the profile is asked for after this is built.
     pub pinned: Vec<daruda_flow::NodeId>,
+    /// Values for the inputs the flow declares. `None` until someone has
+    /// given them: a desktop start then asks the person first, when the
+    /// flow declares any.
+    pub inputs: Option<daruda_flow::input::InputValues>,
 }
 
 /// The flow a request is assembled from: a saved file, or text that would
@@ -283,7 +287,7 @@ impl Workspace {
             FlowPurpose::Validate,
             cx,
         )?;
-        Ok(daruda_flow::request::validate_request(&submission.request))
+        Ok(daruda_flow::request::check_request(&submission.request))
     }
 
     /// Assemble a request that **continues** the run in `run_dir`, rather
@@ -331,6 +335,8 @@ impl Workspace {
             started_by: resumed.started_by,
             until: None,
             pinned: Vec::new(),
+            // The engine reads the values the run recorded at its start.
+            inputs: Default::default(),
             loaded: resumed.loaded,
             run_dir: run_dir.to_path_buf(),
             // The root, not this lane's own directory: the engine names the
@@ -439,6 +445,7 @@ impl Workspace {
             started_by: Some(daruda_flow::request::StartedBy::Desktop),
             until: selection.until.clone(),
             pinned,
+            inputs: selection.inputs.clone().unwrap_or_default(),
             loaded,
             run_dir: super::flow_paths::runs_dir(&cwd).join(self.next_run_id(cx)),
             lock_dir: self.lock_root.clone(),

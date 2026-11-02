@@ -79,6 +79,7 @@ nodes:
     let runner = FakeRunner::new();
     let _ = smol::block_on(run_flow(
         RunInputs {
+            inputs: Default::default(),
             pinned: Vec::new(),
             until: None,
             loaded: &loaded,
@@ -146,6 +147,7 @@ nodes:
     let runner = FakeRunner::new();
     let report = smol::block_on(run_flow(
         RunInputs {
+            inputs: Default::default(),
             pinned: Vec::new(),
             until: None,
             loaded: &loaded,

@@ -10,18 +10,19 @@
 //! contributes its active worktree's set and each row says which, so there is
 //! nothing for a caller to name.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use gpui::Context;
 
 use crate::control::result::{
-    ControlError, FlowEntry, FlowIssue, FlowNotStartedReason, FlowOriginKind, LaneHandle,
-    StopDisposition,
+    ControlError, FlowEntry, FlowInputEntry, FlowInputKind, FlowInputProblem, FlowInputProblemKind,
+    FlowIssue, FlowNotStartedReason, FlowOriginKind, LaneHandle, StopDisposition,
 };
 use crate::workspace::Workspace;
+use crate::workspace::flow_declared::{declared_inputs, declared_profiles};
 use crate::workspace::flow_ops::FlowStartRefused;
 use crate::workspace::flow_paths::{FlowOrigin, FoundFlow, flow_label, project_flows_dir};
-use crate::workspace::flow_profiles::declared_profiles;
 use crate::workspace::flow_request::{FlowSelection, FlowSubmitError};
 use daruda_control_types::runs::RunHandle;
 use daruda_store::project::LaneRef;
@@ -51,6 +52,7 @@ impl Workspace {
                         origin: map_origin(found.origin),
                         lane: LaneHandle::new(self.uuid(), self.active),
                         profiles: declared_profiles(&found.path),
+                        inputs: input_entries(&found.path),
                     })
                     .collect()
             })
@@ -68,16 +70,20 @@ impl Workspace {
     /// questions use the shared desktop/remote answer path. A worktree that
     /// is gone has nowhere to put a run; a file that declares profiles needs
     /// one of them named, and a name it does not declare is refused rather
-    /// than run under the defaults; a lane runs one flow at a time, enforced
-    /// by an on-disk lock the engine takes only after dispatch; and a flow
-    /// that does not pass its own static checks is refused as written.
+    /// than run under the defaults; values that do not satisfy the flow's
+    /// declared inputs are refused, each problem named; a lane runs one flow
+    /// at a time, enforced by an on-disk lock the engine takes only after
+    /// dispatch; and a flow that does not pass its own static checks is
+    /// refused as written.
+    ///
+    /// `submitter` is who started it and whether that start was solicited.
     pub(crate) fn control_flow_run(
         &mut self,
         lane: LaneRef,
         name: &str,
         profile: Option<&str>,
-        started_by: daruda_flow::request::StartedBy,
-        solicited: bool,
+        inputs: &BTreeMap<String, String>,
+        submitter: (daruda_flow::request::StartedBy, bool),
         cx: &mut Context<Self>,
     ) -> Result<FlowStarted, ControlError> {
         let Some(cwd) = self.lane_for(lane).map(|l| l.path.clone()) else {
@@ -120,12 +126,32 @@ impl Workspace {
                 return Err(refusal_answer(label, held_by, FlowStartRefused::Submit(e)));
             }
         }
+        let inputs: daruda_flow::input::InputValues = inputs
+            .iter()
+            .map(|(name, value)| {
+                (
+                    name.clone(),
+                    daruda_flow::input::InputValue::Text(value.clone()),
+                )
+            })
+            .collect();
+        // After the static check, so a file that does not parse is refused
+        // as written rather than as declaring none of the inputs named.
+        if let Err(issues) = daruda_flow::input::resolve(&declared_inputs(&found.path), &inputs) {
+            return Err(ControlError::FlowInputsRefused {
+                name: label,
+                problems: issues.iter().filter_map(input_problem).collect(),
+            });
+        }
         let submitted = self.submit_flow_run(
             lane,
             &found.path,
             profile,
-            &FlowSelection::default(),
-            (started_by, solicited),
+            &FlowSelection {
+                inputs: Some(inputs),
+                ..FlowSelection::default()
+            },
+            submitter,
             cx,
         );
         let run_id = match submitted {
@@ -140,6 +166,7 @@ impl Workspace {
             origin: map_origin(found.origin),
             lane: LaneHandle::new(self.uuid(), lane),
             profiles,
+            inputs: input_entries(&found.path),
         };
         Ok(FlowStarted { entry, run_id })
     }
@@ -273,6 +300,43 @@ impl Workspace {
 /// grammar rejects (an unreadable lock's empty one) names nothing.
 fn flow_handle(run_id: &str) -> Option<RunHandle> {
     format!("flow:{run_id}").parse().ok()
+}
+
+/// The inputs `path` declares, as a listing row names them.
+fn input_entries(path: &Path) -> Vec<FlowInputEntry> {
+    use daruda_flow::input::InputType;
+    declared_inputs(path)
+        .into_iter()
+        .map(|decl| FlowInputEntry {
+            kind: match decl.kind {
+                InputType::String => FlowInputKind::String,
+                InputType::Number => FlowInputKind::Number,
+                InputType::Boolean => FlowInputKind::Boolean,
+                InputType::Choice => FlowInputKind::Choice,
+            },
+            default: decl.default.as_ref().map(|value| value.as_text()),
+            name: decl.name,
+            description: decl.description,
+            required: decl.required,
+            choices: decl.choices,
+        })
+        .collect()
+}
+
+/// One refused value as a control caller reads it. Only the value checks
+/// produce input issues here; anything else is not about a value.
+fn input_problem(issue: &daruda_flow::error::ValidationIssue) -> Option<FlowInputProblem> {
+    use daruda_flow::error::ValidationKind as K;
+    let (input, problem) = match &issue.kind {
+        K::InputMissing { name } => (name, FlowInputProblemKind::Missing),
+        K::InputNotDeclared { name } => (name, FlowInputProblemKind::NotDeclared),
+        K::InputValueInvalid { name } => (name, FlowInputProblemKind::Invalid),
+        _ => return None,
+    };
+    Some(FlowInputProblem {
+        input: input.clone(),
+        problem,
+    })
 }
 
 /// A start's refusal as the control caller's answer. A problem in the file

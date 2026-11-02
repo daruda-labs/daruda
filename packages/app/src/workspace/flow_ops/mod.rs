@@ -21,6 +21,7 @@ use super::Workspace;
 use super::command::flow_picker::{FlowPick, FlowPicker, FlowPurpose};
 use super::command::picker::PickerKey;
 use super::command::picker_key::picker_keystroke;
+use super::flow_inputs_modal::{FlowInputsModal, PendingFlowRun};
 use super::flow_request::{FlowSelection, FlowSubmitError};
 
 mod reporting;
@@ -317,7 +318,7 @@ impl Workspace {
         // picker comes up for it — even when nothing opened the picker to begin
         // with. Everything else is decided.
         if purpose.asks_about_profiles() {
-            let profiles = flow_profiles(&path);
+            let profiles = super::flow_declared::declared_profiles(&path);
             if !profiles.is_empty() {
                 // The selection rides into the picker rather than being asked
                 // for again on the way out: the profile stage already carries
@@ -363,6 +364,27 @@ impl Workspace {
         match purpose {
             FlowPurpose::Validate => self.validate_flow(lane, path, profile, window, cx),
             FlowPurpose::Run => {
+                // The last question a start asks, once the profile is known:
+                // the values its declared inputs take this time.
+                if selection.inputs.is_none() {
+                    let decls = super::flow_declared::declared_inputs(path);
+                    if !decls.is_empty() {
+                        let pending = PendingFlowRun {
+                            lane,
+                            path: path.to_path_buf(),
+                            profile: profile.map(str::to_owned),
+                            selection: selection.clone(),
+                        };
+                        let _form = FlowInputsModal::open(
+                            cx.entity().downgrade(),
+                            pending,
+                            decls,
+                            window,
+                            cx,
+                        );
+                        return;
+                    }
+                }
                 let started = self.submit_flow_run(
                     lane,
                     path,
@@ -379,43 +401,24 @@ impl Workspace {
             FlowPurpose::Graph => self.open_flow_graph(lane, path, window, cx),
         }
     }
-}
 
-/// The profiles a flow declares, for the second question. A file that
-/// cannot be read or parsed reports none: the run that follows fails on
-/// the same read a moment later and names it properly, and a second
-/// error surface here would say it twice in different words.
-fn flow_profiles(path: &Path) -> Vec<String> {
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|text| daruda_flow::load::profiles(&text).ok())
-        .unwrap_or_default()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::flow_profiles;
-
-    #[test]
-    fn profile_prompt_uses_declared_profiles_without_validating_the_graph() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("flow.yaml");
-        std::fs::write(
-            &path,
-            "version: 1\nprofiles:\n  cheap:\n    agent:\n      model: haiku\nnodes: []\n",
-        )
-        .unwrap();
-        assert_eq!(flow_profiles(&path), ["cheap"]);
-    }
-
-    #[test]
-    fn unreadable_or_invalid_profile_sources_leave_errors_to_submission() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("flow.yaml");
-        assert!(flow_profiles(&path).is_empty());
-        std::fs::write(&path, "not: [valid").unwrap();
-        assert!(flow_profiles(&path).is_empty());
-        std::fs::write(&path, "version: 1\nnodes: []\n").unwrap();
-        assert!(flow_profiles(&path).is_empty());
+    /// Run a flow whose inputs the person has just given values for.
+    pub(in crate::workspace) fn run_flow_with_inputs(
+        &mut self,
+        pending: PendingFlowRun,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.dispatch_flow(
+            FlowDispatch {
+                lane: pending.lane,
+                purpose: FlowPurpose::Run,
+                path: &pending.path,
+                profile: pending.profile.as_deref(),
+                selection: &pending.selection,
+            },
+            window,
+            cx,
+        );
     }
 }

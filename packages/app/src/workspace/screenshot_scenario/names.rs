@@ -151,6 +151,7 @@ const NAME_FLOW_PROFILE_PICKER: &str = "flow-profile-picker";
 const NAME_FLOW_RESUMABLE: &str = "flow-resumable";
 const NAME_FLOW_RUNNING: &str = "flow-running";
 const NAME_FLOW_ASKING: &str = "flow-asking";
+const NAME_FLOW_INPUTS: &str = "flow-inputs";
 
 impl ScreenshotScenario {
     /// Map a CLI token to a scenario. Unknown tokens return `None`.
@@ -371,6 +372,7 @@ impl ScreenshotScenario {
             NAME_FLOW_RESUMABLE => Some(Self::FlowResumable),
             NAME_FLOW_RUNNING => Some(Self::FlowRunning),
             NAME_FLOW_ASKING => Some(Self::FlowAsking),
+            NAME_FLOW_INPUTS => Some(Self::FlowInputs),
             NAME_FLOW_DELETE_CONFIRM => Some(Self::FlowDeleteConfirm),
             NAME_FLOW_MOVE_CONFIRM => Some(Self::FlowMoveConfirm),
             NAME_FLOW_RENAME_REFUSED => Some(Self::FlowRenameRefused),

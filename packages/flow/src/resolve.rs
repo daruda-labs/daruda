@@ -53,6 +53,7 @@ pub fn resolve(file: FlowFile, profile: Option<&str>) -> Result<Flow, Vec<Valida
         // resolved, and every issue it found would name the wrong ones.
         None => return Err(issues),
     };
+    let inputs = file.inputs;
 
     for node in file.nodes {
         let timeout = node.timeout.or(defaults.timeout).unwrap_or(DEFAULT_TIMEOUT);
@@ -147,6 +148,7 @@ pub fn resolve(file: FlowFile, profile: Option<&str>) -> Result<Flow, Vec<Valida
                 .clamp(PARALLEL_RANGE.0, PARALLEL_RANGE.1),
             profile: profile.map(str::to_string),
             default_agent,
+            inputs,
             nodes,
         })
     } else {
@@ -193,6 +195,9 @@ pub fn to_flow_file(flow: &Flow, flow_dir: &Path) -> FlowFile {
         // menu into the record would invite reading it as a choice the run
         // still has.
         profiles: std::collections::BTreeMap::new(),
+        // Declarations only: the values a run used are in its log, never in
+        // the spec, so a value can never be pre-substituted around quoting.
+        inputs: flow.inputs.clone(),
         nodes: flow
             .nodes
             .iter()

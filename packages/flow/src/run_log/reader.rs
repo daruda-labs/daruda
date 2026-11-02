@@ -48,6 +48,8 @@ pub struct Replay {
     pub until: Option<NodeId>,
     /// Nodes reused rather than run. Also in `passed`.
     pub pinned: Vec<NodeId>,
+    /// The input values the run started with, defaults filled in.
+    pub inputs: crate::input::InputValues,
     /// The file ended in a line that could not be read.
     pub torn: bool,
 }
@@ -285,12 +287,14 @@ pub(crate) fn replay_events<'e>(events: impl IntoIterator<Item = &'e E>) -> Repl
                 until,
                 pinned,
                 profile,
+                inputs,
                 ..
             } => {
                 replay.started_by = *started_by;
                 replay.profile = profile.clone();
                 replay.until = until.clone();
                 replay.pinned = pinned.clone();
+                replay.inputs = inputs.clone();
             }
             E::Imported(imported) => {
                 replay.profile = imported.profile.clone();
@@ -482,6 +486,7 @@ mod tests {
     fn passes_are_folded_in_order_and_taken_back() {
         let events = [
             E::RunStarted {
+                inputs: Default::default(),
                 started_by: None,
                 nodes: vec![NodeStart {
                     id: "design".into(),
@@ -534,6 +539,7 @@ mod tests {
         };
         let events = [
             E::RunStarted {
+                inputs: Default::default(),
                 started_by: None,
                 nodes: vec![node("a"), node("b"), node("c")],
                 until: None,
@@ -596,6 +602,7 @@ mod tests {
         let mut log =
             crate::run_log::store::open_file_log(dir.path()).unwrap_or_else(|_| panic!("open"));
         log.commit(E::RunStarted {
+            inputs: Default::default(),
             started_by: None,
             nodes: vec![NodeStart {
                 id: "design".into(),

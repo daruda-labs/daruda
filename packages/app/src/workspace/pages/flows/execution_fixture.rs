@@ -56,6 +56,7 @@ pub(in crate::workspace) fn seed(root: &Path, shot: ExecutionShot) -> PathBuf {
         ask: None,
         until: None,
         pinned: Vec::new(),
+        inputs: Default::default(),
         resume: None,
     };
     let report =

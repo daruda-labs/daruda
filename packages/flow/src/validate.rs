@@ -21,6 +21,9 @@ pub const SUPPORTED_VERSION: u32 = 1;
 pub fn validate(flow: &Flow, graph: &FlowGraph) -> Vec<ValidationIssue> {
     let mut issues = Vec::new();
     rules::version_is_supported(flow, &mut issues);
+    // Here rather than at resolve: a bad declaration refuses the run but is
+    // no reason to leave the graph undrawn.
+    issues.extend(crate::input::check_decls(&flow.inputs));
 
     let ancestors: HashMap<&NodeId, HashSet<NodeId>> = flow
         .nodes
@@ -73,6 +76,7 @@ pub fn validate(flow: &Flow, graph: &FlowGraph) -> Vec<ValidationIssue> {
                     texts.push(text.as_str());
                 }
                 rules::output_refs_name_ancestors(id, &texts, reachable, &mut issues);
+                crate::input::check_refs(id, &texts, &flow.inputs, &mut issues);
             }
             NodeKind::Command { run, on_fail } => {
                 let mut texts = vec![run.as_str()];
@@ -83,6 +87,7 @@ pub fn validate(flow: &Flow, graph: &FlowGraph) -> Vec<ValidationIssue> {
                     texts.push(fix.as_str());
                 }
                 rules::output_refs_name_ancestors(id, &texts, reachable, &mut issues);
+                crate::input::check_refs(id, &texts, &flow.inputs, &mut issues);
             }
         }
     }

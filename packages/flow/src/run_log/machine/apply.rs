@@ -16,9 +16,11 @@ pub(super) fn apply(state: &mut FlowRunState, event: &E) {
             until,
             pinned,
             profile,
+            inputs,
         } => {
             start(state, nodes, until.clone(), pinned.clone(), profile.clone());
             state.start.started_by = *started_by;
+            state.start.inputs = inputs.clone();
         }
         E::SourceRecorded { source } => state.source = Some(source.clone()),
         E::SessionBound { binding } => {
@@ -171,6 +173,7 @@ fn start(
         until,
         pinned,
         profile,
+        inputs: Default::default(),
     };
     state.phase = RunPhase::Running;
 }

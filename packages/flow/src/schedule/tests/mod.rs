@@ -91,6 +91,7 @@ fn run_pinned(
     let loaded = load(text, None).expect("valid flow");
     let report = smol::block_on(run_flow(
         RunInputs {
+            inputs: Default::default(),
             until: None,
             pinned: vec![crate::NodeId::from(node)],
             loaded: &loaded,
@@ -121,6 +122,7 @@ fn run_until(text: &str, runner: &dyn NodeRunner, target: &str) -> (RunReport, t
     let loaded = load(text, None).expect("valid flow");
     let report = smol::block_on(run_flow(
         RunInputs {
+            inputs: Default::default(),
             pinned: Vec::new(),
             until: Some(crate::NodeId::from(target)),
             loaded: &loaded,
@@ -162,6 +164,7 @@ fn run_with(
     let loaded = load(text, None).expect("valid flow");
     let report = smol::block_on(run_flow(
         RunInputs {
+            inputs: Default::default(),
             pinned: Vec::new(),
             until: None,
             loaded: &loaded,
@@ -237,6 +240,7 @@ pub(super) fn request_for_profile(
 ) -> crate::request::RunRequest {
     let loaded = load(text, profile).expect("valid flow");
     crate::request::RunRequest {
+        inputs: Default::default(),
         history: Default::default(),
         started_by: Some(crate::request::StartedBy::Desktop),
         loaded,
@@ -354,6 +358,7 @@ mod cancel;
 mod contract;
 mod crash;
 mod generations;
+mod inputs;
 mod left_open;
 mod lifecycle;
 mod ordering;

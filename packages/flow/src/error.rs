@@ -106,6 +106,23 @@ pub enum ValidationKind {
     UnknownUntil { node: NodeId },
     /// A pinned output names a node the flow does not have.
     UnknownPin { node: NodeId },
+    /// A template writes `{{input.<name>}}` for an input the flow does not
+    /// declare. Only `input.` tokens are checked: any other unknown `{{…}}`
+    /// is left verbatim, so a Go or docker format string survives.
+    UndeclaredInput { name: String },
+    /// An input name a template cannot spell.
+    InvalidInputName { name: String },
+    /// A `choice` input with no `choices`.
+    InputChoicesMissing { name: String },
+    /// An input whose `default` its own type refuses.
+    InputDefaultInvalid { name: String },
+    /// A required input the run was given no value for.
+    InputMissing { name: String },
+    /// A value for an input the flow does not declare.
+    InputNotDeclared { name: String },
+    /// A value its input's type refuses — not a number, not a boolean, not
+    /// one of the choices.
+    InputValueInvalid { name: String },
     /// A pinned output's source is not there. Refused rather than run: a pin
     /// is the user's promise that this output is valid, and a promise about a
     /// file that is gone would quietly starve everything downstream of it.

@@ -62,6 +62,9 @@ pub struct Resumed {
     /// The node the run was started up to. Only facts fixed at the start
     /// are read before the lock; the progress is read under it.
     pub until: Option<NodeId>,
+    /// The input values the run started with: a continuation renders these,
+    /// never values asked for again.
+    pub inputs: crate::input::InputValues,
 }
 
 impl Resumed {
@@ -70,6 +73,7 @@ impl Resumed {
         Continuation {
             until: self.until.clone(),
             pinned: self.pinned.clone(),
+            inputs: self.inputs.clone(),
             settle: SETTLE_AFTER_CRASH,
         }
     }
@@ -82,6 +86,8 @@ pub struct Continuation {
     /// Original reused nodes; scheduling replays their progress under the lock.
     pub pinned: Vec<NodeId>,
     pub until: Option<NodeId>,
+    /// The values the run started with.
+    pub inputs: crate::input::InputValues,
     /// [`SETTLE_AFTER_CRASH`] outside the tests, which resume at once.
     pub(crate) settle: Duration,
 }
@@ -157,6 +163,7 @@ pub fn prepare(
         started_by: replay.started_by,
         loaded,
         until: reader::selection(run_dir),
+        inputs: replay.inputs,
     })
 }
 

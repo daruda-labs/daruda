@@ -203,6 +203,27 @@ pub(crate) fn issue(kind: &daruda_flow::error::ValidationKind) -> String {
         K::DuplicateId => std::borrow::Cow::<str>::Owned(s::flow::issue_duplicate_id()),
         K::UnknownDep { dep } => std::borrow::Cow::<str>::Owned(s::flow::issue_unknown_dep(dep)),
         K::Cycle => std::borrow::Cow::<str>::Owned(s::flow::issue_cycle()),
+        K::UndeclaredInput { name } => {
+            std::borrow::Cow::<str>::Owned(s::flow::issue_undeclared_input(name))
+        }
+        K::InvalidInputName { name } => {
+            std::borrow::Cow::<str>::Owned(s::flow::issue_invalid_input_name(name))
+        }
+        K::InputChoicesMissing { name } => {
+            std::borrow::Cow::<str>::Owned(s::flow::issue_input_choices_missing(name))
+        }
+        K::InputDefaultInvalid { name } => {
+            std::borrow::Cow::<str>::Owned(s::flow::issue_input_default_invalid(name))
+        }
+        K::InputMissing { name } => {
+            std::borrow::Cow::<str>::Owned(s::flow::issue_input_missing(name))
+        }
+        K::InputNotDeclared { name } => {
+            std::borrow::Cow::<str>::Owned(s::flow::issue_input_not_declared(name))
+        }
+        K::InputValueInvalid { name } => {
+            std::borrow::Cow::<str>::Owned(s::flow::issue_input_value_invalid(name))
+        }
         K::UnknownAgent { id } => std::borrow::Cow::<str>::Owned(s::flow::issue_unknown_agent(id)),
         K::NobodyToAsk => std::borrow::Cow::<str>::Owned(s::flow::issue_nobody_to_ask()),
         K::MissingPromptFile { field, path } => std::borrow::Cow::<str>::Owned(

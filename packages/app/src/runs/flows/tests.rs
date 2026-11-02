@@ -205,6 +205,7 @@ async fn a_waiter_open_when_a_flow_ends_receives_its_report(cx: &mut gpui::TestA
         ask: Some(asks_tx),
         until: None,
         pinned: vec![],
+        inputs: Default::default(),
         resume: None,
     };
     let key = RunKey::flow_of(&run_dir);

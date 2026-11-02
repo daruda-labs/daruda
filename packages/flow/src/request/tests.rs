@@ -81,6 +81,7 @@ fn spec(command: &str) -> daruda_acp::LaunchSpec {
 fn request_for(text: &str, agents: &[&str], dir: &std::path::Path) -> RunRequest {
     let loaded = load(text, None).expect("valid flow");
     RunRequest {
+        inputs: Default::default(),
         history: Default::default(),
         started_by: Some(crate::request::StartedBy::Desktop),
         loaded,
@@ -681,4 +682,84 @@ fn a_prompt_with_words_in_it_is_not_refused() {
     let req = request_for(AGENT_FLOW, &["claude"], dir.path());
     let kinds: Vec<_> = validate_request(&req).into_iter().map(|i| i.kind).collect();
     assert!(!kinds.contains(&ValidationKind::EmptyPrompt), "{kinds:?}");
+}
+
+const INPUT_FLOW: &str = "\
+version: 1
+inputs:
+  pr: { type: number, required: true }
+  focus: { type: choice, choices: [security, clarity], default: clarity }
+nodes:
+  - id: a
+    kind: command
+    run: gh pr view {{input.pr}}
+";
+
+/// The values a run is given are checked before it starts, against the
+/// flow's own declarations.
+#[test]
+fn a_run_is_refused_values_its_inputs_do_not_allow() {
+    use crate::error::ValidationKind as K;
+    use crate::input::InputValue;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut req = request_for(INPUT_FLOW, &[], dir.path());
+    assert!(
+        crate::request::check_request(&req).is_empty(),
+        "checking the file asks for no run's values"
+    );
+    assert_eq!(
+        validate_request(&req)
+            .into_iter()
+            .map(|i| i.kind)
+            .collect::<Vec<_>>(),
+        [K::InputMissing { name: "pr".into() }]
+    );
+    req.inputs
+        .insert("pr".into(), InputValue::Text("1234".into()));
+    assert!(validate_request(&req).is_empty());
+    assert_eq!(req.effective_inputs()["focus"].as_text(), "clarity");
+    req.inputs
+        .insert("focus".into(), InputValue::Text("speed".into()));
+    assert_eq!(
+        validate_request(&req)
+            .into_iter()
+            .map(|i| i.kind)
+            .collect::<Vec<_>>(),
+        [K::InputValueInvalid {
+            name: "focus".into()
+        }]
+    );
+}
+
+/// What a file-backed prompt names is only knowable once it is read, so
+/// the request is where its undeclared inputs are caught.
+#[test]
+fn an_undeclared_input_inside_a_prompt_file_is_refused() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("p.md"),
+        "review {{input.pr}} and {{input.repo}}",
+    )
+    .unwrap();
+    let text = "\
+version: 1
+defaults: { agent: { id: claude } }
+inputs:
+  pr: { required: true }
+nodes:
+  - id: a
+    kind: agent
+    output: a.md
+    prompt_file: p.md
+";
+    let mut req = request_for(text, &["claude"], dir.path());
+    req.inputs
+        .insert("pr".into(), crate::input::InputValue::Text("1".into()));
+    let kinds: Vec<_> = validate_request(&req).into_iter().map(|i| i.kind).collect();
+    assert_eq!(
+        kinds,
+        [crate::error::ValidationKind::UndeclaredInput {
+            name: "repo".into()
+        }]
+    );
 }

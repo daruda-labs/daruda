@@ -63,6 +63,36 @@ fn a_refused_flow_start_names_its_reason() {
     );
 }
 
+/// A phone cannot give input values, so a refusal over them says which
+/// inputs and where a run with values can come from.
+#[test]
+fn a_refused_inputs_start_names_each_input() {
+    let rendered = render_error(&ControlError::FlowInputsRefused {
+        name: "review.yaml".into(),
+        problems: vec![
+            FlowInputProblem {
+                input: "pr".into(),
+                problem: FlowInputProblemKind::Missing,
+            },
+            FlowInputProblem {
+                input: "focus".into(),
+                problem: FlowInputProblemKind::Invalid,
+            },
+        ],
+    });
+    assert_eq!(
+        rendered,
+        s::control::error_flow_inputs_refused(
+            "review.yaml",
+            format!(
+                "{}, {}",
+                s::control::flow_input_missing("pr"),
+                s::control::flow_input_invalid("focus")
+            )
+        )
+    );
+}
+
 #[test]
 fn stale_run_errors_are_localized() {
     assert_eq!(

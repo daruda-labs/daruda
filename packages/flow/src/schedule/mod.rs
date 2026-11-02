@@ -58,6 +58,8 @@ struct Run<'a> {
     log_dir: PathBuf,
     /// Every node's resolved output path, for `{{node.<id>.output}}`.
     node_outputs: HashMap<NodeId, PathBuf>,
+    /// The run's input values as text, for `{{input.<name>}}`.
+    inputs: std::collections::BTreeMap<String, String>,
     runner: &'a dyn NodeRunner,
     cancel: &'a CancelToken,
     budget: &'a Budget,
@@ -128,6 +130,8 @@ pub(crate) struct RunInputs<'a> {
     pub(crate) pinned: Vec<NodeId>,
     /// What an earlier process finished, when this is a continuation.
     pub(crate) resume: Option<crate::run_log::reader::Replay>,
+    /// The run's input values as text, already checked and defaulted.
+    pub(crate) inputs: std::collections::BTreeMap<String, String>,
 }
 
 /// Run every node in topological order, judging each before the next.
@@ -145,6 +149,7 @@ pub(crate) async fn run_flow(inputs: RunInputs<'_>, runner: &dyn NodeRunner) -> 
         until,
         pinned,
         resume,
+        inputs: input_text,
     } = inputs;
     let (flow, graph) = (loaded.flow(), loaded.graph());
     // Destructured before the run is built: every one of these is a field
@@ -172,6 +177,7 @@ pub(crate) async fn run_flow(inputs: RunInputs<'_>, runner: &dyn NodeRunner) -> 
         run_dir,
         log_dir: run_dir.join(LOG_DIR_NAME),
         node_outputs: node_outputs(flow, run_dir).into_iter().collect(),
+        inputs: input_text,
         runner,
         cancel,
         budget,

@@ -43,6 +43,7 @@ async fn real_flow_thread_and_two_tasks_each_deliver_once(cx: &mut TestAppContex
         ask: Some(asks_tx),
         until: None,
         pinned: vec![],
+        inputs: Default::default(),
         resume: None,
     };
     let flow = RunKey::Flow("flow-result".into());
@@ -281,6 +282,7 @@ async fn resumed_pins_describe_live_and_retained_results_like_disk(cx: &mut Test
         ask: Some(asks_tx),
         until: None,
         pinned: vec![],
+        inputs: Default::default(),
         resume: Some(continuation),
     };
     let key = RunKey::Flow("resumed-pins".into());

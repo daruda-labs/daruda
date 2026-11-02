@@ -756,3 +756,61 @@ fn an_unknown_version_is_rejected() {
             .any(|i| matches!(i.kind, ValidationKind::UnknownVersion(99)))
     );
 }
+
+/// A template may only name inputs the flow declares; anything else in
+/// braces — a Go or docker format string — is left alone.
+#[test]
+fn an_undeclared_input_in_a_template_is_refused_at_load() {
+    let text = "\
+version: 1
+inputs:
+  pr: { type: number }
+nodes:
+  - id: a
+    kind: command
+    run: gh pr view {{input.pr}} --json {{input.fields}} && docker ps --format '{{.Names}}'
+";
+    let Err(crate::FlowError::Validate(issues)) = crate::load(text, None) else {
+        panic!("loaded a flow naming an undeclared input");
+    };
+    let kinds: Vec<_> = issues
+        .into_iter()
+        .map(|issue| (issue.node, issue.kind))
+        .collect();
+    assert_eq!(
+        kinds,
+        [(
+            Some("a".into()),
+            crate::error::ValidationKind::UndeclaredInput {
+                name: "fields".into()
+            }
+        )]
+    );
+}
+
+/// A bad input declaration refuses the run, but the flow still resolves and
+/// its graph builds, so an editor can draw it beside the problem.
+#[test]
+fn a_bad_input_declaration_leaves_the_flow_drawable() {
+    let text = "\
+version: 1
+inputs:
+  count: { type: number, default: many }
+nodes:
+  - id: a
+    kind: command
+    run: \"true\"
+";
+    let inspected = crate::inspect(text, None).expect("resolves and builds");
+    assert_eq!(
+        inspected
+            .issues
+            .into_iter()
+            .map(|issue| issue.kind)
+            .collect::<Vec<_>>(),
+        [crate::error::ValidationKind::InputDefaultInvalid {
+            name: "count".into()
+        }]
+    );
+    assert!(crate::load(text, None).is_err(), "and the run is refused");
+}

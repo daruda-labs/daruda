@@ -448,6 +448,43 @@ fn flow_run_passes_an_optional_profile_through() {
     );
 }
 
+/// Each scalar reaches the engine as the text a form field would hold.
+#[test]
+fn flow_run_reads_input_values_as_text() {
+    let worktree = serde_json::json!({"workspace": workspace_json(), "project": 1, "worktree": 2});
+    let args = serde_json::json!({
+        "name": "review",
+        "worktree": worktree,
+        "inputs": {"pr": 1234, "fix": false, "focus": "speed", "notes": null},
+    });
+    let Command::Immediate(ResolvedCommand::Flow(ResolvedFlowCommand::Run { inputs, .. })) =
+        to_command(ToolId::FlowRun, &args).unwrap()
+    else {
+        panic!("run");
+    };
+    assert_eq!(
+        inputs.into_iter().collect::<Vec<_>>(),
+        [
+            ("fix".to_string(), "false".to_string()),
+            ("focus".into(), "speed".into()),
+            ("pr".into(), "1234".into()),
+        ]
+    );
+    for bad in [
+        serde_json::json!("pr=1"),
+        serde_json::json!({"pr": [1]}),
+        serde_json::json!({"pr": {"n": 1}}),
+    ] {
+        assert_eq!(
+            to_command(
+                ToolId::FlowRun,
+                &serde_json::json!({"name": "review", "worktree": worktree, "inputs": bad})
+            ),
+            Err(ConvertError::BadArgument { name: "inputs" })
+        );
+    }
+}
+
 #[test]
 fn flow_stop_accepts_only_flow_handles_and_keeps_omitted_behavior() {
     let worktree = serde_json::json!({"workspace": workspace_json(), "project": 1, "worktree": 2});

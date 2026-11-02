@@ -9,8 +9,9 @@
 use super::{Absorbed, CommandState, ListingRow};
 use crate::control::result::{
     Activity, AskDisposition, ChatSummary, ControlError, ControlOutcome, ControlResult,
-    FlowNotStartedReason, FlowOriginKind, Health, InterruptCause, Listing, PaneAnswer,
-    SendDisposition, StopDisposition, TaskEntry, TaskProject, TaskStatus,
+    FlowInputProblem, FlowInputProblemKind, FlowNotStartedReason, FlowOriginKind, Health,
+    InterruptCause, Listing, PaneAnswer, SendDisposition, StopDisposition, TaskEntry, TaskProject,
+    TaskStatus,
 };
 use crate::control::spec::{Ordinal, ParseError};
 use crate::remote_channel::bridge::InlineKeyboard;
@@ -272,6 +273,15 @@ fn flow_not_started_reason(reason: &FlowNotStartedReason) -> String {
     }
 }
 
+fn flow_input_problem(problem: &FlowInputProblem) -> String {
+    let input = &problem.input;
+    match problem.problem {
+        FlowInputProblemKind::Missing => s::control::flow_input_missing(input),
+        FlowInputProblemKind::NotDeclared => s::control::flow_input_not_declared(input),
+        FlowInputProblemKind::Invalid => s::control::flow_input_invalid(input),
+    }
+}
+
 pub(crate) fn render_error(error: &ControlError) -> String {
     match error {
         ControlError::OrdinalNotFound { ordinal } => s::control::error_ordinal_not_found(*ordinal),
@@ -288,6 +298,10 @@ pub(crate) fn render_error(error: &ControlError) -> String {
         }
         ControlError::FlowUnknownProfile { name, profile } => {
             s::control::error_flow_unknown_profile(name, profile)
+        }
+        ControlError::FlowInputsRefused { name, problems } => {
+            let problems: Vec<String> = problems.iter().map(flow_input_problem).collect();
+            s::control::error_flow_inputs_refused(name, problems.join(", "))
         }
         ControlError::RunMismatch => s::control::error_run_mismatch(),
         ControlError::NoActiveLane => s::control::error_no_active_lane(),

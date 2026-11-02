@@ -10,6 +10,7 @@
 pub mod error;
 pub mod event;
 pub mod history;
+pub mod input;
 pub mod journal;
 pub mod load;
 pub mod lock;

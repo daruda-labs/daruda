@@ -187,8 +187,8 @@ async fn an_unknown_flow_name_is_refused(cx: &mut TestAppContext) {
                     ws.active,
                     "nope",
                     None,
-                    daruda_flow::request::StartedBy::Phone,
-                    true,
+                    &Default::default(),
+                    (daruda_flow::request::StartedBy::Phone, true),
                     cx
                 ),
                 Err(ControlError::FlowNotFound {
@@ -214,8 +214,8 @@ async fn a_name_resolves_with_or_without_its_extension(cx: &mut TestAppContext) 
                         ws.active,
                         name,
                         None,
-                        daruda_flow::request::StartedBy::Phone,
-                        true,
+                        &Default::default(),
+                        (daruda_flow::request::StartedBy::Phone, true),
                         cx
                     ),
                     Err(ControlError::FlowNeedsInteraction {
@@ -297,6 +297,7 @@ async fn ask_flow_starts_with_a_question(
                 name: "ship".into(),
                 lane: target,
                 profile: None,
+                inputs: Default::default(),
             }),
             origin,
             cx,
@@ -361,8 +362,8 @@ async fn a_flow_declaring_profiles_is_refused_before_desktop_selection(cx: &mut 
                     ws.active,
                     "ship",
                     None,
-                    daruda_flow::request::StartedBy::Phone,
-                    true,
+                    &Default::default(),
+                    (daruda_flow::request::StartedBy::Phone, true),
                     cx
                 ),
                 Err(ControlError::FlowNeedsInteraction {
@@ -416,8 +417,8 @@ async fn an_undeclared_profile_is_refused(cx: &mut TestAppContext) {
                         ws.active,
                         "ship",
                         Some("dear"),
-                        daruda_flow::request::StartedBy::Orchestrator,
-                        true,
+                        &Default::default(),
+                        (daruda_flow::request::StartedBy::Orchestrator, true),
                         cx
                     ),
                     Err(ControlError::FlowUnknownProfile {
@@ -444,8 +445,8 @@ async fn a_declared_profile_starts_the_flow(cx: &mut TestAppContext) {
                     ws.active,
                     "ship",
                     Some("cheap"),
-                    daruda_flow::request::StartedBy::Orchestrator,
-                    true,
+                    &Default::default(),
+                    (daruda_flow::request::StartedBy::Orchestrator, true),
                     cx,
                 )
                 .expect("a declared profile needs no desktop choice");
@@ -516,8 +517,8 @@ async fn a_flow_that_will_not_run_is_answered_not_reported_as_started(cx: &mut T
                     ws.active,
                     "ship",
                     None,
-                    daruda_flow::request::StartedBy::Phone,
-                    true,
+                    &Default::default(),
+                    (daruda_flow::request::StartedBy::Phone, true),
                     cx
                 ),
                 Err(ControlError::FlowRefused {
@@ -564,8 +565,8 @@ async fn a_runnable_flow_starts_and_names_the_file_that_ran(cx: &mut TestAppCont
                     ws.active,
                     "ship",
                     None,
-                    daruda_flow::request::StartedBy::Phone,
-                    true,
+                    &Default::default(),
+                    (daruda_flow::request::StartedBy::Phone, true),
                     cx,
                 )
                 .expect("a command-only flow needs neither an agent nor a person");
@@ -598,8 +599,8 @@ async fn a_lane_already_running_a_flow_refuses_the_next(cx: &mut TestAppContext)
                     ws.active,
                     "ship",
                     None,
-                    daruda_flow::request::StartedBy::Phone,
-                    true,
+                    &Default::default(),
+                    (daruda_flow::request::StartedBy::Phone, true),
                     cx
                 ),
                 Err(ControlError::FlowLocked {
@@ -637,8 +638,8 @@ async fn a_flow_runs_in_the_named_worktree_not_the_active_one(cx: &mut TestAppCo
                     active,
                     "deploy",
                     None,
-                    daruda_flow::request::StartedBy::Phone,
-                    true,
+                    &Default::default(),
+                    (daruda_flow::request::StartedBy::Phone, true),
                     cx
                 ),
                 Err(ControlError::FlowNotFound {
@@ -652,8 +653,8 @@ async fn a_flow_runs_in_the_named_worktree_not_the_active_one(cx: &mut TestAppCo
                     other,
                     "deploy",
                     None,
-                    daruda_flow::request::StartedBy::Phone,
-                    true,
+                    &Default::default(),
+                    (daruda_flow::request::StartedBy::Phone, true),
                     cx,
                 )
                 .expect("the named worktree holds it");
@@ -685,8 +686,8 @@ async fn a_worktree_that_is_gone_is_not_reported_as_a_missing_flow(cx: &mut Test
                     gone,
                     "ship",
                     None,
-                    daruda_flow::request::StartedBy::Phone,
-                    true,
+                    &Default::default(),
+                    (daruda_flow::request::StartedBy::Phone, true),
                     cx
                 ),
                 Err(ControlError::TargetGone)
@@ -712,8 +713,8 @@ async fn a_named_worktree_already_running_refuses_without_a_dialog(cx: &mut Test
                     other,
                     "deploy",
                     None,
-                    daruda_flow::request::StartedBy::Phone,
-                    true,
+                    &Default::default(),
+                    (daruda_flow::request::StartedBy::Phone, true),
                     cx
                 ),
                 Err(ControlError::FlowLocked {
@@ -1110,9 +1111,16 @@ async fn started_run_reports_its_outcome(
     let run_id = cx
         .update_window(wh.into(), |_, _, cx| {
             ws.update(cx, |ws, cx| {
-                ws.control_flow_run(ws.active, "ship", None, origin.flow_started_by(), true, cx)
-                    .expect("dispatched")
-                    .run_id
+                ws.control_flow_run(
+                    ws.active,
+                    "ship",
+                    None,
+                    &Default::default(),
+                    (origin.flow_started_by(), true),
+                    cx,
+                )
+                .expect("dispatched")
+                .run_id
             })
         })
         .expect("window is live");
@@ -1197,8 +1205,8 @@ async fn a_cancelled_phone_started_run_still_reports_back(cx: &mut TestAppContex
                 ws.active,
                 "ship",
                 None,
-                daruda_flow::request::StartedBy::Phone,
-                true,
+                &Default::default(),
+                (daruda_flow::request::StartedBy::Phone, true),
                 cx,
             )
             .expect("dispatched");
@@ -1489,8 +1497,8 @@ async fn a_worktree_held_by_another_process_names_its_run(cx: &mut TestAppContex
                 ws.active,
                 "ship",
                 None,
-                daruda_flow::request::StartedBy::Phone,
-                true,
+                &Default::default(),
+                (daruda_flow::request::StartedBy::Phone, true),
                 cx
             ),
             Err(ControlError::FlowLocked {
@@ -1531,8 +1539,8 @@ nodes:
                 ws.active,
                 name,
                 None,
-                daruda_flow::request::StartedBy::Phone,
-                true,
+                &Default::default(),
+                (daruda_flow::request::StartedBy::Phone, true),
                 cx,
             )
             .expect("dispatched")
@@ -1595,6 +1603,7 @@ async fn a_flow_start_response_names_the_execution_dispatched(cx: &mut TestAppCo
                 name: "ship".into(),
                 lane: target,
                 profile: None,
+                inputs: Default::default(),
             }),
             exec::CommandOrigin::Orchestrator,
             cx,
@@ -1678,8 +1687,8 @@ async fn a_refused_start_tells_the_control_caller_why(cx: &mut TestAppContext) {
             ws.active,
             "ship",
             None,
-            daruda_flow::request::StartedBy::Phone,
-            true,
+            &Default::default(),
+            (daruda_flow::request::StartedBy::Phone, true),
             cx,
         );
         match refused {
@@ -1718,8 +1727,8 @@ async fn a_desktop_resume_of_a_phone_started_run_stays_off_the_phone(cx: &mut Te
             ws.active,
             "ship",
             None,
-            daruda_flow::request::StartedBy::Phone,
-            true,
+            &Default::default(),
+            (daruda_flow::request::StartedBy::Phone, true),
             cx,
         )
         .expect("dispatched")

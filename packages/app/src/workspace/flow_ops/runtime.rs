@@ -209,6 +209,7 @@ nodes:
             started_by: Some(daruda_flow::request::StartedBy::Desktop),
             until: None,
             pinned: Vec::new(),
+            inputs: Default::default(),
             loaded,
             cwd: PathBuf::from("/lane"),
             run_dir: PathBuf::from("/lane/runs/1"),

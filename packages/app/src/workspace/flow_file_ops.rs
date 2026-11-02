@@ -512,6 +512,7 @@ fn starter_flow(agent: &str, name: &str, prompt: &str) -> Result<String, yaml_se
             ..Default::default()
         },
         profiles: Default::default(),
+        inputs: Vec::new(),
         nodes: vec![NodeFile {
             id: "first".into(),
             deps: Vec::new(),

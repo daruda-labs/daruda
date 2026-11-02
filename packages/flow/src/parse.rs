@@ -35,6 +35,13 @@ pub struct FlowFile {
     /// one nobody reading the file can predict.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub profiles: BTreeMap<String, Defaults>,
+    /// The parameters a run is given, in the order a host offers them.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        with = "crate::input::ordered"
+    )]
+    pub inputs: Vec<crate::input::InputDecl>,
     pub nodes: Vec<NodeFile>,
 }
 

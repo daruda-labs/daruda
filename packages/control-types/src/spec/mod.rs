@@ -56,6 +56,10 @@ pub enum ResolvedFlowCommand {
         /// One of the profiles the file declares. `None` runs a file that
         /// declares none; a file that declares some needs one named.
         profile: Option<String>,
+        /// Values for the flow's declared inputs, by name, as text: the
+        /// engine reads a number or a boolean out of it, as it does a form
+        /// field's.
+        inputs: std::collections::BTreeMap<String, String>,
     },
     /// Check flow YAML against `lane` without saving or running it: the
     /// static rules and the worktree's own (its agents, prompt files).

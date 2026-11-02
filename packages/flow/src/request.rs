@@ -84,6 +84,12 @@ pub struct RunRequest {
     /// so every run directory stays self-contained: `archive` and
     /// `{{node.<id>.output}}` both assume the output is inside it.
     pub pinned: Vec<PinnedOutput>,
+    /// Values for the flow's declared inputs, by name. Missing optional ones
+    /// take their default; `validate_request` refuses the rest, and
+    /// `check_request` does not look. Recorded in
+    /// the run log, not in `run.yaml`, and ignored by a continuation, which
+    /// renders the values its run started with.
+    pub inputs: crate::input::InputValues,
     /// Set when this run picks up the one in `run_dir` rather than starting.
     ///
     /// Comes from [`crate::resume::prepare`] with the `loaded` above. It
@@ -105,6 +111,19 @@ impl RunRequest {
         self.until
             .as_ref()
             .or_else(|| self.resume.as_ref().and_then(|r| r.until.as_ref()))
+    }
+
+    /// The input values this run renders: a continuation's, as its run
+    /// recorded them, or this request's own checked against the flow's
+    /// declarations and filled from their defaults. A request
+    /// `validate_request` refused resolves to none.
+    pub(crate) fn effective_inputs(&self) -> crate::input::InputValues {
+        match &self.resume {
+            Some(continuation) => continuation.inputs.clone(),
+            None => {
+                crate::input::resolve(&self.loaded.flow().inputs, &self.inputs).unwrap_or_default()
+            }
+        }
     }
 
     /// Every agent this run could open a session as, repair included when a
@@ -205,7 +224,24 @@ fn check_node_cwd(
 /// thread, so a slow `git status` never stalls the rest of a wave.
 pub type AskGitStatus = std::sync::Arc<dyn Fn(&std::path::Path) -> Option<String> + Send + Sync>;
 
+/// Every problem that refuses this request as a run: [`check_request`]'s,
+/// and its input values against the flow's declarations.
 pub fn validate_request(request: &RunRequest) -> Vec<ValidationIssue> {
+    let mut issues = check_request(request);
+    // A continuation renders the values its run started with; the request
+    // carries none of its own to check.
+    if request.resume.is_none()
+        && let Err(problems) = crate::input::resolve(&request.loaded.flow().inputs, &request.inputs)
+    {
+        issues.extend(problems);
+    }
+    issues
+}
+
+/// Every problem with the flow in this request's context, apart from its
+/// input values: what checking a file answers, which no run's values are
+/// part of. A required input nobody has given yet is not a fault of the file.
+pub fn check_request(request: &RunRequest) -> Vec<ValidationIssue> {
     let mut issues = Vec::new();
     check_absolute(request, &mut issues);
     if let Some(target) = &request.until
@@ -301,6 +337,7 @@ pub fn validate_request(request: &RunRequest) -> Vec<ValidationIssue> {
             "prompt_file",
             &node.id,
             &ancestors,
+            &request.loaded.flow().inputs,
             &mut issues,
         );
         if let AgentFail::Retry { hint, .. } = on_fail {
@@ -310,6 +347,7 @@ pub fn validate_request(request: &RunRequest) -> Vec<ValidationIssue> {
                 "hint_file",
                 &node.id,
                 &ancestors,
+                &request.loaded.flow().inputs,
                 &mut issues,
             );
         }
@@ -438,6 +476,7 @@ fn check_file(
     field: &'static str,
     node: &NodeId,
     ancestors: &HashSet<NodeId>,
+    inputs: &[crate::input::InputDecl],
     issues: &mut Vec<ValidationIssue>,
 ) {
     let Prompt::File(relative) = prompt else {
@@ -492,7 +531,12 @@ fn check_file(
     }
 
     match std::fs::read_to_string(&path) {
-        Ok(text) => crate::validate::check_output_refs(&text, node, ancestors, issues),
+        // What a file-backed prompt references is only knowable here, where
+        // the file is read; the inline ones were checked at load.
+        Ok(text) => {
+            crate::validate::check_output_refs(&text, node, ancestors, issues);
+            crate::input::check_refs(node, &[text.as_str()], inputs, issues);
+        }
         // Unreadable is the same fact as missing to a caller — a distinct
         // kind would only add a branch nothing renders differently.
         Err(e) => issues.push(ValidationIssue {

@@ -79,6 +79,7 @@ impl Run<'_> {
             run_dir: self.run_dir,
             output: None,
             node_outputs: &self.node_outputs,
+            inputs: &self.inputs,
             failure: Some(failure),
             attempts: evidence,
         };

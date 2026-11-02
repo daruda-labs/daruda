@@ -15,9 +15,6 @@ use crate::workspace::command::flow_picker::FlowPurpose;
 #[cfg(feature = "screenshot")]
 use crate::workspace::flow_request::FlowSelection;
 
-#[cfg(feature = "screenshot")]
-use super::flow_profiles;
-
 impl Workspace {
     /// Show the active lane's Flows page without changing the utility dock.
     /// Screenshot seeds use this windowless path; interactive entry points
@@ -55,7 +52,7 @@ impl Workspace {
             return;
         };
         let Some((path, profiles)) = sources.list_flows().into_iter().find_map(|found| {
-            let names = flow_profiles(&found.path);
+            let names = crate::workspace::flow_declared::declared_profiles(&found.path);
             (!names.is_empty()).then_some((found.path, names))
         }) else {
             return;

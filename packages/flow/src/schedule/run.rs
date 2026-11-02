@@ -74,6 +74,8 @@ fn execute_with(
     if !issues.is_empty() {
         return not_started(request, RunOutcome::Invalid { issues });
     }
+    // Resolved once: what `RunStarted` records is what every node renders.
+    let inputs = request.effective_inputs();
 
     // Outside the working tree, under the host's lock root.
     //
@@ -129,7 +131,7 @@ fn execute_with(
     // Only past the lock is the log opened: a continuation reads what the
     // run had finished here, never before the lock.
     let begun = match &request.resume {
-        None => begin(request, &mut setup_warnings),
+        None => begin(request, &inputs, &mut setup_warnings),
         Some(_) => continue_run(request, &mut setup_warnings),
     };
     let Begun {
@@ -167,6 +169,10 @@ fn execute_with(
                 until: request.effective_until().cloned(),
                 pinned,
                 resume,
+                inputs: inputs
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.as_text()))
+                    .collect(),
             },
             runner,
         )),
@@ -248,7 +254,11 @@ struct Begun {
 }
 
 /// A fresh run: pins, spec and an empty log holding `RunStarted`.
-fn begin(request: &RunRequest, warnings: &mut Vec<String>) -> Result<Begun, RunOutcome> {
+fn begin(
+    request: &RunRequest,
+    inputs: &crate::input::InputValues,
+    warnings: &mut Vec<String>,
+) -> Result<Begun, RunOutcome> {
     // First, before anything is written over: a directory that already
     // holds a run is that run's, and starting another there would mix them.
     if crate::run_log::reader::has_log(&request.run_dir) {
@@ -280,6 +290,7 @@ fn begin(request: &RunRequest, warnings: &mut Vec<String>) -> Result<Begun, RunO
         until: request.until.clone(),
         pinned: pinned.clone(),
         profile: request.loaded.flow().profile.clone(),
+        inputs: inputs.clone(),
     };
     smol::block_on(store.commit(started)).map_err(|e| store.failure(IoSite::Run, e))?;
     if let Some(source) = &request.history.source {

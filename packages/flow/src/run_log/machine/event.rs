@@ -21,6 +21,10 @@ pub enum FlowRunEvent {
         pinned: Vec<NodeId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         profile: Option<String>,
+        /// The input values the run renders, defaults filled in. A log
+        /// written before inputs existed reads as none.
+        #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+        inputs: crate::input::InputValues,
     },
     SourceRecorded {
         source: std::path::PathBuf,

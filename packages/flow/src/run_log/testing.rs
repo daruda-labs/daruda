@@ -17,6 +17,7 @@ pub(crate) fn started_store(
 ) -> FlowRunStore {
     let store = spawn(run_dir);
     let started = FlowRunEvent::RunStarted {
+        inputs: Default::default(),
         started_by: None,
         nodes: super::node_starts(loaded),
         until,
@@ -32,6 +33,7 @@ pub(crate) fn started_store(
 pub(crate) fn attempt_in_flight(run_dir: &Path, node: &NodeId) -> FlowRunStore {
     let store = spawn(run_dir);
     let started = FlowRunEvent::RunStarted {
+        inputs: Default::default(),
         started_by: None,
         nodes: vec![NodeStart {
             id: node.clone(),

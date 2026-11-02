@@ -94,6 +94,15 @@ fn field_for(kind: &ValidationKind) -> Option<FormField> {
         | K::ContinueUntilFieldNotDeclared { .. }
         | K::ContinueUntilFieldNotRequired { .. }
         | K::ContinueUntilValueNotAllowed { .. } => return None,
+        // A token can sit in any templated box of the node, and the rest are
+        // about the flow's `inputs:` or a run's values, which no box shows.
+        K::UndeclaredInput { .. }
+        | K::InvalidInputName { .. }
+        | K::InputChoicesMissing { .. }
+        | K::InputDefaultInvalid { .. }
+        | K::InputMissing { .. }
+        | K::InputNotDeclared { .. }
+        | K::InputValueInvalid { .. } => return None,
         // About the flow, not about a box.
         // A selection is about the run, not about any box on a node.
         K::UnknownUntil { .. }
