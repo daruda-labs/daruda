@@ -314,14 +314,14 @@ impl Workspace {
     /// exists for the session.
     fn session_pane_lane(
         &self,
-        session_id: &str,
+        session_id: &daruda_agent::StatusKey,
         index: &[(PaneId, daruda_store::project::LaneRef)],
     ) -> (Option<PaneId>, Option<daruda_store::project::LaneRef>) {
         let pane_id = self
             .claude_sessions
             .pty_bindings
             .iter()
-            .find(|(_, binding)| binding.storage_key() == session_id)
+            .find(|(_, binding)| binding.identity() == *session_id)
             .map(|(pane_id, _)| *pane_id);
         let lane_ref =
             pane_id.and_then(|pane_id| index.iter().find(|(p, _)| *p == pane_id).map(|(_, l)| *l));
@@ -332,7 +332,10 @@ impl Workspace {
     ///
     /// The lane is resolved from the session's pane via
     /// [`Workspace::session_pane_lane`].
-    pub(in crate::workspace) fn probe_lane_status(&self, session_id: &str) -> LaneStatusProbe {
+    pub(in crate::workspace) fn probe_lane_status(
+        &self,
+        session_id: &daruda_agent::StatusKey,
+    ) -> LaneStatusProbe {
         let index = self.pane_lane_index();
         let (pane_id, lane_ref) = self.session_pane_lane(session_id, &index);
         let aggregate = lane_ref.and_then(|lane_ref| {
@@ -369,7 +372,7 @@ impl Workspace {
     pub(in crate::workspace) fn log_lane_status_change(
         &self,
         before: LaneStatusProbe,
-        session_id: &str,
+        session_id: &daruda_agent::StatusKey,
         cwd: &Path,
         last_event: &str,
     ) {
@@ -403,7 +406,7 @@ impl Workspace {
             LogWriter::log(session_transition_report(
                 before.session,
                 after.session,
-                session_id,
+                session_id.storage_key(),
                 cwd,
                 last_event,
                 after.pane_id,

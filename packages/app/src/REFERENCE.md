@@ -94,6 +94,14 @@ The next SessionStart overwrites that marker. Pane teardown clears memory, and t
 desktop startup sweeps retired terminal files without unlinking lock paths.
 Forwarded interrupt keys clear a busy terminal locally without a completion.
 The JSONL module only reads execution answers; it supplies no status fallback.
+The in-memory status identity is `StatusKey::Terminal(TerminalId)` or
+`StatusKey::LegacySession`; lookup never guesses between those namespaces.
+Conversation queries return all observations, or one only when unambiguous.
+Turn-completion and notification deduplication use the same typed identity.
+The workspace hook receiver owns file ingestion and pane observation. Task-specific hook
+consumption lives in `right_dock/task_hook_ops.rs`, with execution facts owned
+by `RunsHost::record_task_cli_hook`. Shared `HookEnd` semantics are interpreted
+by the GPUI-free `runs/cli/hook_policy.rs` for both live and PID-exit recovery.
 `CliSessionEnded` retains the original terminal's end reason in the current
 execution and its ended-history snapshot: agent goodbye, observed process exit,
 pane closure, or restart reconciliation. A delayed goodbye can refine a process

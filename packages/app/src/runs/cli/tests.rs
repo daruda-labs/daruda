@@ -26,7 +26,7 @@ fn report_hook(pane: RunPane, session: &str, pid: Option<u32>, cx: &mut gpui::Ap
     );
     file.terminal_id = RunsHost::terminal_id(pane, cx).cloned();
     file.agent_pid = pid;
-    RunsHost::record_cli_hook(&file, cx);
+    RunsHost::record_task_cli_hook(&file, cx);
 }
 
 #[gpui::test]
@@ -320,7 +320,7 @@ fn a_hook_older_than_the_run_cannot_attach_its_session(cx: &mut TestAppContext) 
         );
         file.terminal_id = RunsHost::terminal_id(pane, cx).cloned();
         file.timestamp = chrono::DateTime::UNIX_EPOCH;
-        RunsHost::record_cli_hook(&file, cx);
+        RunsHost::record_task_cli_hook(&file, cx);
         assert!(
             cx.global::<GlobalTasks>()
                 .get(&id)

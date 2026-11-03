@@ -48,7 +48,7 @@ fn report_hook(
     file.terminal_id = RunsHost::terminal_id(pane, cx).cloned();
     file.agent_pid = pid;
     file.transcript_path = transcript.map(Path::to_path_buf);
-    RunsHost::record_cli_hook(&file, cx);
+    RunsHost::record_task_cli_hook(&file, cx);
 }
 
 /// A Backlog CLI task; [`start`] runs it in a terminal.
@@ -341,7 +341,7 @@ fn bind(ws: &mut Workspace, pane: PaneId, pid: u32, session: &str, cx: &mut Cont
     let transcript = ws
         .claude_sessions
         .status
-        .get(session)
+        .unique_session(session)
         .and_then(|file| file.transcript_path.clone());
     report_hook(
         ws.run_pane(pane),
@@ -1089,7 +1089,12 @@ fn a_session_that_ends_before_its_first_watcher_read_still_settles_its_run(
             lifecycle(&id, cx),
             daruda_store::tasks::Lifecycle::Done { .. }
         ));
-        assert!(ws.claude_sessions.status.get("quick-session").is_none());
+        assert!(
+            ws.claude_sessions
+                .status
+                .unique_session("quick-session")
+                .is_none()
+        );
         assert!(!ws.claude_sessions.pty_bindings.contains_key(&pane));
         assert!(
             path.exists(),

@@ -25,6 +25,7 @@ mod tasks;
 mod wait_host;
 pub(crate) mod watch;
 
+pub(crate) use cli::hook_end_reason as cli_hook_end_reason;
 pub(crate) use cli::resume::CliResumeLease;
 pub(crate) use delivery::{DeliveryFailure, RunPane, TerminalDispatchError};
 pub(crate) use effects::RunsEffects;

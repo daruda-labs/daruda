@@ -36,18 +36,21 @@ fn entry(session: &str, cwd: &str, status: SessionStatus, offset_secs: i64) -> S
 fn upsert_inserts_and_replaces() {
     let mut s = ClaudeStatusStore::new();
     assert!(s.update(entry("a", "/x", SessionStatus::Working, 0)));
-    assert_eq!(s.get("a").unwrap().status, SessionStatus::Working);
+    assert_eq!(
+        s.unique_session("a").unwrap().status,
+        SessionStatus::Working
+    );
     assert!(s.update(entry("a", "/x", SessionStatus::Idle, 1)));
-    assert_eq!(s.get("a").unwrap().status, SessionStatus::Idle);
+    assert_eq!(s.unique_session("a").unwrap().status, SessionStatus::Idle);
 }
 
 #[test]
 fn remove_returns_old() {
     let mut s = ClaudeStatusStore::new();
     s.update(entry("a", "/x", SessionStatus::Idle, 0));
-    let old = s.remove("a").unwrap();
+    let old = s.remove_unique_session("a").unwrap();
     assert_eq!(old.session_id, "a");
-    assert!(s.get("a").is_none());
+    assert!(s.unique_session("a").is_none());
 }
 
 #[test]
@@ -116,9 +119,9 @@ fn a_terminal_replaces_its_previous_session_and_rejects_stale_replays() {
     assert!(store.update(first.clone()));
     assert!(store.update(second));
     assert_eq!(store.len(), 1);
-    assert!(store.get("old").is_none());
+    assert!(store.unique_session("old").is_none());
     assert!(!store.update(first));
-    assert!(store.get("new").is_some());
+    assert!(store.unique_session("new").is_some());
 }
 
 #[test]
@@ -132,16 +135,90 @@ fn the_same_session_in_two_terminals_has_independent_snapshots() {
     assert!(store.update(second));
     assert_eq!(store.len(), 2);
     assert_eq!(
-        store.get_key("terminal-a").unwrap().status,
+        store
+            .get_terminal(&daruda_agent::hooks::route::TerminalId::parse("terminal-a").unwrap())
+            .unwrap()
+            .status,
         SessionStatus::Working
     );
     assert_eq!(
-        store.get_key("terminal-b").unwrap().status,
+        store
+            .get_terminal(&daruda_agent::hooks::route::TerminalId::parse("terminal-b").unwrap())
+            .unwrap()
+            .status,
         SessionStatus::Idle
     );
-    store.remove_key("terminal-b");
+    store.remove(&daruda_agent::StatusKey::Terminal(
+        daruda_agent::hooks::route::TerminalId::parse("terminal-b").unwrap(),
+    ));
     assert_eq!(
-        store.get_key("terminal-a").unwrap().status,
+        store
+            .get_terminal(&daruda_agent::hooks::route::TerminalId::parse("terminal-a").unwrap())
+            .unwrap()
+            .status,
         SessionStatus::Working
+    );
+}
+
+#[test]
+fn logical_session_lookup_refuses_to_choose_between_physical_terminals() {
+    let mut store = ClaudeStatusStore::new();
+    for terminal in ["terminal-a", "terminal-b"] {
+        let mut file = entry("shared", "/work", SessionStatus::Working, 0);
+        file.terminal_id = daruda_agent::hooks::route::TerminalId::parse(terminal);
+        store.update(file);
+    }
+    assert_eq!(store.sessions_for_session("shared").count(), 2);
+    assert!(store.unique_session("shared").is_none());
+    assert!(store.remove_unique_session("shared").is_none());
+    assert_eq!(store.len(), 2);
+    let terminal = daruda_agent::hooks::route::TerminalId::parse("terminal-a").unwrap();
+    store.remove(&daruda_agent::StatusKey::Terminal(terminal));
+    assert_eq!(
+        store
+            .unique_session("shared")
+            .unwrap()
+            .terminal_id
+            .as_ref()
+            .unwrap()
+            .as_str(),
+        "terminal-b"
+    );
+}
+
+#[test]
+fn identical_text_in_legacy_and_terminal_keys_does_not_alias() {
+    use daruda_agent::StatusKey;
+    use daruda_agent::hooks::route::TerminalId;
+    let mut store = ClaudeStatusStore::new();
+    let legacy = entry("terminal-a", "/work", SessionStatus::Idle, 0);
+    let mut routed = entry("routed-session", "/work", SessionStatus::Working, 0);
+    routed.terminal_id = TerminalId::parse("terminal-a");
+    store.update(legacy);
+    store.update(routed);
+    assert_eq!(store.len(), 2);
+    assert_eq!(
+        store
+            .get(&StatusKey::LegacySession("terminal-a".into()))
+            .unwrap()
+            .status,
+        SessionStatus::Idle
+    );
+    assert_eq!(
+        store
+            .get_terminal(&TerminalId::parse("terminal-a").unwrap())
+            .unwrap()
+            .status,
+        SessionStatus::Working
+    );
+    assert!(store.file_for_storage_key("terminal-a").is_none());
+    store.remove(&StatusKey::LegacySession("terminal-a".into()));
+    assert_eq!(store.len(), 1);
+    assert_eq!(
+        store
+            .get_terminal(&TerminalId::parse("terminal-a").unwrap())
+            .unwrap()
+            .session_id,
+        "routed-session"
     );
 }

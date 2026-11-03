@@ -358,21 +358,6 @@ impl Workspace {
         }
     }
 
-    /// Map a single Claude `last_event` string → a daruda
-    /// `SessionEndReason`, returning `None` for events that should
-    /// not transition a task. `last_event` is the
-    /// `hook_event_name` field from the status file.
-    pub(in crate::workspace) fn classify_hook_end_reason(
-        last_event: &str,
-    ) -> Option<daruda_store::tasks::SessionEndReason> {
-        match last_event {
-            "Stop" => Some(daruda_store::tasks::SessionEndReason::Stop),
-            "StopFailure" => Some(daruda_store::tasks::SessionEndReason::Error),
-            "SessionEnd" => Some(daruda_store::tasks::SessionEndReason::Other),
-            _ => None,
-        }
-    }
-
     /// Increment the `PostToolUseFailure` counter for `session_id`.
     /// When the count crosses
     /// [`daruda_store::tasks::TASK_TOOL_USE_FAILURE_THRESHOLD`] the matching

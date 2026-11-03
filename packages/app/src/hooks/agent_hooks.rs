@@ -19,6 +19,9 @@ use gpui::{App, Global};
 
 use crate::window_registry::WindowRegistry;
 
+mod sync_state;
+use sync_state::SyncState;
+
 /// A fresh identity for a terminal about to spawn.
 pub(crate) fn mint_terminal_id() -> TerminalId {
     TerminalId::parse(&uuid::Uuid::new_v4().simple().to_string())
@@ -88,9 +91,7 @@ struct Request {
 /// One worker applies requests in order and catches up to the latest request.
 #[derive(Default)]
 pub(crate) struct AgentHooks {
-    applied: Option<Request>,
-    desired: Option<Request>,
-    running: bool,
+    state: SyncState,
 }
 
 impl Global for AgentHooks {}
@@ -106,15 +107,11 @@ impl AgentHooks {
 
     fn sync_request(request: Request, cx: &mut App) {
         let hooks = cx.default_global::<Self>();
-        hooks.desired = Some(request.clone());
-        if hooks.running || hooks.applied.as_ref() == Some(&request) {
+        let Some(mut request) = hooks.state.request(request) else {
             return;
-        }
-        hooks.running = true;
+        };
         cx.spawn(async move |cx| {
             loop {
-                let request =
-                    cx.update(|cx| cx.global::<Self>().desired.clone().expect("queued request"));
                 let work = request.clone();
                 let outcomes = cx
                     .background_executor()
@@ -124,12 +121,11 @@ impl AgentHooks {
                     let succeeded = outcomes.iter().all(|outcome| outcome.result.is_ok());
                     report(outcomes, request.enabled, cx);
                     let hooks = cx.default_global::<Self>();
-                    hooks.applied = succeeded.then(|| request.clone());
-                    hooks.running = hooks.desired.as_ref() != Some(&request);
-                    hooks.running
+                    hooks.state.complete(&request, succeeded)
                 });
-                if !again {
-                    break;
+                match again {
+                    Some(next) => request = next,
+                    None => break,
                 }
             }
         })
@@ -323,8 +319,8 @@ mod tests {
         cx.run_until_parked();
         assert!(!installer::is_installed(&target));
         cx.update(|cx| {
-            assert!(!cx.global::<AgentHooks>().running);
-            assert!(!cx.global::<AgentHooks>().applied.as_ref().unwrap().enabled);
+            assert!(matches!(&cx.global::<AgentHooks>().state,
+                SyncState::Applied(request) if !request.enabled));
             AgentHooks::sync_request(
                 Request {
                     enabled: true,

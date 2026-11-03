@@ -491,7 +491,9 @@ fn task_badges_use_session_ids_and_aggregate_resumed_terminals() {
     );
     assert!(!statuses.contains_key("terminal-a"));
     assert!(!statuses.contains_key("terminal-b"));
-    store.remove_key("terminal-b");
+    store.remove(&daruda_agent::StatusKey::Terminal(
+        daruda_agent::hooks::route::TerminalId::parse("terminal-b").unwrap(),
+    ));
     assert_eq!(
         task_session_statuses(&store).get("shared-session"),
         Some(&SessionStatus::Idle)

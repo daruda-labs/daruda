@@ -231,23 +231,21 @@ fn failure_counter_clears_when_task_leaves_running_or_session_ends(cx: &mut Test
 
 #[test]
 fn classify_hook_end_reason_maps_known_events() {
-    use crate::workspace::Workspace;
-
     assert_eq!(
-        Workspace::classify_hook_end_reason("Stop"),
+        crate::runs::cli_hook_end_reason("Stop"),
         Some(SessionEndReason::Stop),
     );
     assert_eq!(
-        Workspace::classify_hook_end_reason("SessionEnd"),
+        crate::runs::cli_hook_end_reason("SessionEnd"),
         Some(SessionEndReason::Other),
     );
     assert_eq!(
-        Workspace::classify_hook_end_reason("PreToolUse"),
+        crate::runs::cli_hook_end_reason("PreToolUse"),
         None,
         "non-terminal events must not transition tasks",
     );
     assert_eq!(
-        Workspace::classify_hook_end_reason("PostToolUseFailure"),
+        crate::runs::cli_hook_end_reason("PostToolUseFailure"),
         None,
         "PostToolUseFailure routes through the counter, not the end-reason classifier",
     );

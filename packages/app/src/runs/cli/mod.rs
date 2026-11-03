@@ -14,8 +14,10 @@ use gpui::{App, BorrowAppContext as _};
 
 use super::{GlobalTasks, RunPane, RunsHost};
 
+mod hook_policy;
 pub(in crate::runs) mod resume;
 mod session;
+pub(crate) use hook_policy::hook_end_reason;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 

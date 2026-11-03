@@ -19,6 +19,10 @@ pub struct PtyBinding {
 }
 
 impl PtyBinding {
+    pub fn identity(&self) -> crate::store::StatusKey {
+        crate::store::StatusKey::for_session(self.terminal_id.as_ref(), &self.session_id)
+    }
+
     pub fn storage_key(&self) -> &str {
         self.terminal_id
             .as_ref()

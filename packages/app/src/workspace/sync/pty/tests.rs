@@ -23,7 +23,12 @@ fn an_exited_pty_retires_its_route_and_in_memory_status(cx: &mut gpui::TestAppCo
             cx,
         );
         ws.note_terminal_exited(pane, cx);
-        assert!(ws.claude_sessions.status.get("exiting-pty").is_none());
+        assert!(
+            ws.claude_sessions
+                .status
+                .unique_session("exiting-pty")
+                .is_none()
+        );
         assert!(!ws.claude_sessions.pty_bindings.contains_key(&pane));
         assert!(crate::runs::RunsHost::terminal_pane(&terminal, cx).is_none());
         assert!(path.exists());
@@ -56,7 +61,10 @@ fn routed_process_exit_clears_status_without_deleting_the_terminal_file(
             cx,
         );
         assert!(
-            ws.claude_sessions.status.get("exiting-agent").is_some(),
+            ws.claude_sessions
+                .status
+                .unique_session("exiting-agent")
+                .is_some(),
             "an older process cannot remove its successor"
         );
         ws.apply_pty_tracker_event(
@@ -66,7 +74,12 @@ fn routed_process_exit_clears_status_without_deleting_the_terminal_file(
             },
             cx,
         );
-        assert!(ws.claude_sessions.status.get("exiting-agent").is_none());
+        assert!(
+            ws.claude_sessions
+                .status
+                .unique_session("exiting-agent")
+                .is_none()
+        );
         assert!(path.exists());
     });
 }
@@ -96,7 +109,11 @@ fn terminal_session_switch_interrupt_and_removal_share_the_routed_identity(
         );
         ws.interrupt_terminal_agent(pane, cx);
         assert_eq!(
-            ws.claude_sessions.status.get("first").unwrap().status,
+            ws.claude_sessions
+                .status
+                .unique_session("first")
+                .unwrap()
+                .status,
             daruda_agent::SessionStatus::Idle
         );
         ws.apply_claude_status_event(
@@ -104,7 +121,11 @@ fn terminal_session_switch_interrupt_and_removal_share_the_routed_identity(
             cx,
         );
         assert_eq!(
-            ws.claude_sessions.status.get("first").unwrap().status,
+            ws.claude_sessions
+                .status
+                .unique_session("first")
+                .unwrap()
+                .status,
             daruda_agent::SessionStatus::Idle,
             "an old watcher replay cannot undo the interrupt"
         );
@@ -116,7 +137,7 @@ fn terminal_session_switch_interrupt_and_removal_share_the_routed_identity(
             crate::hooks::watcher::StatusEvent::Changed(path.clone()),
             cx,
         );
-        assert!(ws.claude_sessions.status.get("first").is_none());
+        assert!(ws.claude_sessions.status.unique_session("first").is_none());
         assert_eq!(ws.claude_sessions.pty_bindings[&pane].session_id, "second");
         sf::delete(&path).unwrap();
         ws.apply_claude_status_event(
@@ -125,7 +146,7 @@ fn terminal_session_switch_interrupt_and_removal_share_the_routed_identity(
             },
             cx,
         );
-        assert!(ws.claude_sessions.status.get("second").is_none());
+        assert!(ws.claude_sessions.status.unique_session("second").is_none());
         assert!(ws.session_statuses(cx).is_empty());
         status.timestamp = chrono::Utc::now();
         sf::write_atomic(&path, &status).unwrap();
@@ -134,7 +155,7 @@ fn terminal_session_switch_interrupt_and_removal_share_the_routed_identity(
             cx,
         );
         ws.release_pane_tracking(&[pane], cx);
-        assert!(ws.claude_sessions.status.get("second").is_none());
+        assert!(ws.claude_sessions.status.unique_session("second").is_none());
         assert!(crate::runs::RunsHost::terminal_pane(&terminal, cx).is_none());
         assert!(
             path.exists(),
@@ -144,7 +165,7 @@ fn terminal_session_switch_interrupt_and_removal_share_the_routed_identity(
             crate::hooks::watcher::StatusEvent::Changed(path.clone()),
             cx,
         );
-        assert!(ws.claude_sessions.status.get("second").is_none());
+        assert!(ws.claude_sessions.status.unique_session("second").is_none());
     });
 }
 
@@ -205,18 +226,30 @@ fn routed_hooks_ignore_other_windows_and_retired_terminals(cx: &mut gpui::TestAp
                 .iter()
                 .any(|(id, _)| id == &status.session_id)
         );
-        ws.claude_sessions.status.remove(&status.session_id);
+        ws.claude_sessions
+            .status
+            .remove_unique_session(&status.session_id);
         ws.apply_claude_status_event(
             crate::hooks::watcher::StatusEvent::Changed(path.clone()),
             cx,
         );
-        assert!(ws.claude_sessions.status.get(&status.session_id).is_none());
+        assert!(
+            ws.claude_sessions
+                .status
+                .unique_session(&status.session_id)
+                .is_none()
+        );
     });
     first.update(cx, |ws, cx| {
         let pane = ws.active_runtime().focused_pane_id;
         crate::runs::RunsHost::unregister_terminal(ws.run_pane(pane), cx);
         ws.apply_claude_status_event(crate::hooks::watcher::StatusEvent::Changed(path), cx);
-        assert!(ws.claude_sessions.status.get(&status.session_id).is_none());
+        assert!(
+            ws.claude_sessions
+                .status
+                .unique_session(&status.session_id)
+                .is_none()
+        );
     });
 }
 
@@ -252,7 +285,7 @@ fn exited_cli_clears_memory_without_unlinking_a_writers_files(cx: &mut gpui::Tes
             },
             cx,
         );
-        assert!(ws.claude_sessions.status.get(&session).is_none());
+        assert!(ws.claude_sessions.status.unique_session(&session).is_none());
     });
     assert!(path.exists());
     assert!(
@@ -321,7 +354,7 @@ fn ending_one_terminal_preserves_another_with_the_same_session(cx: &mut gpui::Te
         assert_eq!(
             ws.claude_sessions
                 .status
-                .get_key(files[1].0.storage_key())
+                .get(&files[1].0.identity())
                 .unwrap()
                 .status,
             daruda_agent::SessionStatus::Working

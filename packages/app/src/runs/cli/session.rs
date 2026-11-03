@@ -10,7 +10,7 @@ use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::tasks::{CliProcessState, ExecutionRef, Lifecycle, SessionEndReason, TaskEvent};
 use gpui::{App, BorrowAppContext as _};
 
-use super::cli_runs;
+use super::{cli_runs, hook_end_reason};
 use crate::runs::{GlobalTasks, RunsHost};
 
 impl RunsHost {
@@ -49,7 +49,7 @@ impl RunsHost {
         );
     }
 
-    pub(crate) fn record_cli_hook(file: &StatusFile, cx: &mut App) {
+    pub(crate) fn record_task_cli_hook(file: &StatusFile, cx: &mut App) {
         let Some(terminal) = file.terminal_id.as_ref() else {
             return;
         };
@@ -243,14 +243,9 @@ impl RunsHost {
                 .then_some(file)
             });
         if let Some(file) = final_hook {
-            let reason = match file.last_event.as_str() {
-                "Stop" => Some(SessionEndReason::Stop),
-                "StopFailure" => Some(SessionEndReason::Error),
-                "SessionEnd" => Some(SessionEndReason::Other),
-                _ => None,
-            };
+            let reason = hook_end_reason(&file.last_event);
             if let Some(reason) = reason {
-                Self::record_cli_hook(&file, cx);
+                Self::record_task_cli_hook(&file, cx);
                 Self::settle_cli_terminal(
                     &file.session_id,
                     file.terminal_id.map(|id| id.as_str().to_owned()),
