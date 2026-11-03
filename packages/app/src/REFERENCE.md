@@ -107,6 +107,7 @@ Task-independent terminal history lives in `daruda_store::terminal_sessions`
 profile-routed `status/history/` directory. Terminal journals compact after
 64 records to bound per-hook replay; snapshots retain every execution and its
 latest observation. The shared runlog default and byte limit keep their policy.
+Recovery logs identify each failed terminal and its redacted journal path.
 Hook processes commit observations
 under the terminal's stable status lock before publishing the live status file;
 watcher coalescing cannot replace an execution's history. Journals retain

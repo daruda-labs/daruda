@@ -6,6 +6,11 @@
 
 use std::path::Path;
 
+use daruda_store::observability::{
+    error_report::{ErrorReport, ErrorSeverity},
+    log_writer::LogWriter,
+    system_info::redact_home,
+};
 use daruda_store::terminal_sessions::{
     Conversation, Observation, ObservationKind, SessionEvent, SessionHistory, SessionJournal,
     TerminalEndReason,
@@ -107,7 +112,10 @@ pub fn terminals(status_dir: &Path) -> Result<Vec<TerminalId>, HistoryError> {
 
 /// Capture identities before new terminals spawn; reconciliation itself may
 /// run later without retiring terminals created after this snapshot.
-pub fn reconcile_terminals(status_dir: &Path, terminals: &[TerminalId]) -> Result<(), HistoryError> {
+pub fn reconcile_terminals(
+    status_dir: &Path,
+    terminals: &[TerminalId],
+) -> Result<(), HistoryError> {
     let mut first_error = None;
     for terminal in terminals {
         let result = (|| {
@@ -125,10 +133,26 @@ pub fn reconcile_terminals(status_dir: &Path, terminals: &[TerminalId]) -> Resul
             Ok::<_, HistoryError>(())
         })();
         if let Err(error) = result {
+            LogWriter::log(reconciliation_error_report(status_dir, terminal, &error));
             first_error.get_or_insert(error);
         }
     }
     first_error.map_or(Ok(()), Err)
+}
+
+fn reconciliation_error_report(
+    status_dir: &Path,
+    terminal: &TerminalId,
+    error: &HistoryError,
+) -> ErrorReport {
+    ErrorReport::new("Terminal history recovery failed")
+        .severity(ErrorSeverity::Warning)
+        .from_error(error)
+        .at(file!(), line!())
+        .with_context("terminal", terminal.as_str())
+        .with_context("path", redact_home(directory(status_dir, terminal)))
+        .dedup(format!("terminal_history.reconcile.{terminal}"))
+        .build()
 }
 
 #[cfg(test)]

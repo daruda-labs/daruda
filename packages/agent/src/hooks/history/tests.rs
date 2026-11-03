@@ -65,3 +65,37 @@ fn startup_snapshot_reconciliation_keeps_new_terminal_observations_open() {
     assert!(read(dir.path(), &old).unwrap().terminal_is_closed());
     assert!(!read(dir.path(), &new).unwrap().terminal_is_closed());
 }
+
+#[test]
+fn recovery_reports_identify_the_failed_terminal_and_journal() {
+    let dir = tempfile::tempdir().unwrap();
+    let terminal = TerminalId::parse("broken-terminal").unwrap();
+    let error = HistoryError::Io(std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        "journal is not readable",
+    ));
+    let report = reconciliation_error_report(dir.path(), &terminal, &error);
+    assert_eq!(report.context["terminal"], terminal.as_str());
+    assert_eq!(
+        report.context["path"],
+        redact_home(directory(dir.path(), &terminal))
+    );
+    assert!(report.message.contains("journal is not readable"));
+    assert_eq!(
+        report.dedup_key.as_deref(),
+        Some("terminal_history.reconcile.broken-terminal")
+    );
+}
+
+#[test]
+fn recovery_continues_after_a_terminal_journal_fails_to_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let broken = TerminalId::parse("broken-terminal").unwrap();
+    let healthy = TerminalId::parse("healthy-terminal").unwrap();
+    observe_locked(dir.path(), &file(&healthy, "session", "SessionStart")).unwrap();
+    let blocked = directory(dir.path(), &broken);
+    std::fs::write(&blocked, b"not a directory").unwrap();
+    assert!(reconcile_terminals(dir.path(), &[broken, healthy.clone()]).is_err());
+    assert_eq!(std::fs::read(blocked).unwrap(), b"not a directory");
+    assert!(read(dir.path(), &healthy).unwrap().terminal_is_closed());
+}
