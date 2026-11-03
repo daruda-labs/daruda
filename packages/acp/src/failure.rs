@@ -314,22 +314,32 @@ mod tests {
 
         let (transport, mut peer) = Channel::duplex();
         let error = smol::block_on(async {
-            let peer_task = smol::spawn(async move {
-                // Close only after the request reached the peer, so it is a
-                // real incoming EOF rather than a failed outgoing write.
-                assert!(peer.rx.next().await.is_some());
-                drop(peer);
-            });
-            let result = Client
-                .v1()
-                .connect_with(transport, async |cx| {
-                    cx.send_request(InitializeRequest::new(ProtocolVersion::V1))
-                        .block_task()
-                        .await
-                })
-                .await;
-            peer_task.await;
-            result.unwrap_err()
+            let request = async {
+                let peer_task = smol::spawn(async move {
+                    // Close only after the request reached the peer, so it is a
+                    // real incoming EOF rather than a failed outgoing write.
+                    assert!(peer.rx.next().await.is_some());
+                    drop(peer);
+                });
+                let result = Client
+                    .v1()
+                    .connect_with(transport, async |cx| {
+                        cx.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                            .block_task()
+                            .await
+                    })
+                    .await;
+                peer_task.await;
+                result.unwrap_err()
+            };
+            // This GPUI-free test uses the real executor clock; bound the
+            // request and peer shutdown so EOF regressions cannot hang CI.
+            #[allow(clippy::disallowed_methods)]
+            let timeout = smol::Timer::after(std::time::Duration::from_secs(5));
+            match futures::future::select(Box::pin(request), Box::pin(timeout)).await {
+                futures::future::Either::Left((error, _)) => error,
+                futures::future::Either::Right(_) => panic!("EOF exchange exceeded its deadline"),
+            }
         });
         let failure = AcpFailure::classify(&error);
         assert!(matches!(failure, AcpFailure::TransportClosed { .. }));

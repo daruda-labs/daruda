@@ -199,8 +199,27 @@ fn cancelling_kills_a_grandchild_whose_parent_already_exited() {
         );
         std::thread::sleep(Duration::from_millis(25));
     };
-    // Let the direct child exit before cancelling, which is the whole point.
-    std::thread::sleep(Duration::from_millis(300));
+    // Observe exit without reaping: cancel must still own the original
+    // process group while its leader is a zombie and its descendants run.
+    let parent = login.child_pid().to_string();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let status = daruda_core::process::command("ps")
+            .args(["-o", "stat=", "-p", &parent])
+            .output()
+            .expect("read the parent status");
+        if String::from_utf8_lossy(&status.stdout)
+            .trim()
+            .starts_with('Z')
+        {
+            break;
+        }
+        if Instant::now() >= deadline {
+            handle.cancel();
+            panic!("the direct child did not exit before cancellation");
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
 
     handle.cancel();
     assert!(
@@ -352,35 +371,37 @@ fn spawn_and_wait_times_out_and_cancels_smoke() {
     assert_eq!(outcome, LoginOutcome::TimedOut);
 }
 
-/// Real spawn smoke test proving a cloned [`LoginProcessHandle`]
-/// cancels the *same* child as the [`LoginProcess`] it was obtained
-/// from, independently of `self` — the shape Finding 1 exists for:
-/// grab `handle()` before `wait(self)` moves the process into a
-/// background executor, then cancel from elsewhere while `wait` is
-/// still blocked. `sleep 5` with a generous 10s timeout means only
-/// the handle's cancel (fired after 200ms from another thread) can
-/// end this early.
+/// A cloned handle cancels after the process has moved into its wait loop.
 #[test]
-#[ignore = "spawns a real subprocess; run manually with --ignored"]
-fn handle_clone_cancels_independently_of_self_smoke() {
-    let process = spawn_login(&from_line("/bin/sleep 5"), Duration::from_secs(10))
-        .expect("spawn should succeed");
-
+fn handle_clone_cancels_while_wait_owns_the_process() {
+    let process = spawn_fixture(&["--sleep-ms", "30000"], TEST_LONG_TIMEOUT);
+    let pid = process.child_pid();
     let handle = process.handle();
     let cloned = handle.clone();
-    thread::spawn(move || {
-        thread::sleep(Duration::from_millis(200));
-        cloned.cancel();
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let waiter = thread::spawn(move || {
+        let entered = std::sync::Once::new();
+        let never_landed = || {
+            entered.call_once(|| entered_tx.send(()).expect("report the active wait loop"));
+            false
+        };
+        process.wait(WaitPolicy::OnCredentials {
+            grace: TEST_GRACE,
+            credentials_landed: &never_landed,
+        })
     });
-
-    let start = Instant::now();
-    let outcome = process.wait(WaitPolicy::OnExit);
-    assert!(
-        start.elapsed() < Duration::from_secs(5),
-        "cancel via the cloned handle should end wait() well before the 10s timeout"
-    );
+    let entered = entered_rx.recv_timeout(TEST_LONG_TIMEOUT);
+    // Cancel and join even when readiness times out, so a failed test does
+    // not leave its fixture or wait thread running.
+    cloned.cancel();
+    let outcome = waiter.join().expect("the login wait thread finishes");
+    entered.expect("the process entered its wait loop before cancellation");
     assert!(
         matches!(outcome, LoginOutcome::Failed(_)),
         "expected a killed-process Failed outcome, got {outcome:?}"
+    );
+    assert!(
+        !process_is_running(pid),
+        "the cancelled child must be reaped"
     );
 }

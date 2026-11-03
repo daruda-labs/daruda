@@ -400,20 +400,10 @@ fn json_schema_lists_every_theme_slot() {
     }
 }
 
-/// Regeneration helper for `assets/themes/theme.schema.json`. Run
-/// manually after a `daruda_theme_fields!` change:
-///
-/// ```bash
-/// cargo test -p daruda \
-///   ui::theme::daruda_theme::tests::regenerate_theme_schema_json \
-///   -- --ignored --nocapture
+/// Regenerate the bundled schema explicitly; normal tests never write it.
+/// ```sh
+/// cargo test -p daruda_ui --lib theme::daruda_theme::tests::regenerate_theme_schema_json -- --ignored --exact --nocapture
 /// ```
-///
-/// Marked `#[ignore]` so the regular test run never overwrites
-/// disk — only an explicit invocation can mutate the bundled
-/// schema. Committing the regenerated file is what makes
-/// `bundled_theme_schema_json_matches_generated` (below) pass on
-/// the next run.
 #[test]
 #[ignore = "regenerator — writes to assets/themes/theme.schema.json"]
 fn regenerate_theme_schema_json() {
@@ -429,12 +419,8 @@ fn regenerate_theme_schema_json() {
 
 #[test]
 fn bundled_theme_schema_json_matches_generated() {
-    // Same "lockstep with disk" invariant as
-    // `bundled_daruda_dark_json_matches_default`, but for the
-    // companion JSON Schema. Editors that point `$schema` at the
-    // bundled file would otherwise show stale autocomplete after
-    // a slot rename / addition. Regenerate with the companion below:
-    //   cargo test -p daruda --bin daruda dump_theme_schema -- --ignored
+    // Keep editor autocomplete in step with the live type. Regenerate using
+    // the ignored `regenerate_theme_schema_json` helper above.
     let bundled = include_str!("../../../../../assets/themes/theme.schema.json");
     let bundled_value: serde_json::Value =
         serde_json::from_str(bundled).expect("bundled theme.schema.json must be valid JSON");
@@ -457,22 +443,4 @@ fn is_dark_reflects_base_background_lightness() {
         ..Default::default()
     };
     assert!(!light.is_dark());
-}
-
-/// Writes `assets/themes/theme.schema.json` from the live type — the companion
-/// to the drift check above, and the command its comment names. Ignored by
-/// default because it writes into the repository.
-#[test]
-#[ignore = "regenerator — writes assets/themes/theme.schema.json"]
-fn dump_theme_schema() {
-    let generated =
-        serde_json::to_string_pretty(&DarudaTheme::json_schema()).expect("the schema serialises");
-    std::fs::write(
-        concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../assets/themes/theme.schema.json"
-        ),
-        format!("{generated}\n"),
-    )
-    .expect("write the bundled schema");
 }

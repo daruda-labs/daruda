@@ -9204,7 +9204,8 @@ mod tests {
 
         cx.update(|window, cx| {
             input.update(cx, |state, cx| {
-                state.set_value("fn main() {}", window, cx);
+                // daruda patch: fixture setup must not contribute an edit.
+                state.set_value_silently("fn main() {}", window, cx);
                 let no_highlighter: InputHighlighterFactory = Rc::new(|_: &str| None);
                 state.set_highlighter_factory(no_highlighter, cx);
                 assert!(state.last_input_edits.as_slice().is_empty());
@@ -9226,9 +9227,9 @@ mod tests {
         });
     }
 
-    /// `set_value` is silent and leaves no edits behind for the next change.
+    /// daruda patch: silent resets leave no edits behind for the next change.
     #[gpui::test]
-    fn test_last_input_edits_cleared_by_set_value(cx: &mut TestAppContext) {
+    fn test_last_input_edits_cleared_by_set_value_silently(cx: &mut TestAppContext) {
         let input_view = InputView::build_textarea(cx, |state| state.default_value("hello"));
         let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
         let input = input_view.input;
@@ -9238,7 +9239,7 @@ mod tests {
                 state.replace_text_in_ranges(&[(5..5, "!".to_string())], window, cx);
                 assert_eq!(state.last_input_edits.as_slice().len(), 1);
 
-                state.set_value("replaced", window, cx);
+                state.set_value_silently("replaced", window, cx);
                 assert!(state.last_input_edits.as_slice().is_empty());
 
                 state.replace_text_in_ranges(&[(8..8, "?".to_string())], window, cx);
