@@ -503,6 +503,10 @@ pub fn apply_daruda_palette(cx: &mut App) {
         ));
         t.highlight_theme = Arc::new(highlight);
         mirror_button_colors(t);
+        // A focused control tints its own border rather than drawing a second
+        // ring outside it: the outer ring doubles every field's edge and is
+        // cut off by the docks' and modals' clipping.
+        t.focus_ring = false;
     });
 }
 

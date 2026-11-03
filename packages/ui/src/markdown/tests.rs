@@ -3,9 +3,9 @@
 
 use gpui::{
     AppContext as _, Bounds, Context, InteractiveElement as _, IntoElement, Modifiers, MouseButton,
-    MouseDownEvent, ParentElement as _, Pixels, Render, SharedString, Styled as _, TestAppContext,
-    VisualTestContext, Window, WindowBounds, WindowOptions, deferred, div, point,
-    prelude::FluentBuilder as _, px, size,
+    MouseDownEvent, ParentElement as _, Pixels, Render, SharedString,
+    StatefulInteractiveElement as _, Styled as _, TestAppContext, VisualTestContext, Window,
+    WindowBounds, WindowOptions, deferred, div, point, prelude::FluentBuilder as _, px, size,
 };
 
 use std::sync::Arc;
@@ -354,6 +354,104 @@ fn a_full_width_body_shrinks_inside_a_flex_row(cx: &mut TestAppContext) {
         tail.right() <= px(200.),
         "the body's min-content width pushed its sibling out of the row: {tail:?}"
     );
+}
+
+/// A one-line body in the middle of a tall scrolled column, as a reply sits in
+/// the agent-chat transcript.
+struct ScrolledBodyProbe {
+    scroll: gpui::ScrollHandle,
+    text: &'static str,
+}
+
+impl Render for ScrolledBodyProbe {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .relative()
+            .size_full()
+            .child(crate::TextSelectionLayer)
+            .child(
+                div()
+                    .id("column")
+                    .size_full()
+                    .flex()
+                    .flex_col()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.scroll)
+                    .child(div().flex_none().h(px(150.)))
+                    .child(
+                        div()
+                            .debug_selector(|| "scrolled-body".into())
+                            .child(super::markdown("probe", self.text, copy_tooltips())),
+                    )
+                    .child(div().flex_none().h(px(1000.))),
+            )
+    }
+}
+
+/// Press on `text` at the height `at` picks from the body's bounds, drag
+/// along that line, and report the column's scroll offset after the
+/// auto-scroll would have run.
+fn scroll_after_dragging_along(
+    cx: &mut TestAppContext,
+    text: &'static str,
+    at: impl Fn(Bounds<Pixels>) -> Pixels,
+) -> Pixels {
+    init_gpui_component(cx);
+    let bounds = Bounds::new(point(px(0.), px(0.)), size(px(600.), px(400.)));
+    let opts = WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        ..Default::default()
+    };
+    let scroll = gpui::ScrollHandle::new();
+    let probe_scroll = scroll.clone();
+    let window = cx
+        .update(|cx| {
+            cx.open_window(opts, |_window, cx| {
+                cx.new(|_cx| ScrolledBodyProbe {
+                    scroll: probe_scroll,
+                    text,
+                })
+            })
+        })
+        .expect("window opens");
+    let mut vcx = VisualTestContext::from_window(window.into(), cx);
+    vcx.run_until_parked();
+    vcx.update(|window, _| window.refresh());
+    vcx.run_until_parked();
+
+    let body = vcx.debug_bounds("scrolled-body").expect("body painted");
+    let y = at(body);
+    vcx.simulate_event(MouseDownEvent {
+        position: point(px(30.), y),
+        modifiers: Modifiers::default(),
+        button: MouseButton::Left,
+        click_count: 1,
+        first_mouse: false,
+    });
+    vcx.simulate_event(gpui::MouseMoveEvent {
+        position: point(px(200.), y),
+        modifiers: Modifiers::default(),
+        pressed_button: Some(MouseButton::Left),
+    });
+    vcx.run_until_parked();
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(500));
+    vcx.run_until_parked();
+
+    assert!(
+        vcx.update(crate::TextSelection::has_selection),
+        "no drag-selection started"
+    );
+    scroll.offset().y
+}
+
+/// Drag-selecting along a reply's only line must not scroll the column. Drag
+/// auto-scroll measures against the nearest clip; if the body wrapper clipped
+/// overflow it became that clip, and the line sits inside its edge zone.
+#[gpui::test]
+fn dragging_along_a_body_line_does_not_scroll_its_column(cx: &mut TestAppContext) {
+    let offset = scroll_after_dragging_along(cx, PROBE_TEXT, |body| body.center().y);
+    assert_eq!(offset, px(0.), "the drag scrolled the column");
 }
 
 /// The body size the reported defects were visible at. Any size works for the

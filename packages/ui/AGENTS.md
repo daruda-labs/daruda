@@ -168,7 +168,8 @@ Theme writes go through `gpui_component::Theme::update`: 0.8 rederives the
 component tokens and the `gpui_base` projection only there, so a
 `Theme::global_mut` edit leaves widgets on upstream defaults. Buttons read
 their own `button_*` slots; `theme::apply_daruda_palette` mirrors them from the
-generic colors.
+generic colors, and turns `focus_ring` off so a focused control tints its own
+border instead of adding an outer ring that doubles the edge and is clipped.
 
 The gpui-kit manifests and `ferrum_flow` use `gpui = { workspace = true }`
 so their types share daruda's pinned GPUI instance. Preserve upstream modules for reproducible re-vendoring,

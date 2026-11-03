@@ -717,10 +717,12 @@ impl gpui_base::RootPlugin for WindowState {
 
     fn style(&self, surface: &mut gpui::Stateful<gpui::Div>, _window: &mut Window, cx: &mut App) {
         use gpui::Refineable as _;
+        // daruda patch: no fill. The host paints its own surfaces with the
+        // configured window opacity; an opaque root fill under them would make
+        // a translucent window opaque.
         surface.style().refine(
             &gpui::StyleRefinement::default()
                 .font_family(cx.theme().font_family.clone())
-                .bg(cx.theme().tokens.background)
                 .text_color(cx.theme().foreground),
         );
     }
@@ -769,5 +771,46 @@ impl RenderOnce for WindowStateLayers {
             .children(WindowState::sheet_layer(root.clone(), window, cx))
             .children(WindowState::dialog_layer(&root, window, cx))
             .children(WindowState::notification_layer(&root, window, cx))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{
+        AppContext as _, Context, IntoElement, Render, TestAppContext, Window, div, px, size,
+    };
+
+    struct Empty;
+
+    impl Render for Empty {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
+
+    /// daruda patch: the root paints no fill of its own, so a host that draws
+    /// translucent surfaces keeps a translucent window.
+    #[gpui::test]
+    fn the_root_paints_no_window_fill(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|_| Empty);
+            crate::Root::new(view, window, cx)
+        });
+        cx.simulate_resize(size(px(400.), px(300.)));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let filled = cx.update(|window, _| {
+            let viewport = window.viewport_size();
+            let scale = window.scale_factor();
+            window.painted_quads().into_iter().any(|quad| {
+                quad.bounds.size.width.0 >= f32::from(viewport.width) * scale - 1.0
+                    && quad.bounds.size.height.0 >= f32::from(viewport.height) * scale - 1.0
+                    && quad
+                        .background
+                        .as_solid()
+                        .is_some_and(|color| color.a > 0.0)
+            })
+        });
+        assert!(!filled, "the root filled the whole window");
     }
 }

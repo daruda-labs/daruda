@@ -407,6 +407,17 @@ the stacked-menu contrast is pinned by
 
 ---
 
+## `vendor/gpui-kit/crates/component/src/root.rs` — vendored, **the root paints no fill**
+
+0.8's `WindowState::style` fills the whole root surface with
+`tokens.background`. daruda paints its own surfaces at the configured window
+opacity, and 0.5's `Root` painted no fill, so the opaque fill made a
+translucent window opaque. The patch drops the `.bg(..)` and keeps the font
+family and text colour. `root::tests::the_root_paints_no_window_fill` fails
+without it.
+
+---
+
 ## `vendor/gpui-kit/crates/component/src/tab/tab_bar.rs` — vendored, **a caller's gap spaces the tabs**
 
 ### Why
@@ -645,7 +656,7 @@ fail loudly if you forget: `a_click_on_a_link_opens_it`,
 | `TextView::code_block_render` | `text_view.rs` (`CodeBlockRenderFn`, builder), `node.rs` (`CodeBlock` render consults it first) | Replaces a code block's rendering when the closure returns `Some(element)`; `None` falls through to the default block. The agent chat renders ` ```mermaid ` fences as diagrams through it, falling through while the image is not ready. |
 | `TextView::debug_inline_bounds` | `text_view.rs` (`DebugInlineBoundsFn`, builder), `inline.rs` (`Inline::debug_bounds`, reported from paint) | Unset by default. The app's two-renderer Markdown conformance probe observes the exact bounds each prose `Inline` paints; measuring the outer paragraph div would stay positive even if its text child collapsed. |
 | Task checkbox selector | `node.rs` (`debug_selector(|| "markdown-task-checkbox")`) | Lets the same probe find a task-list checkbox. `debug_selector` is a no-op without `test-support`, and neither probe adds a layout wrapper. |
-| Code-block actions on hover | `node.rs` (`CODE_BLOCK_GROUP`; the block container takes `.group`, the actions overlay `.opacity(0.).group_hover(..)`, which keeps its layout) | The host's copy button appears only while the pointer is over the block, so an idle block shows no persistent action chip. |
+| Code-block actions on hover | `node.rs` (`CODE_BLOCK_GROUP`; the block container takes `.group`, the actions overlay `.opacity(0.).group_hover(..)`, which keeps its layout, plus its own `.hover(..)` because the button takes the pointer from the block; a scrolling block moves the overlay left by `SCROLLBAR_WIDTH`) | The host's copy button appears only while the pointer is over the block, so an idle block shows no persistent action chip, and it never sits under the block's vertical scrollbar. |
 | Loose and tight lists | `format/markdown.rs` (`Node::List` carries the list's `spread` onto its items), `document.rs` (`NodeRenderOptions::loose_list`), `node.rs` (list arm derives it; list items take `pt(paragraph_gap)` after the first only when loose) | CommonMark calls a list loose when any item is spread, and mdast reports blank lines *between* items on the list and blank lines *inside* one on the item. A tight list keeps one line pitch, so a wrapped item is exactly two rows tall; a loose list spaces its items like paragraphs. |
 
 Re-apply each row. `packages/ui/src/markdown/tests.rs` and the conformance

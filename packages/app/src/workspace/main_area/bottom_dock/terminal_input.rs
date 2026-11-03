@@ -209,7 +209,11 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
         );
     }
     if let Some(menu) = &snap.slash_menu {
-        cell = cell.child(render_slash_menu(menu, snap.workspace.0.clone(), cx));
+        // Deferred: laid out in place above the composer, but painted after
+        // the window without the dock's clip, so it can rise over the panes.
+        cell = cell.child(
+            gpui::deferred(render_slash_menu(menu, snap.workspace.0.clone(), cx)).with_priority(1),
+        );
     }
     let ws = snap.workspace.0.clone();
     super::bottom_panel_body()

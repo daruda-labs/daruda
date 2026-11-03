@@ -2602,12 +2602,16 @@ impl CodeBlock {
                 .range_backgrounds(node_cx.range_backgrounds(leaf_key).to_vec())
                 .reveal(node_cx.reveal_at(leaf_key, 0, self.code().len())),
             );
+        let scrolls = matches!(style.code_block().overflow.y, Some(Overflow::Scroll));
         let actions = node_cx.code_block_actions.clone().map(|actions| {
             div()
                 .id("actions")
                 .absolute()
                 .top_2()
                 .right_2()
+                // daruda patch: a scrolling block draws its vertical scrollbar
+                // along the right edge, so the actions sit left of it.
+                .when(scrolls, |this| this.right(crate::SCROLLBAR_WIDTH))
                 .bg(style.code_background())
                 .rounded(cx.theme().tokens.radius.md)
                 // daruda patch: the actions show only while the block is
@@ -2615,12 +2619,15 @@ impl CodeBlock {
                 // rather than visibility keeps their layout for the host.
                 .opacity(0.)
                 .group_hover(CODE_BLOCK_GROUP, |style| style.opacity(1.))
+                // The button takes the pointer from the block beneath it, so
+                // the overlay also stays shown while it is hovered itself.
+                .hover(|style| style.opacity(1.))
                 .child(actions(&self, window, cx))
         });
         // The id scopes the caller's action ids per code block, so plain ids
         // like `"copy"` don't collide across blocks.
         let id = block_element_id("codeblock", self.span, options.ix);
-        let block = if matches!(style.code_block().overflow.y, Some(Overflow::Scroll)) {
+        let block = if scrolls {
             let scroll_handle = window
                 .use_keyed_state(
                     block_element_id("codeblock-scroll", self.span, options.ix),

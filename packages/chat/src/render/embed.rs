@@ -139,8 +139,12 @@ impl RenderOnce for CopyOverlay {
             .absolute()
             .top_1()
             .right_1()
-            .invisible()
-            .group_hover(self.group, |s| s.visible())
+            // The chip occludes, so with the pointer on it the embed's group is
+            // no longer hovered; its own hover keeps it shown. Opacity rather
+            // than visibility keeps its hitbox, which that hover needs.
+            .opacity(0.)
+            .group_hover(self.group, |s| s.opacity(1.))
+            .hover(|s| s.opacity(1.))
             .bg(self.chip_bg)
             .rounded(px(theme::AGENT_CHAT_INPUT_RADIUS))
             .child(crate::localized::code_copy_button(

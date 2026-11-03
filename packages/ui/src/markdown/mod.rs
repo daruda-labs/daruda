@@ -268,12 +268,14 @@ impl RenderOnce for Markdown {
             return view.into_any_element();
         }
         // Without a width constraint the view lays out at its intrinsic
-        // max-content width; fill the container so it wraps. Clipping x zeroes
-        // the wrapper's automatic minimum width, so it also shrinks inside a
-        // caller's flex row.
+        // max-content width; fill the container so it wraps. A zero minimum
+        // width lets it shrink inside a caller's flex row. Not overflow
+        // clipping: that would make this block the content mask that
+        // window-wide selection measures drag auto-scroll against, so a drag
+        // near the block's own bottom edge would scroll the transcript.
         div()
             .w_full()
-            .overflow_x_hidden()
+            .min_w_0()
             .child(view.w_full())
             .into_any_element()
     }

@@ -1029,3 +1029,38 @@ async fn copy_chip_press_leaves_the_embed_scroll_alone(cx: &mut TestAppContext) 
     let after = editor.read_with(&vcx, |s, _| s.scroll_offset().y);
     assert_eq!(before, after, "the chip press scrolled the embed");
 }
+
+/// The chip occludes the embed under it, so pointing at the chip leaves the
+/// embed's hover group; the chip must stay shown regardless.
+#[gpui::test]
+async fn copy_chip_stays_shown_while_the_pointer_is_on_it(cx: &mut TestAppContext) {
+    let (window_handle, _view) = render_shell_output_card(cx, LARGE_ROWS, true);
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
+    let embed = vcx
+        .debug_bounds("agent-chat-out-embed-b1#0")
+        .expect("the bounded embed painted");
+    vcx.simulate_mouse_move(embed.center(), None, gpui::Modifiers::default());
+    vcx.update(|window, _| window.refresh());
+    vcx.run_until_parked();
+    let chip = vcx
+        .debug_bounds("agent-chat-out-copy-b1#0-chip")
+        .expect("the copy chip painted");
+    vcx.simulate_mouse_move(chip.center(), None, gpui::Modifiers::default());
+    vcx.update(|window, _| window.refresh());
+    vcx.run_until_parked();
+    let chip = vcx
+        .debug_bounds("agent-chat-out-copy-b1#0-chip")
+        .expect("the copy chip painted");
+    let scale = vcx.update(|window, _| window.scale_factor());
+    let shown = vcx.update(|window, _| {
+        window.painted_quads().into_iter().any(|quad| {
+            (quad.bounds.origin.x.0 - f32::from(chip.origin.x) * scale).abs() < 1.0
+                && (quad.bounds.origin.y.0 - f32::from(chip.origin.y) * scale).abs() < 1.0
+                && quad
+                    .background
+                    .as_solid()
+                    .is_some_and(|color| color.a > 0.5)
+        })
+    });
+    assert!(shown, "the chip faded out under the pointer");
+}
