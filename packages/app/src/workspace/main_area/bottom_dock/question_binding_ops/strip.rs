@@ -55,7 +55,7 @@ impl Workspace {
         }
     }
 
-    /// Esc while bound leaves answer mode (D5); the strip then says the
+    /// Esc while bound leaves answer mode; the strip then says the
     /// next Esc stops. `false` when not bound, so Esc goes on to Stop.
     pub(in crate::workspace) fn question_escape(&mut self, cx: &mut Context<Self>) -> bool {
         let Some((pane, question)) = self.focused_question(cx).filter(|(_, q)| q.bound) else {
@@ -122,7 +122,7 @@ impl Workspace {
         }
     }
 
-    /// `FocusComposer`: show and focus the composer, then bind it (D7-b).
+    /// `FocusComposer`: show and focus the composer, then bind it.
     /// Over a prompt draft the draft starts the answer and `prefill` is
     /// ignored; an empty composer takes `prefill`, the field's committed
     /// answer. Already bound, the field switch commits the text first.
@@ -137,7 +137,7 @@ impl Workspace {
         let Some(view) = self.agent_chat_view(pane).cloned() else {
             return;
         };
-        // E14: the card works with the dock shut, so writing opens it.
+        // The card works with the dock shut, so writing opens it.
         if !self.docks.bottom.read(cx).is_open {
             self.docks.bottom.update(cx, |dock, cx| {
                 dock.toggle();
@@ -180,7 +180,45 @@ impl Workspace {
         self.sync_question_composer(window, cx);
     }
 
-    /// D8 "Skip and send this": decline the question, then send the held
+    /// `SubmitQuestion`: the card's send while the composer holds text typed
+    /// for the bound field. The text is committed there first, as Enter
+    /// would, so it goes with the answer; a field that takes no text keeps
+    /// it in the composer and the strip says why.
+    pub(in crate::workspace) fn submit_question_with_composer_text(
+        &mut self,
+        pane: PaneId,
+        question_id: u64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(view) = self.agent_chat_view(pane).cloned() else {
+            return;
+        };
+        let Some(question) = view
+            .read(cx)
+            .question_composer()
+            .filter(|q| q.question_id == question_id && q.bound)
+        else {
+            return;
+        };
+        let typed = self.pane_composer_text(pane, cx).trim().to_owned();
+        if !typed.is_empty() {
+            let taken = !self.question_swap_pending(pane, &question)
+                && view.update(cx, |v, cx| {
+                    v.commit_question_text(question_id, question.field, typed, cx)
+                });
+            if !taken {
+                self.refuse_question_text(pane, &question, cx);
+                return;
+            }
+            self.set_pane_composer_text(pane, "", window, cx);
+            self.sync_question_composer(window, cx);
+        }
+        view.update(cx, |v, cx| v.submit_question(question_id, cx));
+        self.sync_question_composer(window, cx);
+    }
+
+    /// "Skip and send this": decline the question, then send the held
     /// prompt, which the turn delivers once the agent goes on.
     pub(in crate::workspace) fn skip_question_and_send_prompt(
         &mut self,
@@ -199,7 +237,7 @@ impl Workspace {
         self.send_composer_text(window, cx);
     }
 
-    /// D8 "Keep queued": send the held prompt; it waits behind the question.
+    /// "Keep queued": send the held prompt; it waits behind the question.
     pub(in crate::workspace) fn keep_prompt_queued_behind_question(
         &mut self,
         pane: PaneId,
@@ -223,6 +261,3 @@ impl Workspace {
             .take_if(|b| b.pane == pane)
     }
 }
-
-#[cfg(test)]
-mod tests {}

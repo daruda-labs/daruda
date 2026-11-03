@@ -69,7 +69,8 @@ impl AgentChatView {
     /// Up (`down == false`) or down in an empty bound composer. With nothing
     /// lit, down lights the first row and up the last; after that the
     /// highlight moves one row and stops at either end. Past the last row of
-    /// the last field it lands on the card's send button.
+    /// the last field it lands on the card's send button. Moving is working
+    /// on the question, so it stops the countdown, as Tab does.
     pub fn move_question_row(&mut self, id: u64, down: bool, cx: &mut Context<Self>) {
         self.announcing_question_composer(cx, |view, cx| {
             let Some(question) = view.questions.oldest_mut(id) else {
@@ -91,6 +92,7 @@ impl AgentChatView {
             };
             if next.is_some() && question.focus.highlight != next {
                 question.focus.highlight = next;
+                question.stop_countdown();
                 cx.notify();
             }
         });
@@ -105,7 +107,7 @@ impl AgentChatView {
                 return;
             };
             match question.focus.highlight {
-                Some(QuestionHighlight::Row(row)) => view.choose_row(id, row, cx),
+                Some(QuestionHighlight::Row(row)) => view.choose_row(id, row, true, cx),
                 Some(QuestionHighlight::Send) => view.submit_filled(id, AnswerSource::Desktop, cx),
                 None if question.all_answered() => {
                     view.submit_filled(id, AnswerSource::Desktop, cx)
@@ -116,8 +118,10 @@ impl AgentChatView {
     }
 
     /// Digit `n` in an empty bound composer: choose row `n` as the card
-    /// numbers it. `false` when the field has no such row, or no choices at
-    /// all (a text field), so the digit is typed instead.
+    /// numbers it. A pick never sends here, since the digit may be the
+    /// start of a prompt; the empty Enter that follows sends. `false` when the
+    /// field has no such row, or no choices at all (a text field), so the
+    /// digit is typed instead.
     pub fn choose_question_number(&mut self, id: u64, n: usize, cx: &mut Context<Self>) -> bool {
         self.announcing_question_composer(cx, |view, cx| {
             let Some(question) = view.questions.oldest_mut(id) else {
@@ -130,7 +134,7 @@ impl AgentChatView {
                 return false;
             };
             question.focus.highlight = Some(QuestionHighlight::Row(row));
-            view.choose_row(id, row, cx);
+            view.choose_row(id, row, false, cx);
             true
         })
     }
@@ -155,13 +159,13 @@ impl AgentChatView {
             };
             if let Some(Row::Choice(option)) = lit {
                 let field = question.focus.field;
-                view.pick_option(id, field, option, cx);
+                view.pick_option(id, field, option, false, cx);
             }
             true
         })
     }
 
-    /// Typing in the bound composer ends keyboard choosing (spec 7.1): the
+    /// Typing in the bound composer ends keyboard choosing: the
     /// lit row or send button goes dark, so a later empty Enter picks nothing
     /// the person has since typed over.
     pub fn clear_question_highlight(&mut self, id: u64, cx: &mut Context<Self>) {
@@ -222,6 +226,7 @@ impl AgentChatView {
                 return false;
             }
             question.focus = target;
+            question.stop_countdown();
             view.remeasure_question(id, "question-field-moved");
             cx.notify();
             true
@@ -230,7 +235,8 @@ impl AgentChatView {
 
     /// Choose row `row` of the focused field: pick or toggle an option,
     /// answer a yes/no, or, on the write row, ask the host for the composer.
-    fn choose_row(&mut self, id: u64, row: usize, cx: &mut Context<Self>) {
+    /// `may_send` lets a lone select's pick send the form.
+    fn choose_row(&mut self, id: u64, row: usize, may_send: bool, cx: &mut Context<Self>) {
         let Some(question) = self.questions.oldest_mut(id) else {
             return;
         };
@@ -241,7 +247,7 @@ impl AgentChatView {
         let boolean = matches!(focused.kind, QuestionFieldKind::Boolean);
         match FieldRows::of(question, focused).row(row) {
             Some(Row::Choice(choice)) if boolean => self.set_flag(id, field, choice == 0, cx),
-            Some(Row::Choice(option)) => self.pick_option(id, field, option, cx),
+            Some(Row::Choice(option)) => self.pick_option(id, field, option, may_send, cx),
             Some(Row::Write) => self.request_question_composer(id, field, cx),
             None => {}
         }

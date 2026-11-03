@@ -72,6 +72,10 @@ pub enum AgentChatEvent {
         question_id: u64,
         prefill: Option<String>,
     },
+    /// A question card's send while the composer bound to it holds text:
+    /// the host commits that text to the bound field, empties the
+    /// composer, then calls `submit_question(question_id)`.
+    SubmitQuestion { question_id: u64 },
     /// A question left the open list. The host settles any phone card still
     /// offering it; `from_phone` says the phone's own answer settled it.
     /// `question` is the question in one line, for a notification about it.

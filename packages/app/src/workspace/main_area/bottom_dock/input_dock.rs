@@ -112,8 +112,8 @@ impl InputDock {
                     let Some(ws) = ws_for_escape.upgrade() else {
                         return false;
                     };
-                    // A bound question's first Escape only leaves answer mode
-                    // (D5). Its sync writes this input's placeholder, so the
+                    // A bound question's first Escape only leaves answer mode.
+                    // Its sync writes this input's placeholder, so the
                     // release waits past this hook (pitfall #5).
                     if ws.read(app).focused_question_bound(app) {
                         let ws_deferred = ws.downgrade();

@@ -1,4 +1,4 @@
-//! The opt-in answer timeout (S6-b): each open question's deadline, the
+//! The opt-in answer timeout: each open question's deadline, the
 //! touch that stops it for good, and the decline sent once time is up.
 
 use std::time::{Duration, Instant};
@@ -57,8 +57,9 @@ impl OpenQuestion {
         self.deadline.filter(|_| !self.draft.touched())
     }
 
-    /// The person typed this question's answer in the bound composer: a
-    /// touch like a pick, so the countdown stops for good.
+    /// The person is working on this question without changing the draft:
+    /// typing its answer, moving through its card, or binding the composer.
+    /// A touch like a pick, so the countdown stops for good.
     pub(in crate::view) fn stop_countdown(&mut self) {
         self.draft.touch();
         self.deadline = None;

@@ -9,7 +9,7 @@ use gpui::Context;
 use crate::strings as s;
 use crate::view::AgentChatView;
 use crate::view::questions::{
-    AnswerSource, OpenQuestion, QuestionCountdown, QuestionOutcome, primary_fields,
+    AnswerSource, OpenQuestion, QuestionCountdown, QuestionOutcome, field_header, primary_fields,
 };
 
 /// One field of an open question, as the phone shows it. Plain values: the
@@ -179,11 +179,13 @@ impl AgentChatView {
                 }
             },
         }
+        // What the card showed is what the person answered, default included.
+        question.draft.confirm(&target.key);
         self.phone_move_on(id, field, cx)
     }
 
-    /// After field `from`: the next field neither answered nor left blank,
-    /// wrapping; else send the form; else `from` again, when it is a required
+    /// After field `from`: the next field neither answered by the person nor
+    /// left blank, wrapping; else send the form; else `from` again, when it is a required
     /// field still empty. A form left wholly blank has nothing to send, so it
     /// is declined, as if the person skipped every question.
     fn phone_move_on(&mut self, id: u64, from: usize, cx: &mut Context<Self>) -> PhoneAnswerResult {
@@ -193,9 +195,12 @@ impl AgentChatView {
         let keys: Vec<&str> = primary_fields(&question.request)
             .map(|f| f.key.as_str())
             .collect();
+        // A field holding only its default was never shown on the phone, so
+        // it is asked rather than sent unseen.
         let next = (from + 1..keys.len()).chain(0..from).find(|&ix| {
-            !question.draft.is_answered(&question.request, keys[ix])
-                && !question.draft.is_left_blank(keys[ix])
+            !question
+                .draft
+                .is_settled_by_person(&question.request, keys[ix])
         });
         if let Some(next) = next {
             return self.phone_card_for(id, next, cx);
@@ -267,11 +272,7 @@ fn phone_question(
         ),
         QuestionFieldKind::Text => (Vec::new(), Vec::new()),
     };
-    let header = target
-        .title
-        .as_deref()
-        .filter(|title| !title.is_empty())
-        .unwrap_or(&question.request.message);
+    let header = field_header(&question.request, Some(target));
     Some(PhoneQuestion {
         id: question.id,
         field,

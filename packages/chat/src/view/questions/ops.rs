@@ -102,10 +102,10 @@ impl AgentChatView {
         });
     }
 
-    /// Pick option `option` of primary field `field`. A single select keeps
-    /// one pick and moves focus on; a multi-select toggles in place. A form
-    /// that is one select sends on the pick, unless an "Other" answer is
-    /// already committed beside it.
+    /// The card's option click: pick option `option` of primary field
+    /// `field`. A single select keeps one pick and moves focus on; a
+    /// multi-select toggles in place. A form that is one select sends on the
+    /// click, unless an "Other" answer is already committed beside it.
     pub fn pick_question_option(
         &mut self,
         id: u64,
@@ -113,14 +113,20 @@ impl AgentChatView {
         option: usize,
         cx: &mut Context<Self>,
     ) {
-        self.announcing_question_composer(cx, |view, cx| view.pick_option(id, field, option, cx));
+        self.announcing_question_composer(cx, |view, cx| {
+            view.pick_option(id, field, option, true, cx)
+        });
     }
 
+    /// Pick an option as [`Self::pick_question_option`] does. `may_send`
+    /// lets a lone select's pick send the form; a digit typed into an empty
+    /// composer only picks, since it may be the start of a prompt.
     pub(in crate::view) fn pick_option(
         &mut self,
         id: u64,
         field: usize,
         option: usize,
+        may_send: bool,
         cx: &mut Context<Self>,
     ) {
         let Some(question) = self.questions.get_mut(id) else {
@@ -142,7 +148,7 @@ impl AgentChatView {
             .is_some_and(|key| question.draft.text(key).is_some());
         question.draft.pick(target, &value);
         if single {
-            if picks_answer(&question.request) && !typed_beside {
+            if may_send && picks_answer(&question.request) && !typed_beside {
                 self.submit_filled(id, AnswerSource::Desktop, cx);
                 return;
             }
@@ -186,6 +192,22 @@ impl AgentChatView {
         cx.notify();
     }
 
+    /// The card's send button. Text typed in the composer bound to this
+    /// question is part of the answer, but only the host can read it: the
+    /// host is asked to commit it and then call [`Self::submit_question`].
+    pub fn submit_question_from_card(&mut self, id: u64, cx: &mut Context<Self>) {
+        let typed_in_composer = !self.composer_hint_empty
+            && self
+                .questions
+                .first()
+                .is_some_and(|q| q.id == id && q.composer.is_bound());
+        if typed_in_composer {
+            cx.emit(AgentChatEvent::SubmitQuestion { question_id: id });
+        } else {
+            self.submit_question(id, cx);
+        }
+    }
+
     /// Send the filled form. Does nothing while a required field is empty.
     pub fn submit_question(&mut self, id: u64, cx: &mut Context<Self>) {
         self.announcing_question_composer(cx, |view, cx| {
@@ -199,6 +221,18 @@ impl AgentChatView {
         from: AnswerSource,
         cx: &mut Context<Self>,
     ) {
+        self.submit_with(id, from, self.composer_hint_empty, cx);
+    }
+
+    /// [`Self::submit_filled`] with what the composer will hold once this
+    /// returns, which decides whether the next question may bind it.
+    pub(in crate::view) fn submit_with(
+        &mut self,
+        id: u64,
+        from: AnswerSource,
+        composer_empty: bool,
+        cx: &mut Context<Self>,
+    ) {
         let Some(values) = self
             .questions
             .get(id)
@@ -206,11 +240,12 @@ impl AgentChatView {
         else {
             return;
         };
-        self.settle_question(
+        self.settle_with(
             id,
             Some(QuestionAnswer::Submit(values.clone())),
             QuestionOutcome::Answered(values),
             from,
+            composer_empty,
             cx,
         );
     }
@@ -283,6 +318,20 @@ impl AgentChatView {
         from: AnswerSource,
         cx: &mut Context<Self>,
     ) {
+        self.settle_with(id, reply, outcome, from, self.composer_hint_empty, cx);
+    }
+
+    /// [`Self::settle_question`], where `composer_empty` says whether the
+    /// composer is free for the next question to bind.
+    fn settle_with(
+        &mut self,
+        id: u64,
+        reply: Option<QuestionAnswer>,
+        outcome: QuestionOutcome,
+        from: AnswerSource,
+        composer_empty: bool,
+        cx: &mut Context<Self>,
+    ) {
         let Some(question) = self.questions.take(id) else {
             return;
         };
@@ -299,7 +348,7 @@ impl AgentChatView {
             handle.respond_question(id, answer);
         }
         let tool = question.tool_call_id().map(str::to_owned);
-        let may_bind = self.composer_free(self.composer_hint_empty);
+        let may_bind = self.composer_free(composer_empty);
         self.questions.settle(question, outcome, may_bind);
         // Before the rebuild, so the remeasure below sees the folded height.
         if let Some(tool) = tool.as_deref() {

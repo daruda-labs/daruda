@@ -393,7 +393,7 @@ fn only_the_oldest_open_question_is_bound(cx: &mut gpui::TestAppContext) {
         .unwrap();
 }
 
-/// E3: the composer summary counts the open questions behind the oldest.
+/// The composer summary counts the open questions behind the oldest.
 #[gpui::test]
 fn the_composer_summary_counts_questions_waiting_behind(cx: &mut gpui::TestAppContext) {
     let (window, _answers) = asked(
@@ -1265,7 +1265,7 @@ fn multi_only(tool: &str) -> QuestionRequest {
     }
 }
 
-/// Spec 7.2: Enter on a multi-select toggles, so a form that is one
+/// Enter on a multi-select toggles, so a form that is one
 /// multi-select is sent from the send button past its last row.
 #[gpui::test]
 fn a_lone_multi_select_is_answered_and_sent_by_keyboard(cx: &mut gpui::TestAppContext) {
@@ -1364,7 +1364,7 @@ fn countdown(view: &crate::view::AgentChatView, id: u64) -> Option<std::time::In
         .and_then(|q| q.countdown())
 }
 
-/// S6-b: an untouched question is declined once its time is up, and the
+/// An untouched question is declined once its time is up, and the
 /// record says it expired and after how long. Later ticks change nothing.
 #[gpui::test]
 fn an_untouched_question_expires_once_with_decline(cx: &mut gpui::TestAppContext) {
@@ -1555,4 +1555,31 @@ fn a_reload_retimes_only_untouched_questions(cx: &mut gpui::TestAppContext) {
             assert!(deadline >= before + TIMEOUT, "counted from the reload");
         })
         .unwrap();
+}
+
+/// Working through the card from the keyboard, or asking for the
+/// composer, is acting on the question: each stops its countdown.
+#[gpui::test]
+fn navigating_or_binding_stops_the_countdown(cx: &mut gpui::TestAppContext) {
+    type Verb = fn(&mut crate::view::AgentChatView, &mut gpui::Context<crate::view::AgentChatView>);
+    let verbs: [(&str, Verb); 3] = [
+        ("arrow", |view, cx| view.move_question_row(1, true, cx)),
+        ("tab", |view, cx| {
+            assert!(view.move_question_field(1, true, String::new(), cx));
+        }),
+        ("bind", |view, cx| {
+            view.release_question_composer(1, cx);
+            view.bind_question_composer(1, None, false, cx);
+        }),
+    ];
+    for (name, verb) in verbs {
+        let (window, _answers) = asked_timed(cx, TIMEOUT, vec![(1, form_question("toolu_1"))]);
+        window
+            .update(cx, |view, _window, cx| {
+                assert!(countdown(view, 1).is_some(), "{name}: running");
+                verb(view, cx);
+                assert_eq!(countdown(view, 1), None, "{name}: stopped");
+            })
+            .unwrap();
+    }
 }

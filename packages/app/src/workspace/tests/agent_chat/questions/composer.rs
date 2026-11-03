@@ -316,7 +316,7 @@ fn enter_while_bound_answers_and_does_not_queue(cx: &mut TestAppContext) {
     );
 }
 
-/// D8: once released, a typed prompt would wait behind the question for
+/// Once released, a typed prompt would wait behind the question for
 /// good, so Enter warns first; "Skip and send this" declines, then sends.
 #[gpui::test]
 fn enter_after_release_arms_the_prompt_warning_and_skip_and_send_declines_then_sends(
@@ -396,7 +396,7 @@ fn a_question_over_a_typed_draft_stays_released(cx: &mut TestAppContext) {
     assert_eq!(composer_text(&ws, &mut vcx), "a follow-up I was writing");
 }
 
-/// D5: the first Esc leaves answer mode, the next one stops the agent.
+/// The first Esc leaves answer mode, the next one stops the agent.
 #[gpui::test]
 fn first_escape_releases_and_second_escape_stops(cx: &mut TestAppContext) {
     let (_dir, ws, mut vcx) = workspace(cx);
@@ -415,7 +415,7 @@ fn first_escape_releases_and_second_escape_stops(cx: &mut TestAppContext) {
     assert!(strip(&ws, &mut vcx).is_none());
 }
 
-/// D7-b: writing from the card over a prompt draft keeps the draft as the
+/// Writing from the card over a prompt draft keeps the draft as the
 /// start of the answer; over an empty composer it loads the field's answer.
 #[gpui::test]
 fn writing_over_a_draft_keeps_the_draft_as_the_answer_start(cx: &mut TestAppContext) {
@@ -574,7 +574,7 @@ fn a_slash_leading_answer_is_sent_as_the_answer(cx: &mut TestAppContext) {
     assert!(queued(&ws, &mut vcx, pane).is_empty());
 }
 
-/// T4: a card pick that moves focus on commits what the composer held to
+/// A card pick that moves focus on commits what the composer held to
 /// the field it was typed for, then loads the new field's own text.
 #[gpui::test]
 fn a_card_pick_that_moves_focus_keeps_typed_text_on_its_field(cx: &mut TestAppContext) {
@@ -609,7 +609,7 @@ fn a_card_pick_that_moves_focus_keeps_typed_text_on_its_field(cx: &mut TestAppCo
     assert_eq!(composer_text(&ws, &mut vcx), "teal");
 }
 
-/// E22 (controller ruling): once the warning is up, more Enters change
+/// Once the warning is up, more Enters change
 /// nothing; only the strip's buttons send the prompt on.
 #[gpui::test]
 fn a_second_enter_after_the_warning_does_not_queue(cx: &mut TestAppContext) {
@@ -658,7 +658,7 @@ fn a_refused_enter_keeps_the_text_without_a_line_break(cx: &mut TestAppContext) 
     assert!(queued(&ws, &mut vcx, pane).is_empty());
 }
 
-/// E14: writing from the card opens a shut bottom dock on the composer.
+/// Writing from the card opens a shut bottom dock on the composer.
 #[gpui::test]
 fn writing_from_the_card_opens_a_shut_dock(cx: &mut TestAppContext) {
     let (_dir, ws, mut vcx) = workspace_with_dock_shut(cx);
@@ -683,7 +683,7 @@ fn writing_from_the_card_opens_a_shut_dock(cx: &mut TestAppContext) {
     assert!(summary(&ws, &mut vcx, pane).expect("open").bound);
 }
 
-/// T4: text typed on a yes/no has no field to go to when a pick moves
+/// Text typed on a yes/no has no field to go to when a pick moves
 /// focus on; it must not become the next field's answer.
 #[gpui::test]
 fn text_a_field_refuses_does_not_follow_focus(cx: &mut TestAppContext) {
@@ -909,4 +909,87 @@ fn a_draft_emptied_in_the_background_lets_the_next_question_bind(cx: &mut TestAp
     let next = summary(&ws, &mut vcx, first).expect("open");
     assert_eq!(next.question_id, 2);
     assert!(next.bound, "the emptied composer is free for it");
+}
+
+/// The card's send takes the text typed in the bound composer with it:
+/// a pick moved focus to the reason, typed but not yet entered.
+#[gpui::test]
+fn the_card_send_commits_the_bound_composer_text_first(cx: &mut TestAppContext) {
+    let (_dir, ws, mut vcx) = workspace(cx);
+    let pane = add_pane(&ws, &mut vcx);
+    let mut probes = connect(&ws, &mut vcx, pane, &[1]);
+    ask(&ws, &mut vcx, pane, 1, color_then_reason());
+    let view = vcx.update(|_, cx| ws.read(cx).agent_chat_view(pane).expect("chat").clone());
+    vcx.update(|_, cx| view.update(cx, |v, cx| v.pick_question_option(1, 0, 0, cx)));
+    vcx.run_until_parked();
+    type_text(&ws, &mut vcx, "because X");
+
+    vcx.update(|_, cx| view.update(cx, |v, cx| v.submit_question_from_card(1, cx)));
+    vcx.run_until_parked();
+
+    assert_eq!(
+        probes[0].answer(),
+        Some(QuestionAnswer::Submit(BTreeMap::from([
+            ("color".to_owned(), QuestionValue::Text("red".into())),
+            ("why".to_owned(), QuestionValue::Text("because X".into())),
+        ])))
+    );
+    assert_eq!(composer_text(&ws, &mut vcx), "", "the text went with it");
+}
+
+/// Text the bound field cannot take keeps the card's send from going: the
+/// text stays and the strip says why.
+#[gpui::test]
+fn the_card_send_over_text_a_field_refuses_sends_nothing(cx: &mut TestAppContext) {
+    let (_dir, ws, mut vcx) = workspace(cx);
+    let pane = add_pane(&ws, &mut vcx);
+    let mut probes = connect(&ws, &mut vcx, pane, &[1]);
+    ask(&ws, &mut vcx, pane, 1, yes_no_then_reason());
+    type_text(&ws, &mut vcx, "maybe");
+    let view = vcx.update(|_, cx| ws.read(cx).agent_chat_view(pane).expect("chat").clone());
+
+    vcx.update(|_, cx| view.update(cx, |v, cx| v.submit_question_from_card(1, cx)));
+    vcx.run_until_parked();
+
+    assert_eq!(probes[0].answer(), None);
+    assert_eq!(composer_text(&ws, &mut vcx), "maybe");
+    assert!(says_text_not_taken(&ws, &mut vcx));
+}
+
+/// Released, an Enter carrying only attachments is a prompt too: it is held
+/// back with the warning rather than queued silently behind the question.
+#[gpui::test]
+fn an_attachment_only_enter_is_held_back_behind_a_released_question(cx: &mut TestAppContext) {
+    let (_dir, ws, mut vcx) = workspace(cx);
+    let pane = add_pane(&ws, &mut vcx);
+    let mut probes = connect(&ws, &mut vcx, pane, &[1]);
+    ask(&ws, &mut vcx, pane, 1, path_question());
+    vcx.update(|_, cx| ws.update(cx, |ws, cx| ws.release_question_for_prompt(pane, cx)));
+    let view = vcx.update(|_, cx| ws.read(cx).agent_chat_view(pane).expect("chat").clone());
+    vcx.update(|_, cx| {
+        view.update(cx, |v, cx| {
+            v.add_attachments(
+                vec![daruda_acp::PromptAttachment {
+                    name: "notes".into(),
+                    content: daruda_acp::AttachmentContent::ResourceLink {
+                        uri: "urn:test:notes".into(),
+                    },
+                }],
+                cx,
+            )
+            .expect("attached")
+        })
+    });
+
+    press_enter_key(&mut vcx);
+
+    assert!(queued(&ws, &mut vcx, pane).is_empty(), "nothing queued yet");
+    assert_eq!(probes[0].answer(), None);
+    assert_eq!(
+        strip(&ws, &mut vcx)
+            .expect("strip")
+            .pending_prompt
+            .as_deref(),
+        Some("")
+    );
 }

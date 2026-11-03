@@ -1,6 +1,6 @@
 //! The composer answering the focused agent pane's pending question: Enter,
 //! Esc, the card's write row, the strip's actions, and the prompt a released
-//! question would hold back (E22). The binding is the view's; the host keeps
+//! question would hold back. The binding is the view's; the host keeps
 //! only what lets composer text land on the field it was typed for, plus the
 //! strip's own marks.
 
@@ -35,11 +35,15 @@ pub(in crate::workspace) struct QuestionMarks {
     /// Panes whose composer text was typed as the answer to this question,
     /// so binding it again is no "draft became the answer".
     answer_text: HashMap<PaneId, AnsweredQuestion>,
-    /// The strip's width at its last paint, for the narrow layout (E21).
+    /// The strip's width at its last paint, for the narrow layout.
     strip_width: Option<f32>,
     /// The composer held text at the last sync. The arrow-key hook runs
     /// inside the composer's own update and cannot read it there.
     composer_has_text: bool,
+    /// The composer's owner at the last hint sync. Saved drafts change only
+    /// when the owner does, or through `set_pane_composer_text`, so a
+    /// keystroke refreshes the owner's hint alone.
+    hinted_owner: Option<PaneId>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -120,10 +124,16 @@ impl Workspace {
         &self,
         cx: &App,
     ) -> QuestionPlaceholder {
-        match self.focused_question(cx) {
-            Some((_, q)) if q.bound && q.note_mode => QuestionPlaceholder::Note,
-            Some((_, q)) if q.bound => QuestionPlaceholder::Answer,
-            _ => QuestionPlaceholder::Prompt,
+        QuestionPlaceholder::of(self.focused_question(cx).as_ref().map(|(_, q)| q))
+    }
+}
+
+impl QuestionPlaceholder {
+    fn of(question: Option<&QuestionComposer>) -> Self {
+        match question {
+            Some(q) if q.bound && q.note_mode => Self::Note,
+            Some(q) if q.bound => Self::Answer,
+            _ => Self::Prompt,
         }
     }
 }

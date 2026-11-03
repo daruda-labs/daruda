@@ -266,7 +266,7 @@ pub(crate) fn handle_in_app(aimed: Aimed, target: &Target, cx: &mut App) -> Effe
             edit: Edit::StaleCard,
         },
         InboundAction::StaleQuestion => Effect::Reply(RenderedReply {
-            text: s::notification::telegram_permission_stale(),
+            text: s::notification::telegram_question_stale(),
             keyboard: None,
         }),
         InboundAction::StaleListing => Effect::Feedback {

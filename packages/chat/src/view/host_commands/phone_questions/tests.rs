@@ -331,3 +331,43 @@ fn a_required_field_has_no_skip_of_its_own(cx: &mut gpui::TestAppContext) {
         assert!(view.has_pending_question());
     });
 }
+
+/// A field holding only its schema default is shown on the phone before
+/// the form goes: the default is offered as picked, and Send accepts it.
+#[gpui::test]
+fn a_defaulted_field_is_shown_before_the_phone_sends(cx: &mut gpui::TestAppContext) {
+    let mut confirm = field("question_1", QuestionFieldKind::Boolean, None);
+    confirm.default = Some(QuestionValue::Bool(true));
+    let request = QuestionRequest {
+        message: "Two things".into(),
+        tool_call_id: Some("toolu_1".into()),
+        delivery: daruda_acp::QuestionDelivery::Blocking,
+        fields: vec![
+            field(
+                "question_0",
+                QuestionFieldKind::SingleSelect(vec![option("a"), option("b")]),
+                None,
+            ),
+            confirm,
+        ],
+    };
+    let (view, mut answer, _) = asked(cx, request);
+    view.update(cx, |view, cx| {
+        let PhoneAnswerResult::Next(card) =
+            view.answer_question_from_phone(1, 0, PhoneReply::Option(0), cx)
+        else {
+            panic!("the defaulted field is still asked");
+        };
+        assert_eq!(card.field, 1);
+        assert_eq!(card.picked, [0], "the default shows as picked");
+        assert_eq!(
+            view.answer_question_from_phone(1, 1, PhoneReply::Send, cx),
+            PhoneAnswerResult::Submitted
+        );
+    });
+    let expected = BTreeMap::from([
+        ("question_0".to_owned(), QuestionValue::Text("a".into())),
+        ("question_1".to_owned(), QuestionValue::Bool(true)),
+    ]);
+    assert_eq!(answer.answer(), Some(QuestionAnswer::Submit(expected)));
+}

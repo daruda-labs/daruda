@@ -852,7 +852,7 @@ bottom_dock:
   question_answering: "Answering question %{n}/%{total} “%{header}”"
   # The same, on a strip too narrow for the header.
   question_answering_narrow: "Answering question %{n}/%{total}"
-  # Other questions on the same pane waiting behind the one shown (E3).
+  # Other questions on the same pane waiting behind the one shown.
   question_waiting_after: "+%{count} waiting"
   question_note_hint: "your text becomes a note"
   question_draft_hint: "your draft became the answer"

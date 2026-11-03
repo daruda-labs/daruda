@@ -19,6 +19,10 @@ pub(crate) struct QuestionDraft {
     /// Primary fields the person chose to leave blank, so a walk through
     /// the unanswered ones does not come back to them.
     left_blank: BTreeSet<String>,
+    /// Primary fields the person answered or accepted as shown. A field
+    /// holding only its schema default is answered but not confirmed, so a
+    /// surface that never showed it still asks.
+    confirmed: BTreeSet<String>,
 }
 
 impl QuestionDraft {
@@ -66,6 +70,7 @@ impl QuestionDraft {
     /// multi-select toggles it.
     pub(crate) fn pick(&mut self, field: &QuestionField, value: &str) {
         self.touched = true;
+        self.confirmed.insert(field.key.clone());
         let picks = self.picks.entry(field.key.clone()).or_default();
         if matches!(field.kind, QuestionFieldKind::MultiSelect(_)) {
             match picks.iter().position(|p| p == value) {
@@ -81,6 +86,7 @@ impl QuestionDraft {
 
     pub(crate) fn set_flag(&mut self, key: &str, value: bool) {
         self.touched = true;
+        self.confirmed.insert(key.to_owned());
         self.flags.insert(key.to_owned(), value);
     }
 
@@ -104,6 +110,23 @@ impl QuestionDraft {
     /// answer in the bound composer.
     pub(crate) fn touch(&mut self) {
         self.touched = true;
+    }
+
+    /// The person answered primary field `primary_key`, or accepted what it
+    /// holds, without changing it.
+    pub(crate) fn confirm(&mut self, primary_key: &str) {
+        self.confirmed.insert(primary_key.to_owned());
+    }
+
+    /// Whether primary field `primary_key` needs nothing more from the
+    /// person: answered by them, or left blank on purpose.
+    pub(crate) fn is_settled_by_person(
+        &self,
+        request: &QuestionRequest,
+        primary_key: &str,
+    ) -> bool {
+        self.left_blank.contains(primary_key)
+            || (self.confirmed.contains(primary_key) && self.is_answered(request, primary_key))
     }
 
     pub(crate) fn text(&self, key: &str) -> Option<&str> {
@@ -137,10 +160,6 @@ impl QuestionDraft {
             self.texts.remove(companion);
         }
         self.left_blank.insert(primary_key.to_owned());
-    }
-
-    pub(crate) fn is_left_blank(&self, primary_key: &str) -> bool {
-        self.left_blank.contains(primary_key)
     }
 
     /// Whether `primary_key` has a pick, flag, own text, or companion text.
@@ -203,6 +222,18 @@ impl QuestionDraft {
 /// "Other" box under a select.
 pub(crate) fn primary_fields(request: &QuestionRequest) -> impl Iterator<Item = &QuestionField> {
     request.fields.iter().filter(|f| f.companion_of.is_none())
+}
+
+/// How a question headed by primary field `field` reads: the field's
+/// title, or the request's message when it has none.
+pub(crate) fn field_header<'a>(
+    request: &'a QuestionRequest,
+    field: Option<&'a QuestionField>,
+) -> &'a str {
+    field
+        .and_then(|f| f.title.as_deref())
+        .filter(|title| !title.is_empty())
+        .unwrap_or(&request.message)
 }
 
 /// The key of the free-text field supplementing `primary_key`, if any.

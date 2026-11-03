@@ -94,6 +94,9 @@ impl Workspace {
             } => {
                 self.focus_composer_for_question(pane_id, *question_id, prefill.clone(), window, cx)
             }
+            AgentChatEvent::SubmitQuestion { question_id } => {
+                self.submit_question_with_composer_text(pane_id, *question_id, window, cx)
+            }
             AgentChatEvent::QuestionSettled {
                 end: daruda_chat::view::QuestionEnd::Expired,
                 question,

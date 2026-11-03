@@ -1,5 +1,5 @@
 //! The composer's Enter while a question waits: answer it, or hold a prompt
-//! back behind it (E22).
+//! back behind it.
 
 use daruda_chat::view::QuestionComposer;
 use gpui::{App, Context, Window};
@@ -11,7 +11,7 @@ use crate::workspace::main_area::pane_tree::PaneId;
 impl Workspace {
     /// The composer's Enter, before it becomes a prompt. While bound the
     /// text answers the question (whatever it starts with, `/` included).
-    /// Released, Enter holds a prompt back with the E22 warning, since it
+    /// Released, Enter holds a prompt back with a warning, since it
     /// would wait behind the question; only the strip's buttons send it on.
     /// `true` when the Enter was consumed here. `text` is the composer's
     /// value without trailing line breaks.
@@ -28,15 +28,17 @@ impl Workspace {
             return false;
         };
         let typed = text.trim();
-        if typed.is_empty() {
-            if !question.bound {
-                return false;
-            }
+        if typed.is_empty() && question.bound {
             // An empty Enter chooses the card's highlighted row; the parked
             // queue's resume gesture waits until the question is done.
             view.update(cx, |v, cx| v.choose_question_row(question.question_id, cx));
             self.sync_question_composer(window, cx);
             return true;
+        }
+        // Released, an empty Enter is a prompt only when it carries
+        // attachments; otherwise it is the empty-Enter gesture.
+        if typed.is_empty() && view.read(cx).draft_attachments().is_empty() {
+            return false;
         }
         if question.bound {
             let accepted = !self.question_swap_pending(pane, &question)
@@ -113,6 +115,3 @@ impl Workspace {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {}

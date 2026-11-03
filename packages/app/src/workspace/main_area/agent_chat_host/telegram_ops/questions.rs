@@ -229,7 +229,7 @@ mod tests {
         );
     }
 
-    /// Q19: the countdown keeps running while the phone holds the card, so
+    /// The countdown keeps running while the phone holds the card, so
     /// the card says how long was left when it was sent.
     #[test]
     fn the_body_ends_with_the_time_left_while_the_timeout_runs() {

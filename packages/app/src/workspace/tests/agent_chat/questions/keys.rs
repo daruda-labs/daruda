@@ -80,8 +80,10 @@ fn color_answer(color: &str) -> Option<QuestionAnswer> {
     )])))
 }
 
+/// A digit picks but never sends: it may be the start of a prompt. The
+/// empty Enter then sends the answered form.
 #[gpui::test]
-fn digit_in_an_empty_bound_composer_picks(cx: &mut TestAppContext) {
+fn digit_in_an_empty_bound_composer_picks_without_sending(cx: &mut TestAppContext) {
     let (_dir, ws, mut vcx) = keyed_workspace(cx);
     let pane = add_pane(&ws, &mut vcx);
     let mut probes = connect(&ws, &mut vcx, pane, &[1]);
@@ -89,11 +91,15 @@ fn digit_in_an_empty_bound_composer_picks(cx: &mut TestAppContext) {
 
     keys(&mut vcx, "2");
 
-    assert_eq!(probes[0].answer(), color_answer("blue"));
+    assert_eq!(probes[0].answer(), None, "a digit alone sends nothing");
     assert_eq!(composer_text(&ws, &mut vcx), "", "the digit is not typed");
+
+    keys(&mut vcx, "enter");
+
+    assert_eq!(probes[0].answer(), color_answer("blue"));
 }
 
-/// D6: a digit is a choice only in an empty bound composer; with text, or
+/// A digit is a choice only in an empty bound composer; with text, or
 /// released, it is a character like any other.
 #[gpui::test]
 fn digit_in_a_non_empty_composer_types(cx: &mut TestAppContext) {
@@ -271,7 +277,7 @@ fn empty_enter_picks_the_highlighted_row_before_resuming_the_queue(cx: &mut Test
     });
 }
 
-/// Spec 7.1: typing ends keyboard choosing, so text typed and deleted again
+/// Typing ends keyboard choosing, so text typed and deleted again
 /// leaves no row for an empty Enter to pick.
 #[gpui::test]
 fn typing_clears_the_highlight(cx: &mut TestAppContext) {
@@ -302,7 +308,7 @@ fn send_lit(ws: &Entity<Workspace>, vcx: &mut VisualTestContext, pane: PaneId) -
     })
 }
 
-/// Spec 7.2: Tab on the last field commits its text and lights send, which
+/// Tab on the last field commits its text and lights send, which
 /// holds no text; Shift+Tab brings the field and its text back, and Enter
 /// on send sends what the button would.
 #[gpui::test]

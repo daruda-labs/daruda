@@ -19,7 +19,7 @@ mod ops;
 mod record;
 
 pub use countdown::QuestionCountdown;
-pub(crate) use draft::{QuestionDraft, companion_key, picks_answer, primary_fields};
+pub(crate) use draft::{QuestionDraft, companion_key, field_header, picks_answer, primary_fields};
 pub(crate) use record::{QuestionOutcome, QuestionRecord};
 
 /// Open questions, oldest first, and the settled ones by tool call id.
@@ -272,6 +272,12 @@ impl OpenQuestion {
             return false;
         };
         self.draft.commit_text(&key, text);
+        if !text.trim().is_empty()
+            && let Some(primary) = primary_fields(&self.request).nth(field)
+        {
+            let primary = primary.key.clone();
+            self.draft.confirm(&primary);
+        }
         if self.composer.is_bound() {
             self.composer = ComposerBinding::Bound {
                 draft_became_answer: false,

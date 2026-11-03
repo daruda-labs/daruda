@@ -678,7 +678,7 @@ async fn a_config_edit_moves_live_sessions_off_unpicked_defaults(cx: &mut TestAp
     assert_eq!(probes[1].drain().0, 1, "only the model is requested");
 }
 
-/// S6-b, Q17: a pane is born on its agent's question timeout, else the
+/// A pane is born on its agent's question timeout, else the
 /// global one, and follows a config reload.
 #[gpui::test]
 async fn a_pane_follows_its_agents_question_timeout_from_birth_through_reload(

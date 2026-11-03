@@ -410,7 +410,11 @@ fn actions(
                         .selected(true)
                         .disabled(!ready)
                         .debug_selector(move || submit.clone())
-                        .on_click(cx.listener(move |view, _, _, cx| view.submit_question(id, cx))),
+                        .on_click(
+                            cx.listener(move |view, _, _, cx| {
+                                view.submit_question_from_card(id, cx)
+                            }),
+                        ),
                     ),
             )
         })

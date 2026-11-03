@@ -40,11 +40,11 @@ pub(crate) enum QuestionShot {
     /// filtered out: the card stays on screen through both.
     Folded,
     /// The pending form with the composer bound to its first field, and a
-    /// second question waiting behind it (E3): the question strip with its
+    /// second question waiting behind it: the question strip with its
     /// "+1 waiting", the answer placeholder and the "Answer" button.
     Composer,
     /// The pending form released, with a prompt Enter held back: the
-    /// strip's E22 warning and its two ways out.
+    /// strip's held-prompt warning and its two ways out.
     BlockedPrompt,
     /// [`Self::Composer`] with the answer timeout in its last half minute:
     /// the time left on the card header and the strip, drawn heavier.

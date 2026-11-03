@@ -7,7 +7,7 @@ use daruda_store::project::PaneCwd;
 use gpui::{Bounds, Pixels};
 
 use super::super::session_config::SessionConfig;
-use super::questions::{ComposerBinding, primary_fields};
+use super::questions::{ComposerBinding, field_header, primary_fields};
 use super::{AgentChatView, AgentSessionStatus, PromptId, PromptQueue, QueuedPrompt};
 
 /// Longest question text a run report carries.
@@ -24,7 +24,7 @@ pub struct QuestionComposer {
     pub field: usize,
     /// `(field + 1, primary field count)`, for "1/2".
     pub position: (usize, usize),
-    /// Open questions on this pane behind this one (E3), for "+1 waiting".
+    /// Open questions on this pane behind this one, for "+1 waiting".
     pub waiting_after: usize,
     /// The focused field's title, or the question's message when it has
     /// none; the agent's words, verbatim.
@@ -47,11 +47,7 @@ pub struct QuestionComposer {
 /// `request` in one line: its first field's title, or its message when that
 /// field has none, cut to [`QUESTION_SUMMARY_MAX_CHARS`].
 pub fn question_summary(request: &daruda_acp::QuestionRequest) -> String {
-    let text = primary_fields(request)
-        .next()
-        .and_then(|f| f.title.as_deref())
-        .filter(|title| !title.is_empty())
-        .unwrap_or(&request.message);
+    let text = field_header(request, primary_fields(request).next());
     let (prefix, cut) = daruda_core::text::char_prefix(text, QUESTION_SUMMARY_MAX_CHARS);
     if cut {
         format!("{prefix}…")
@@ -157,10 +153,7 @@ impl AgentChatView {
     pub fn question_composer(&self) -> Option<QuestionComposer> {
         let question = self.questions.first()?;
         let field = question.focused_field();
-        let header = field
-            .and_then(|f| f.title.as_deref())
-            .filter(|title| !title.is_empty())
-            .unwrap_or(&question.request.message);
+        let header = field_header(&question.request, field);
         Some(QuestionComposer {
             question_id: question.id,
             field: question.focus.field,

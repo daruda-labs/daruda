@@ -53,10 +53,9 @@ impl AgentChatView {
                 return false;
             }
             // The host empties the composer once the text is taken, after this
-            // returns; the hint must say so now for the next question to bind.
-            view.composer_hint_empty = true;
+            // returns, so the next question may bind it.
             if field + 1 == question.primary_count() && question.all_answered() {
-                view.submit_filled(id, AnswerSource::Desktop, cx);
+                view.submit_with(id, AnswerSource::Desktop, true, cx);
                 return true;
             }
             question.advance_after_text(field);
@@ -119,6 +118,8 @@ impl AgentChatView {
             question.composer = ComposerBinding::Bound {
                 draft_became_answer: draft_present && !question.composer.is_bound(),
             };
+            // The person asked for the composer: they are answering.
+            question.stop_countdown();
             if target != question.focus.field {
                 question.focus = QuestionFocus {
                     field: target,

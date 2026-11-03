@@ -1,9 +1,10 @@
 //! Keeping the composer, each pane's draft hint, and the strip's marks in
 //! line with the question a pane's composer answers.
 
+use daruda_chat::view::QuestionComposer;
 use gpui::{App, Context, Window};
 
-use super::{AnsweredQuestion, BoundField};
+use super::{AnsweredQuestion, BoundField, QuestionPlaceholder};
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -21,8 +22,8 @@ impl Workspace {
         let has_text = !self.input_dock.input.read(cx).value().is_empty();
         let gained_text = has_text && !self.input_dock.question.composer_has_text;
         self.input_dock.question.composer_has_text = has_text;
-        // Spec 7.1: typing ends keyboard choosing. Before the field follows,
-        // so text typed on the send button stays with the last field.
+        // Typing ends keyboard choosing. Before the field follows, so text
+        // typed on the send button stays with the last field.
         if gained_text
             && let Some((pane, question)) = self.focused_question(cx).filter(|(_, q)| q.bound)
             && let Some(view) = self.agent_chat_view(pane).cloned()
@@ -33,11 +34,13 @@ impl Workspace {
         }
         self.follow_bound_field(focused, window, cx);
         self.sync_composer_hints(cx);
-        self.note_answer_text(cx);
-        if self.drop_stale_question_marks(cx) {
+        // Read once, after the steps above that may move the question.
+        let question = self.focused_question(cx);
+        self.note_answer_text(question.as_ref(), cx);
+        if self.drop_stale_question_marks(question.as_ref(), cx) {
             cx.notify();
         }
-        let placeholder = self.focused_question_placeholder(cx);
+        let placeholder = QuestionPlaceholder::of(question.as_ref().map(|(_, q)| q));
         if placeholder != self.input_dock.question.placeholder {
             self.input_dock.question.placeholder = placeholder;
             self.apply_input_placeholder(window, cx);
@@ -55,15 +58,20 @@ impl Workspace {
         self.sync_question_composer(window, cx);
     }
 
-    /// Refresh the empty-draft hint of the owner's visible text and of
-    /// every saved draft, which a field swap may rewrite.
+    /// Refresh the empty-draft hint of the owner's visible text. When the
+    /// owner changed, every saved draft is refreshed too: the old owner's
+    /// text has just become one.
     fn sync_composer_hints(&mut self, cx: &mut Context<Self>) {
-        let panes: Vec<PaneId> = self
-            .input_dock
-            .owner
-            .into_iter()
-            .chain(self.input_dock.drafts.keys().copied())
-            .collect();
+        let owner = self.input_dock.owner;
+        let panes: Vec<PaneId> = if owner == self.input_dock.question.hinted_owner {
+            owner.into_iter().collect()
+        } else {
+            owner
+                .into_iter()
+                .chain(self.input_dock.drafts.keys().copied())
+                .collect()
+        };
+        self.input_dock.question.hinted_owner = owner;
         for pane in panes {
             self.sync_composer_hint(pane, cx);
         }
@@ -72,21 +80,28 @@ impl Workspace {
     /// The one update site of `pane`'s empty-draft hint.
     fn sync_composer_hint(&mut self, pane: PaneId, cx: &mut Context<Self>) {
         if let Some(view) = self.agent_chat_view(pane).cloned() {
-            let empty = self.pane_composer_text(pane, cx).trim().is_empty();
+            let empty = if self.input_dock.owner == Some(pane) {
+                self.input_dock.input.read(cx).value().trim().is_empty()
+            } else {
+                self.input_dock
+                    .drafts
+                    .get(&pane)
+                    .is_none_or(|draft| draft.trim().is_empty())
+            };
             view.update(cx, |v, cx| v.set_composer_hint_empty(empty, cx));
         }
     }
 
     /// Remember that the owner's text was typed while bound: it stays that
     /// question's answer after a release. An emptied composer forgets.
-    fn note_answer_text(&mut self, cx: &App) {
+    fn note_answer_text(&mut self, question: Option<&(PaneId, QuestionComposer)>, cx: &App) {
         let Some(owner) = self.input_dock.owner else {
             return;
         };
         if self.input_dock.input.read(cx).value().trim().is_empty() {
             self.input_dock.question.answer_text.remove(&owner);
-        } else if let Some((pane, q)) = self.focused_question(cx)
-            && pane == owner
+        } else if let Some((pane, q)) = question
+            && *pane == owner
             && q.bound
             && let Some(view) = self.agent_chat_view(owner)
         {
@@ -98,7 +113,7 @@ impl Workspace {
         }
     }
 
-    /// T4: when `pane`'s bound field moved since the last sync, the text it
+    /// When `pane`'s bound field moved since the last sync, the text it
     /// holds was typed for the old field. Commit it there, then load the new
     /// field's committed answer, so text never follows focus.
     fn follow_bound_field(&mut self, pane: PaneId, window: &mut Window, cx: &mut Context<Self>) {
@@ -166,7 +181,7 @@ impl Workspace {
 
     /// The composer text `pane` holds: the visible one when it owns the
     /// composer, its saved draft otherwise.
-    fn pane_composer_text(&self, pane: PaneId, cx: &App) -> String {
+    pub(super) fn pane_composer_text(&self, pane: PaneId, cx: &App) -> String {
         if self.input_dock.owner == Some(pane) {
             self.input_dock.input.read(cx).value().to_string()
         } else {
@@ -199,8 +214,8 @@ impl Workspace {
             } else {
                 self.input_dock.drafts.insert(pane, text.to_owned());
             }
-            // A removed draft drops out of `sync_composer_hints`, so the
-            // hint follows here or it would keep saying "typed".
+            // A saved draft changes outside `sync_composer_hints`, so its
+            // hint follows here.
             self.sync_composer_hint(pane, cx);
         }
     }
@@ -208,16 +223,21 @@ impl Workspace {
     /// Drop the held-back prompt once the composer no longer shows it for a
     /// released question, the Esc mark once its pane is not released, and
     /// the refusal once its field is not bound or the composer empties.
-    fn drop_stale_question_marks(&mut self, cx: &App) -> bool {
-        let question = self.focused_question(cx);
-        let focused = question
-            .as_ref()
-            .map(|(pane, q)| (*pane, q.question_id, q.bound));
+    fn drop_stale_question_marks(
+        &mut self,
+        question: Option<&(PaneId, QuestionComposer)>,
+        cx: &App,
+    ) -> bool {
+        let focused = question.map(|(pane, q)| (*pane, q.question_id, q.bound));
         let bound_field = question
-            .as_ref()
             .filter(|(_, q)| q.bound)
             .map(|(pane, q)| (*pane, BoundField::of(q)));
-        let composer = self.input_dock.input.read(cx).value().trim().to_owned();
+        let value = self.input_dock.input.read(cx).value();
+        let composer = value.trim();
+        // A held prompt of attachments alone is gone once they are.
+        let attachments = question
+            .and_then(|(pane, _)| self.agent_chat_view(*pane))
+            .is_some_and(|view| !view.read(cx).draft_attachments().is_empty());
         let marks = &mut self.input_dock.question;
         let mut changed = false;
         if marks.text_refused.is_some()
@@ -228,7 +248,8 @@ impl Workspace {
         }
         if let Some(blocked) = &marks.blocked_prompt
             && (focused != Some((blocked.pane, blocked.question_id, false))
-                || composer != blocked.text)
+                || composer != blocked.text.as_str()
+                || (blocked.text.is_empty() && !attachments))
         {
             marks.blocked_prompt = None;
             changed = true;
@@ -242,6 +263,3 @@ impl Workspace {
         changed
     }
 }
-
-#[cfg(test)]
-mod tests {}

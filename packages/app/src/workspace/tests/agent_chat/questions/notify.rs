@@ -31,7 +31,7 @@ fn shown_bodies() -> Vec<String> {
         .collect()
 }
 
-/// §0 S2: a question in a pane off screen notifies once, naming the agent
+/// A question in a pane off screen notifies once, naming the agent
 /// and the question; one in the pane being looked at is skipped exactly when
 /// a permission request there would be.
 #[gpui::test]

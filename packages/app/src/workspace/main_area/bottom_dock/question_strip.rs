@@ -3,7 +3,7 @@
 //! names the question the composer's Enter answers, or says why Enter took
 //! no text; released, it offers to
 //! answer; after a held-back prompt, it warns that the prompt would wait
-//! behind the question (E22) and offers D8's two ways out. A pure builder
+//! behind the question and offers its two ways out. A pure builder
 //! over [`BottomDockSnapshot::question`]; buttons dispatch named operations.
 
 use gpui::{
@@ -102,7 +102,7 @@ pub(super) fn render(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> Optio
             .text_color(subtle)
             .child(SharedString::from(s::bottom_dock::question_esc_again()))
     });
-    // E3: other questions behind this one. Its own segment, so the narrow
+    // Other questions behind this one. Its own segment, so the narrow
     // strip keeps it after the message truncates.
     let waiting_after = waiting_after_label(strip, warn).map(|label| {
         div()
@@ -129,7 +129,7 @@ pub(super) fn render(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> Optio
             .text_color(subtle)
             .child(SharedString::from(BOUND_GLYPH))
     });
-    // The width decides the narrow layout (E21); recording it is the layout
+    // The width decides the narrow layout; recording it is the layout
     // geometry caching `canvas` exists for.
     let width_capture = {
         let ws = snap.workspace.clone();
@@ -278,7 +278,7 @@ mod tests {
         assert_eq!(header_line(""), "");
     }
 
-    /// E21: a narrow strip keeps "question i/N" and drops the header.
+    /// A narrow strip keeps "question i/N" and drops the header.
     #[test]
     fn a_narrow_strip_drops_the_header_but_keeps_the_position() {
         let strip = strip(0);
@@ -290,7 +290,7 @@ mod tests {
         assert!(narrow.contains(&crate::surface::strings::bottom_dock::question_note_hint()));
     }
 
-    /// E3: the strip counts the questions waiting behind this one, and says
+    /// The strip counts the questions waiting behind this one, and says
     /// nothing when it is the only one or a warning takes the line.
     #[test]
     fn the_strip_counts_questions_waiting_behind() {

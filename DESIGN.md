@@ -1062,7 +1062,7 @@ padding:    sm (8px)
   included) they type, and typing puts the highlight out.
   When the answer timeout runs, the bound line ends with `· 4:12 left`,
   heavier in its last half minute as on the card. Other open questions on the
-  pane add `· +1 waiting` (E3), a segment of its own so a narrow strip keeps
+  pane add `· +1 waiting`, a segment of its own so a narrow strip keeps
   it; the strip always names the oldest question, the one the composer takes.
   Released: "A question is waiting" with [✎ Answer]. A prompt held back
   behind the question turns it into a warning (banner-warning tones) with
