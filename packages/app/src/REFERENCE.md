@@ -219,6 +219,20 @@ the 64 most recent settled message ids prevent competing stale edits. A stale
 tap on an untracked message loses its buttons. Workspace only updates its
 pane-local permission presentation.
 
+An agent's question reaches the phone one field per card
+(`CardId::Question { pane, question, step }`), offered at arrival and by the
+same level-triggered sweep as a permission wait. A tap, or a text reply to the
+card, answers the field the card names (`respond_bot_question`), never the
+desktop's focus, composer binding or uncommitted text. An optional field's
+card can leave just that field blank ("Skip this one"); "Skip all" declines
+the form. A taken answer retires the question's cards and sends the next
+field's; the last one sends the form through the desktop's gate. A reply to
+a retired card is refused as stale. The view's single settle path makes the first
+answer win, and `AgentChatEvent::QuestionSettled` edits every card left with
+how it ended, naming the desktop when it answered first. A phone-started turn
+keeps its question for the phone; a task run the orchestrator or phone started
+still declines it.
+
 `control/approval` owns the process-wide pending decision. The orchestrator's
 host-owned card strip remains answerable without a remote channel. Desktop and
 eligible remote cards share the first answer; settlement edits remote cards and

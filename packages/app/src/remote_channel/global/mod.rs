@@ -203,7 +203,7 @@ impl RemoteChannels {
                 pane,
                 header,
                 tail: MessageTail::Plain(tail),
-                permission: None,
+                prompt: None,
             },
             delivery,
             cx,

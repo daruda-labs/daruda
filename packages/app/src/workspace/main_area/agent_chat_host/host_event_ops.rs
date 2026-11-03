@@ -30,6 +30,13 @@ impl Workspace {
         view.update(cx, |_, cx| {
             cx.on_release(move |view, cx| {
                 crate::remote_channel::settle_permissions(pane_ref, view.permission_session(), cx);
+                crate::remote_channel::settle_questions(
+                    pane_ref,
+                    view.permission_session(),
+                    None,
+                    &crate::surface::strings::notification::telegram_question_cancelled(),
+                    cx,
+                );
                 crate::runs::RunsHost::release_execution(
                     pane,
                     daruda_store::tasks::machine::UndeliveredReason::PaneClosed,
@@ -78,8 +85,23 @@ impl Workspace {
                 uri: uri.clone(),
                 mime: mime.clone(),
             }),
+            AgentChatEvent::QuestionComposerChanged => {
+                self.question_composer_changed(pane_id, window, cx);
+            }
+            AgentChatEvent::FocusComposer {
+                question_id,
+                prefill,
+            } => {
+                self.focus_composer_for_question(pane_id, *question_id, prefill.clone(), window, cx)
+            }
+            AgentChatEvent::QuestionSettled {
+                end: daruda_chat::view::QuestionEnd::Expired,
+                question,
+                ..
+            } => self.notify_question_expired(pane_id, question, cx),
             AgentChatEvent::HostCardChosen { .. }
             | AgentChatEvent::PermissionSettled { .. }
+            | AgentChatEvent::QuestionSettled { .. }
             | AgentChatEvent::PromptSent { .. }
             | AgentChatEvent::PersonPromptSent { .. }
             | AgentChatEvent::PromptsDropped { .. } => {}
@@ -118,6 +140,16 @@ fn on_app_chat_event(
                 cx,
             );
         }
+        AgentChatEvent::QuestionSettled {
+            session,
+            question_id,
+            end,
+            from_phone,
+            ..
+        } => {
+            let label = question_settled_label(*end, *from_phone);
+            crate::remote_channel::settle_questions(pane, *session, Some(*question_id), &label, cx);
+        }
         AgentChatEvent::PromptSent { task, session_id } => {
             crate::runs::RunsHost::prompt_sent(task.clone(), session_id.clone(), cx)
         }
@@ -150,6 +182,23 @@ fn on_app_chat_event(
             }
         }
         _ => {}
+    }
+}
+
+/// What a question's phone card says once the question ends. An answer
+/// names the desktop when the desktop gave it, so the phone knows its own
+/// card lost the race.
+fn question_settled_label(end: daruda_chat::view::QuestionEnd, from_phone: bool) -> String {
+    use crate::surface::strings::notification as n;
+    use daruda_chat::view::QuestionEnd;
+    match end {
+        QuestionEnd::Answered if from_phone => n::telegram_question_answered(),
+        QuestionEnd::Answered => n::telegram_question_answered_on_desktop(),
+        QuestionEnd::Skipped => n::telegram_question_skipped(),
+        QuestionEnd::SkippedForPrompt => n::telegram_question_skipped_for_prompt(),
+        QuestionEnd::Cancelled => n::telegram_question_cancelled(),
+        QuestionEnd::Withdrawn => n::telegram_question_withdrawn(),
+        QuestionEnd::Expired => n::telegram_question_expired(),
     }
 }
 

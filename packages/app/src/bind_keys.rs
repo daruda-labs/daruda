@@ -24,7 +24,9 @@ use crate::workspace::{
     FocusSkillSearch, GitChangesActivate, GitChangesSelectNext, GitChangesSelectPrev,
     GitChangesToggleStage, InvokeSkillPalette, MinimizeWindow, MoveActiveProjectToGroup,
     MoveTabLeft, MoveTabRight, NewGroup, NewTab, NextTab, OpenCommandHistory, OpenSettings,
-    PrevTab, RenameActiveProject, SaveFilePane, SplitDown, SplitRight, ToggleBottomDock,
+    PrevTab, QuestionNextField, QuestionPick1, QuestionPick2, QuestionPick3, QuestionPick4,
+    QuestionPick5, QuestionPick6, QuestionPick7, QuestionPick8, QuestionPick9, QuestionPrevField,
+    QuestionToggle, RenameActiveProject, SaveFilePane, SplitDown, SplitRight, ToggleBottomDock,
     ToggleCommandPalette, ToggleFilesFocus, ToggleFullScreen, ToggleGitChangesFocus,
     ToggleLaneSwitcher, ToggleLeftDock, ToggleRightDock,
 };
@@ -271,6 +273,43 @@ pub(crate) fn register_static_bindings(cx: &mut App) {
     // in `slot_actions.rs` instead of nine across four files.
     cx.bind_keys(crate::tab_slot_table!(@bindings cx));
     cx.bind_keys(crate::lane_slot_table!(@bindings cx));
+    let question_bindings = question_answer_bindings(cx);
+    cx.bind_keys(question_bindings);
+}
+
+/// The composer's keys while it answers an agent's question. Each names
+/// `> Input` so it matches at the input's own depth, and registering after
+/// `gpui_component::init` puts it ahead of the input's Tab indent there.
+/// Digits and Space need an empty composer, which the IME's marked text
+/// also fills, so they never act mid-composition.
+fn question_answer_bindings(cx: &App) -> Vec<KeyBinding> {
+    const EMPTY: Option<&str> = Some("QuestionAnswerEmpty > Input");
+    const BOUND: Option<&str> = Some("QuestionAnswer > Input");
+    let pick = k::SHORTCUT_QUESTION_PICK;
+    vec![
+        binding(pick[0], QuestionPick1, EMPTY, cx),
+        binding(pick[1], QuestionPick2, EMPTY, cx),
+        binding(pick[2], QuestionPick3, EMPTY, cx),
+        binding(pick[3], QuestionPick4, EMPTY, cx),
+        binding(pick[4], QuestionPick5, EMPTY, cx),
+        binding(pick[5], QuestionPick6, EMPTY, cx),
+        binding(pick[6], QuestionPick7, EMPTY, cx),
+        binding(pick[7], QuestionPick8, EMPTY, cx),
+        binding(pick[8], QuestionPick9, EMPTY, cx),
+        binding(k::SHORTCUT_QUESTION_TOGGLE, QuestionToggle, EMPTY, cx),
+        binding(
+            k::SHORTCUT_QUESTION_NEXT_FIELD,
+            QuestionNextField,
+            BOUND,
+            cx,
+        ),
+        binding(
+            k::SHORTCUT_QUESTION_PREV_FIELD,
+            QuestionPrevField,
+            BOUND,
+            cx,
+        ),
+    ]
 }
 
 pub(crate) fn register_global_actions(cx: &mut App, config: std::sync::Arc<daruda_config::Config>) {

@@ -55,10 +55,10 @@ impl AgentChatView {
         self.phone_turn_state = None;
     }
 
-    /// A permission card went to the phone before this fold, so the wait is
-    /// answered without agent text — and the ledger stays open: the turn is
+    /// A permission or question card is what the phone hears next, so the
+    /// wait is answered without agent text — and the ledger stays open: the turn is
     /// still the phone's, and its completion is still owed.
-    pub(in crate::view) fn answer_phone_turn_for_permission(&mut self) {
+    pub(in crate::view) fn answer_phone_turn_for_card(&mut self) {
         // Whether this call answered is moot: the card already went out, so
         // no ack follows here either way.
         self.answer_phone_turn_without_agent_text();

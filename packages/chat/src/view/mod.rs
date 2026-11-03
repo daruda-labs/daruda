@@ -442,6 +442,10 @@ pub struct AgentChatView {
     pub(super) pending_permissions: HashSet<u64>,
     /// Questions the agent asked and waits on — see [`questions::Questions`].
     pub(super) questions: questions::Questions,
+    /// The host's word on whether the composer holds no prompt draft, which
+    /// decides whether an arriving question may take the composer. The view
+    /// does not own the composer, so it cannot look for itself.
+    pub(super) composer_hint_empty: bool,
     pub(super) permission_session: u64,
     /// Permission ids relayed to the current phone for this connection.
     /// Cleared on recipient change or session teardown; the periodic sweep
@@ -618,7 +622,7 @@ pub struct AgentChatView {
 }
 
 pub use crate::host_cards::{HostCard, HostCardAction};
-pub use event::{AgentChatEvent, PermissionOutcome, PromptDropReason};
+pub use event::{AgentChatEvent, PermissionOutcome, PromptDropReason, QuestionEnd};
 mod activity_types;
 pub(crate) use activity_types::{ActivitySpan, ToolSummaryStyle, TurnRecord};
 pub use activity_types::{ActivityState, ChatContentWidth, TurnOutcome};
@@ -646,6 +650,9 @@ mod attachments;
 mod event;
 mod host_commands;
 mod host_surface;
+pub use host_commands::{PhoneAnswerResult, PhoneQuestion, PhoneReply};
+pub use host_surface::{QuestionComposer, question_summary};
+pub use questions::QuestionCountdown;
 pub(super) mod list_sync;
 mod pane_choices;
 pub(crate) mod questions;

@@ -13,6 +13,7 @@
 //! a map allocation behind every response bar on the paint path, which the row
 //! walk's linearity guard rejects.
 
+use std::collections::HashSet;
 use std::ops::Range;
 
 use daruda_acp::ChatItem;
@@ -66,11 +67,42 @@ pub(super) fn run_active(items: &[ChatItem], run: Range<usize>) -> bool {
 pub(super) struct TranscriptStructure<'a> {
     items: &'a [ChatItem],
     hierarchy: &'a ToolHierarchy<'a>,
+    /// Top-level calls that are rows of their own and end any run they meet
+    /// (questions). View state rather than anything an item carries, so the
+    /// caller hands it in; without it every top-level call can join a run.
+    standalone: Option<&'a HashSet<String>>,
 }
 
 impl<'a> TranscriptStructure<'a> {
     pub(super) fn new(items: &'a [ChatItem], hierarchy: &'a ToolHierarchy<'a>) -> Self {
-        Self { items, hierarchy }
+        Self {
+            items,
+            hierarchy,
+            standalone: None,
+        }
+    }
+
+    /// The same structure with `ids` standing apart from tool runs.
+    pub(super) fn with_standalone(self, ids: &'a HashSet<String>) -> Self {
+        Self {
+            standalone: Some(ids),
+            ..self
+        }
+    }
+
+    /// Whether the item at `ix` is a top-level call that is a row of its own
+    /// instead of a tool run's member.
+    pub(super) fn stands_alone(&self, ix: usize) -> bool {
+        matches!(
+            (self.items.get(ix), self.standalone),
+            (Some(ChatItem::ToolCall(tc)), Some(ids))
+                if !self.hierarchy.is_nested_child(tc) && ids.contains(&tc.id)
+        )
+    }
+
+    /// Whether the item at `ix` is a top-level call a tool run holds.
+    pub(super) fn grouped_tool(&self, ix: usize) -> bool {
+        self.top_level_tool(ix) && !self.stands_alone(ix)
     }
 
     /// Whether the item at `ix` is a tool call that earns a row of its own.
@@ -97,12 +129,13 @@ impl<'a> TranscriptStructure<'a> {
 
     /// The stretch of top-level tool calls beginning at `start`, bounded by
     /// `limit`, ending at the first row-owning item that is neither a call nor a
-    /// thought — agents narrate before nearly every call. A passed-over item is
-    /// spanned, not a boundary, and the filter is never read, so it cannot split
-    /// a run. Ask [`Self::group_members`] for what the group holds.
+    /// thought — agents narrate before nearly every call — or at a standalone
+    /// call. A passed-over item is spanned, not a boundary, and the filter is
+    /// never read, so it cannot split a run. Ask [`Self::group_members`] for
+    /// what the group holds.
     pub(super) fn tool_run(&self, start: usize, limit: usize) -> Range<usize> {
         let mut k = start + 1;
-        while k < limit && (!self.owns_a_row(k) || self.top_level_tool(k) || self.is_thought(k)) {
+        while k < limit && (!self.owns_a_row(k) || self.grouped_tool(k) || self.is_thought(k)) {
             k += 1;
         }
         start..k
@@ -110,7 +143,7 @@ impl<'a> TranscriptStructure<'a> {
 
     /// The calls a run's group holds, without the thoughts between them.
     pub(super) fn group_calls(self, run: Range<usize>) -> impl Iterator<Item = usize> + Clone + 'a {
-        run.filter(move |&ix| self.top_level_tool(ix))
+        run.filter(move |&ix| self.grouped_tool(ix))
     }
 
     /// The thoughts a run's group holds, without its calls.
@@ -145,7 +178,7 @@ impl<'a> TranscriptStructure<'a> {
         let mut runs = 0;
         let mut k = run.start;
         while k < limit {
-            if self.top_level_tool(k) {
+            if self.grouped_tool(k) {
                 runs += 1;
                 k = self.tool_run(k, limit).end;
             } else {
@@ -317,6 +350,34 @@ mod tests {
         let s = TranscriptStructure::new(&prose, &h);
         assert_eq!(s.tool_run(0, prose.len()), 0..2, "prose ends the run");
         assert_eq!(s.top_level_tool_runs(0..prose.len()), 2);
+    }
+
+    /// A standalone call ends the run before it and is in none; the calls
+    /// after it start another. A nested one is not a row, so it splits nothing.
+    #[test]
+    fn a_standalone_call_splits_the_run_it_lands_in() {
+        let items = [
+            tool("a", None, false),
+            tool("q", None, false),
+            tool("b", None, false),
+        ];
+        let h = ToolHierarchy::build(&items);
+        let ids = HashSet::from(["q".to_owned()]);
+        let s = TranscriptStructure::new(&items, &h).with_standalone(&ids);
+        assert_eq!(s.tool_run(0, items.len()), 0..1);
+        assert!(s.stands_alone(1) && !s.grouped_tool(1));
+        assert_eq!(s.tool_run(2, items.len()), 2..3);
+        assert_eq!(s.top_level_tool_runs(0..items.len()), 2);
+
+        let nested = [
+            tool("a", None, false),
+            tool("q", Some("a"), false),
+            tool("b", None, false),
+        ];
+        let h = ToolHierarchy::build(&nested);
+        let s = TranscriptStructure::new(&nested, &h).with_standalone(&ids);
+        assert!(!s.stands_alone(1));
+        assert_eq!(s.tool_run(0, nested.len()), 0..3);
     }
 
     /// A range holding a live call reads active; the same range without one

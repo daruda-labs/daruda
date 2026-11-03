@@ -82,6 +82,10 @@ pub(super) fn text(setting: TextSetting) -> RowCopy {
             label: s::settings::label_input_max_rows,
             hint: s::settings::hint_input_max_rows,
         },
+        TextSetting::AgentQuestionTimeoutSecs => RowCopy {
+            label: s::settings::label_agent_question_timeout,
+            hint: s::settings::hint_agent_question_timeout,
+        },
         TextSetting::AgentReadingWidth => RowCopy {
             label: s::settings::label_reading_width,
             hint: String::new,

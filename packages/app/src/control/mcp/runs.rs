@@ -113,6 +113,7 @@ pub(super) fn convert(snapshot: domain::RunSnapshot) -> wire::RunResult {
             waiting_on: waiting_on.map(|waiting| match waiting {
                 domain::WaitingOn::Question { node } => wire::WaitingOn::Question { node },
                 domain::WaitingOn::Permission { tool } => wire::WaitingOn::Permission { tool },
+                domain::WaitingOn::Answer { question } => wire::WaitingOn::Answer { question },
             }),
         },
         domain::RunState::Ended {

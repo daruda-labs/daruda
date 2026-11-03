@@ -62,6 +62,10 @@ pub(super) fn prompt(events: &[RunEvent]) -> String {
                     || "Waiting for permission".into(),
                     |tool| format!("Waiting for permission: {}", single_line(tool)),
                 ),
+                RunState::Running {
+                    waiting_on: Some(WaitingOn::Answer { question }),
+                    ..
+                } => format!("Waiting for an answer: {}", single_line(question)),
                 _ => "State changed".into(),
             };
             format!(

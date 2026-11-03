@@ -306,6 +306,30 @@ impl RemoteChannels {
             Self::settle_card(&card, label, cx);
         }
     }
+
+    pub(crate) fn settle_questions(
+        pane: PaneRef,
+        session: u64,
+        question_id: Option<u64>,
+        label: &str,
+        cx: &mut App,
+    ) {
+        let cards: Vec<_> = cx
+            .try_global::<Self>()
+            .into_iter()
+            .flat_map(|bridge| bridge.connections.values())
+            .flat_map(|connection| {
+                connection
+                    .cards
+                    .borrow()
+                    .ledger()
+                    .questions(pane, session, question_id)
+            })
+            .collect();
+        for card in cards {
+            Self::settle_card(&card, label, cx);
+        }
+    }
 }
 
 /// Record what a send came to. A card that reached the person is kept as sent
@@ -334,10 +358,19 @@ pub(super) fn finish(
         return;
     };
     if live && let Some(pane) = pane {
+        let question = match pending.card.as_ref().map(|claim| &claim.card) {
+            Some(CardId::Question { question, step, .. }) => Some((*question, *step)),
+            _ => None,
+        };
         for id in &ids {
             connection
                 .core
                 .record_delivered(id.clone(), pane, orchestrator);
+            if let Some((question, step)) = question {
+                connection
+                    .core
+                    .record_question_sent(id.clone(), pane, question, step);
+            }
         }
     }
     if let Some(card) = &pending.card {

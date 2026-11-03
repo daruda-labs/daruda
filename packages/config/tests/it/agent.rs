@@ -1300,3 +1300,52 @@ fn every_preset_env_default_name_is_usable() {
         }
     }
 }
+
+/// Off unless stated: a question waits for its answer however long it takes.
+/// An agent's own value beats the global one, its `0` included.
+#[test]
+fn timeout_defaults_off_and_agent_overrides_global() {
+    use std::time::Duration;
+    let config = AgentConfig::default();
+    assert_eq!(config.question_timeout_secs, 0);
+    let agent = agent_with(None, None);
+    assert_eq!(config.question_timeout(Some(&agent)), None);
+    assert_eq!(config.question_timeout(None), None);
+
+    let config: AgentConfig = toml::from_str("question_timeout_secs = 300").expect("deserialize");
+    assert_eq!(
+        config.question_timeout(Some(&agent)),
+        Some(Duration::from_secs(300)),
+        "an agent stating nothing follows the global value"
+    );
+    assert_eq!(
+        config.question_timeout(None),
+        Some(Duration::from_secs(300))
+    );
+    let back: AgentConfig =
+        toml::from_str(&toml::to_string(&config).expect("serialize")).expect("deserialize");
+    assert_eq!(back.question_timeout_secs, 300);
+
+    let quick = AgentDefinition {
+        question_timeout_secs: Some(60),
+        ..agent.clone()
+    };
+    assert_eq!(
+        config.question_timeout(Some(&quick)),
+        Some(Duration::from_secs(60))
+    );
+    let never = AgentDefinition {
+        question_timeout_secs: Some(0),
+        ..agent
+    };
+    assert_eq!(
+        config.question_timeout(Some(&never)),
+        None,
+        "an agent's 0 turns the global timeout off for it"
+    );
+    assert_eq!(
+        AgentConfig::default().question_timeout(Some(&quick)),
+        Some(Duration::from_secs(60)),
+        "an agent may turn the timeout on alone"
+    );
+}

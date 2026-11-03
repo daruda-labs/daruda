@@ -64,10 +64,10 @@ pub(super) enum PhoneTurnAction {
     None,
     /// A Stop's cancel-ack landed — the turn is over and no relay is owed.
     Clear,
-    /// A permission card interrupted the turn. The card itself was relayed
-    /// as the phone's first sign of life (before this fold), so the wait is
-    /// answered — but the turn is still the phone's, and its completion is
-    /// still owed.
+    /// A permission card or a question interrupted the turn. The card is
+    /// what the phone hears next (the permission before this fold, the
+    /// question from the host's relay after it), so the wait is answered —
+    /// but the turn is still the phone's, and its completion is still owed.
     Answer,
     /// New conversation content arrived — check whether it resolves the
     /// armed watch.

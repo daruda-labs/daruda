@@ -43,6 +43,26 @@ pub enum BotPermissionOutcome {
     Gone,
 }
 
+/// Outcome of routing a phone answer to a question into its pane, so the
+/// poll loop can tell the phone what became of it. Set by
+/// `Workspace::respond_bot_question`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BotQuestionOutcome {
+    /// Taken; the next field's card is on its way.
+    Next,
+    /// A multi-select toggle; the same field's card is re-sent.
+    Updated,
+    /// Taken, and the form went to the agent.
+    Submitted,
+    Skipped,
+    /// The question was already answered, skipped or closed elsewhere.
+    AlreadySettled,
+    /// The field takes a button, not text; nothing changed.
+    TextNotTaken,
+    /// The target pane/view is gone.
+    Gone,
+}
+
 /// What the caller (the poll loop) should do with a routed update.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InboundAction {
@@ -67,6 +87,15 @@ pub enum InboundAction {
         perm_id: u64,
         decision: PermissionDecision,
     },
+    /// A tap on a question card, or a text reply to one.
+    RespondQuestion {
+        pane: PaneRef,
+        question: QuestionPromptRef,
+        reply: QuestionReply,
+    },
+    /// A text reply to a question card that was already settled or
+    /// superseded by a later card. Answered like a stale tap.
+    StaleQuestion,
     /// A parsed command awaiting execution. Resolution of any ordinal happens
     /// in the executor, which owns `CommandState`.
     RunCommand {
@@ -229,6 +258,51 @@ pub struct PermissionPromptRef {
     pub buttons: Vec<(String, PermissionDecision)>,
 }
 
+/// The one field of an agent's question a phone card answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct QuestionPromptRef {
+    pub session: u64,
+    pub question_id: u64,
+    /// Index among the question's primary fields.
+    pub field: usize,
+}
+
+/// What a button on a question card means. Text never rides on a button: it
+/// arrives as a reply to the card, so it is only a [`QuestionReply`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuestionButton {
+    /// Choice `n` of the field, in card order.
+    Option(usize),
+    /// Done with a multi-select field.
+    Send,
+    /// Leave this optional field blank and move on.
+    SkipField,
+    /// Decline the whole question.
+    Skip,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QuestionReply {
+    Button(QuestionButton),
+    Text(String),
+}
+
+/// A question card: the field it answers, a step distinct per card sent (a
+/// re-sent field is a new card), and rows of pre-localized buttons.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuestionPrompt {
+    pub question: QuestionPromptRef,
+    pub step: u64,
+    pub rows: Vec<Vec<(String, QuestionButton)>>,
+}
+
+/// The buttons a pane's ping carries, when it asks for a decision.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PingPrompt {
+    Permission(PermissionPromptRef),
+    Question(QuestionPrompt),
+}
+
 /// The event-specific trailing content of a ping, kept separate from the
 /// always-plain `header`. Only some pings carry genuine agent-authored
 /// markdown safe to run through a transport's markdown translation; plain
@@ -275,10 +349,17 @@ impl Outbound {
                 run_dir: prompt.run_dir.clone(),
                 ask_id: prompt.ask_id,
             }),
-            Self::Ping(ping) => ping.permission.as_ref().map(|prompt| CardId::Permission {
-                pane: ping.pane,
-                session: prompt.session,
-                request: prompt.perm_id,
+            Self::Ping(ping) => ping.prompt.as_ref().map(|prompt| match prompt {
+                PingPrompt::Permission(prompt) => CardId::Permission {
+                    pane: ping.pane,
+                    session: prompt.session,
+                    request: prompt.perm_id,
+                },
+                PingPrompt::Question(prompt) => CardId::Question {
+                    pane: ping.pane,
+                    question: prompt.question,
+                    step: prompt.step,
+                },
             }),
             Self::Notice(_) => None,
         }
@@ -287,15 +368,26 @@ impl Outbound {
 
 /// A ping to relay to the phone. `header` and `tail` are pre-formatted,
 /// already-localized text whose content `BridgeCore` treats as opaque —
-/// it only cares which `MessageTail` variant `tail` is. `permission`
-/// is `Some` only for a permission-wait ping (one button per option),
+/// it only cares which `MessageTail` variant `tail` is. `prompt` is `Some`
+/// only for a ping that asks for a decision (a permission or a question),
 /// `None` for a plain completion ping.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgePing {
     pub pane: PaneRef,
     pub header: String,
     pub tail: MessageTail,
-    pub permission: Option<PermissionPromptRef>,
+    pub prompt: Option<PingPrompt>,
+}
+
+#[cfg(test)]
+impl BridgePing {
+    /// The permission buttons, when this ping asks for a permission.
+    pub(crate) fn permission(&self) -> Option<&PermissionPromptRef> {
+        match &self.prompt {
+            Some(PingPrompt::Permission(prompt)) => Some(prompt),
+            _ => None,
+        }
+    }
 }
 
 /// A pending approval, ready to send. The two tokens are already registered

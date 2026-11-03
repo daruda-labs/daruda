@@ -313,6 +313,10 @@ pub enum AcpEvent {
         id: u64,
         question: crate::question::QuestionRequest,
     },
+    /// The agent took a question back with `$/cancel_request`. The question
+    /// with this `id` is no longer open; a later
+    /// [`AcpSessionHandle::respond_question`] for it is a no-op.
+    QuestionWithdrawn { id: u64 },
     /// A `session/prompt` turn completed; carries the protocol stop reason.
     /// `completed_normally` distinguishes a normal completion (any stop reason
     /// other than `Cancelled`) from a client-initiated cancellation, so the host

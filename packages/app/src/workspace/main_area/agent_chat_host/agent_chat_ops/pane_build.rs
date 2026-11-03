@@ -28,6 +28,18 @@ impl Workspace {
         )
     }
 
+    /// How long a question from `agent_id` may wait untouched: its catalog
+    /// entry's own value, else the global one. Applied at pane creation, on
+    /// an agent switch and on every config reload.
+    pub(in crate::workspace) fn question_timeout_for(
+        &self,
+        agent_id: &str,
+    ) -> Option<std::time::Duration> {
+        self.mirrors
+            .agent
+            .question_timeout(self.mirrors.agents.iter().find(|a| a.id == agent_id))
+    }
+
     /// Construct an Agent chat `Pane` (no tab side-effects), parked `Idle` (or
     /// `Error` with no lane cwd). The live ACP session is *not* started here —
     /// `focus_pane` connects it lazily on first focus, so cold restore doesn't
@@ -136,7 +148,11 @@ impl Workspace {
         });
         self.subscribe_agent_chat(pane_id, &view, window, cx);
         let preferred_editor = self.mirrors.preferred_editor.clone();
-        view.update(cx, |view, _| view.set_preferred_editor(&preferred_editor));
+        let question_timeout = self.question_timeout_for(&agent_id);
+        view.update(cx, |view, cx| {
+            view.set_preferred_editor(&preferred_editor);
+            view.set_question_timeout(question_timeout, cx);
+        });
         Pane {
             id: pane_id,
             content: PaneContent::AgentChat(AgentChatContent {

@@ -138,6 +138,7 @@ fn coverage_of(patch: &SettingsPatch) -> Coverage {
         | SettingsPatch::PresenceIdleForegroundSecs(_)
         | SettingsPatch::AgentInputMaxRows(_)
         | SettingsPatch::AgentReadingWidth(_)
+        | SettingsPatch::AgentQuestionTimeoutSecs(_)
         | SettingsPatch::FlowTimeoutMinutes(_)
         | SettingsPatch::FlowMaxNodeRuns(_)
         | SettingsPatch::FlowMaxCost(_)

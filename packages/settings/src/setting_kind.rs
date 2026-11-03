@@ -28,6 +28,7 @@ pub(crate) enum TextSetting {
     PresenceIdleForegroundSecs,
     AgentInputMaxRows,
     AgentReadingWidth,
+    AgentQuestionTimeoutSecs,
     FlowTimeoutMinutes,
     FlowMaxNodeRuns,
     FlowMaxCost,
@@ -119,7 +120,7 @@ pub(crate) enum BoolSetting {
 // click of the new widget.
 impl TextSetting {
     #[cfg(test)]
-    pub(crate) const ALL: [Self; 33] = [
+    pub(crate) const ALL: [Self; 34] = [
         Self::TerminalFontSize,
         Self::TerminalLineHeight,
         Self::TerminalCellWidth,
@@ -145,6 +146,7 @@ impl TextSetting {
         Self::PresenceIdleForegroundSecs,
         Self::AgentInputMaxRows,
         Self::AgentReadingWidth,
+        Self::AgentQuestionTimeoutSecs,
         Self::FlowTimeoutMinutes,
         Self::FlowMaxNodeRuns,
         Self::FlowMaxCost,
@@ -185,6 +187,7 @@ impl TextSetting {
             Self::PresenceIdleForegroundSecs => (),
             Self::AgentInputMaxRows => (),
             Self::AgentReadingWidth => (),
+            Self::AgentQuestionTimeoutSecs => (),
             Self::FlowTimeoutMinutes => (),
             Self::FlowMaxNodeRuns => (),
             Self::FlowMaxCost => (),

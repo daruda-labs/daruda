@@ -21,6 +21,17 @@ pub struct QuestionRequest {
     /// The tool call that asked, when the agent named one.
     pub tool_call_id: Option<String>,
     pub fields: Vec<QuestionField>,
+    pub delivery: QuestionDelivery,
+}
+
+/// How a question holds the agent.
+///
+/// Only `Blocking` exists today: the turn waits on the answer. This is the
+/// slot for a non-blocking question, which codex-acp's
+/// `request_user_input_async` would send without parking the turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuestionDelivery {
+    Blocking,
 }
 
 /// One answer slot of a question, in the agent's order.
@@ -35,6 +46,8 @@ pub struct QuestionField {
     /// The select field this free-text field supplements ("Other"), when the
     /// agent marked it as one. Rendered under that field rather than alone.
     pub companion_of: Option<String>,
+    /// The agent's pre-filled answer, when the schema carried one.
+    pub default: Option<QuestionValue>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,7 +78,7 @@ pub enum QuestionAnswer {
     Cancel,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QuestionValue {
     Text(String),
     Choices(Vec<String>),
@@ -107,6 +120,7 @@ impl QuestionRequest {
             message: request.message.clone(),
             tool_call_id,
             fields: ordered(fields),
+            delivery: QuestionDelivery::Blocking,
         })
     }
 }
@@ -143,7 +157,7 @@ fn field_of(
     property: &ElicitationPropertySchema,
     required: bool,
 ) -> Option<QuestionField> {
-    let (title, description, kind, meta) = match property {
+    let (title, description, kind, meta, default) = match property {
         ElicitationPropertySchema::String(s) => {
             let kind = match (&s.one_of, &s.enum_values) {
                 (Some(options), _) => QuestionFieldKind::SingleSelect(options_of(options)),
@@ -152,7 +166,12 @@ fn field_of(
                 ),
                 (None, None) => QuestionFieldKind::Text,
             };
-            (&s.title, &s.description, kind, s.meta.as_ref())
+            let default = s
+                .default
+                .clone()
+                .map(QuestionValue::Text)
+                .filter(|d| in_options(&kind, d));
+            (&s.title, &s.description, kind, s.meta.as_ref(), default)
         }
         ElicitationPropertySchema::Array(a) => {
             let options = match &a.items {
@@ -162,11 +181,13 @@ fn field_of(
                 }
                 _ => return None,
             };
+            let default = a.default.clone().map(QuestionValue::Choices);
             (
                 &a.title,
                 &a.description,
                 QuestionFieldKind::MultiSelect(options),
                 a.meta.as_ref(),
+                default,
             )
         }
         ElicitationPropertySchema::Boolean(b) => (
@@ -174,6 +195,7 @@ fn field_of(
             &b.description,
             QuestionFieldKind::Boolean,
             b.meta.as_ref(),
+            b.default.map(QuestionValue::Bool),
         ),
         _ => return None,
     };
@@ -190,7 +212,19 @@ fn field_of(
             .then(|| custom_answer_target(meta))
             .flatten(),
         kind,
+        default,
     })
+}
+
+/// A single-select default must name an offered option; a free-text field
+/// accepts any default.
+fn in_options(kind: &QuestionFieldKind, default: &QuestionValue) -> bool {
+    match (kind, default) {
+        (QuestionFieldKind::SingleSelect(options), QuestionValue::Text(value)) => {
+            options.iter().any(|o| o.value == *value)
+        }
+        _ => true,
+    }
 }
 
 fn options_of(options: &[EnumOption]) -> Vec<QuestionOption> {

@@ -67,6 +67,25 @@ pub(crate) fn settle_permissions(pane: bridge::PaneRef, session: u64, cx: &mut g
     global::RemoteChannels::settle_permissions(pane, session, &label, cx);
 }
 
+/// Settle every phone card still offering question `question_id` of `pane`'s
+/// session (every question when `None`), on every channel, with `label`.
+pub(crate) fn settle_questions(
+    pane: bridge::PaneRef,
+    session: u64,
+    question_id: Option<u64>,
+    label: &str,
+    cx: &mut gpui::App,
+) {
+    crate::telegram::global::TelegramBridge::settle_questions(
+        pane,
+        session,
+        question_id,
+        label,
+        cx,
+    );
+    global::RemoteChannels::settle_questions(pane, session, question_id, label, cx);
+}
+
 /// Introduce a chat on eligible channels. Explicit, solicited delivery selects
 /// the chat and records its ping; presence-based delivery is only a Notice,
 /// preserving selection and reply routing. Best effort by design: the request has

@@ -131,6 +131,12 @@ impl SettingsView {
                     }
                 })
             })?;
+            let question_timeout_secs = question_timeout_override(
+                &row.question_timeout_input.read(cx).value(),
+            )
+            .map_err(|()| {
+                SharedString::from(s::settings::err_agent_catalog_question_timeout(ordinal))
+            })?;
             let entry = daruda_config::AgentEntry::for_definition(
                 daruda_config::AgentDefinition {
                     default_mode: row.default_mode(cx),
@@ -139,6 +145,7 @@ impl SettingsView {
                     tail_window: row.tail_window(cx),
                     tail_window_calls: row.tail_window_calls(cx),
                     display_filter: row.display_filter(),
+                    question_timeout_secs,
                     env,
                     ..daruda_config::AgentDefinition::new(id, name, launch)
                 },

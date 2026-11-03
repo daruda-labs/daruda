@@ -1,5 +1,10 @@
-//! Who a mid-turn question is shown to: the desktop form for a turn started
-//! here, the agent's own reply for a turn started away from it.
+//! Who a mid-turn question is shown to: the desktop form, and the phone's
+//! card for a turn the phone started.
+
+mod composer;
+mod keys;
+mod notify;
+mod timeout;
 
 use gpui::{AppContext as _, TestAppContext};
 
@@ -7,8 +12,7 @@ use super::super::build_workspace_with;
 use crate::workspace::main_area::pane::TabEntry;
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 use daruda_acp::{
-    AcpEvent, AcpSessionHandle, QuestionAnswer, QuestionField, QuestionFieldKind, QuestionOption,
-    QuestionRequest,
+    AcpEvent, AcpSessionHandle, QuestionField, QuestionFieldKind, QuestionOption, QuestionRequest,
 };
 use daruda_chat::view::AgentSessionStatus;
 
@@ -16,6 +20,7 @@ fn question() -> QuestionRequest {
     QuestionRequest {
         message: "Which color?".into(),
         tool_call_id: None,
+        delivery: daruda_acp::QuestionDelivery::Blocking,
         fields: vec![QuestionField {
             key: "question_0".into(),
             title: None,
@@ -27,6 +32,7 @@ fn question() -> QuestionRequest {
                 description: None,
             }]),
             companion_of: None,
+            default: None,
         }],
     }
 }
@@ -114,11 +120,20 @@ fn a_desktop_turn_shows_the_question(cx: &mut TestAppContext) {
     assert_eq!(answer.answer(), None, "it waits for the person");
 }
 
-/// The phone cannot fill the form, so the agent is told to ask in its reply,
-/// which the relay already carries back.
+/// A phone-started turn keeps its question: the relay sends it to the phone
+/// as a card, and the card is the turn's first answer there, so no fallback
+/// ack follows it.
 #[gpui::test]
-fn a_phone_turn_declines_the_question(cx: &mut TestAppContext) {
+fn a_phone_turn_keeps_the_question_for_the_phone(cx: &mut TestAppContext) {
     let (_dir, ws, pane, mut answer) = asked(true, cx);
-    assert!(!pending(&ws, pane, cx));
-    assert_eq!(answer.answer(), Some(QuestionAnswer::Decline));
+    assert!(pending(&ws, pane, cx));
+    assert_eq!(answer.answer(), None, "it waits for the phone");
+    ws.read_with(cx, |ws, cx| {
+        let view = ws.agent_chat_view(pane).expect("chat pane").read(cx);
+        assert!(view.phone_owns_turn(), "the turn is still the phone's");
+        assert!(
+            !view.is_phone_turn_waiting(),
+            "the question answered the wait"
+        );
+    });
 }

@@ -44,6 +44,7 @@ macro_rules! with_settings_fields {
             KeepAwakeApprovalWaitMinutes: desktop.keep_awake_approval_wait_minutes, "desktop.keep_awake_approval_wait_minutes", copy, |value: u64| value as i64;
             AgentInputMaxRows: agent.input_max_rows, "agent.input_max_rows", copy, |value: u8| value as i64;
             AgentReadingWidth: agent.reading_width, "agent.reading_width", copy, |value: f32| f64::from(value);
+            AgentQuestionTimeoutSecs: agent.question_timeout_secs, "agent.question_timeout_secs", copy, |value: u32| i64::from(value);
             FlowTimeoutMinutes: flow.timeout_minutes, "flow.timeout_minutes", copy, |value: u32| value as i64;
             FlowMaxNodeRuns: flow.max_node_runs, "flow.max_node_runs", copy, |value: u32| value as i64;
             FlowMaxCost: flow.max_cost, "flow.max_cost", copy, |value: f64| value;

@@ -35,7 +35,12 @@ impl AgentChatView {
         let hierarchy = ToolHierarchy::build(&self.items);
         self.live_units = LiveSubagentUnits::build(&hierarchy, &self.items);
         self.filter_matches =
-            FilterMatchIndex::build(&hierarchy, &self.items, self.display_filter.value());
+            FilterMatchIndex::build(&hierarchy, &self.items, self.display_filter.value())
+                .with_questions(
+                    &hierarchy,
+                    self.questions.pinned_tools(),
+                    self.questions.recorded_tools(),
+                );
         self.turn_boundary = TurnBoundary::of(&self.items);
         self.activity_title = activity_bar_title(self.session_title.as_deref(), &self.items);
         self.rows = project_with_filter_index(

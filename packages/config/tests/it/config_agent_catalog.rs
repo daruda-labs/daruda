@@ -507,3 +507,68 @@ fn patch_config_file_preserves_implicit_default_agents_when_unmanaged() {
         )]
     );
 }
+
+/// The per-agent answer timeout survives the hand-built writer on both entry
+/// shapes, and the global key survives a settings patch.
+#[test]
+fn question_timeouts_round_trip_globally_and_per_agent() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let cfg = Config {
+        agents: vec![
+            AgentEntry::preset_with(
+                "codex-acp".to_string(),
+                PresetOverrides {
+                    question_timeout_secs: Some(0),
+                    ..PresetOverrides::default()
+                },
+            ),
+            AgentEntry::custom(AgentDefinition {
+                question_timeout_secs: Some(90),
+                ..AgentDefinition::new(
+                    "hermes".to_string(),
+                    "Hermes Agent".to_string(),
+                    AgentLaunch::Raw("hermes acp".to_string()),
+                )
+            }),
+        ],
+        ..Config::default()
+    };
+    patch_config_file_to(&cfg, &path).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("question_timeout_secs = 0"), "{text}");
+    assert!(text.contains("question_timeout_secs = 90"), "{text}");
+    let reloaded = Config::load_from(&path);
+    assert_eq!(reloaded.agents, cfg.agents);
+    let agents = reloaded.resolved_agents();
+    assert_eq!(agents[0].question_timeout_secs, Some(0));
+    assert_eq!(agents[1].question_timeout_secs, Some(90));
+
+    apply_settings_patch_to(&SettingsPatch::AgentQuestionTimeoutSecs(300), &path).unwrap();
+    assert_eq!(Config::load_from(&path).agent.question_timeout_secs, 300);
+}
+
+/// Hand-edited timeouts past a day load as a day, globally and on both entry
+/// shapes, so Settings can always write the catalog back.
+#[test]
+fn out_of_range_question_timeouts_load_clamped() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "[agent]\nquestion_timeout_secs = 999999\n\
+         [[agents]]\npreset = \"codex-acp\"\nquestion_timeout_secs = 4000000000\n\
+         [[agents]]\nid = \"far\"\nname = \"Far\"\ncommand = \"far-acp\"\nquestion_timeout_secs = 999999\n",
+    )
+    .unwrap();
+    let cfg = Config::load_from(&path);
+    assert_eq!(cfg.agent.question_timeout_secs, QUESTION_TIMEOUT_MAX_SECS);
+    for agent in cfg.resolved_agents().iter() {
+        assert_eq!(
+            agent.question_timeout_secs,
+            Some(QUESTION_TIMEOUT_MAX_SECS),
+            "{}",
+            agent.id
+        );
+    }
+}

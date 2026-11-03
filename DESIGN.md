@@ -948,6 +948,56 @@ bubble, i.e. as something the person typed. The host owns this copy and
 localizes it (`agent_chat.interrupted`), and it names the actor because the
 reading worth ruling out is "the agent stopped on its own".
 
+**Question card**
+
+A question the agent asks (`AskUserQuestion`, ACP form elicitation) is the body
+of the tool row that asked it — conversation structure, not a dialog.
+
+```
+? Claude asks                   Waiting for your answer · 2/2
+Please answer the following questions.
+┃ Which checks should run before merge? (choose any)
+┃   1 ☐ Unit tests
+┃   2 ☑ Clippy                      # picked: glyph + semibold + fill
+┃   4 ✎ Answer in your own words → input below
+┃ Open a draft pull request?        # focused field: heavier rail
+┃ ▸ 1 ○ Yes                         # highlighted: ▸ + fill
+                                   [Skip] [Send answer]
+
+fill:      pane-tint            edge: pane-border-tint (decorative)
+rail:      pane-control-edge on the focused field, pane-border-tint otherwise
+selected:  pane-active-tint — the fill is secondary; the glyph carries it
+chips:     button_chip_on_surface; Send is the selected chip, never accent
+```
+
+- **Selection never rides on colour alone.** Single ○/◉, multiple ☐/☑, the
+  keyboard highlight ▸, free text ✎, and a number on every option. Options are
+  list rows, not chips: chips are view settings, and these are answers.
+- **No accent anywhere on the card.** Accent has no verified contrast on a
+  terminal-mirrored surface; Send's emphasis is the selected-chip fill, and a
+  disabled Send drops its edge.
+- **The agent's words are verbatim.** Message, titles and option labels pass
+  through; only the host's own words (header, status, Skip, Send) are i18n.
+- **A question is its own row, never a tool group's member.** It sits at the
+  run's item level like a permission prompt, so no group bar stands between
+  the agent's prose and what it asked.
+- **A waiting card has no chevron and is never hidden.** Like a permission
+  prompt it stays on screen through response folds and the display filter.
+- **An opt-in answer timeout counts down in the header.** With
+  `question_timeout_secs` set, an untouched question shows `· 4:12 left` after
+  its status; the last half minute turns `pane-fg` and semibold, never colour
+  alone. Touching the question stops the countdown for good.
+- **A settled question becomes a summary bar** — a full-width `FoldRow` with a
+  chevron, because the frozen form is behind it. The bar states the outcome so
+  the chevron hides nothing essential: `? 2 answered · Unit tests · Clippy`,
+  `? 1 skipped`, `? 1 asked — skipped — answered in chat`,
+  `? 1 asked — stopped before an answer`, `? 1 asked — withdrawn by the
+  agent`, `? 1 asked — expired after 5m`. It folds once when the answer
+  settles; after that the person's choice holds. Opened, the frozen form is
+  inert (no hover, no cursor), picks in the foreground and semibold, the rest
+  `pane-fg-subtle`. Records fold with previous-response cleanup but are never
+  filtered: they are the person's words.
+
 **BottomDock chip row (session controls, for reference)**
 
 The mode / model / effort chips under an agent pane live in the BottomDock, not
@@ -999,6 +1049,25 @@ padding:    sm (8px)
   collapses it.
 - Selector chips (mode, model, effort): ghost buttons, 28px high, 6px side
   padding so neighbouring labels do not read as far apart.
+- Question strip: one line between the queued-prompt strip and the composer
+  while the focused agent pane has a question open. Bound: `↳ Answering
+  question 1/2 “header”` with [Use for prompt] [↑ Question], the answer
+  placeholder, and the submit button reading "Answer" instead of Stop.
+  An Enter the bound field cannot take as text swaps the bound line for its
+  reason in warning tones; the text stays until the composer empties.
+  Bound keys: over an empty composer ↑↓ move the card's ▸, Enter or a digit
+  chooses that row, Space toggles a multi-select option; Tab / Shift+Tab
+  move between fields. Past the last field's rows, ↓ or Tab lights the
+  card's Send (▸ + active fill around it). With text (IME composition
+  included) they type, and typing puts the highlight out.
+  When the answer timeout runs, the bound line ends with `· 4:12 left`,
+  heavier in its last half minute as on the card. Other open questions on the
+  pane add `· +1 waiting` (E3), a segment of its own so a narrow strip keeps
+  it; the strip always names the oldest question, the one the composer takes.
+  Released: "A question is waiting" with [✎ Answer]. A prompt held back
+  behind the question turns it into a warning (banner-warning tones) with
+  [Skip and send this] [Keep queued]. Ghost compact buttons; the text
+  truncates first.
 - Submit button: `background accent, text accent-fg, radius md, height 28px, padding 0 md`
 - Secondary action buttons: `background surface-2, text body, radius md, height 28px`
 

@@ -24,6 +24,38 @@ pub(crate) enum ThoughtsShot {
     ThoughtsOnly,
 }
 
+/// Which state of the agent-question seeds a capture shows.
+#[cfg(feature = "screenshot")]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum QuestionShot {
+    /// One single select waiting on its row, the composer bound to it.
+    Single,
+    /// The two-field form mid-answer: a pick in the first field, the
+    /// keyboard on the second with one row highlighted.
+    Form,
+    /// Three settled records (answered, skipped, cancelled by a Stop),
+    /// with the answered one opened to its frozen form.
+    Answered,
+    /// A pending form inside a collapsed response with the tool facets
+    /// filtered out: the card stays on screen through both.
+    Folded,
+    /// The pending form with the composer bound to its first field, and a
+    /// second question waiting behind it (E3): the question strip with its
+    /// "+1 waiting", the answer placeholder and the "Answer" button.
+    Composer,
+    /// The pending form released, with a prompt Enter held back: the
+    /// strip's E22 warning and its two ways out.
+    BlockedPrompt,
+    /// [`Self::Composer`] with the answer timeout in its last half minute:
+    /// the time left on the card header and the strip, drawn heavier.
+    Countdown,
+}
+
+/// The answer timeout the countdown capture runs: inside the final half
+/// minute even after the capture's settle delay.
+#[cfg(feature = "screenshot")]
+const SHOT_QUESTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(25);
+
 /// Age the running-tool capture backdates its call to, so the badge shows a
 /// number rather than the `0s` a just-started call would.
 #[cfg(feature = "screenshot")]
@@ -313,45 +345,128 @@ impl Workspace {
         );
     }
 
-    /// A question pinned under the seeded conversation. `form` shows the
-    /// several-field form, with its "Other" box open and a pick made, rather
-    /// than the single select with a second question waiting behind it.
+    /// Put the countdown capture's timeout back on the focused pane after a
+    /// config pass reset it to the config's own (off). It counts from now.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn restart_question_countdown_for_shot(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        let pane = self.active_runtime().focused_pane_id;
+        if let Some(view) = self.agent_chat_view(pane).cloned() {
+            view.update(cx, |v, cx| {
+                v.set_question_timeout(Some(SHOT_QUESTION_TIMEOUT), cx)
+            });
+        }
+    }
+
+    /// A question the agent asked, drawn on its tool call's row. See
+    /// [`QuestionShot`] for what each state puts on screen.
     #[cfg(feature = "screenshot")]
     pub(in crate::workspace) fn open_agent_chat_question_for_shot(
         &mut self,
-        form: bool,
+        shot: QuestionShot,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.open_agent_chat_pane_seeded(
+        use daruda_chat::fold::FoldKey;
+        use daruda_chat::shot_transcript as seed;
+        use daruda_transcript::display_filter::{DisplayFilter, FilterFacet};
+
+        let pane = self.open_agent_chat_pane_seeded(
             None,
-            move |v, window, cx| {
-                v.seed_transcript(
-                    daruda_chat::shot_transcript::sample_transcript(),
-                    window,
-                    cx,
-                );
-                if form {
+            move |v, window, cx| match shot {
+                QuestionShot::Composer => {
+                    let mut items = seed::pending_question_transcript(seed::QUESTION_FORM_TOOL_ID);
+                    items.push(seed::shot_question_tool(seed::QUESTION_TOOL_ID));
+                    v.seed_working_transcript(items, window, cx);
                     v.seed_questions_for_shot(
-                        vec![daruda_chat::shot_transcript::shot_question_form()],
+                        vec![seed::shot_question_form(), seed::shot_question()],
+                        true,
                         cx,
                     );
-                    v.pick_question_option(0, "question_0".into(), "Clippy".into(), cx);
-                    v.set_question_flag(0, "question_1".into(), true, cx);
-                    v.open_question_text(0, "question_0_custom".into(), window, cx);
-                } else {
-                    v.seed_questions_for_shot(
-                        vec![
-                            daruda_chat::shot_transcript::shot_question(),
-                            daruda_chat::shot_transcript::shot_question_form(),
-                        ],
+                }
+                QuestionShot::BlockedPrompt | QuestionShot::Countdown => {
+                    if shot == QuestionShot::Countdown {
+                        v.set_question_timeout(Some(SHOT_QUESTION_TIMEOUT), cx);
+                    }
+                    v.seed_working_transcript(
+                        seed::pending_question_transcript(seed::QUESTION_FORM_TOOL_ID),
+                        window,
                         cx,
                     );
+                    v.seed_questions_for_shot(vec![seed::shot_question_form()], true, cx);
+                }
+                QuestionShot::Single => {
+                    v.seed_working_transcript(
+                        seed::pending_question_transcript(seed::QUESTION_TOOL_ID),
+                        window,
+                        cx,
+                    );
+                    v.seed_questions_for_shot(vec![seed::shot_question()], true, cx);
+                }
+                QuestionShot::Form => {
+                    v.seed_working_transcript(
+                        seed::pending_question_transcript(seed::QUESTION_FORM_TOOL_ID),
+                        window,
+                        cx,
+                    );
+                    v.seed_questions_for_shot(vec![seed::shot_question_form()], true, cx);
+                    // "Clippy" in the checks, then Tab and ↓ to light "Yes".
+                    v.pick_question_option(0, 0, 1, cx);
+                    v.move_question_field(0, true, String::new(), cx);
+                    v.move_question_row(0, true, cx);
+                }
+                QuestionShot::Answered => {
+                    v.seed_transcript(seed::settled_questions_transcript(), window, cx);
+                    v.seed_questions_for_shot(seed::settled_questions().into(), true, cx);
+                    v.pick_question_option(0, 0, 0, cx);
+                    v.pick_question_option(0, 0, 1, cx);
+                    v.set_question_flag(0, 1, true, cx);
+                    v.submit_question(0, cx);
+                    v.skip_question(1, cx);
+                    v.cancel_questions_for_shot(cx);
+                    // Settling folds each record once; open the answered one
+                    // so the frozen form shows beside two summary bars.
+                    v.set_fold_for_shot(
+                        FoldKey::Tool(seed::QUESTION_FORM_TOOL_ID.into()),
+                        true,
+                        window,
+                        cx,
+                    );
+                }
+                QuestionShot::Folded => {
+                    // Settled rather than working: a live run's response
+                    // cannot collapse, and the pin through that fold is the
+                    // point. The form is untouched, so its Send is disabled.
+                    v.seed_transcript(
+                        seed::pending_question_transcript(seed::QUESTION_FORM_TOOL_ID),
+                        window,
+                        cx,
+                    );
+                    v.seed_questions_for_shot(vec![seed::shot_question_form()], true, cx);
+                    v.set_display_filter_for_shot(
+                        DisplayFilter::default().with_section(FilterFacet::Tools, false),
+                        cx,
+                    );
+                    if let Some(run_start) = v.last_response_for_shot() {
+                        v.set_fold_for_shot(FoldKey::Response(run_start), false, window, cx);
+                    }
                 }
             },
             window,
             cx,
         );
+        // The held-back prompt is the composer's, so it is typed and sent
+        // here rather than in the view's seed.
+        if let (QuestionShot::BlockedPrompt, Some(pane)) = (shot, pane) {
+            let prompt = daruda_chat::shot_transcript::QUESTION_BLOCKED_PROMPT;
+            self.release_question_for_prompt(pane, cx);
+            self.input_dock
+                .input
+                .update(cx, |state, cx| state.set_value(prompt, window, cx));
+            self.route_composer_submit_to_question(prompt, window, cx);
+        }
     }
 
     #[cfg(feature = "screenshot")]

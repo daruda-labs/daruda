@@ -1,7 +1,7 @@
 //! Execute a routed action once, independently of its delivery transport.
 
 use super::{
-    bridge::{BotPermissionOutcome, InboundAction, PaneRef},
+    bridge::{BotPermissionOutcome, BotQuestionOutcome, InboundAction, PaneRef, QuestionReply},
     command::{self as commands, CommandState, RenderedReply},
 };
 use crate::control::{result::ControlError, spec::ParseError};
@@ -202,6 +202,17 @@ pub(crate) fn handle_in_app(aimed: Aimed, target: &Target, cx: &mut App) -> Effe
                 edit: Edit::ManagedCard,
             }
         }
+        InboundAction::RespondQuestion {
+            pane,
+            question,
+            reply,
+        } => {
+            let mut outcome = BotQuestionOutcome::Gone;
+            dispatch_to_workspace(cx, pane.workspace, |ws, cx| {
+                outcome = ws.respond_bot_question(pane.pane, question, reply.clone(), cx);
+            });
+            question_effect(&reply, outcome)
+        }
         InboundAction::SelectTarget { pane } => {
             command::select_target(pane, target, cx).map_or(Effect::None, |label| {
                 Effect::Feedback {
@@ -254,6 +265,10 @@ pub(crate) fn handle_in_app(aimed: Aimed, target: &Target, cx: &mut App) -> Effe
             label: s::control::approval_already_answered(),
             edit: Edit::StaleCard,
         },
+        InboundAction::StaleQuestion => Effect::Reply(RenderedReply {
+            text: s::notification::telegram_permission_stale(),
+            keyboard: None,
+        }),
         InboundAction::StaleListing => Effect::Feedback {
             label: s::control::listing_stale(),
             edit: Edit::KeepButtons,
@@ -261,6 +276,39 @@ pub(crate) fn handle_in_app(aimed: Aimed, target: &Target, cx: &mut App) -> Effe
         InboundAction::Ignore | InboundAction::Unsupported | InboundAction::Paired { .. } => {
             Effect::None
         }
+    }
+}
+
+/// What the phone is told about its answer to an agent's question. A tap is
+/// answered on its button; a text reply that was taken needs no word, since
+/// the next card or the card's settlement says it, but one that was refused
+/// gets a reply so it does not read as accepted.
+fn question_effect(reply: &QuestionReply, outcome: BotQuestionOutcome) -> Effect {
+    let label = match outcome {
+        BotQuestionOutcome::Next => s::notification::telegram_question_next(),
+        BotQuestionOutcome::Updated => s::notification::telegram_question_updated(),
+        BotQuestionOutcome::Submitted => s::notification::telegram_question_answered(),
+        BotQuestionOutcome::Skipped => s::notification::telegram_question_skipped(),
+        BotQuestionOutcome::AlreadySettled => s::notification::telegram_question_stale(),
+        BotQuestionOutcome::TextNotTaken => s::notification::telegram_question_text_not_taken(),
+        BotQuestionOutcome::Gone => s::notification::telegram_permission_gone(),
+    };
+    match (reply, outcome) {
+        (QuestionReply::Button(_), _) => Effect::Feedback {
+            label,
+            edit: Edit::ManagedCard,
+        },
+        (
+            QuestionReply::Text(_),
+            BotQuestionOutcome::Next
+            | BotQuestionOutcome::Updated
+            | BotQuestionOutcome::Submitted
+            | BotQuestionOutcome::Skipped,
+        ) => Effect::None,
+        (QuestionReply::Text(_), _) => Effect::Reply(RenderedReply {
+            text: label,
+            keyboard: None,
+        }),
     }
 }
 
@@ -302,6 +350,40 @@ fn deliver_prompt(
 #[cfg(test)]
 mod tests {
     use crate::remote_channel::bridge::{InboundAction, PaneRef, Routed, Unaimed};
+
+    /// A toggle's toast says what its card says; a refused text reply gets a
+    /// reply, while a taken one is told by the next card.
+    #[test]
+    fn question_answers_are_told_what_their_card_says() {
+        use crate::remote_channel::bridge::{BotQuestionOutcome, QuestionButton, QuestionReply};
+        use crate::surface::strings as s;
+        let tap = QuestionReply::Button(QuestionButton::Option(0));
+        let label = |effect| match effect {
+            super::Effect::Feedback { label, .. } => Some(label),
+            super::Effect::Reply(reply) => Some(reply.text),
+            _ => None,
+        };
+        assert_eq!(
+            label(super::question_effect(&tap, BotQuestionOutcome::Updated)),
+            Some(s::notification::telegram_question_updated())
+        );
+        assert_eq!(
+            label(super::question_effect(&tap, BotQuestionOutcome::Next)),
+            Some(s::notification::telegram_question_next())
+        );
+        let text = QuestionReply::Text("teal".into());
+        assert_eq!(
+            label(super::question_effect(&text, BotQuestionOutcome::Next)),
+            None
+        );
+        assert_eq!(
+            label(super::question_effect(
+                &text,
+                BotQuestionOutcome::AlreadySettled
+            )),
+            Some(s::notification::telegram_question_stale())
+        );
+    }
 
     /// A message that named no chat, on a bridge that remembered none, still
     /// reaches an agent — `aim` lends it the app's own lane. The sender is told

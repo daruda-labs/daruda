@@ -66,7 +66,9 @@ impl Workspace {
         // sibling dims).
         self.refresh_pane_dimming(cx);
         // Placeholder + panel activation stay on the `focus_pane` path; this
-        // method only tracks the focused pane + swaps the draft.
+        // method tracks the focused pane, swaps the draft, and resyncs the
+        // incoming pane's question binding with that draft.
+        self.sync_question_composer(window, cx);
     }
 
     /// Drop a removed pane's bottom-dock input draft and clear `InputDock::owner`
@@ -92,6 +94,7 @@ impl Workspace {
 
     pub(in crate::workspace) fn forget_pane_input_draft(&mut self, pane_id: PaneId) {
         self.input_dock.drafts.remove(&pane_id);
+        self.input_dock.question.forget_pane(pane_id);
         if self.input_dock.owner == Some(pane_id) {
             self.input_dock.owner = None;
         }

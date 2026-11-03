@@ -226,7 +226,14 @@ pub(crate) fn schedule_capture(
                     // their spans and diagrams against the captured theme.
                     crate::window_registry::WindowRegistry::for_each_workspace(
                         cx,
-                        |ws, _window, cx| ws.apply_store_config(cx),
+                        |ws, _window, cx| {
+                            ws.apply_store_config(cx);
+                            if let Some(scenario) = scenario {
+                                crate::workspace::screenshot_scenario::after_config_pass(
+                                    scenario, ws, cx,
+                                );
+                            }
+                        },
                     );
                 });
             }

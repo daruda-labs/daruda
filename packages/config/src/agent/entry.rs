@@ -64,6 +64,7 @@ pub struct PresetOverrides {
     /// to "follow the preset". Same three states as
     /// [`AgentDefinition::env`], one level down.
     pub env: Option<Vec<(String, String)>>,
+    pub question_timeout_secs: Option<u32>,
 }
 
 impl AgentEntry {
@@ -157,6 +158,9 @@ impl AgentSource {
                 if let Some(env) = &overrides.env {
                     definition.env = Some(env.clone());
                 }
+                if let Some(secs) = overrides.question_timeout_secs {
+                    definition.question_timeout_secs = Some(secs);
+                }
                 Some(definition)
             }
         }
@@ -237,6 +241,7 @@ impl AgentSource {
                 tail_window: definition.tail_window,
                 tail_window_calls: definition.tail_window_calls,
                 display_filter: definition.display_filter.clone(),
+                question_timeout_secs: definition.question_timeout_secs,
                 // Diffed like `name` and `command`, not copied whole: a
                 // preset may state an environment of its own, and a row that
                 // agrees with it has to keep following it. An empty one is a
@@ -295,6 +300,8 @@ struct AgentEntryRepr {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     display_filter: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    question_timeout_secs: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     env: Option<EnvRepr>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ssh: Option<SshLaunchRepr>,
@@ -334,6 +341,9 @@ impl TryFrom<AgentEntryRepr> for AgentSource {
                     // same launch assembly, so it cannot be the one env entry
                     // point that skips the name check.
                     env: v.env.map(super::sanitized_env),
+                    question_timeout_secs: super::chat_config::clamp_question_timeout(
+                        v.question_timeout_secs,
+                    ),
                 },
             });
         }
@@ -354,6 +364,7 @@ impl TryFrom<AgentEntryRepr> for AgentSource {
             tail_window: v.tail_window,
             tail_window_calls: v.tail_window_calls,
             display_filter: v.display_filter,
+            question_timeout_secs: v.question_timeout_secs,
             env: v.env,
         });
         Ok(Self::for_definition(definition, None))
@@ -384,6 +395,7 @@ impl From<AgentSource> for AgentEntryRepr {
                 tail_window: overrides.tail_window,
                 tail_window_calls: overrides.tail_window_calls,
                 display_filter: overrides.display_filter,
+                question_timeout_secs: overrides.question_timeout_secs,
                 env: overrides.env.map(|env| env.into_iter().collect()),
                 ssh: None,
                 docker: None,
@@ -402,6 +414,7 @@ impl From<AgentSource> for AgentEntryRepr {
                     tail_window: repr.tail_window,
                     tail_window_calls: repr.tail_window_calls,
                     display_filter: repr.display_filter,
+                    question_timeout_secs: repr.question_timeout_secs,
                     env: repr.env,
                     ssh: repr.ssh,
                     docker: repr.docker,

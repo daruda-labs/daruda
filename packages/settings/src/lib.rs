@@ -317,6 +317,7 @@ pub struct SettingsView {
     presence_idle_foreground_input: Entity<InputState>,
     agent_input_max_rows_input: Entity<InputState>,
     agent_reading_width_input: Entity<InputState>,
+    agent_question_timeout_input: Entity<InputState>,
     flow_timeout_minutes_input: Entity<InputState>,
     flow_max_node_runs_input: Entity<InputState>,
     flow_max_cost_input: Entity<InputState>,

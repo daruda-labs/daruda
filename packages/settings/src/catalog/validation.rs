@@ -34,5 +34,19 @@ pub(crate) fn agent_row_transport_error(
     session_host::checked_bare_word(value, field).err()
 }
 
+/// A row's question-timeout field as the catalog stores it: blank follows
+/// the global value (`Ok(None)`), whole seconds up to a day override it,
+/// `0` included, and anything else is refused.
+pub(crate) fn question_timeout_override(text: &str) -> Result<Option<u32>, ()> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(None);
+    }
+    match text.parse::<u32>() {
+        Ok(secs) if secs <= daruda_config::QUESTION_TIMEOUT_MAX_SECS => Ok(Some(secs)),
+        _ => Err(()),
+    }
+}
+
 #[cfg(test)]
 mod tests;

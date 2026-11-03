@@ -21,10 +21,18 @@ const TOOL_COUNT: usize = 12;
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Step {
     Create(usize),
-    Output { tool: usize, lines: usize },
+    Output {
+        tool: usize,
+        lines: usize,
+    },
     ExpandAll,
     Toggle(usize),
-    Scroll { tool: usize, offset: f32 },
+    Scroll {
+        tool: usize,
+        offset: f32,
+    },
+    /// The agent asks a question from this tool call.
+    Ask(usize),
 }
 
 fn tool_id(tool: usize) -> String {
@@ -75,6 +83,42 @@ fn apply(window: WindowHandle<AgentChatView>, step: Step, cx: &mut TestAppContex
                     view.toggle_fold(FoldKey::Tool(tool_id(tool)), window, cx)
                 })
                 .unwrap();
+            return;
+        }
+        Step::Ask(tool) => {
+            let question = daruda_acp::QuestionRequest {
+                message: "Which one?".into(),
+                tool_call_id: Some(tool_id(tool)),
+                delivery: daruda_acp::QuestionDelivery::Blocking,
+                fields: vec![daruda_acp::QuestionField {
+                    key: "question_0".into(),
+                    title: None,
+                    description: None,
+                    required: false,
+                    kind: daruda_acp::QuestionFieldKind::SingleSelect(
+                        ["a", "b", "c"]
+                            .map(|v| daruda_acp::QuestionOption {
+                                value: v.into(),
+                                label: v.into(),
+                                description: None,
+                            })
+                            .into(),
+                    ),
+                    companion_of: None,
+                    default: None,
+                }],
+            };
+            window.root(cx).unwrap().update(cx, |view, cx| {
+                view.apply_event(
+                    AcpEvent::QuestionAsked {
+                        id: tool as u64,
+                        question,
+                    },
+                    "",
+                    false,
+                    cx,
+                );
+            });
             return;
         }
         Step::Scroll { tool, offset } => {
@@ -188,6 +232,15 @@ impl Fixture {
                     "target card has positive height"
                 );
                 bounds.size.height
+            })
+            .unwrap()
+    }
+
+    /// Height of everything above the scroll top, from the list's measurements.
+    pub fn offset_above_viewport(&self, cx: &TestAppContext) -> Pixels {
+        self.window
+            .read_with(cx, |view, _| {
+                -view.list_state.scroll_px_offset_for_scrollbar().y
             })
             .unwrap()
     }

@@ -2,6 +2,8 @@
 //! awaiting migration) and the per-session model / mode preference rule.
 
 use super::AgentDefinition;
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 
 /// The app-wide transcript keys a pre-catalog `[agent]` section could state.
@@ -81,6 +83,10 @@ pub struct AgentConfig {
     /// Defaults to [`FAST_MODE_PLAIN_DESCRIPTION`]; set
     /// `hidden_config_option_descriptions = []` to show every advertised option.
     pub hidden_config_option_descriptions: Vec<String>,
+    /// Seconds a question the agent asks may wait untouched before it is
+    /// declined as expired; `0` (the default) waits for the person however
+    /// long it takes. An agent's own `question_timeout_secs` overrides it.
+    pub question_timeout_secs: u32,
 }
 
 /// The Claude adapter's Fast mode description in its reason-less form — the
@@ -112,6 +118,16 @@ pub const READING_WIDTH_DEFAULT: f32 = 700.0;
 /// Whether a fresh AgentChat pane starts held to that column.
 pub const USE_READING_WIDTH_DEFAULT: bool = true;
 
+/// Largest answer timeout Settings accepts: a day, past which waiting is
+/// the same as no timeout at all.
+pub const QUESTION_TIMEOUT_MAX_SECS: u32 = 24 * 60 * 60;
+
+/// A stated answer timeout held to [`QUESTION_TIMEOUT_MAX_SECS`] on load, so a
+/// hand-edited value Settings could not have written never blocks a save.
+pub(crate) fn clamp_question_timeout(secs: Option<u32>) -> Option<u32> {
+    secs.map(|secs| secs.min(QUESTION_TIMEOUT_MAX_SECS))
+}
+
 /// Sentinel meaning every work step is visible.
 pub const TAIL_WINDOW_ALL: u8 = 0;
 /// Tail-window sizes offered by the AgentChat chip.
@@ -131,6 +147,7 @@ impl Default for AgentConfig {
             reading_width: READING_WIDTH_DEFAULT,
             tool_summary_labels: true,
             hidden_config_option_descriptions: default_hidden_config_option_descriptions(),
+            question_timeout_secs: 0,
         }
     }
 }
@@ -153,11 +170,21 @@ impl AgentConfig {
         }
     }
 
+    /// How long a question from `agent` may wait untouched: the agent's own
+    /// value when it states one, else this global one; zero is off either way.
+    pub fn question_timeout(&self, agent: Option<&AgentDefinition>) -> Option<Duration> {
+        let secs = agent
+            .and_then(|a| a.question_timeout_secs)
+            .unwrap_or(self.question_timeout_secs);
+        (secs > 0).then(|| Duration::from_secs(u64::from(secs)))
+    }
+
     /// Clamp numeric fields to their valid ranges.
     pub fn clamp(&mut self) {
         self.input_max_rows = self
             .input_max_rows
             .clamp(INPUT_MAX_ROWS_MIN, INPUT_MAX_ROWS_MAX);
+        self.question_timeout_secs = self.question_timeout_secs.min(QUESTION_TIMEOUT_MAX_SECS);
         self.reading_width = crate::clamp_or(
             self.reading_width,
             READING_WIDTH_MIN,

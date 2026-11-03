@@ -33,6 +33,7 @@ use crate::rows::tail::TailWindow;
 use crate::rows::{FilterMatchIndex, LiveSubagentUnits, effective_tool_status};
 use crate::strings as s;
 use crate::view::AgentChatView;
+use crate::view::questions::Questions;
 use daruda_transcript::command_analysis::{CommandAnalysis, CommandAnalysisIndex, CommandEffect};
 use daruda_transcript::tool_category::{ToolCategory, is_mcp_tool_name};
 use daruda_ui::CachedImage;
@@ -42,12 +43,15 @@ use daruda_ui::{Icon, IconName, IconNamed as _, Sizable as _};
 mod labels;
 pub(super) mod output;
 mod permission;
+mod question;
 use labels::{
     command_tags, exit_badge_label, tool_header_label, tool_status_badge, tool_title_summary,
 };
 pub(super) use labels::{name_keyed_icon, tool_icon, tool_kind_icon};
 use output::{OutputBlockContext, output_block_view};
 pub(super) use permission::permission_card;
+pub(super) use question::question_form;
+use question::{question_card, question_record};
 
 /// Tool invocation card — foldable (default collapsed once done, expanded while
 /// in progress). The header leads with a fixed-width label (the agent's own tool
@@ -83,6 +87,10 @@ pub(super) struct CardContext<'a> {
     pub(super) dim: f32,
     /// The host's external editor, named by the diff header's tooltip.
     pub(super) preferred_editor: &'a str,
+    /// Questions the agent asked, drawn on the rows of the calls that asked.
+    pub(super) questions: &'a Questions,
+    /// The agent's name, for a question card's header.
+    pub(super) agent_name: &'a str,
 }
 
 pub(super) fn tool_card(
@@ -92,7 +100,7 @@ pub(super) fn tool_card(
     ctx: CardContext<'_>,
     window: &mut Window,
     cx: &mut Context<AgentChatView>,
-) -> impl IntoElement + use<> {
+) -> AnyElement {
     let CardContext {
         items,
         live_units,
@@ -107,13 +115,29 @@ pub(super) fn tool_card(
         t,
         dim,
         preferred_editor,
+        questions,
+        agent_name,
     } = ctx;
     // Derived here rather than by each caller: a subagent launch takes
     // `FoldKey::Subagent` and every other call takes `FoldKey::Tool`, and a
     // caller that got that pair wrong would give the card a key its own toggle
     // never reads. Both call paths used to restate this.
     let key = tool_fold_key(tc);
-    let expanded = fold.is_expanded(&key, fold_context_at(&key, ix, items, boundary, live_units));
+    // A card holding a pending question below it stays open: the question has
+    // no other row to be answered from.
+    let expanded = fold.is_expanded(&key, fold_context_at(&key, ix, items, boundary, live_units))
+        || filter_matches.pins(&tc.id);
+    // A question is the body of the call that asked it: its open form, or
+    // once settled the record in the call's place.
+    if let Some(open) = questions.open_for_tool(&tc.id) {
+        let surface = theme::PaneSurfaceTokens::agent_chat(cx).dimmed(dim);
+        let may_write = questions.first().map(|q| q.id) == Some(open.id);
+        return question_card(tc, open, may_write, agent_name, &surface, cx);
+    }
+    if let Some(record) = questions.record_for_tool(&tc.id) {
+        let surface = theme::PaneSurfaceTokens::agent_chat(cx).dimmed(dim);
+        return question_record(tc, record, key, expanded, &surface, dim, cx);
+    }
     let markdown_links = AgentChatMarkdownLinks::new(cx.weak_entity());
     // A subagent parent (Task/Agent) whose flattened children keep running past
     // its own completion must not read "done": the adapter marks the parent
@@ -467,6 +491,7 @@ pub(super) fn tool_card(
     super::card_frame::CardFrame::new(tone)
         .render(dim, cx)
         .child(block)
+        .into_any_element()
 }
 
 #[cfg(test)]

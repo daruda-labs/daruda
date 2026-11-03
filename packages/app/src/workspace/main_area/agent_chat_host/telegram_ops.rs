@@ -18,6 +18,7 @@ use crate::workspace::main_area::pane_tree::PaneId;
 
 mod diff_preview;
 mod inbound;
+mod questions;
 
 pub(in crate::workspace) use daruda_chat::phone_turn::{FirstResponseOutcome, PhoneTurn};
 
@@ -176,7 +177,16 @@ impl Workspace {
         pane_id: PaneId,
         cx: &Context<Self>,
     ) -> String {
-        let project_line = self.project_name_for_pane(pane_id);
+        self.telegram_header_at(pane_id, self.project_name_for_pane(pane_id), cx)
+    }
+
+    /// [`Self::telegram_header`] with `project_line` as its first line.
+    fn telegram_header_at(
+        &self,
+        pane_id: PaneId,
+        project_line: Option<String>,
+        cx: &Context<Self>,
+    ) -> String {
         match self.agent_chat_view(pane_id) {
             Some(view) => {
                 let agent = view.read(cx).agent_name().to_owned();
@@ -320,14 +330,16 @@ impl Workspace {
             })
             .unwrap_or_else(|| permission_wait_tail(prompt, &[]));
         let header = self.telegram_header(pane_id, cx);
-        let permission = Some(crate::telegram::bridge::PermissionPromptRef {
-            session: self
-                .agent_chat_view(pane_id)
-                .map(|view| view.read(cx).permission_session())
-                .unwrap_or_default(),
-            perm_id: prompt.id,
-            buttons,
-        });
+        let permission = Some(crate::telegram::bridge::PingPrompt::Permission(
+            crate::telegram::bridge::PermissionPromptRef {
+                session: self
+                    .agent_chat_view(pane_id)
+                    .map(|view| view.read(cx).permission_session())
+                    .unwrap_or_default(),
+                perm_id: prompt.id,
+                buttons,
+            },
+        ));
         let told = if is_telegram_first_response {
             self.relay_to_telegram(pane_id, header, tail, permission, cx);
             true
@@ -348,8 +360,8 @@ impl Workspace {
         view.update(cx, |v, _| v.mark_permission_told_to_phone(perm_id));
     }
 
-    /// Re-offer permission prompts the phone has never been shown, for every
-    /// pane whose request is still outstanding.
+    /// Re-offer permission prompts and questions the phone has never been
+    /// shown, for every pane whose request is still outstanding.
     ///
     /// This is not the deferral queue coming back. A completion ping reports a
     /// past event, so holding one and flushing it later delivers something
@@ -371,9 +383,16 @@ impl Workspace {
             if let Some(exec) =
                 crate::runs::RunsHost::pane_execution(self.run_pane(pane_id), cx).cloned()
             {
-                let waiting = (view.read(cx).activity_state()
-                    == daruda_chat::view::ActivityState::AwaitingPermission)
-                    .then_some(crate::runs::result::WaitingOn::Permission { tool: None });
+                let waiting = match view.read(cx).activity_state() {
+                    daruda_chat::view::ActivityState::AwaitingPermission => {
+                        Some(crate::runs::result::WaitingOn::Permission { tool: None })
+                    }
+                    daruda_chat::view::ActivityState::AwaitingAnswer => view
+                        .read(cx)
+                        .pending_question_summary()
+                        .map(|question| crate::runs::result::WaitingOn::Answer { question }),
+                    _ => None,
+                };
                 crate::runs::RunsHost::observe_task_waiting(
                     crate::runs::result::RunKey::Task(exec),
                     waiting,
@@ -384,6 +403,7 @@ impl Workspace {
             for prompt in untold {
                 self.relay_permission_wait_to_telegram(pane_id, &prompt, cx);
             }
+            self.relay_untold_questions(pane_id, cx);
         }
     }
 
@@ -407,7 +427,7 @@ impl Workspace {
         pane_id: PaneId,
         header: String,
         tail: TelegramTail,
-        permission: Option<crate::telegram::bridge::PermissionPromptRef>,
+        prompt: Option<crate::telegram::bridge::PingPrompt>,
         cx: &mut Context<Self>,
     ) -> bool {
         // The ledger closes at the completion tee, after the completion relay
@@ -422,14 +442,14 @@ impl Workspace {
             trace::delivery("relay.solicited", || {
                 format!("pane={pane_id} text={}", trace::tail_digest(&tail))
             });
-            self.relay_to_telegram(pane_id, header, tail, permission, cx);
+            self.relay_to_telegram(pane_id, header, tail, prompt, cx);
             return true;
         }
         // `relay_to_telegram` asks this too, but asking here first keeps a
         // disabled/unpaired bridge out of the presence trace below, where it
         // would read as a presence decision it never was.
         let remote_sent = crate::remote_channel::global::RemoteChannels::send_ping(
-            self.remote_ping(pane_id, header.clone(), tail.clone(), permission.clone()),
+            self.remote_ping(pane_id, header.clone(), tail.clone(), prompt.clone()),
             delivery,
             cx,
         );
@@ -469,7 +489,7 @@ impl Workspace {
             )
         });
         if send {
-            self.relay_telegram_only(pane_id, header, tail, permission, cx);
+            self.relay_telegram_only(pane_id, header, tail, prompt, cx);
         }
         send || remote_sent
     }
@@ -501,15 +521,15 @@ impl Workspace {
         pane_id: PaneId,
         header: String,
         tail: TelegramTail,
-        permission: Option<crate::telegram::bridge::PermissionPromptRef>,
+        prompt: Option<crate::telegram::bridge::PingPrompt>,
         cx: &Context<Self>,
     ) {
         crate::remote_channel::global::RemoteChannels::send_ping(
-            self.remote_ping(pane_id, header.clone(), tail.clone(), permission.clone()),
+            self.remote_ping(pane_id, header.clone(), tail.clone(), prompt.clone()),
             crate::remote_channel::global::Delivery::Explicit,
             cx,
         );
-        self.relay_telegram_only(pane_id, header, tail, permission, cx);
+        self.relay_telegram_only(pane_id, header, tail, prompt, cx);
     }
 
     fn remote_ping(
@@ -517,7 +537,7 @@ impl Workspace {
         pane_id: PaneId,
         header: String,
         tail: TelegramTail,
-        permission: Option<crate::remote_channel::bridge::PermissionPromptRef>,
+        prompt: Option<crate::remote_channel::bridge::PingPrompt>,
     ) -> crate::remote_channel::bridge::BridgePing {
         crate::remote_channel::bridge::BridgePing {
             pane: crate::remote_channel::bridge::PaneRef {
@@ -526,7 +546,7 @@ impl Workspace {
             },
             header,
             tail,
-            permission,
+            prompt,
         }
     }
 
@@ -535,7 +555,7 @@ impl Workspace {
         pane_id: PaneId,
         header: String,
         tail: TelegramTail,
-        permission: Option<crate::remote_channel::bridge::PermissionPromptRef>,
+        prompt: Option<crate::remote_channel::bridge::PingPrompt>,
         cx: &Context<Self>,
     ) {
         let Some(bridge) = self.telegram_bridge(cx) else {
@@ -563,7 +583,7 @@ impl Workspace {
                 },
                 header,
                 tail,
-                permission,
+                prompt,
             },
             cx,
         );
@@ -756,5 +776,7 @@ impl Workspace {
 
 #[cfg(test)]
 mod notify_tests;
+#[cfg(test)]
+mod question_tests;
 #[cfg(test)]
 mod tests;

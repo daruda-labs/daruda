@@ -54,8 +54,8 @@ pub use account_env::{AccountEnv, account_env};
 pub use agent::{
     ACP_REGISTRY_URL, ACP_REGISTRY_VERSION, AgentConfig, AgentDefinition, AgentEntry, AgentLaunch,
     AgentPreset, AgentSource, AgentVocabularySeed, CODEX_CONFIG_ENV, LaunchTransport,
-    PresetLaunchability, PresetOverrides, READING_WIDTH_DEFAULT, READING_WIDTH_MAX,
-    READING_WIDTH_MIN, SessionPreferences, TAIL_WINDOW_ALL, TAIL_WINDOW_CHOICES,
+    PresetLaunchability, PresetOverrides, QUESTION_TIMEOUT_MAX_SECS, READING_WIDTH_DEFAULT,
+    READING_WIDTH_MAX, READING_WIDTH_MIN, SessionPreferences, TAIL_WINDOW_ALL, TAIL_WINDOW_CHOICES,
     TAIL_WINDOW_DEFAULT, TranscriptDefault, account_recipe_for_local_command, agent_preset,
     agent_presets, agent_vocabulary_seed, assemble_launch_command, canonical_env,
     is_valid_env_name, with_transcript_default,

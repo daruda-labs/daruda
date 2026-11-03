@@ -41,11 +41,13 @@ fn send(
             pane,
             header: "Project".into(),
             tail: MessageTail::Plain(format!("Permission {request}")),
-            permission: Some(PermissionPromptRef {
-                session,
-                perm_id: request,
-                buttons: vec![("Allow".into(), PermissionDecision::Allow("allow".into()))],
-            }),
+            prompt: Some(crate::remote_channel::bridge::PingPrompt::Permission(
+                PermissionPromptRef {
+                    session,
+                    perm_id: request,
+                    buttons: vec![("Allow".into(), PermissionDecision::Allow("allow".into()))],
+                },
+            )),
         },
         cx,
     );

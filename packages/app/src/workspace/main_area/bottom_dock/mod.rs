@@ -14,6 +14,9 @@ pub(super) mod macro_edit_modal;
 pub(super) mod macro_key;
 pub(in crate::workspace) mod macro_ops;
 mod mode_chip;
+pub(in crate::workspace) mod question_binding_ops;
+pub(in crate::workspace) mod question_keys_ops;
+mod question_strip;
 pub(super) mod queue_strip;
 pub(in crate::workspace) mod slash_command;
 pub(in crate::workspace) mod tab_strip;
@@ -65,20 +68,24 @@ pub(in crate::workspace) fn render_body(
     }
     if snap.terminal_input_visible {
         let input = terminal_input::render_body(snap, cx);
-        // The queued-prompt strip (if any) sits ABOVE the input panel; both
-        // stack in a full-height column so the input keeps its `flex_1` growth
-        // and the fixed-height strip rides on top.
-        return match queue_strip::render(snap, cx) {
-            Some(strip) => div()
-                .flex_1()
-                .flex()
-                .flex_col()
-                .overflow_hidden()
-                .child(strip)
-                .child(input)
-                .into_any_element(),
-            None => input,
-        };
+        // The queued-prompt strip, then the question strip (if any), sit ABOVE
+        // the input panel; all stack in a full-height column so the input keeps
+        // its `flex_1` growth and the fixed-height strips ride on top.
+        let strips: Vec<AnyElement> = queue_strip::render(snap, cx)
+            .into_iter()
+            .chain(question_strip::render(snap, cx))
+            .collect();
+        if strips.is_empty() {
+            return input;
+        }
+        return div()
+            .flex_1()
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .children(strips)
+            .child(input)
+            .into_any_element();
     }
 
     let active_tab_id = snap.active_tab_id.as_ref();

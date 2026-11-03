@@ -89,7 +89,9 @@ impl<'a> SubagentChildren<'a> {
             .enumerate()
             .filter_map(|(pos, (ix, call))| {
                 let covered = lens.calls.hides(pos, count);
-                let live = tool_or_subtree_live(call, lens.live_units);
+                // A pending question escapes the window as a live call does.
+                let live =
+                    tool_or_subtree_live(call, lens.live_units) || lens.filter.pins(&call.id);
                 (!covered || lens.revealed || live).then_some(SubagentChild { ix, call })
             })
             .collect();

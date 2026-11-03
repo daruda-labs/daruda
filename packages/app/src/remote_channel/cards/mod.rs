@@ -18,6 +18,11 @@ pub(crate) enum CardId {
         session: u64,
         request: u64,
     },
+    Question {
+        pane: PaneRef,
+        question: crate::remote_channel::bridge::QuestionPromptRef,
+        step: u64,
+    },
 }
 
 #[derive(Clone)]
@@ -168,6 +173,26 @@ impl<Receipt> CardLedger<Receipt> {
 
     fn cards(&self) -> impl Iterator<Item = &CardId> {
         self.cards.keys()
+    }
+
+    /// Every card offering question `question_id` of `pane`'s session, any
+    /// field, or every question when `question_id` is `None`.
+    pub(crate) fn questions(
+        &self,
+        pane: PaneRef,
+        session: u64,
+        question_id: Option<u64>,
+    ) -> Vec<CardId> {
+        self.cards
+            .keys()
+            .filter(|card| {
+                matches!(card, CardId::Question { pane: held, question, .. }
+                    if *held == pane
+                        && question.session == session
+                        && question_id.is_none_or(|id| id == question.question_id))
+            })
+            .cloned()
+            .collect()
     }
 
     pub(crate) fn permissions(&self, pane: PaneRef, session: u64) -> Vec<CardId> {

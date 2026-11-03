@@ -99,11 +99,14 @@ impl AgentChatView {
     /// subagent stays busy until its window lapses, with nothing to announce
     /// it), so reconciling alone leaves the row outliving its run while the
     /// footer's Stop button, reading `is_busy()` live, has flipped back to Send.
+    /// The question answer timeout is clock-driven the same way, so it runs
+    /// first: a declined question no longer holds the pane's activity.
     pub fn tick_activity(
         &mut self,
         now: std::time::Instant,
         cx: &mut Context<Self>,
     ) -> Option<TurnOutcome> {
+        self.expire_questions(now, cx);
         let edge = self.reconcile_activity(now);
         if self.rows_activity != self.settled_activity_state() {
             self.reproject(cx);

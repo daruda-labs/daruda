@@ -142,6 +142,7 @@ pub enum EndedAs {
 pub enum WaitingOn {
     Question { node: String },
     Permission { tool: Option<String> },
+    Answer { question: String },
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

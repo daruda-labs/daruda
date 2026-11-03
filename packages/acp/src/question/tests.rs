@@ -210,3 +210,59 @@ fn an_overlong_trailing_number_sorts_last() {
     .expect("renderable");
     assert_eq!(question.fields[0].key, "question_1");
 }
+
+#[test]
+fn defaults_are_read_per_kind() {
+    let question = parse(serde_json::json!({
+        "mode": "form",
+        "sessionId": "s-1",
+        "message": "Setup",
+        "requestedSchema": {
+            "type": "object",
+            "properties": {
+                "a_text": { "type": "string", "default": "x" },
+                "b_one": {
+                    "type": "string",
+                    "default": "blue",
+                    "oneOf": [{ "const": "red", "title": "red" }, { "const": "blue", "title": "blue" }]
+                },
+                "c_stale": {
+                    "type": "string",
+                    "default": "green",
+                    "oneOf": [{ "const": "red", "title": "red" }]
+                },
+                "d_many": {
+                    "type": "array",
+                    "default": ["p", "q"],
+                    "items": { "type": "string", "enum": ["p", "q", "r"] }
+                },
+                "e_flag": { "type": "boolean", "default": true },
+                "f_none": { "type": "boolean" }
+            }
+        }
+    }))
+    .expect("renderable");
+    let default = |key: &str| {
+        question
+            .fields
+            .iter()
+            .find(|f| f.key == key)
+            .unwrap()
+            .default
+            .clone()
+    };
+    assert_eq!(default("a_text"), Some(QuestionValue::Text("x".into())));
+    assert_eq!(default("b_one"), Some(QuestionValue::Text("blue".into())));
+    assert_eq!(
+        default("c_stale"),
+        None,
+        "a default outside the options is dropped"
+    );
+    assert_eq!(
+        default("d_many"),
+        Some(QuestionValue::Choices(vec!["p".into(), "q".into()]))
+    );
+    assert_eq!(default("e_flag"), Some(QuestionValue::Bool(true)));
+    assert_eq!(default("f_none"), None);
+    assert_eq!(question.delivery, QuestionDelivery::Blocking);
+}

@@ -7,7 +7,58 @@ use daruda_store::project::PaneCwd;
 use gpui::{Bounds, Pixels};
 
 use super::super::session_config::SessionConfig;
+use super::questions::{ComposerBinding, primary_fields};
 use super::{AgentChatView, AgentSessionStatus, PromptId, PromptQueue, QueuedPrompt};
+
+/// Longest question text a run report carries.
+const QUESTION_SUMMARY_MAX_CHARS: usize = 120;
+
+/// What the composer strip and placeholder say about the question the
+/// composer answers. A summary only: the form itself stays the view's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuestionComposer {
+    pub question_id: u64,
+    /// Index of the focused field among the question's primary fields. A
+    /// card pick can move it while the composer holds text: on a change the
+    /// host commits that text to the field it last saw, by index.
+    pub field: usize,
+    /// `(field + 1, primary field count)`, for "1/2".
+    pub position: (usize, usize),
+    /// Open questions on this pane behind this one (E3), for "+1 waiting".
+    pub waiting_after: usize,
+    /// The focused field's title, or the question's message when it has
+    /// none; the agent's words, verbatim.
+    pub header: String,
+    /// Typed text rides on the field's single pick as a note.
+    pub note_mode: bool,
+    /// The composer's Enter answers the question rather than prompting.
+    pub bound: bool,
+    /// The person bound the composer over a prompt draft, which now starts
+    /// the answer; true until the next commit or bind.
+    pub draft_became_answer: bool,
+    /// The keyboard is on the card's send button. Composer text belongs to
+    /// no field there, so the host commits it before and loads none.
+    pub send_highlighted: bool,
+    /// When the answer timeout declines the question, while it runs; the
+    /// strip shows the time left through [`super::QuestionCountdown`].
+    pub deadline: Option<std::time::Instant>,
+}
+
+/// `request` in one line: its first field's title, or its message when that
+/// field has none, cut to [`QUESTION_SUMMARY_MAX_CHARS`].
+pub fn question_summary(request: &daruda_acp::QuestionRequest) -> String {
+    let text = primary_fields(request)
+        .next()
+        .and_then(|f| f.title.as_deref())
+        .filter(|title| !title.is_empty())
+        .unwrap_or(&request.message);
+    let (prefix, cut) = daruda_core::text::char_prefix(text, QUESTION_SUMMARY_MAX_CHARS);
+    if cut {
+        format!("{prefix}…")
+    } else {
+        prefix.to_owned()
+    }
+}
 
 impl AgentChatView {
     pub fn agent_id(&self) -> &str {
@@ -93,6 +144,51 @@ impl AgentChatView {
     /// started the turn, and its outcome is owed back there.
     pub fn phone_owns_turn(&self) -> bool {
         self.phone_turn_state.is_some()
+    }
+
+    /// The oldest open question in one line for a run report: its first
+    /// field's title, or the request message when that field has none.
+    pub fn pending_question_summary(&self) -> Option<String> {
+        Some(question_summary(&self.questions.first()?.request))
+    }
+
+    /// The oldest open question as the composer sees it, bound or not; only
+    /// that question may take the composer.
+    pub fn question_composer(&self) -> Option<QuestionComposer> {
+        let question = self.questions.first()?;
+        let field = question.focused_field();
+        let header = field
+            .and_then(|f| f.title.as_deref())
+            .filter(|title| !title.is_empty())
+            .unwrap_or(&question.request.message);
+        Some(QuestionComposer {
+            question_id: question.id,
+            field: question.focus.field,
+            position: (
+                question.focus.field + 1,
+                primary_fields(&question.request).count(),
+            ),
+            waiting_after: self.questions.open().count() - 1,
+            header: header.to_owned(),
+            note_mode: field.is_some_and(|f| question.is_note(f)),
+            bound: question.composer.is_bound(),
+            draft_became_answer: question.composer
+                == ComposerBinding::Bound {
+                    draft_became_answer: true,
+                },
+            send_highlighted: question.send_highlighted(),
+            deadline: question.countdown(),
+        })
+    }
+
+    /// The text committed to primary field `field` of the oldest open
+    /// question, when that question is `id`. The composer loads it when the
+    /// field takes the composer, so an earlier answer can be edited.
+    pub fn question_field_text(&self, id: u64, field: usize) -> Option<String> {
+        let question = self.questions.first().filter(|q| q.id == id)?;
+        let target = primary_fields(&question.request).nth(field)?;
+        let key = question.text_key(target)?;
+        question.draft.text(key).map(str::to_owned)
     }
 }
 

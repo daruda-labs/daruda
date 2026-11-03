@@ -260,7 +260,16 @@ impl Workspace {
 
     /// Derive the bottom-input placeholder string from the current focused-pane
     /// context. Pure read — no window or side-effects required.
-    fn compute_input_placeholder(&self, cx: &Context<Self>) -> String {
+    pub(in crate::workspace) fn compute_input_placeholder(&self, cx: &Context<Self>) -> String {
+        use crate::workspace::main_area::bottom_dock::question_binding_ops::QuestionPlaceholder;
+        match self.focused_question_placeholder(cx) {
+            QuestionPlaceholder::Answer if self.mirrors.agent.use_modifier_to_send => {
+                return s::bottom_dock::question_placeholder_modifier();
+            }
+            QuestionPlaceholder::Answer => return s::bottom_dock::question_placeholder(),
+            QuestionPlaceholder::Note => return s::bottom_dock::question_placeholder_note(),
+            QuestionPlaceholder::Prompt => {}
+        }
         let focused_id = self.active_runtime().focused_pane_id;
         let is_agent = self.is_agent_chat_pane(focused_id);
         let mode_name: Option<String> = if is_agent {

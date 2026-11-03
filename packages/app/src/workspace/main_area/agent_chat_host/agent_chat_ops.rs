@@ -21,7 +21,7 @@ mod pane_build;
 mod shots;
 
 #[cfg(feature = "screenshot")]
-pub(crate) use shots::ThoughtsShot;
+pub(crate) use shots::{QuestionShot, ThoughtsShot};
 
 use daruda_config::AgentLaunch;
 use daruda_store::project::{LaneSessionHost, PaneCwd};

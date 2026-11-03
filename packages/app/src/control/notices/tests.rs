@@ -72,19 +72,30 @@ fn question_and_permission_pointer_fields_stay_on_one_line(cx: &mut TestAppConte
                     tool: Some("tool\tname\u{2029}text".into()),
                 },
             ),
+            (
+                "answer",
+                WaitingOn::Answer {
+                    question: "which\nanswer\u{2028}text".into(),
+                },
+            ),
         ] {
             let snapshot = blocked(id, waiting);
             RunsHost::register_run(snapshot.key.clone(), cx);
             RunsHost::seed_run_wait(snapshot, cx);
         }
         let batch = batch(audience(1, Some("s")), cx).unwrap();
-        assert_eq!(batch.prompt.lines().count(), 2);
+        assert_eq!(batch.prompt.lines().count(), 3);
         assert!(batch.prompt.contains("node question text"));
+        assert!(
+            batch
+                .prompt
+                .contains("Waiting for an answer: which answer text")
+        );
         assert!(batch.prompt.contains("tool name text"));
         assert!(!batch.prompt.contains('\u{1b}'));
         accept(batch, cx);
         assert!(self::batch(audience(1, Some("s")), cx).is_none());
-        assert_eq!(RunsHost::unreported_run_events(cx).len(), 2);
+        assert_eq!(RunsHost::unreported_run_events(cx).len(), 3);
     });
 }
 

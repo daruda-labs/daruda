@@ -15,7 +15,12 @@ fn a_long_prompt_folds_at_the_settle_and_the_next_prompt_stays_open(cx: &mut gpu
                 let key = FoldKey::UserPrompt(ix);
                 view.fold.is_expanded(
                     &key,
-                    crate::agent_chat_helpers::fold_context(&key, &view.items, &view.live_units),
+                    crate::agent_chat_helpers::fold_context(
+                        &key,
+                        &view.items,
+                        &view.live_units,
+                        view.filter_matches.standalone_calls(),
+                    ),
                 )
             };
             assert!(expanded(view, 0), "open while the agent works");

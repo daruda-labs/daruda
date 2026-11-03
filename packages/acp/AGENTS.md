@@ -76,6 +76,8 @@ without it the model ends its turn with the question in text. A form with a
 field this crate cannot render, a URL elicitation, or any request to a host that
 did not opt in is declined at once rather than parked, because nothing would
 ever answer it. Flow's headless runner does not opt in.
+An agent may withdraw a parked question with `$/cancel_request`; the host
+receives `QuestionWithdrawn` and the park answers `-32800`.
 
 **Implemented but not advertised: `_meta.terminal_output`.** A vendor-private,
 non-standard claude-agent-acp flag. Setting it makes a Bash result *content-less*

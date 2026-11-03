@@ -191,16 +191,42 @@ agent_chat:
   # Shown on a permission card whose turn was cancelled before the user
   # decided, in place of the chosen-option line.
   permission_cancelled: "Cancelled."
-  # The panel pinned under the conversation while the agent waits on an
-  # answer to a question it asked mid-turn.
-  question_title: "Question"
-  # Beside the title when more questions wait behind the one shown.
-  question_more: "%{count} more waiting"
-  # Opens a free-text box under a question's options.
-  # A picked option chip: a check as well as the active fill.
-  question_picked: "✓ %{label}"
-  question_type_answer: "Type an answer…"
-  question_text_placeholder: "Your answer"
+  # Header of a question the agent asked mid-turn; `agent` is its name.
+  question_asked_by: "%{agent} asks"
+  question_waiting: "Waiting for your answer"
+  # How long an untouched question has before it is declined, e.g. "4:12 left".
+  question_time_left: "%{time} left"
+  # Which question of a form has the keyboard, e.g. "1/2".
+  question_position: "%{n}/%{total}"
+  # Separator between a question header's or record's segments.
+  question_separator: " · "
+  # The row that answers a question in free text, typed in the composer.
+  question_write: "Answer in your own words"
+  question_write_hint: "→ input below"
+  # A free-text answer already committed to a question.
+  question_typed: "Your answer: %{text}"
+  # Free text committed beside a picked option.
+  question_note: "Note: %{text}"
+  # After a question's title when it takes several picks.
+  question_multi: "(choose any)"
+  # Beside the send button while some questions of the form are unanswered;
+  # sending leaves them skipped.
+  question_unanswered: "%{count} unanswered — sent as skipped"
+  # A settled question's summary bar, e.g. "2 answered · Clippy · Links".
+  question_record_answered: "%{count} answered"
+  # The summary so far (`line`) and how many answer labels did not fit.
+  question_record_more: "%{line} +%{count} more"
+  question_record_skipped: "%{count} skipped"
+  # A settled question that was not answered: `outcome` is one of the phrases
+  # below, e.g. "2 asked — withdrawn by the agent".
+  question_record_ended: "%{count} asked — %{outcome}"
+  question_record_skipped_for_prompt: "skipped — answered in chat"
+  question_record_cancelled: "stopped before an answer"
+  question_record_withdrawn: "withdrawn by the agent"
+  # `time` is how long the question waited, e.g. "expired after 5m".
+  question_record_expired: "expired after %{time}"
+  # A whole-minute wait, e.g. "5m".
+  question_timeout_minutes: "%{mins}m"
   question_yes: "Yes"
   question_no: "No"
   question_submit: "Send answer"

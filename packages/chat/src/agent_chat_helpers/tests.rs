@@ -492,7 +492,12 @@ fn a_running_rule_holds_a_subagent_open_through_its_children() {
     let expanded = |items: &[ChatItem]| {
         state.is_expanded(
             &key,
-            fold_context(&key, items, &LiveSubagentUnits::of(items)),
+            fold_context(
+                &key,
+                items,
+                &LiveSubagentUnits::of(items),
+                &Default::default(),
+            ),
         )
     };
     assert!(expanded(&items));
@@ -537,6 +542,29 @@ fn a_streaming_thought_keeps_its_tool_group_active() {
     let user = || ChatItem::UserText("q".to_owned());
     assert!(fold_active(&key, &[user(), call(), thought(true)]));
     assert!(!fold_active(&key, &[user(), call(), thought(false)]));
+}
+
+/// A waiting question after a settled call is not that call's group member, so
+/// a click on the group reads it settled, as its bar does — otherwise the
+/// `running` rule reads the group open and the first click does nothing.
+#[test]
+fn a_group_click_does_not_read_a_question_after_it() {
+    use crate::fold::FoldState;
+    use daruda_acp::ToolStatusView::{Completed, InProgress};
+    let items = [
+        ChatItem::UserText("q".to_owned()),
+        ChatItem::ToolCall(tool_call("t-read", Completed, 0)),
+        ChatItem::ToolCall(tool_call("t-ask", InProgress, 0)),
+    ];
+    let key = FoldKey::ToolGroup("t-read".to_owned());
+    let questions = std::collections::HashSet::from(["t-ask".to_owned()]);
+    let live_units = LiveSubagentUnits::of(&items);
+    let state = FoldState::default();
+    assert!(!state.is_expanded(&key, fold_context(&key, &items, &live_units, &questions)));
+    assert!(state.is_expanded(
+        &key,
+        fold_context(&key, &items, &live_units, &Default::default())
+    ));
 }
 
 #[test]

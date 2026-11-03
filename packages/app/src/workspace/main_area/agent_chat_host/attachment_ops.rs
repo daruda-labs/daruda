@@ -59,7 +59,12 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let pane = self.active_runtime().focused_pane_id;
-        if let Some(view) = self.agent_chat_view(pane).cloned() {
+        // An answer is text only: a bound composer takes dropped paths as text.
+        if let Some(view) = self
+            .agent_chat_view(pane)
+            .cloned()
+            .filter(|_| !self.focused_question_bound(cx))
+        {
             self.load_attachments(
                 pane,
                 view.downgrade(),
@@ -94,6 +99,9 @@ impl Workspace {
     }
 
     pub(in crate::workspace) fn pick_composer_attachments(&mut self, cx: &mut Context<Self>) {
+        if self.focused_question_bound(cx) {
+            return;
+        }
         let pane = self.active_runtime().focused_pane_id;
         let Some(view) = self.agent_chat_view(pane).cloned() else {
             return;
@@ -137,6 +145,10 @@ impl Workspace {
         let Some(view) = self.agent_chat_view(pane).cloned() else {
             return false;
         };
+        // A bound composer pastes as text: its answer cannot carry files.
+        if self.focused_question_bound(cx) {
+            return false;
+        }
         let Some(item) = cx.read_from_clipboard() else {
             return false;
         };

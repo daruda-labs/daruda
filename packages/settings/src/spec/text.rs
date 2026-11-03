@@ -382,6 +382,22 @@ pub(crate) const TEXT_SETTINGS: &[TextSpec] = &[
         },
     },
     TextSpec {
+        setting: TextSetting::AgentQuestionTimeoutSecs,
+        placeholder: || s::settings::placeholder_example("300"),
+        field: |w| &w.agent_question_timeout_input,
+        show: |c| c.agent.question_timeout_secs.to_string(),
+        current: |c| SettingsPatch::AgentQuestionTimeoutSecs(c.agent.question_timeout_secs),
+        parse: |input, cx| {
+            bounded(
+                input,
+                0..=daruda_config::QUESTION_TIMEOUT_MAX_SECS,
+                || s::settings::err_question_timeout().into(),
+                cx,
+            )
+            .map(SettingsPatch::AgentQuestionTimeoutSecs)
+        },
+    },
+    TextSpec {
         setting: TextSetting::AgentReadingWidth,
         placeholder: || s::settings::placeholder_example("700"),
         field: |w| &w.agent_reading_width_input,

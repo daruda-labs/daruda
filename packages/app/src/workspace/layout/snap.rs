@@ -248,6 +248,31 @@ pub(in crate::workspace) struct QueuedPromptsSnapshot {
     pub resume_armed: bool,
 }
 
+/// The strip above the composer while the focused agent pane has a question
+/// open: what `question_composer()` reports, plus the host's own marks.
+#[derive(Clone, PartialEq)]
+pub(in crate::workspace) struct QuestionStripSnapshot {
+    pub pane_id: crate::workspace::main_area::pane_tree::PaneId,
+    pub composer: daruda_chat::view::QuestionComposer,
+    /// A prompt Enter tried to send while the question waits released; the
+    /// strip warns it would wait behind the question (E22).
+    pub pending_prompt: Option<String>,
+    /// Esc just released the binding, so the next Esc stops the agent.
+    pub esc_again: bool,
+    /// The last Enter was refused because the bound field cannot take the
+    /// composer's text; the strip says why instead of the bound message.
+    pub text_not_taken: bool,
+    /// The strip is no wider than the narrow breakpoint (E21): it drops the
+    /// question's header and keeps its position and buttons.
+    pub narrow: bool,
+    /// The composer holds nothing, IME marked text included: the digit and
+    /// Space keys then answer rather than type.
+    pub composer_empty: bool,
+    /// What the answer timeout leaves, in whole seconds, so the staged
+    /// snapshot changes (and the strip repaints) once a second.
+    pub time_left: Option<daruda_chat::view::QuestionCountdown>,
+}
+
 /// The composer's expand toggle: offered only while the draft overflows the
 /// configured rows, and kept while expanded so it can always be collapsed.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -326,6 +351,9 @@ pub(in crate::workspace) struct BottomDockSnapshot {
     /// focus, an agent pane with an empty queue, or the Landing state — the
     /// strip is then not rendered.
     pub queued_prompts: Option<QueuedPromptsSnapshot>,
+    /// The focused agent pane's open question; the strip and the submit
+    /// button's "Answer" label read it. `None` without one.
+    pub question: Option<QuestionStripSnapshot>,
     pub composer_expand: ComposerExpand,
     /// Shell flavour of the focused pane's PTY. Drives drag-and-drop path
     /// quoting in the terminal input — Posix backslash/single-quote rules,

@@ -45,6 +45,20 @@ fn malformed_handles_are_rejected_including_serde() {
 }
 
 #[test]
+fn waiting_on_answer_round_trips_on_the_wire() {
+    use daruda_control_types::runs::WaitingOn;
+    let wait = WaitingOn::Answer {
+        question: "Which check?".into(),
+    };
+    let json = serde_json::to_value(&wait).unwrap();
+    assert_eq!(
+        json,
+        serde_json::json!({"kind": "answer", "question": "Which check?"})
+    );
+    assert_eq!(serde_json::from_value::<WaitingOn>(json).unwrap(), wait);
+}
+
+#[test]
 fn result_states_round_trip_without_losing_ending_or_pointers() {
     use daruda_control_types::runs::{EndedAs, Pointers, Progress, RunResult, RunState, WaitingOn};
     let mut states = vec![

@@ -840,6 +840,36 @@ bottom_dock:
   # Queued-prompt strip header — replaces the count once the first empty Enter
   # has armed the resume gesture, asking for the confirming second press.
   queue_resume_armed: "Press Enter again to resume %{n}"
+  # Composer placeholder while it answers an agent's question.
+  question_placeholder: "Answer in your own words · ↑↓ options · Enter to send · Esc to leave"
+  # Composer placeholder while it answers a question and modifier-to-send is on.
+  question_placeholder_modifier: "Answer in your own words · ↑↓ options · ⌘↵ to send · Esc to leave"
+  # Composer placeholder while typed text becomes a note on the picked option.
+  question_placeholder_note: "Add a note to your choice…"
+  # Composer submit button while it answers a question (instead of Stop).
+  question_send: "Answer"
+  # Question strip above the composer; header is the agent's words, verbatim.
+  question_answering: "Answering question %{n}/%{total} “%{header}”"
+  # The same, on a strip too narrow for the header.
+  question_answering_narrow: "Answering question %{n}/%{total}"
+  # Other questions on the same pane waiting behind the one shown (E3).
+  question_waiting_after: "+%{count} waiting"
+  question_note_hint: "your text becomes a note"
+  question_draft_hint: "your draft became the answer"
+  question_release: "Use for prompt"
+  # Scrolls the transcript to the question card.
+  question_show: "↑ Question"
+  question_waiting: "A question is waiting for your answer."
+  question_answer: "✎ Answer"
+  # Shown when a prompt is sent while a question waits unanswered.
+  question_prompt_blocked: "A question is waiting, so this prompt is delivered after it."
+  question_skip_and_send: "Skip and send this"
+  question_keep_queued: "Keep queued"
+  # Shown after Esc left answer mode; the next Esc stops the agent.
+  question_esc_again: "Esc again stops"
+  # Strip line while Enter cannot take the composer text as the answer
+  # (the field takes no text, or the text is still on the previous field).
+  question_text_not_taken: "This question takes no typed answer — pick an option, or clear the input to answer the next one."
 
 # Projects view
 projects:
@@ -1542,6 +1572,11 @@ notification:
   agent_completed: "Agent finished responding"
   # Body for the "agent is waiting for input / permission" desktop notification.
   agent_waiting: "Agent is waiting for your input"
+  # The agent asked a question and waits for the answer; `question` is its
+  # one-line summary.
+  agent_question_waiting: "%{agent} is asking: %{question}"
+  # A question timed out and was skipped; `question` is its one-line summary.
+  agent_question_expired: "%{agent} went on without your answer: %{question}"
   telegram_truncated_marker: "…(truncated)…"
   # Body for the fixed Telegram ack sent when a phone-triggered turn goes 60s
   # without producing text or a tool call, or settles with nothing having
@@ -1566,6 +1601,41 @@ notification:
   telegram_permission_stale: "Already handled in the app"
   # Feedback when the target pane/session is gone (closed since the prompt sent).
   telegram_permission_gone: "This session is no longer available"
+  # First tail line of a phone card relaying an agent's question; `agent`
+  # is the chat's agent name.
+  telegram_question_asks: "❓ %{agent} asks"
+  # The same line when the form has several questions, e.g. "2/3".
+  telegram_question_asks_position: "❓ %{agent} asks · %{n}/%{total}"
+  # Under a question card whose field takes free text.
+  telegram_question_reply_hint: "Reply to this message to answer in your own words."
+  # Under a question card while the answer timeout runs; `time` is e.g. "4:12".
+  telegram_question_time_left: "⏳ %{time} left, then it is skipped."
+  # A choice button on a multi-select question card, chosen or not.
+  telegram_question_picked: "☑ %{label}"
+  telegram_question_unpicked: "☐ %{label}"
+  # Ends a multi-select question card's choosing.
+  telegram_question_send: "Send"
+  # Leaves an optional question blank and moves on to the next one.
+  telegram_question_skip_one: "Skip this one"
+  # Declines the whole form.
+  telegram_question_skip: "Skip all"
+  # Appended to a question card once its field is taken and the next field
+  # went out as a new card; the second after a multi-select toggle.
+  telegram_question_next: "✅ Taken — next below"
+  telegram_question_updated: "↻ Updated below"
+  # Appended to a question card when the question ends.
+  telegram_question_answered: "✅ Answered"
+  telegram_question_answered_on_desktop: "✅ Answered on the desktop"
+  telegram_question_skipped: "Skipped"
+  telegram_question_skipped_for_prompt: "Skipped — answered in chat"
+  telegram_question_cancelled: "Stopped before an answer"
+  telegram_question_withdrawn: "Withdrawn by the agent"
+  telegram_question_expired: "Expired"
+  # Feedback when a phone answer reached a question already answered,
+  # skipped or closed in the app.
+  telegram_question_stale: "Already answered or closed in the app"
+  # Feedback when a text reply reached a question that takes a button.
+  telegram_question_text_not_taken: "This question takes a button — tap one on the card."
 
 # Terminal annotations (SP-1)
 terminal:

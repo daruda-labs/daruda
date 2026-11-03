@@ -75,6 +75,11 @@ impl SettingsView {
             window,
             cx,
         ));
+        subs.push(Self::subscribe_agent_input(
+            &row.question_timeout_input,
+            window,
+            cx,
+        ));
         subs.push(Self::subscribe_agent_input(&row.host_input, window, cx));
         subs.push(Self::subscribe_agent_input(
             &row.container_input,

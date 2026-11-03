@@ -69,7 +69,7 @@ fn ping() -> BridgePing {
         },
         header: "project".into(),
         tail: super::super::bridge::MessageTail::Plain("done".into()),
-        permission: None,
+        prompt: None,
     }
 }
 

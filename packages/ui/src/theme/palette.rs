@@ -693,6 +693,9 @@ pub const AGENT_QUEUE_STRIP_FONT_SIZE: f32 = FONT_SIZE_MD;
 pub const AGENT_QUEUE_STRIP_ROW_RADIUS: f32 = RADIUS_SM;
 pub const AGENT_QUEUE_STRIP_ROW_PAD_X: f32 = PAD_SM;
 pub const AGENT_QUEUE_STRIP_ROW_PAD_Y: f32 = PAD_XS;
+/// The one-line question strip above the composer: a compact action row
+/// inside the strip's vertical padding. The bottom dock reserves exactly this.
+pub const AGENT_QUESTION_STRIP_H: f32 = BUTTON_COMPACT_HEIGHT + 2.0 * PAD_SM;
 pub const AGENT_BANNER_ICON: Hsla = hsla(210.0, 1.0, 0.68, 1.0);
 pub const AGENT_BANNER_BG: Hsla = with_alpha(AGENT_BANNER_ICON, 0.08);
 pub const AGENT_BANNER_BORDER: Hsla = with_alpha(AGENT_BANNER_ICON, 0.20);

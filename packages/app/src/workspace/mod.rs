@@ -249,6 +249,23 @@ actions!(
         FileViewerSearchOpen,
         FileViewerSearchNext,
         FileViewerSearchPrev,
+        /// Choose row N of the question the empty composer answers; bound
+        /// in the composer's `QuestionAnswerEmpty` context only.
+        QuestionPick1,
+        QuestionPick2,
+        QuestionPick3,
+        QuestionPick4,
+        QuestionPick5,
+        QuestionPick6,
+        QuestionPick7,
+        QuestionPick8,
+        QuestionPick9,
+        /// Toggle the highlighted multi-select option (`QuestionAnswerEmpty`).
+        QuestionToggle,
+        /// Move the answering composer to the question's next / previous
+        /// field (`QuestionAnswer`).
+        QuestionNextField,
+        QuestionPrevField,
         FilesToggleHidden,
         FilesSelectNext,
         FilesSelectPrev,

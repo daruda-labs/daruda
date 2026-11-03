@@ -177,6 +177,9 @@ fn agent_entry_table(entry: &AgentEntry) -> toml_edit::Table {
                 overrides.tail_window_calls,
                 overrides.display_filter.as_deref(),
             );
+            if let Some(secs) = overrides.question_timeout_secs {
+                table["question_timeout_secs"] = toml_edit::value(i64::from(secs));
+            }
             // Written whenever the row states one at all: an empty table is
             // the preset's environment cleared, not the absence of an
             // override (see `PresetOverrides::env`).
@@ -226,6 +229,9 @@ fn agent_entry_table(entry: &AgentEntry) -> toml_edit::Table {
                 agent.tail_window_calls,
                 agent.display_filter.as_deref(),
             );
+            if let Some(secs) = agent.question_timeout_secs {
+                table["question_timeout_secs"] = toml_edit::value(i64::from(secs));
+            }
             // Same rule as a preset override above: written whenever the
             // definition states one at all, so an empty table survives as
             // "stated, and empty".

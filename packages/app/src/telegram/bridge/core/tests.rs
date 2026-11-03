@@ -562,7 +562,7 @@ fn build_ping_plain_completion_has_no_keyboard() {
         pane: pane(1, 1),
         header: "Turn finished".to_string(),
         tail: TelegramTail::Plain(String::new()),
-        permission: None,
+        prompt: None,
     });
 
     assert_eq!(msg.chat_id, 1);
@@ -578,20 +578,22 @@ fn build_ping_permission_registers_two_distinct_tokens() {
         pane: pane(1, 1),
         header: "Approve this?".to_string(),
         tail: TelegramTail::Plain(String::new()),
-        permission: Some(PermissionPromptRef {
-            session: 1,
-            perm_id: 7,
-            buttons: vec![
-                (
-                    "Allow".to_string(),
-                    PermissionDecision::Allow("opt_allow".to_string()),
-                ),
-                (
-                    "Reject".to_string(),
-                    PermissionDecision::Reject("opt_reject".to_string()),
-                ),
-            ],
-        }),
+        prompt: Some(crate::remote_channel::bridge::PingPrompt::Permission(
+            PermissionPromptRef {
+                session: 1,
+                perm_id: 7,
+                buttons: vec![
+                    (
+                        "Allow".to_string(),
+                        PermissionDecision::Allow("opt_allow".to_string()),
+                    ),
+                    (
+                        "Reject".to_string(),
+                        PermissionDecision::Reject("opt_reject".to_string()),
+                    ),
+                ],
+            },
+        )),
     });
 
     let keyboard = msg.keyboard.expect("keyboard present");
@@ -635,28 +637,30 @@ fn build_ping_permission_registers_one_token_per_button_beyond_two() {
         pane: pane(1, 1),
         header: "Approve this?".to_string(),
         tail: TelegramTail::Plain(String::new()),
-        permission: Some(PermissionPromptRef {
-            session: 1,
-            perm_id: 9,
-            buttons: vec![
-                (
-                    "Allow Once".to_string(),
-                    PermissionDecision::Allow("allow_once".to_string()),
-                ),
-                (
-                    "Allow for Session".to_string(),
-                    PermissionDecision::Allow("allow_always".to_string()),
-                ),
-                (
-                    "Allow Commands Starting With …".to_string(),
-                    PermissionDecision::Allow("accept_execpolicy_amendment".to_string()),
-                ),
-                (
-                    "Reject".to_string(),
-                    PermissionDecision::Reject("reject_once".to_string()),
-                ),
-            ],
-        }),
+        prompt: Some(crate::remote_channel::bridge::PingPrompt::Permission(
+            PermissionPromptRef {
+                session: 1,
+                perm_id: 9,
+                buttons: vec![
+                    (
+                        "Allow Once".to_string(),
+                        PermissionDecision::Allow("allow_once".to_string()),
+                    ),
+                    (
+                        "Allow for Session".to_string(),
+                        PermissionDecision::Allow("allow_always".to_string()),
+                    ),
+                    (
+                        "Allow Commands Starting With …".to_string(),
+                        PermissionDecision::Allow("accept_execpolicy_amendment".to_string()),
+                    ),
+                    (
+                        "Reject".to_string(),
+                        PermissionDecision::Reject("reject_once".to_string()),
+                    ),
+                ],
+            },
+        )),
     });
 
     let keyboard = msg.keyboard.expect("keyboard present");
@@ -714,7 +718,9 @@ fn pending_permissions_bound_evicts_oldest_entries() {
         pane: pane(1, 1),
         header: "first".to_string(),
         tail: TelegramTail::Plain(String::new()),
-        permission: Some(prompt()),
+        prompt: Some(crate::remote_channel::bridge::PingPrompt::Permission(
+            prompt(),
+        )),
     });
     let first_keyboard = first_msg.keyboard.expect("keyboard present");
     let first_allow_token = only_row(&first_keyboard)[0].1.clone();
@@ -727,7 +733,9 @@ fn pending_permissions_bound_evicts_oldest_entries() {
             pane: pane(1, 1),
             header: "more".to_string(),
             tail: TelegramTail::Plain(String::new()),
-            permission: Some(prompt()),
+            prompt: Some(crate::remote_channel::bridge::PingPrompt::Permission(
+                prompt(),
+            )),
         });
     }
 

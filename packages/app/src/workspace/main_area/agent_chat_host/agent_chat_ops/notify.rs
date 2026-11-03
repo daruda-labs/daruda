@@ -63,17 +63,32 @@ impl Workspace {
             .unwrap_or_else(s::agent_chat::tab_title)
     }
 
-    /// Fire the "waiting for input" notification on a permission request.
-    /// Called from the event pump BEFORE folding into the view — distinct
-    /// from turn completion, which fires only via [`Self::fire_activity_completion`].
+    /// Fire the "waiting for input" notification on a permission request or
+    /// a question. Called from the event pump BEFORE folding into the view —
+    /// distinct from turn completion, which fires only via
+    /// [`Self::fire_activity_completion`].
     pub(in crate::workspace::main_area::agent_chat_host) fn maybe_notify_agent_event(
         &mut self,
         pane_id: PaneId,
         event: &daruda_acp::AcpEvent,
         cx: &mut Context<Self>,
     ) {
-        let daruda_acp::AcpEvent::PermissionRequested { id, request } = event else {
-            return;
+        let (id, request) = match event {
+            daruda_acp::AcpEvent::PermissionRequested { id, request } => (id, request),
+            daruda_acp::AcpEvent::QuestionAsked { question, .. } => {
+                let summary = daruda_chat::view::question_summary(question);
+                self.notify_agent_pane(
+                    pane_id,
+                    self.mirrors.notifications.agent_waiting_enabled,
+                    s::notification::agent_question_waiting(
+                        self.pane_agent_name(pane_id, cx),
+                        summary,
+                    ),
+                    cx,
+                );
+                return;
+            }
+            _ => return,
         };
         self.notify_agent_pane(
             pane_id,
@@ -96,6 +111,30 @@ impl Workspace {
             return;
         };
         self.relay_permission_wait_to_telegram(pane_id, &card, cx);
+    }
+
+    /// A question's answer timeout ran out: the agent went on without the
+    /// person's answer. Its one settle emits one `Expired` event, so this
+    /// fires once per question; gated like the arrival notification above.
+    pub(in crate::workspace::main_area::agent_chat_host) fn notify_question_expired(
+        &self,
+        pane_id: PaneId,
+        question: &str,
+        cx: &Context<Self>,
+    ) {
+        self.notify_agent_pane(
+            pane_id,
+            self.mirrors.notifications.agent_waiting_enabled,
+            s::notification::agent_question_expired(self.pane_agent_name(pane_id, cx), question),
+            cx,
+        );
+    }
+
+    /// The pane's agent name for a question notification.
+    fn pane_agent_name(&self, pane_id: PaneId, cx: &Context<Self>) -> String {
+        self.agent_chat_view(pane_id)
+            .map(|view| view.read(cx).agent_name().to_owned())
+            .unwrap_or_default()
     }
 
     /// Fire the "completed" notification. Called only from

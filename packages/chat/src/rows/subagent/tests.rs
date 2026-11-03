@@ -220,3 +220,26 @@ fn a_launch_with_no_children_yields_nothing() {
     assert!(children.shown.is_empty());
     assert_eq!((children.hidden, children.kept), (0, 0));
 }
+
+#[test]
+fn a_pinned_child_escapes_a_shut_window_like_a_live_one() {
+    let items = card_of(4);
+    let hierarchy = crate::tool_hierarchy::ToolHierarchy::build(&items);
+    let filter = FilterMatchIndex::of(&items, DisplayFilter::default()).with_questions(
+        &hierarchy,
+        ["c0"],
+        [],
+    );
+    let live = LiveSubagentUnits::of(&items);
+    let children = SubagentChildren::of(
+        &items,
+        "task",
+        0,
+        lens(&filter, &live, TailWindow::Last(1), false),
+    );
+    assert_eq!(ids(&children), vec!["c0", "c3"]);
+    assert_eq!(
+        children.hidden, 3,
+        "the tally still counts what the window covers"
+    );
+}

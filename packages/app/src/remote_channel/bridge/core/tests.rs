@@ -41,11 +41,13 @@ fn channel_instances_do_not_share_targets_or_permission_tokens() {
         pane: pane(1),
         header: "permission".into(),
         tail: super::super::MessageTail::Plain("write".into()),
-        permission: Some(super::super::PermissionPromptRef {
-            session: 1,
-            perm_id: 7,
-            buttons: vec![("Allow".into(), PermissionDecision::Allow("once".into()))],
-        }),
+        prompt: Some(crate::remote_channel::bridge::PingPrompt::Permission(
+            super::super::PermissionPromptRef {
+                session: 1,
+                perm_id: 7,
+                buttons: vec![("Allow".into(), PermissionDecision::Allow("once".into()))],
+            },
+        )),
     });
     let token = prepared.keyboard.unwrap().rows[0][0].1.clone();
     assert_eq!(second.route_callback(token.clone()), InboundAction::Ignore);
@@ -183,4 +185,102 @@ fn settlement_keeps_late_flow_routing_separate_from_live_tokens_and_bounded() {
     );
     core.clear_settled_callbacks();
     assert_eq!(core.route_callback(latest), InboundAction::Ignore);
+}
+
+fn question_ping(core: &mut RoutingCore<String>) -> (QuestionPromptRef, Vec<String>) {
+    use super::super::QuestionPrompt;
+    let question = QuestionPromptRef {
+        session: 1,
+        question_id: 4,
+        field: 0,
+    };
+    let prepared = core.build_ping(BridgePing {
+        pane: pane(1),
+        header: "question".into(),
+        tail: super::super::MessageTail::Plain("which?".into()),
+        prompt: Some(PingPrompt::Question(QuestionPrompt {
+            question,
+            step: 9,
+            rows: vec![
+                vec![("A".into(), QuestionButton::Option(0))],
+                vec![("Skip".into(), QuestionButton::Skip)],
+            ],
+        })),
+    });
+    let tokens = prepared
+        .keyboard
+        .unwrap()
+        .rows
+        .into_iter()
+        .map(|row| row[0].1.clone())
+        .collect();
+    (question, tokens)
+}
+
+fn question_card(question: QuestionPromptRef) -> crate::remote_channel::cards::CardId {
+    crate::remote_channel::cards::CardId::Question {
+        pane: pane(1),
+        question,
+        step: 9,
+    }
+}
+
+/// A question button names its field and is spent once tapped; the card's
+/// settlement retires the rest, so neither can answer twice.
+#[test]
+fn a_question_button_answers_its_field_once() {
+    let mut core = RoutingCore::<String>::default();
+    let (question, tokens) = question_ping(&mut core);
+    assert_eq!(
+        core.route_callback(tokens[0].clone()),
+        InboundAction::RespondQuestion {
+            pane: pane(1),
+            question,
+            reply: QuestionReply::Button(QuestionButton::Option(0)),
+        }
+    );
+    assert_eq!(
+        core.route_callback(tokens[0].clone()),
+        InboundAction::Ignore
+    );
+    core.settle_card(&question_card(question));
+    assert_eq!(
+        core.route_callback(tokens[1].clone()),
+        InboundAction::Ignore
+    );
+}
+
+/// Text replying to a live question card answers that field. Once the card
+/// is settled or superseded by a later step, the reply is stale: refused,
+/// never written into the field, and never sent as a prompt.
+#[test]
+fn a_reply_to_a_question_card_answers_it_while_the_card_is_live() {
+    let mut core = RoutingCore::<String>::default();
+    let (question, _) = question_ping(&mut core);
+    core.record_sent("m1".into(), pane(1));
+    core.record_question_sent("m1".into(), pane(1), question, 9);
+    assert_eq!(
+        core.route_text("teal".into(), Some("m1".into())).ready(),
+        InboundAction::RespondQuestion {
+            pane: pane(1),
+            question,
+            reply: QuestionReply::Text("teal".into()),
+        }
+    );
+    // The next card for the same field supersedes this one.
+    core.record_sent("m2".into(), pane(1));
+    core.record_question_sent("m2".into(), pane(1), question, 10);
+    core.settle_card(&question_card(question));
+    assert_eq!(
+        core.route_text("late".into(), Some("m1".into())).ready(),
+        InboundAction::StaleQuestion
+    );
+    assert!(matches!(
+        core.route_text("live".into(), Some("m2".into())).ready(),
+        InboundAction::RespondQuestion { .. }
+    ));
+    assert!(matches!(
+        core.route_text("next".into(), None).ready(),
+        InboundAction::InjectPrompt { .. }
+    ));
 }

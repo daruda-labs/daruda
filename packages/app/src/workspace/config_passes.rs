@@ -97,10 +97,11 @@ impl Workspace {
             .update(cx, |panel, cx| panel.set_metrics(metrics, cx));
     }
 
-    /// Each chat pane's name and the transcript defaults it follows until the
-    /// user overrides them — applied here as well as at pane creation, so an
-    /// open, untouched pane tracks a config edit live. Resolved per pane: the
-    /// defaults are per agent, and a window holds panes on different agents.
+    /// Each chat pane's name, the transcript defaults it follows until the
+    /// user overrides them, and its question answer timeout — applied here as
+    /// well as at pane creation, so an open, untouched pane tracks a config
+    /// edit live. Resolved per pane: the defaults are per agent, and a window
+    /// holds panes on different agents.
     pub(super) fn apply_config_to_agent_chat_defaults(
         &mut self,
         telegram_recipient_changed: bool,
@@ -115,7 +116,7 @@ impl Workspace {
         for (_, view) in self.every_agent_chat() {
             view.update(cx, |view, cx| {
                 if telegram_recipient_changed {
-                    view.forget_permissions_told_to_phone();
+                    view.forget_told_to_phone();
                 }
                 let name = agent_names
                     .iter()
@@ -128,6 +129,7 @@ impl Workspace {
                     self.mirrors.agent_reader_defaults,
                 );
                 view.reseed_transcript_defaults(&defaults, cx);
+                view.set_question_timeout(self.question_timeout_for(view.agent_id()), cx);
             });
         }
     }

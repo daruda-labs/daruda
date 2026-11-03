@@ -63,6 +63,7 @@ impl AgentChatView {
             _event_pump: None,
             pending_permissions: HashSet::new(),
             questions: Default::default(),
+            composer_hint_empty: true,
             permission_session: super::session_access::new_permission_session(),
             permissions_told_to_phone: HashSet::new(),
             phone_turn_state: None,

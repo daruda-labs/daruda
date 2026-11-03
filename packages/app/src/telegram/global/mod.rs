@@ -111,7 +111,7 @@ impl TelegramBridge {
                 pane,
                 header,
                 tail: TelegramTail::Plain(tail),
-                permission: None,
+                prompt: None,
             },
             cx,
         );
@@ -150,12 +150,12 @@ impl TelegramBridge {
             });
             return;
         }
-        let (pane, permission) = (ping.pane, ping.permission.is_some());
+        let (pane, prompt) = (ping.pane, ping.prompt.is_some());
         let text = trace::is_on().then(|| trace::tail_digest(&ping.tail));
         match self.enqueue(Outbound::Ping(ping), cx) {
             Ok(()) => trace::delivery("queue.ping", || {
                 format!(
-                    "{} pane={} permission={permission} text={}",
+                    "{} pane={} prompt={prompt} text={}",
                     trace::enqueue_slot(),
                     trace::pane(pane),
                     trace::opt(text)
@@ -562,7 +562,7 @@ mod tests {
                     pane,
                     header: "daruda/main".into(),
                     tail: TelegramTail::Plain("done".into()),
-                    permission: None,
+                    prompt: None,
                 },
                 cx,
             );

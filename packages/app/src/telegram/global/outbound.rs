@@ -388,6 +388,28 @@ impl TelegramBridge {
             Self::settle_card(&card, label, cx);
         }
     }
+
+    pub(crate) fn settle_questions(
+        pane: PaneRef,
+        session: u64,
+        question_id: Option<u64>,
+        label: &str,
+        cx: &mut App,
+    ) {
+        let cards = cx
+            .try_global::<Self>()
+            .map(|bridge| {
+                bridge
+                    .cards
+                    .borrow()
+                    .ledger()
+                    .questions(pane, session, question_id)
+            })
+            .unwrap_or_default();
+        for card in cards {
+            Self::settle_card(&card, label, cx);
+        }
+    }
 }
 
 /// Record what a send came to. A card that reached the chat is kept as sent
@@ -415,6 +437,14 @@ fn finish(
     let bridge = cx.global_mut::<TelegramBridge>();
     if live && let Some((pane, id)) = pane.zip(message_id) {
         bridge.core.record_delivered(id, pane, orchestrator);
+        if let Some(CardId::Question { question, step, .. }) =
+            card.as_ref().map(|claim| &claim.card)
+        {
+            bridge
+                .core
+                .routing
+                .record_question_sent(id, pane, *question, *step);
+        }
     }
     if let Some(card) = card {
         let receipt = message_id.map(|message_id| Receipt {

@@ -386,6 +386,8 @@ impl AgentChatView {
     /// callers differ there (fresh conversation vs. resume via `session/load`).
     fn teardown_transient_session_state(&mut self, cx: &mut Context<Self>) {
         cancel_pending_permission(self, cx);
+        // Before the handle goes: the open ones still owe the agent a cancel.
+        self.reset_questions(cx);
         self.detach_handle();
         self._event_pump = None;
         self.items.clear();

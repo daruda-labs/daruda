@@ -20,6 +20,9 @@ struct EventChanges {
     touched_tool: bool,
     touched_text: bool,
     compaction_index: Option<usize>,
+    /// The tool call a question just arrived on: its row trades the card for
+    /// the question's form, a height `rebuild_rows` does not see change.
+    asked_on_tool: Option<String>,
     reconcile_scope: ReconcileScope,
     finished_restore: bool,
     turn_settled: bool,
@@ -32,6 +35,7 @@ impl Default for EventChanges {
             touched_tool: false,
             touched_text: false,
             compaction_index: None,
+            asked_on_tool: None,
             reconcile_scope: ReconcileScope::All,
             finished_restore: false,
             turn_settled: false,
@@ -130,7 +134,12 @@ impl AgentChatView {
                 changes.phone_turn_action = PhoneTurnAction::Answer;
             }
             AcpEvent::QuestionAsked { id, question } => {
-                self.ask_question(id, question);
+                changes.asked_on_tool = question.tool_call_id.clone();
+                self.ask_question(id, question, self.composer_hint_empty, cx);
+                changes.phone_turn_action = PhoneTurnAction::Answer;
+            }
+            AcpEvent::QuestionWithdrawn { id } => {
+                self.withdraw_question(id, cx);
             }
             AcpEvent::TurnEnded { .. } | AcpEvent::TurnFailed(_)
                 if self.queue.turn.awaiting_cancel_ack() =>
@@ -190,7 +199,7 @@ impl AgentChatView {
         match changes.phone_turn_action {
             PhoneTurnAction::None => {}
             PhoneTurnAction::Clear => self.clear_phone_turn(),
-            PhoneTurnAction::Answer => self.answer_phone_turn_for_permission(),
+            PhoneTurnAction::Answer => self.answer_phone_turn_for_card(),
             PhoneTurnAction::CheckUpdate => {
                 if let Some(outcome) = self.take_phone_first_response() {
                     telegram_first_response_effect = PhoneAckEffect::Relay(outcome);
@@ -269,6 +278,9 @@ impl AgentChatView {
             .and_then(|ix| super::super::rows::item_row(&self.rows, ix))
         {
             self.apply_list_sync(ListSync::Rows(row..row + 1), "compaction-update");
+        }
+        if let Some(row) = self.question_row(changes.asked_on_tool.as_deref()) {
+            self.apply_list_sync(ListSync::Rows(row..row + 1), "question-asked");
         }
         // A tool update can mutate a non-tail card in place (status, output,
         // raw-output fallback, diff body, or a nested subagent child rendered

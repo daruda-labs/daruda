@@ -10,7 +10,7 @@
 
 use gpui::{App, AppContext as _, Entity, Point, Window, px};
 
-use super::main_area::agent_chat_host::agent_chat_ops::ThoughtsShot;
+use super::main_area::agent_chat_host::agent_chat_ops::{QuestionShot, ThoughtsShot};
 use super::main_area::tab_ops::OpenIntent;
 use super::pages::tasks::editor::TaskEditorShot;
 use super::{ToggleCommandPalette, Workspace, dialog_helpers};
@@ -273,12 +273,10 @@ pub(crate) enum ScreenshotScenario {
     /// Paired with [`Self::AgentChatPlan`] because the question is whether the
     /// cut step is distinguishable from both the done one and the untouched one.
     AgentChatPlanStopped,
-    /// A question the agent asked mid-turn, pinned under the conversation with
-    /// a second one waiting behind it.
-    AgentChatQuestion,
-    /// The several-field question form, with a pick made and its "Other" box
-    /// open, so Send and a text field show.
-    AgentChatQuestionForm,
+    /// A question the agent asked, drawn as its tool row's body. Glyph-led
+    /// selection, the focused field's rail, a disabled Send and the settled
+    /// summary bars are judgeable only on screen.
+    AgentChatQuestion(QuestionShot),
     /// The tail window's boundary row with nothing floating over it. The pair
     /// with [`Self::AgentChatTailOpen`] is the only way to judge the one thing
     /// the row exists to say — whether its two states are distinguishable —
@@ -345,6 +343,18 @@ pub(crate) enum ScreenshotScenario {
     /// The buttons a person has to read and hit — the one part of `ask` no
     /// state test can look at, and a surface that needs visual verification.
     FlowAsking,
+}
+
+/// Restore what `scenario` seeded beside config after a capture's config
+/// pass (`--screenshot-theme`) put the config's own values back.
+pub(crate) fn after_config_pass(
+    scenario: ScreenshotScenario,
+    ws: &mut Workspace,
+    cx: &mut gpui::Context<Workspace>,
+) {
+    if scenario == ScreenshotScenario::AgentChatQuestion(QuestionShot::Countdown) {
+        ws.restart_question_countdown_for_shot(cx);
+    }
 }
 
 /// Drive `scenario` into view on `workspace`'s `window`. Called from the
@@ -929,14 +939,9 @@ pub(crate) fn drive(
                 ws.open_agent_chat_plan_for_shot(true, window, cx)
             });
         }
-        ScreenshotScenario::AgentChatQuestion => {
+        ScreenshotScenario::AgentChatQuestion(shot) => {
             workspace.update(cx, |ws, cx| {
-                ws.open_agent_chat_question_for_shot(false, window, cx)
-            });
-        }
-        ScreenshotScenario::AgentChatQuestionForm => {
-            workspace.update(cx, |ws, cx| {
-                ws.open_agent_chat_question_for_shot(true, window, cx)
+                ws.open_agent_chat_question_for_shot(shot, window, cx)
             });
         }
         ScreenshotScenario::AgentChatFold => {

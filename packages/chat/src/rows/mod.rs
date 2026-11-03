@@ -204,6 +204,12 @@ impl RenderRow {
 pub(super) struct FilterMatchIndex {
     filter: DisplayFilter,
     tool_ids: HashSet<String>,
+    /// Calls an open question keeps on screen, with their ancestors so a
+    /// pinned call nested in a card still has the card reachable.
+    pinned_ids: HashSet<String>,
+    /// The question calls themselves, open or settled, without ancestors: a
+    /// top-level one is a row of its own rather than a tool group's member.
+    question_ids: HashSet<String>,
 }
 
 impl FilterMatchIndex {
@@ -221,7 +227,47 @@ impl FilterMatchIndex {
             // through the cards it renders inside.
             tool_ids.extend(hierarchy.with_ancestors(tc.id.as_str()).map(str::to_owned));
         }
-        Self { filter, tool_ids }
+        Self {
+            filter,
+            tool_ids,
+            pinned_ids: HashSet::new(),
+            question_ids: HashSet::new(),
+        }
+    }
+
+    /// Exempt the rows carrying questions from the filter. Open questions are
+    /// also pinned through folds; a record is exempt from the filter alone and
+    /// still folds with its response.
+    pub(super) fn with_questions<'a>(
+        mut self,
+        hierarchy: &ToolHierarchy<'a>,
+        pinned: impl IntoIterator<Item = &'a str>,
+        recorded: impl IntoIterator<Item = &'a str>,
+    ) -> Self {
+        for id in pinned {
+            self.question_ids.insert(id.to_owned());
+            for owner in hierarchy.with_ancestors(id) {
+                self.tool_ids.insert(owner.to_owned());
+                self.pinned_ids.insert(owner.to_owned());
+            }
+        }
+        for id in recorded {
+            self.question_ids.insert(id.to_owned());
+            self.tool_ids
+                .extend(hierarchy.with_ancestors(id).map(str::to_owned));
+        }
+        self
+    }
+
+    /// Whether call `id` is, or holds, a pending question that no fold may hide.
+    pub(crate) fn pins(&self, id: &str) -> bool {
+        self.pinned_ids.contains(id)
+    }
+
+    /// The calls that stand as rows of their own instead of joining a tool
+    /// run, for the structure that draws group boundaries.
+    pub(crate) fn standalone_calls(&self) -> &HashSet<String> {
+        &self.question_ids
     }
 
     /// Test convenience: derive the hierarchy for this one call. Production
@@ -416,10 +462,7 @@ pub(super) fn project_with_filter_index<'a>(
                         // fault rather than as a summary — so the turn bar falls
                         // back to previewing the prose, as it does for a turn
                         // that called nothing at all.
-                        categories: if TranscriptStructure::new(items, hierarchy)
-                            .top_level_tool_runs(run.clone())
-                            > 1
-                        {
+                        categories: if context.structure().top_level_tool_runs(run.clone()) > 1 {
                             tally_categories(run.clone().filter_map(|k| match &items[k] {
                                 ChatItem::ToolCall(tc) if !hierarchy.is_nested_child(tc) => {
                                     Some(tc)
@@ -497,6 +540,7 @@ impl<'a> ProjectionContext<'a> {
     /// the hierarchy is built once per pass, never per query.
     fn structure(&self) -> TranscriptStructure<'a> {
         TranscriptStructure::new(self.items, self.hierarchy)
+            .with_standalone(self.filter.standalone_calls())
     }
 }
 

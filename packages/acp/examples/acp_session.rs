@@ -110,6 +110,9 @@ fn main() {
                     eprintln!("[question] {question:?}");
                     handle.respond_question(id, daruda_acp::QuestionAnswer::Decline);
                 }
+                AcpEvent::QuestionWithdrawn { id } => {
+                    eprintln!("[question {id} withdrawn]");
+                }
                 AcpEvent::TurnEnded { stop_reason, .. } => {
                     turns_completed += 1;
                     eprintln!("[turn {turns_completed} ended] stop_reason={stop_reason}");

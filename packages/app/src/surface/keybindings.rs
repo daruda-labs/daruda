@@ -130,6 +130,18 @@ pub const SHORTCUT_FILE_VIEWER_SEARCH_NEXT: &str = "enter";
 pub const SHORTCUT_FILE_VIEWER_SEARCH_PREV: &str = "shift-enter";
 
 // ============================================================================
+// Composer answering an agent's question
+// ============================================================================
+//
+// Bound only while the composer answers a question (digits and Space only
+// while it is also empty), so they stay out of `action_map` and the palette:
+// rebinding them without that context would steal typing everywhere.
+pub const SHORTCUT_QUESTION_PICK: [&str; 9] = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
+pub const SHORTCUT_QUESTION_TOGGLE: &str = "space";
+pub const SHORTCUT_QUESTION_NEXT_FIELD: &str = "tab";
+pub const SHORTCUT_QUESTION_PREV_FIELD: &str = "shift-tab";
+
+// ============================================================================
 // Project
 // ============================================================================
 pub const SHORTCUT_OPEN_FOLDER: &str = "secondary-o";

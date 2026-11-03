@@ -213,6 +213,7 @@ pub(super) async fn run_connection(
                             .respond(crate::question::QuestionAnswer::Decline.into_response());
                     };
                     let id = next_question_id.fetch_add(1, Ordering::Relaxed);
+                    let cancellation = responder.cancellation();
                     let (answer_tx, answer_rx) = oneshot::channel();
                     question_parks
                         .lock()
@@ -223,10 +224,33 @@ pub(super) async fn run_connection(
                     // Parked off the dispatch task for the reason the
                     // permission handler is; a dropped sender (host gone)
                     // cancels.
+                    let withdrawn_parks = question_parks.clone();
+                    let withdrawn_tx = question_event_tx.clone();
                     connection.spawn(async move {
-                        let answer = answer_rx
-                            .await
-                            .unwrap_or(crate::question::QuestionAnswer::Cancel);
+                        let answer = match futures::future::select(
+                            answer_rx,
+                            std::pin::pin!(cancellation.cancelled()),
+                        )
+                        .await
+                        {
+                            Either::Left((answer, _)) => {
+                                answer.unwrap_or(crate::question::QuestionAnswer::Cancel)
+                            }
+                            Either::Right(((), _)) => {
+                                // The agent took the question back. Unpark it
+                                // first so a late host answer is a no-op, then
+                                // answer with the standard cancellation error.
+                                withdrawn_parks
+                                    .lock()
+                                    .expect("question parks mutex poisoned")
+                                    .remove(&id);
+                                let _ =
+                                    withdrawn_tx.unbounded_send(AcpEvent::QuestionWithdrawn { id });
+                                return responder.respond_with_result(Err(
+                                    agent_client_protocol::Error::request_cancelled(),
+                                ));
+                            }
+                        };
                         responder.respond(answer.into_response())
                     })
                 }

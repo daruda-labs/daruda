@@ -160,3 +160,37 @@ fn revisiting_a_previously_measured_card_uses_its_new_height(cx: &mut TestAppCon
     assert!(fixture.tool_height(1, cx) > old_height + px(1.));
     fixture.assert_matches_fresh(cx);
 }
+
+/// A question swaps a card just above the viewport for its form. The list
+/// reuses a cached height there, so the ask must drop it: the scroll extent
+/// above the viewport has to agree with the one a fresh layout measures.
+#[gpui::test]
+fn a_question_on_a_card_above_the_viewport_is_remeasured(cx: &mut TestAppContext) {
+    let mut fixture = Fixture::new(cx);
+    let at = |tool: usize| Step::Scroll { tool, offset: 0. };
+    fixture.step(at(2), cx);
+    cx.run_until_parked();
+    let card = fixture.tool_height(2, cx);
+    fixture.step(at(3), cx);
+    cx.run_until_parked();
+    fixture.assert_tool_above_viewport(2, cx);
+    fixture.step(Step::Ask(2), cx);
+    cx.run_until_parked();
+    let after_ask = fixture.offset_above_viewport(cx);
+
+    fixture.step(at(2), cx);
+    cx.run_until_parked();
+    let form = fixture.tool_height(2, cx);
+    assert!(
+        (form - card).abs() > px(1.),
+        "the form must differ from the card for this to test anything: {card:?} -> {form:?}"
+    );
+    fixture.step(at(3), cx);
+    cx.run_until_parked();
+    assert_pixels(
+        after_ask,
+        fixture.offset_above_viewport(cx),
+        "extent above the viewport right after the ask",
+    );
+    fixture.assert_matches_fresh(cx);
+}

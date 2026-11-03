@@ -8,7 +8,7 @@ mod validation;
 
 use super::*;
 use path_warning::agent_command_path_warning;
-use validation::{agent_row_transport_error, is_valid_agent_id};
+use validation::{agent_row_transport_error, is_valid_agent_id, question_timeout_override};
 
 /// Which parts of a catalog card are open. View state only: never persisted,
 /// and carried across a catalog reload so a save does not fold the card the
@@ -54,6 +54,9 @@ pub(crate) struct AgentCatalogRow {
     /// Optional model to request when this agent connects. Same option
     /// sourcing and same empty sentinel as `default_mode_select`.
     pub(crate) default_model_select: Entity<SelectState>,
+    /// This agent's question answer timeout in seconds; empty follows the
+    /// global one. Read through [`validation::question_timeout_override`].
+    pub(crate) question_timeout_input: Entity<InputState>,
     /// The command's executable name, when [`agent_command_path_warning`]
     /// determined it names a local binary not found on `PATH` — `None` when
     /// no check applies (`npx`/`uvx`/JSON stdio) or the binary was found.

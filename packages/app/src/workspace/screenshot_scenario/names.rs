@@ -1,7 +1,7 @@
 //! The `--screenshot-scenario` CLI names and their mapping to a
 //! [`ScreenshotScenario`].
 
-use super::super::main_area::agent_chat_host::agent_chat_ops::ThoughtsShot;
+use super::super::main_area::agent_chat_host::agent_chat_ops::{QuestionShot, ThoughtsShot};
 use super::super::pages::tasks::editor::TaskEditorShot;
 use super::ScreenshotScenario;
 use daruda_chat::view::ActivityOptionsTab;
@@ -115,9 +115,15 @@ const NAME_AGENT_CHAT_SOLE_REPLY: &str = "agent-chat-sole-reply";
 const NAME_AGENT_CHAT_PLAN: &str = "agent-chat-plan";
 const NAME_AGENT_CHAT_RUNNING_TOOL: &str = "agent-chat-running-tool";
 const NAME_AGENT_CHAT_PLAN_STOPPED: &str = "agent-chat-plan-stopped";
-/// CLI tokens for the pinned question panel.
+/// CLI tokens for an agent question on its tool row: waiting, a form
+/// mid-answer, settled records, and pinned through a fold and a filter.
 const NAME_AGENT_CHAT_QUESTION: &str = "agent-chat-question";
 const NAME_AGENT_CHAT_QUESTION_FORM: &str = "agent-chat-question-form";
+const NAME_AGENT_CHAT_QUESTION_ANSWERED: &str = "agent-chat-question-answered";
+const NAME_AGENT_CHAT_QUESTION_FOLDED: &str = "agent-chat-question-folded";
+const NAME_AGENT_CHAT_QUESTION_COMPOSER: &str = "agent-chat-question-composer";
+const NAME_AGENT_CHAT_QUESTION_BLOCKED_PROMPT: &str = "agent-chat-question-blocked-prompt";
+const NAME_AGENT_CHAT_QUESTION_COUNTDOWN: &str = "agent-chat-question-countdown";
 /// CLI tokens for a stretch of work narrated thought by thought — settled, mid-turn
 /// on a thought with no call after it yet, and filtered down to its thoughts.
 const NAME_AGENT_CHAT_THOUGHTS: &str = "agent-chat-thoughts";
@@ -351,8 +357,21 @@ impl ScreenshotScenario {
             NAME_AGENT_CHAT_PLAN => Some(Self::AgentChatPlan),
             NAME_AGENT_CHAT_RUNNING_TOOL => Some(Self::AgentChatRunningTool),
             NAME_AGENT_CHAT_PLAN_STOPPED => Some(Self::AgentChatPlanStopped),
-            NAME_AGENT_CHAT_QUESTION => Some(Self::AgentChatQuestion),
-            NAME_AGENT_CHAT_QUESTION_FORM => Some(Self::AgentChatQuestionForm),
+            NAME_AGENT_CHAT_QUESTION => Some(Self::AgentChatQuestion(QuestionShot::Single)),
+            NAME_AGENT_CHAT_QUESTION_FORM => Some(Self::AgentChatQuestion(QuestionShot::Form)),
+            NAME_AGENT_CHAT_QUESTION_ANSWERED => {
+                Some(Self::AgentChatQuestion(QuestionShot::Answered))
+            }
+            NAME_AGENT_CHAT_QUESTION_FOLDED => Some(Self::AgentChatQuestion(QuestionShot::Folded)),
+            NAME_AGENT_CHAT_QUESTION_COMPOSER => {
+                Some(Self::AgentChatQuestion(QuestionShot::Composer))
+            }
+            NAME_AGENT_CHAT_QUESTION_BLOCKED_PROMPT => {
+                Some(Self::AgentChatQuestion(QuestionShot::BlockedPrompt))
+            }
+            NAME_AGENT_CHAT_QUESTION_COUNTDOWN => {
+                Some(Self::AgentChatQuestion(QuestionShot::Countdown))
+            }
             NAME_AGENT_CHAT_TAIL => Some(Self::AgentChatTail),
             NAME_AGENT_CHAT_TAIL_OPEN => Some(Self::AgentChatTailOpen),
             NAME_AGENT_CHAT_GROUP_TAIL => Some(Self::AgentChatGroupTail),

@@ -1,6 +1,8 @@
 //! Fold context resolution: the newest-turn boundary, each fold key's turn
 //! position and activity, and the row a fold toggle must remeasure.
 
+use std::collections::HashSet;
+
 use super::{is_active, response_run};
 use crate::fold::{FoldContext, FoldKey};
 use crate::tool_hierarchy::ToolHierarchy;
@@ -33,15 +35,42 @@ impl TurnBoundary {
 }
 
 /// Resolve a key's activity and turn position from the conversation.
+///
+/// `standalone` names the calls the projection keeps out of tool runs
+/// (questions), so a group's bar and its click read the same members.
 pub(crate) fn fold_context(
     key: &FoldKey,
     items: &[daruda_acp::ChatItem],
     live_units: &LiveSubagentUnits,
+    standalone: &HashSet<String>,
 ) -> FoldContext {
-    match fold_key_index(key, items) {
-        Some(ix) => fold_context_at(key, ix, items, TurnBoundary::of(items), live_units),
-        None => FoldContext::new(TurnPosition::Past, false),
+    let Some(ix) = fold_key_index(key, items) else {
+        return FoldContext::new(TurnPosition::Past, false);
+    };
+    let boundary = TurnBoundary::of(items);
+    match key {
+        FoldKey::ToolGroup(_) => {
+            FoldContext::new(boundary.at(ix), group_active_at(ix, items, standalone))
+        }
+        _ => fold_context_at(key, ix, items, boundary, live_units),
     }
+}
+
+/// Whether the tool group starting at `ix` is still being produced.
+///
+/// A nested child is spanned by the run but is not a member of it, so a
+/// group's liveness must not read one — otherwise a call that belongs to an
+/// inner card holds the group force-expanded. The hierarchy is built here
+/// because only the click path asks: the projection reads `group_active` off
+/// the structure it already holds, and no render asks about a group.
+fn group_active_at(
+    ix: usize,
+    items: &[daruda_acp::ChatItem],
+    standalone: &HashSet<String>,
+) -> bool {
+    let hierarchy = ToolHierarchy::build(items);
+    let structure = TranscriptStructure::new(items, &hierarchy).with_standalone(standalone);
+    structure.group_active(structure.tool_run(ix, items.len()))
 }
 
 /// Resolve fold context when the item index and turn boundary are already known.
@@ -134,18 +163,9 @@ fn fold_active_at(
         // run it cut, and a scan that stopped only at the next prompt read the
         // turn after a Stop as part of this one.
         FoldKey::Response(_) => run_active(items, response_run(items, ix)),
-        // A nested child is spanned by the run but is not a member of it, so a
-        // group's liveness must not read one — otherwise a call that belongs to
-        // an inner card holds the group force-expanded.
-        //
-        // The hierarchy is built here rather than passed in because only the
-        // click path reaches this arm: the projection asks `group_active` of
-        // the structure it already holds, and no render asks about a group.
-        FoldKey::ToolGroup(_) => {
-            let hierarchy = ToolHierarchy::build(items);
-            let structure = TranscriptStructure::new(items, &hierarchy);
-            structure.group_active(structure.tool_run(ix, items.len()))
-        }
+        // A group's members depend on which calls stand apart from runs,
+        // which only `fold_context` is told; this reading knows of none.
+        FoldKey::ToolGroup(_) => group_active_at(ix, items, &HashSet::new()),
         FoldKey::ThinkingGroup(_) => items.get(ix..).is_some_and(|rest| {
             rest.iter()
                 .take_while(|item| matches!(item, ChatItem::Thinking { .. }))

@@ -55,12 +55,14 @@ impl Workspace {
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
             let id = effective_id.clone();
             let name = agent_name_for(&self.mirrors.agents, &effective_id);
+            let question_timeout = self.question_timeout_for(&effective_id);
             view.update(cx, |v, cx| {
                 v.switch_agent(
                     super::super::agent_chat_ops::agent_identity(id, name),
                     &defaults,
                     cx,
-                )
+                );
+                v.set_question_timeout(question_timeout, cx);
             });
             self.update_agent_chat_agent_id(pane_id, effective_id.clone());
             self.mutate_durable(cx, |_, _| {});

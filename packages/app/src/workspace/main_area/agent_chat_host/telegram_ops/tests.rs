@@ -851,7 +851,7 @@ async fn an_outstanding_permission_declined_while_present_is_offered_once_the_us
         let sent = expect_ping(outbound.next().now_or_never().flatten().unwrap());
         assert_eq!(sent.pane.pane, pane);
         assert_eq!(
-            sent.permission.as_ref().map(|p| p.perm_id),
+            sent.permission().map(|p| p.perm_id),
             Some(7),
             "the offer carries the buttons for this request"
         );
@@ -925,7 +925,7 @@ async fn permission_delivery_history_tracks_recipient_and_connection(
         ws.relay_outstanding_permissions(cx);
         assert_eq!(
             expect_ping(outbound.next().now_or_never().flatten().unwrap())
-                .permission
+                .permission()
                 .unwrap()
                 .perm_id,
             0
@@ -1003,7 +1003,7 @@ async fn permission_delivery_history_tracks_recipient_and_connection(
                     .flatten()
                     .expect("new connection's permission must be relayed"),
             );
-            assert_eq!(ping.permission.unwrap().perm_id, 0);
+            assert_eq!(ping.permission().unwrap().perm_id, 0);
             ws.relay_outstanding_permissions(cx);
             assert!(outbound.next().now_or_never().is_none());
         }

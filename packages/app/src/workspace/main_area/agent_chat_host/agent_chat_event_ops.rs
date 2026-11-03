@@ -76,11 +76,11 @@ impl Workspace {
                 _ => {}
             }
         }
-        // The form is shown at the desktop only. A turn nobody there started
-        // declines it, and the agent asks in its reply instead — which the
-        // phone relay and the orchestrator's notice already carry.
+        // A turn the orchestrator or a task started away from the desktop has
+        // nobody to fill the form, so it is declined and the agent asks in its
+        // reply instead. A phone-started turn keeps it: the phone answers it.
         if let daruda_acp::AcpEvent::QuestionAsked { id, .. } = &event
-            && self.question_has_no_one_to_answer(pane_id, &view, cx)
+            && self.question_has_no_one_to_answer(pane_id, cx)
         {
             if let Some(handle) = view.read(cx).any_handle() {
                 handle.respond_question(*id, daruda_acp::QuestionAnswer::Decline);
@@ -128,6 +128,7 @@ impl Workspace {
             crate::overage_policy::stop_on_overage_enabled(cx),
             view.read(cx).is_read_only(),
         );
+        let asked = matches!(&event, daruda_acp::AcpEvent::QuestionAsked { .. });
         let telegram_first_response = view.update(cx, |v, cx| {
             v.apply_event(event, &syntax_theme, is_light, cx)
         });
@@ -135,6 +136,11 @@ impl Workspace {
             self.release_cli_resume(pane_id);
         }
         self.relay_phone_ack_effect(pane_id, telegram_first_response, cx);
+        // At arrival as well as on the periodic sweep, as a permission wait
+        // is: a phone-started turn should not wait a pump tick for its card.
+        if asked {
+            self.relay_untold_questions(pane_id, cx);
+        }
         // Before the activity tick below, so the stop's settle edge fires its
         // `Stopped` completion in this same fold.
         if let Some(limit) = overage {
@@ -218,18 +224,11 @@ impl Workspace {
 }
 
 impl Workspace {
-    /// Whether the turn a question arrived in was started away from the
-    /// desktop: relayed from the phone, or a task run the orchestrator or the
-    /// phone started. Those callers read the agent's reply, never this form.
-    fn question_has_no_one_to_answer(
-        &self,
-        pane_id: PaneId,
-        view: &gpui::Entity<daruda_chat::view::AgentChatView>,
-        cx: &gpui::App,
-    ) -> bool {
-        if view.read(cx).phone_owns_turn() {
-            return true;
-        }
+    /// Whether the turn a question arrived in belongs to a task run the
+    /// orchestrator or the phone started. Those callers read the agent's
+    /// reply, never this form. A phone-relayed prompt is not one: its
+    /// question goes to the phone as a card.
+    fn question_has_no_one_to_answer(&self, pane_id: PaneId, cx: &gpui::App) -> bool {
         let Some(exec) = crate::runs::RunsHost::pane_execution(self.run_pane(pane_id), cx) else {
             return false;
         };

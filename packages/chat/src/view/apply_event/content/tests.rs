@@ -99,8 +99,12 @@ fn compaction_stays_visible_when_prose_is_filtered_or_responses_are_collapsed(
                     .contains(&crate::fold::FoldKey::Compaction(1))
             );
             let key = crate::fold::FoldKey::Compaction(1);
-            let context =
-                crate::agent_chat_helpers::fold_context(&key, &view.items, &view.live_units);
+            let context = crate::agent_chat_helpers::fold_context(
+                &key,
+                &view.items,
+                &view.live_units,
+                view.filter_matches.standalone_calls(),
+            );
             assert!(!view.fold.is_expanded(&key, context));
             view.toggle_fold(key.clone(), window, cx);
             assert!(view.fold.is_expanded(&key, context));

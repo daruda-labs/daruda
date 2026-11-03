@@ -9,6 +9,12 @@ use super::super::transcript_defaults::TranscriptDefaults;
 use super::list_sync::ListSync;
 use super::{AgentChatEvent, AgentChatView, AgentIdentity, HostCard};
 
+mod phone_questions;
+mod question_keys;
+mod questions;
+
+pub use phone_questions::{PhoneAnswerResult, PhoneQuestion, PhoneReply};
+
 impl AgentChatView {
     /// Show a host-owned request below the conversation. Duplicate ids leave
     /// the existing request and its decision untouched.
@@ -43,12 +49,6 @@ impl AgentChatView {
             self.agent_name = name;
             cx.notify();
         }
-    }
-
-    /// The phone recipient changed: forget which permission requests the
-    /// old one was told about, so the next sweep tells the new one.
-    pub fn forget_permissions_told_to_phone(&mut self) {
-        self.permissions_told_to_phone.clear();
     }
 
     /// The configured reading width changed. Only a pane laid out at that
@@ -153,7 +153,7 @@ mod tests {
             v.hold_permission_for_shot(7);
             v.permissions_told_to_phone.insert(7);
             v.set_agent_name("Claude Code".into(), cx);
-            v.forget_permissions_told_to_phone();
+            v.forget_told_to_phone();
         })
         .unwrap();
         view.read_with(cx, |v, _| {

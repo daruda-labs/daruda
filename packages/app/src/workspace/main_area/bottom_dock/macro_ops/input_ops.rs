@@ -72,15 +72,28 @@ impl Workspace {
     /// Appends `\r` so the shell receives the command as if Enter was
     /// pressed, then clears the input field.
     ///
-    /// `gpui_component::Input`'s multi-line `enter` action inserts a
-    /// `\n` into the textarea *before* it emits the `PressEnter`
-    /// event (see `gpui_component/src/input/state.rs::enter`), so the
-    /// raw `state.value()` always has at least one trailing newline
-    /// when Cmd+Enter triggers this path. Trimming trailing `\r`/`\n`
-    /// before the embedded-newline → `\r` conversion is what keeps
-    /// the shell from receiving two (or three, after `ICRNL` echo)
-    /// Enter keystrokes.
+    /// A submitting Enter emits `PressEnter` without inserting a line
+    /// break, but the draft can still end in Shift+Enter line breaks.
+    /// Trimming trailing `\r`/`\n` before the embedded-newline → `\r`
+    /// conversion keeps the shell from receiving extra Enter keystrokes.
     pub(in crate::workspace) fn send_terminal_input(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let raw = self.input_dock.input.read(cx).value().to_string();
+        let trimmed = raw.trim_end_matches(['\n', '\r']);
+        // A pending question takes the Enter first: as its answer while the
+        // composer is bound, or to warn that a prompt would wait behind it.
+        if self.route_composer_submit_to_question(trimmed, window, cx) {
+            return;
+        }
+        self.send_composer_text(window, cx);
+    }
+
+    /// [`Self::send_terminal_input`] past the question routing: attachments,
+    /// the empty-Enter gesture, history, then the pane funnel.
+    pub(in crate::workspace) fn send_composer_text(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -185,7 +198,13 @@ impl Workspace {
     /// Prefers the live queue's last entry; falls back to the parked queue's
     /// last entry so ↑ still edits the most-recent prompt after a Stop parked
     /// the queue (the strip renders parked rows as editable).
+    ///
+    /// `None` too while the composer answers a question: a queued prompt
+    /// pulled in would be sent as the answer.
     fn focused_agent_last_queued(&self, cx: &App) -> Option<(PaneId, PromptId)> {
+        if self.focused_question_bound(cx) {
+            return None;
+        }
         let focused = self.active_runtime().focused_pane_id;
         let view = self.agent_chat_view(focused)?;
         let id = view.read(cx).queue().last_prompt_id()?;

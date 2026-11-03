@@ -109,6 +109,9 @@ settings:
   err_currency: "Enter the currency your agent reports, such as USD."
   label_input_max_rows: "Composer height (rows)"
   hint_input_max_rows: "Rows the message box grows to before it scrolls."
+  label_agent_question_timeout: "Question timeout (seconds)"
+  hint_agent_question_timeout: "An agent question nobody touches is skipped after this long; 0 waits for you. Each agent can set its own."
+  err_question_timeout: "Enter whole seconds from 0 to 86400."
   label_reading_width: "Column width (px)"
   card_keep_awake: "Keep computer awake"
   label_keep_awake_mode: "Mode"
@@ -353,6 +356,9 @@ settings:
   agent_field_default_mode: "Session mode"
   # Label for an agent catalog row's optional model override.
   agent_field_default_model: "Model"
+  agent_field_question_timeout: "Question timeout (s)"
+  agent_question_timeout_placeholder: "Follows the Chat setting"
+  agent_question_timeout_description: "Seconds this agent's untouched questions wait before they are skipped. Empty follows the Chat setting; 0 turns it off for this agent."
   # The "no override" entry in a row's mode/model picker, for an adapter whose
   # own default daruda has no fact about.
   agent_vocabulary_agent_default: "Agent default"
@@ -450,6 +456,7 @@ settings:
   err_agent_catalog_id: "Agent ID \"%{id}\" can only use letters, numbers, '.', '_' and '-'."
   err_agent_catalog_duplicate: "Agent ID \"%{id}\" is used more than once."
   err_agent_catalog_env: "Agent %{index}'s environment takes one KEY=value per line — \"%{line}\" is not one."
+  err_agent_catalog_question_timeout: "Agent %{index}'s question timeout takes whole seconds from 0 to 86400, or nothing to follow the Chat setting."
   # A well-formed `KEY=value` line whose name daruda cannot put into a launch
   # command. Separate from `settings_err_agent_catalog_env` because the fix is
   # different — rename the variable, not reshape the line — and because the

@@ -38,6 +38,34 @@ writes "save as agent default" into the catalog), not a dependency.
 - **Transcript presentation** (fold matrix, display filter, tool categories)
   is `daruda_transcript`'s; this package applies it, Settings authors it.
 
+## Questions
+
+A question the agent asks (`view/questions/`) is drawn as the body of the
+tool row that asked it (`render/tool/question/`); one with no row falls back
+to the panel in `render/question.rs`. A top-level question call is a row of
+its own at the run's item level, never a tool group's member (the row
+projection's `FilterMatchIndex::standalone_calls`, also read by the group
+click's fold context). While it waits, its row is pinned through response
+folds and the display filter. Settling keeps a
+`QuestionRecord` and folds that row once; after that the person's fold choice
+holds. A settled question leaves the open list, so a late or duplicate
+answer is a no-op. Only the oldest open question may bind the composer. The
+host never touches question state: it reads `question_composer()`, drives the
+verbs in `view/host_commands/questions.rs`, and listens for
+`QuestionComposerChanged` and `FocusComposer`. The composer's Enter answers a
+question only while bound (`QuestionComposer::bound`); released, it stays a
+prompt, and the host warns before queuing it behind the waiting question.
+Text the composer holds is uncommitted until Enter or a field change, which
+commits it to the field it was typed for; Tab is one more field change.
+The composer's keys drive `view/host_commands/question_keys.rs`; digits and
+Space act only over an empty composer, which IME marked text never is.
+The phone's verbs (`view/host_commands/phone_questions.rs`) hand out one
+field per card and commit to the field the card names, leaving the
+composer, its binding and the desktop focus alone; every settle emits
+`QuestionSettled` so the host can edit the cards left on the phone.
+Visual rules:
+[Question card](../../DESIGN.md#agentchatpane).
+
 ## Activity and Cancellation
 
 Every "is this pane working?" and "did it finish?" decision reads

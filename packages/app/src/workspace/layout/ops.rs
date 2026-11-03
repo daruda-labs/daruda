@@ -117,7 +117,9 @@ impl Workspace {
     /// and the queued-prompt strip's reserve. A drag cannot paint the composer
     /// clipped, and once the draft shrinks the dock returns to the saved size.
     pub(in crate::workspace) fn bottom_dock_display_size(&self, cx: &gpui::App) -> f32 {
-        use crate::ui::theme::{AGENT_QUEUE_STRIP_OUTER_MAX_H, BUTTON_HEIGHT, GAP_SM};
+        use crate::ui::theme::{
+            AGENT_QUESTION_STRIP_H, AGENT_QUEUE_STRIP_OUTER_MAX_H, BUTTON_HEIGHT, GAP_SM,
+        };
 
         let dock = self.docks.bottom.read(cx);
         if !self.input_dock.visible {
@@ -131,6 +133,9 @@ impl Workspace {
             }
             if view.queue().in_strip_order().next().is_some() {
                 floor += AGENT_QUEUE_STRIP_OUTER_MAX_H;
+            }
+            if view.question_composer().is_some() {
+                floor += AGENT_QUESTION_STRIP_H;
             }
         }
         dock.size.max(floor.min(dock.max_size))

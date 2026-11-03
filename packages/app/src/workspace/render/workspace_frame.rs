@@ -270,6 +270,7 @@ impl Workspace {
         // each slot is one macro line in `slot_actions.rs`.
         let workspace_root = crate::tab_slot_table!(@register_listeners cx, workspace_root);
         let workspace_root = crate::lane_slot_table!(@register_listeners cx, workspace_root);
+        let workspace_root = question_key_listeners(workspace_root, cx);
         workspace_root
             .on_action(cx.listener(Self::on_toggle_left_dock))
             .on_action(cx.listener(Self::on_reset_left_dock_width))
@@ -336,4 +337,32 @@ impl Workspace {
             .child(title_bar)
             .child(body_layout)
     }
+}
+
+/// The composer's question keys. `terminal_input` scopes their bindings to
+/// its answer context; each listener re-checks and propagates what the
+/// question does not take.
+fn question_key_listeners(root: gpui::Div, cx: &mut Context<Workspace>) -> gpui::Div {
+    use crate::workspace::main_area::bottom_dock::question_keys_ops::QuestionKey as Key;
+    use crate::workspace::{
+        QuestionNextField, QuestionPick1, QuestionPick2, QuestionPick3, QuestionPick4,
+        QuestionPick5, QuestionPick6, QuestionPick7, QuestionPick8, QuestionPick9,
+        QuestionPrevField, QuestionToggle,
+    };
+    root.on_action(cx.listener(|ws, _: &QuestionPick1, w, cx| ws.question_key(Key::Pick(1), w, cx)))
+        .on_action(cx.listener(|ws, _: &QuestionPick2, w, cx| ws.question_key(Key::Pick(2), w, cx)))
+        .on_action(cx.listener(|ws, _: &QuestionPick3, w, cx| ws.question_key(Key::Pick(3), w, cx)))
+        .on_action(cx.listener(|ws, _: &QuestionPick4, w, cx| ws.question_key(Key::Pick(4), w, cx)))
+        .on_action(cx.listener(|ws, _: &QuestionPick5, w, cx| ws.question_key(Key::Pick(5), w, cx)))
+        .on_action(cx.listener(|ws, _: &QuestionPick6, w, cx| ws.question_key(Key::Pick(6), w, cx)))
+        .on_action(cx.listener(|ws, _: &QuestionPick7, w, cx| ws.question_key(Key::Pick(7), w, cx)))
+        .on_action(cx.listener(|ws, _: &QuestionPick8, w, cx| ws.question_key(Key::Pick(8), w, cx)))
+        .on_action(cx.listener(|ws, _: &QuestionPick9, w, cx| ws.question_key(Key::Pick(9), w, cx)))
+        .on_action(cx.listener(|ws, _: &QuestionToggle, w, cx| ws.question_key(Key::Toggle, w, cx)))
+        .on_action(
+            cx.listener(|ws, _: &QuestionNextField, w, cx| ws.question_key(Key::NextField, w, cx)),
+        )
+        .on_action(
+            cx.listener(|ws, _: &QuestionPrevField, w, cx| ws.question_key(Key::PrevField, w, cx)),
+        )
 }

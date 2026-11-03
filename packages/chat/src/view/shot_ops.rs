@@ -65,16 +65,35 @@ impl AgentChatView {
     }
 
     /// Put `questions` in front of the person as if the agent had asked them,
-    /// with no session to answer to.
+    /// with no session to answer to. `composer_empty` stands in for the
+    /// host's word on the composer, which decides the first one's binding.
     pub fn seed_questions_for_shot(
         &mut self,
         questions: Vec<daruda_acp::QuestionRequest>,
+        composer_empty: bool,
         cx: &mut Context<Self>,
     ) {
-        for (id, question) in questions.into_iter().enumerate() {
-            self.ask_question(id as u64, question);
-        }
+        self.announcing_question_composer(cx, |view, _| {
+            for (id, question) in questions.into_iter().enumerate() {
+                view.enqueue_question(id as u64, question, composer_empty);
+            }
+        });
         cx.notify();
+    }
+
+    /// Cancel every open question as a Stop does, leaving their records.
+    pub fn cancel_questions_for_shot(&mut self, cx: &mut Context<Self>) {
+        self.cancel_pending_questions(cx);
+        self.rebuild_rows();
+        self.resync_all_row_heights("question-cancel-shot");
+    }
+
+    /// The last response bar's run start, the key its fold is stored under.
+    pub fn last_response_for_shot(&self) -> Option<usize> {
+        self.rows.iter().rev().find_map(|r| match r.kind {
+            RowKind::ResponseHeader { run_start, .. } => Some(run_start),
+            _ => None,
+        })
     }
 
     /// Leave the filter on its tab but its popover shut, so the chip on
@@ -96,6 +115,7 @@ mod tests {
             assert_eq!(v.first_conclusion_for_shot(), None);
             assert_eq!(v.tail_boundary_for_shot(), None);
             assert_eq!(v.last_windowed_group_for_shot(), None);
+            assert_eq!(v.last_response_for_shot(), None);
             v.pin_fold_editor_for_shot(cx);
             assert!(v.screenshot_fold_open);
         })

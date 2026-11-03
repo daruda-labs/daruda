@@ -214,6 +214,7 @@ const AGENT: &[Card] = &[
             b(B::AgentToolSummaryLabels),
             b(B::AgentUseModifierToSend),
             t(T::AgentInputMaxRows),
+            t(T::AgentQuestionTimeoutSecs),
         ],
     },
     Card::Rows {

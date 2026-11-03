@@ -1,4 +1,4 @@
-use super::agent_row_transport_error;
+use super::{agent_row_transport_error, question_timeout_override};
 use daruda_project::lane::session_host::{SessionHostError, SessionHostField};
 
 fn agent_row_is_valid(kind: &str, host: &str, container: &str) -> bool {
@@ -70,5 +70,17 @@ fn a_host_that_would_break_the_launch_command_is_refused() {
             Some(expected),
             "{name}"
         );
+    }
+}
+
+#[test]
+fn a_question_timeout_override_is_blank_or_whole_seconds_up_to_a_day() {
+    assert_eq!(question_timeout_override(""), Ok(None));
+    assert_eq!(question_timeout_override("  "), Ok(None));
+    assert_eq!(question_timeout_override("0"), Ok(Some(0)));
+    assert_eq!(question_timeout_override(" 300 "), Ok(Some(300)));
+    assert_eq!(question_timeout_override("86400"), Ok(Some(86_400)));
+    for refused in ["86401", "-1", "5m", "1.5"] {
+        assert_eq!(question_timeout_override(refused), Err(()), "{refused}");
     }
 }

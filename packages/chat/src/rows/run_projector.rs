@@ -39,7 +39,11 @@ impl<'a> RunRows<'a> {
                 &items[j],
                 ChatItem::ToolCall(tc) if tool_or_subtree_live(tc, context.live_units)
             );
-            let structural = folds.enclosing || (!live && (folds.collapsed || window.withholds(j)));
+            // A pending question is the call's body and waits on the user, so
+            // no fold or window may hide it.
+            let pinned = matches!(&items[j], ChatItem::ToolCall(tc) if filter.pins(&tc.id));
+            let structural =
+                !pinned && (folds.enclosing || (!live && (folds.collapsed || window.withholds(j))));
             match group {
                 GroupFilter::Kept => self.push(kind, structural, filtered, indent + 1),
                 // The header already stands for the whole cut; tallying the
@@ -161,7 +165,7 @@ impl UnitWindow {
         let mut units: Vec<(usize, bool)> = Vec::new();
         let mut k = run.start;
         while k < run.end {
-            if !context.structure().top_level_tool(k) {
+            if !context.structure().grouped_tool(k) {
                 k += 1;
                 continue;
             }
@@ -276,7 +280,6 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
         let items = self.context.items;
         let fold = self.context.fold;
         let boundary = self.context.boundary;
-        let hierarchy = self.context.hierarchy;
         let live_units = self.context.live_units;
         let filter = self.context.filter;
         let run = self.spec.run.clone();
@@ -340,13 +343,25 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
             // window's range decides the fold and the boundary's state gates it.
             let covered = k < window.window_start;
             let folded = response_collapsed || (!tail_revealed && covered);
-            if TranscriptStructure::new(items, hierarchy).top_level_tool(k) {
+            if context.structure().stands_alone(k) {
+                // A question is read where it was asked, not behind a group
+                // bar: it ends the run in progress and sits at the run's item
+                // level. An open one waits on the person, so no fold hides it.
+                let pinned = matches!(&items[k], ChatItem::ToolCall(tc) if filter.pins(&tc.id));
+                out.push(
+                    RowKind::AgentItem(k),
+                    folded && !pinned,
+                    !filter.matches(&items[k]),
+                    base_indent,
+                );
+                k += 1;
+            } else if context.structure().grouped_tool(k) {
                 // Every run earns a header, one call included: a turn's shape
                 // must not change with how many calls happened to land next to
                 // each other, and the bar is where the run's fold and its
                 // summary live. A run always holds at least the call that
                 // started it, so there is no shorter case to branch on.
-                let structure = TranscriptStructure::new(items, hierarchy);
+                let structure = context.structure();
                 let grun = structure.tool_run(k, run.end);
                 k = grun.end;
                 // Resolved once: past this line the group is its members, and
@@ -359,9 +374,13 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                 // leaves the group something to show.
                 let group = GroupFilter::of(members.iter().copied(), items, filter);
                 // Two questions about one run: whether the header escapes the
-                // fold above it (any call or its subtree still works), and what
-                // the group's own `running` rule reads (its members).
-                let escapes_enclosing_fold = run_is_live(items, calls.iter().copied(), live_units);
+                // fold above it (any call or its subtree still works, or a card
+                // holds an open question), and what the group's own `running`
+                // rule reads (its members).
+                let escapes_enclosing_fold = run_is_live(items, calls.iter().copied(), live_units)
+                    || calls.iter().any(
+                        |&j| matches!(&items[j], ChatItem::ToolCall(tc) if filter.pins(&tc.id)),
+                    );
                 {
                     let gid = tool_id(&items[grun.start]);
                     let group_key = FoldKey::ToolGroup(gid.clone());

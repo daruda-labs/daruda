@@ -215,6 +215,27 @@ fn every_thoughts_shot_is_addressable() {
     }
 }
 
+#[test]
+fn every_question_shot_is_addressable() {
+    for (name, shot) in [
+        ("agent-chat-question", QuestionShot::Single),
+        ("agent-chat-question-form", QuestionShot::Form),
+        ("agent-chat-question-answered", QuestionShot::Answered),
+        ("agent-chat-question-folded", QuestionShot::Folded),
+        ("agent-chat-question-composer", QuestionShot::Composer),
+        (
+            "agent-chat-question-blocked-prompt",
+            QuestionShot::BlockedPrompt,
+        ),
+        ("agent-chat-question-countdown", QuestionShot::Countdown),
+    ] {
+        assert_eq!(
+            ScreenshotScenario::from_cli_name(name),
+            Some(ScreenshotScenario::AgentChatQuestion(shot))
+        );
+    }
+}
+
 /// Every tab the panel offers has to be reachable from the CLI, or a tab
 /// silently loses its permanent capture coverage.
 #[test]

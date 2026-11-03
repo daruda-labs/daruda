@@ -218,6 +218,16 @@ impl SettingsView {
                 s::settings::agent_field_default_model(),
                 daruda_ui::select::select(&row.default_model_select, cx, 0),
             ))
+            .child(field_row(
+                s::settings::agent_field_question_timeout(),
+                daruda_ui::input(&row.question_timeout_input, cx, 0),
+            ))
+            .child(
+                div()
+                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                    .text_color(t.text_muted)
+                    .child(s::settings::agent_question_timeout_description()),
+            )
             .child(Self::section_label(
                 s::settings::agent_section_transcript(),
                 cx,

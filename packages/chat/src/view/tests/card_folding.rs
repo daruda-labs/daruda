@@ -72,8 +72,12 @@ fn nested_footer_closes_only_its_card_and_recovers_its_header(cx: &mut gpui::Tes
                 (FoldKey::Tool("child".into()), false),
                 (FoldKey::Tool("sibling".into()), true),
             ] {
-                let context =
-                    crate::agent_chat_helpers::fold_context(&key, &view.items, &view.live_units);
+                let context = crate::agent_chat_helpers::fold_context(
+                    &key,
+                    &view.items,
+                    &view.live_units,
+                    view.filter_matches.standalone_calls(),
+                );
                 assert_eq!(view.fold.is_expanded(&key, context), expected, "{key:?}");
             }
             // The child starts below the parent's title and instructions.
@@ -148,8 +152,12 @@ fn card_footer_collapses_tools_and_subagents_without_toggling_them_open(
             ] {
                 view.fold.set_all([key.clone()], true);
                 view.collapse_card(key.clone(), CollapseAnchor::Unmeasured, window, cx);
-                let context =
-                    crate::agent_chat_helpers::fold_context(&key, &view.items, &view.live_units);
+                let context = crate::agent_chat_helpers::fold_context(
+                    &key,
+                    &view.items,
+                    &view.live_units,
+                    view.filter_matches.standalone_calls(),
+                );
                 assert!(!view.fold.is_expanded(&key, context));
                 view.collapse_card(key.clone(), CollapseAnchor::Unmeasured, window, cx);
                 assert!(!view.fold.is_expanded(&key, context));

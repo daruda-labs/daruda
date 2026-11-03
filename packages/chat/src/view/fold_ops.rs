@@ -23,7 +23,12 @@ impl AgentChatView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let context = fold_context(&key, &self.items, &self.live_units);
+        let context = fold_context(
+            &key,
+            &self.items,
+            &self.live_units,
+            self.filter_matches.standalone_calls(),
+        );
         if !self.fold.is_expanded(&key, context) {
             return;
         }
@@ -82,13 +87,32 @@ impl AgentChatView {
         }
     }
 
+    /// Fold a question's record once, as it settles. It goes through the same
+    /// override a person's toggle does, so their later choice sticks; the
+    /// caller remeasures the row afterwards.
+    pub(super) fn fold_settled_question(&mut self, tool_call_id: &str) {
+        let key = FoldKey::Tool(tool_call_id.to_owned());
+        let ctx = fold_context(
+            &key,
+            &self.items,
+            &self.live_units,
+            self.filter_matches.standalone_calls(),
+        );
+        self.fold.set_expanded(key, false, ctx);
+    }
+
     pub(crate) fn toggle_fold(
         &mut self,
         key: FoldKey,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let context = fold_context(&key, &self.items, &self.live_units);
+        let context = fold_context(
+            &key,
+            &self.items,
+            &self.live_units,
+            self.filter_matches.standalone_calls(),
+        );
         let expanded = !self.fold.is_expanded(&key, context);
         self.set_fold_expanded(key, expanded, window, cx);
     }
@@ -101,7 +125,12 @@ impl AgentChatView {
         cx: &mut Context<Self>,
     ) {
         // Projection and user actions resolve the same effective defaults.
-        let ctx = fold_context(&key, &self.items, &self.live_units);
+        let ctx = fold_context(
+            &key,
+            &self.items,
+            &self.live_units,
+            self.filter_matches.standalone_calls(),
+        );
         if !self.fold.set_expanded(key.clone(), expanded, ctx) {
             return;
         }

@@ -760,6 +760,7 @@ impl Workspace {
         let question = daruda_acp::QuestionRequest {
             message: "Which?".into(),
             tool_call_id: None,
+            delivery: daruda_acp::QuestionDelivery::Blocking,
             fields: vec![daruda_acp::QuestionField {
                 key: "question_0".into(),
                 title: None,
@@ -767,6 +768,7 @@ impl Workspace {
                 required: false,
                 kind: daruda_acp::QuestionFieldKind::Text,
                 companion_of: None,
+                default: None,
             }],
         };
         view.update(cx, |v, cx| {

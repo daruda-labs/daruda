@@ -276,6 +276,8 @@ pub(crate) fn action_name(routed: &Routed) -> &'static str {
         InboundAction::Paired { .. } => "paired",
         InboundAction::InjectPrompt { .. } => "inject_prompt",
         InboundAction::RespondPermission { .. } => "respond_permission",
+        InboundAction::RespondQuestion { .. } => "respond_question",
+        InboundAction::StaleQuestion => "stale_question",
         InboundAction::StaleApproval => "stale_approval",
         InboundAction::RunCommand { .. } => "run_command",
         InboundAction::ReportParseError { .. } => "report_parse_error",

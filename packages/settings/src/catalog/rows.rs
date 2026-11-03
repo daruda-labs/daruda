@@ -137,6 +137,16 @@ impl SettingsView {
             default_model_select: cx.new(|cx| {
                 select::state_with_options(model_options, Some(&default_model), window, cx)
             }),
+            question_timeout_input: cx.new(|cx_state| {
+                InputState::new(window, cx_state)
+                    .placeholder(s::settings::agent_question_timeout_placeholder())
+                    .default_value(
+                        definition
+                            .question_timeout_secs
+                            .map(|secs| secs.to_string())
+                            .unwrap_or_default(),
+                    )
+            }),
             path_warning,
             env_field_base,
         };

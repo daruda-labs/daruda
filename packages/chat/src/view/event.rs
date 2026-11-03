@@ -61,6 +61,39 @@ pub enum AgentChatEvent {
         tasks: Vec<ExecutionRef>,
         reason: PromptDropReason,
     },
+    /// What `question_composer()` reports changed: a question arrived or
+    /// settled, or its binding, field or note mode moved. The host resyncs
+    /// its strip and placeholder.
+    QuestionComposerChanged,
+    /// A question card's "answer in your own words": show and focus the
+    /// composer, then bind it with `bind_question_composer(question_id, None,
+    /// ..)`. `prefill` is what that field already holds, for editing.
+    FocusComposer {
+        question_id: u64,
+        prefill: Option<String>,
+    },
+    /// A question left the open list. The host settles any phone card still
+    /// offering it; `from_phone` says the phone's own answer settled it.
+    /// `question` is the question in one line, for a notification about it.
+    QuestionSettled {
+        session: u64,
+        question_id: u64,
+        question: String,
+        end: QuestionEnd,
+        from_phone: bool,
+    },
+}
+
+/// How a question left the open list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QuestionEnd {
+    Answered,
+    Skipped,
+    /// The person sent a prompt instead of answering.
+    SkippedForPrompt,
+    Cancelled,
+    Withdrawn,
+    Expired,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

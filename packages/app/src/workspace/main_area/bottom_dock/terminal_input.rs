@@ -5,6 +5,7 @@
 //! [`daruda_core::shell::quote`] using the focused pane's shell flavour before
 //! insertion.
 
+use crate::ui::Disableable as _;
 use crate::ui::ScrollableElement as _;
 use crate::ui::theme;
 use gpui::{AnyElement, ClickEvent, Context, ExternalPaths, IntoElement, div, prelude::*, px};
@@ -29,7 +30,10 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
     // factory applies the accent / danger background; height and radius are pinned
     // here to match the spec's fixed heights table (Button: 28px) and radius scale
     // (md: 6px), overriding `Button::small()`'s 24px default.
-    let submit = match snap.agent_stop_pane {
+    // A bound question outranks Stop: the turn is busy only because it waits
+    // on this answer, so the button sends it.
+    let answering = snap.question.as_ref().is_some_and(|q| q.composer.bound);
+    let submit = match snap.agent_stop_pane.filter(|_| !answering) {
         Some(pane_id) => {
             crate::ui::button_danger("send", crate::surface::strings::common::btn_stop())
                 .h(px(theme::BUTTON_HEIGHT))
@@ -40,14 +44,21 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
                     }
                 }))
         }
-        None => crate::ui::button_primary("send", crate::surface::strings::common::btn_submit())
-            .h(px(theme::BUTTON_HEIGHT))
-            .rounded(px(theme::RADIUS_MD))
-            .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
-                if let Some(ws) = workspace.upgrade() {
-                    ws.update(cx, |ws, cx| ws.send_terminal_input(window, cx));
-                }
-            })),
+        None => crate::ui::button_primary(
+            "send",
+            if answering {
+                crate::surface::strings::bottom_dock::question_send()
+            } else {
+                crate::surface::strings::common::btn_submit()
+            },
+        )
+        .h(px(theme::BUTTON_HEIGHT))
+        .rounded(px(theme::RADIUS_MD))
+        .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
+            if let Some(ws) = workspace.upgrade() {
+                ws.update(cx, |ws, cx| ws.send_terminal_input(window, cx));
+            }
+        })),
     };
     // When the focused pane is an Agent chat pane, selector chips sit to the
     // left of the Submit button (all in the input's right-hand action column):
@@ -87,8 +98,11 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
     if snap.attachment_draft.is_some() {
         let ws = snap.workspace.clone();
         chips.push(
+            // An answer is text only, so attaching waits until the composer
+            // is back to prompts.
             crate::ui::button_icon("attach-files", crate::ui::icons::ATTACH_FILE, cx)
                 .tooltip(crate::surface::strings::agent_chat::attachment_add())
+                .disabled(answering)
                 .on_click(move |_, _, cx| {
                     if let Some(ws) = ws.upgrade() {
                         ws.update(cx, |ws, cx| ws.pick_composer_attachments(cx));
@@ -142,9 +156,24 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
     // via `set_auto_grow`); the outer dock height is driven by
     // `adapt_dock_to_input_lines` on every `InputEvent::Change`. In fill
     // mode (fallback) the editor fills the dock's fixed height and scrolls.
+    // The question keys bind under these contexts (see `bind_keys`): Tab and
+    // Shift+Tab while bound, digits and Space only over an empty composer.
+    let answer_context = snap
+        .question
+        .as_ref()
+        .filter(|q| q.composer.bound)
+        .map(|q| {
+            let mut context = gpui::KeyContext::default();
+            context.add("QuestionAnswer");
+            if q.composer_empty {
+                context.add("QuestionAnswerEmpty");
+            }
+            context
+        });
     let mut cell = div()
         .flex_1()
         .flex()
+        .when_some(answer_context, |el, context| el.key_context(context))
         .child(
             div()
                 .flex_1()

@@ -117,6 +117,10 @@ impl CompletionProvider for SlashCommandProvider {
             return empty();
         };
         let ws = ws.read(cx);
+        // A bound composer's text is an answer, `/usr/bin` included.
+        if ws.focused_question_bound(cx) {
+            return empty();
+        }
         let focused = ws.active_runtime().focused_pane_id;
         let commands: Vec<SlashCommand> = with_builtin_clear(
             ws.agent_chat_view(focused)
@@ -178,6 +182,7 @@ impl CompletionProvider for SlashCommandProvider {
         self.workspace.upgrade().is_some_and(|ws| {
             let ws = ws.read(cx);
             ws.is_agent_chat_pane(ws.active_runtime().focused_pane_id)
+                && !ws.focused_question_bound(cx)
         })
     }
 }

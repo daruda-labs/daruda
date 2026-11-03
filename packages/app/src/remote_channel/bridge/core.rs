@@ -1,8 +1,8 @@
 //! Channel-independent reply routing, target selection, and callback tokens.
 
 use super::{
-    BridgePing, InboundAction, InlineKeyboard, PaneRef, PermissionDecision, PreparedPing, Routed,
-    Unaimed,
+    BridgePing, InboundAction, InlineKeyboard, PaneRef, PermissionDecision, PingPrompt,
+    PreparedPing, QuestionButton, QuestionPromptRef, QuestionReply, Routed, Unaimed,
 };
 use std::collections::{HashMap, VecDeque};
 use uuid::Uuid;
@@ -24,6 +24,12 @@ pub(crate) const PENDING_PERMISSIONS_CAP: usize = 64;
 /// three namespaces cannot collide structurally.
 pub(crate) const APPROVAL_TOKEN_PREFIX: &str = "apv";
 const FLOW_ASK_TOKEN_PREFIX: &str = "faq";
+/// Callback-data prefix for a question card's button.
+const QUESTION_TOKEN_PREFIX: &str = "qst";
+
+/// Question-button tokens kept before the oldest is evicted. A card is
+/// settled, and its tokens forgotten, as soon as its field is answered.
+const PENDING_QUESTIONS_CAP: usize = 64;
 
 /// Approval tokens kept before the oldest is evicted. Two per card, and a
 /// card the user never answers times out on the app side — so this only
@@ -59,6 +65,15 @@ pub struct RoutingCore<M = i64> {
             PermissionDecision,
         ),
     >,
+    pending_questions: HashMap<String, (PaneRef, QuestionPromptRef, u64, QuestionButton)>,
+    pending_questions_order: VecDeque<String>,
+    /// Question cards a text reply answers, with the step each carried.
+    /// Kept after the card settles, so a late reply is refused rather than
+    /// sent as a prompt.
+    sent_questions: HashMap<M, (PaneRef, QuestionPromptRef, u64)>,
+    sent_questions_order: VecDeque<M>,
+    /// Question cards settled or superseded; a reply to one is stale.
+    settled_questions: VecDeque<(PaneRef, QuestionPromptRef, u64)>,
     settled_callbacks: VecDeque<(String, InboundAction)>,
     command_state: crate::remote_channel::command::CommandState,
 }
@@ -74,6 +89,11 @@ impl<M: Eq + std::hash::Hash + Clone> Default for RoutingCore<M> {
             pending_approvals: HashMap::new(),
             pending_approvals_order: VecDeque::new(),
             pending_flow_asks: HashMap::new(),
+            pending_questions: HashMap::new(),
+            pending_questions_order: VecDeque::new(),
+            sent_questions: HashMap::new(),
+            sent_questions_order: VecDeque::new(),
+            settled_questions: VecDeque::new(),
             settled_callbacks: VecDeque::new(),
             command_state: crate::remote_channel::command::CommandState::default(),
         }
@@ -120,6 +140,23 @@ impl<M: Eq + std::hash::Hash + Clone> RoutingCore<M> {
             // A command we *do* own, used wrongly. Ours to answer.
             Err(error) => return Routed::Ready(InboundAction::ReportParseError { error }),
         };
+
+        // A reply to a question card answers it, slash or not: only a
+        // command daruda owns, parsed above, outranks the card.
+        if let Some(card) = reply_to_message_id
+            .as_ref()
+            .and_then(|id| self.sent_questions.get(id))
+        {
+            if self.settled_questions.contains(card) {
+                return Routed::Ready(InboundAction::StaleQuestion);
+            }
+            let (pane, question, _) = *card;
+            return Routed::Ready(InboundAction::RespondQuestion {
+                pane,
+                question,
+                reply: QuestionReply::Text(text),
+            });
+        }
 
         let reply_to = reply_to_message_id
             .and_then(|id| self.sent_pings.get(&id))
@@ -174,6 +211,20 @@ impl<M: Eq + std::hash::Hash + Clone> RoutingCore<M> {
             return match self.command_state.resolve_token(&data) {
                 Some(pane) => InboundAction::SelectTarget { pane },
                 None => InboundAction::StaleListing,
+            };
+        }
+
+        if data.starts_with(QUESTION_TOKEN_PREFIX) {
+            // Consumed, as a permission token is: the card is settled the
+            // moment its field moves on, and a second tap must not toggle
+            // or answer twice.
+            return match self.pending_questions.remove(&data) {
+                Some((pane, question, _, button)) => InboundAction::RespondQuestion {
+                    pane,
+                    question,
+                    reply: QuestionReply::Button(button),
+                },
+                None => InboundAction::Ignore,
             };
         }
 
@@ -247,21 +298,41 @@ impl<M: Eq + std::hash::Hash + Clone> RoutingCore<M> {
     }
 
     pub fn build_ping(&mut self, ping: BridgePing) -> PreparedPing {
-        let keyboard = ping.permission.map(|prompt| {
-            let buttons: Vec<(String, String)> = prompt
-                .buttons
-                .into_iter()
-                .map(|(label, decision)| {
-                    let token = Uuid::new_v4().simple().to_string();
-                    self.insert_pending_permission(
-                        token.clone(),
-                        (ping.pane, prompt.session, prompt.perm_id, decision),
-                    );
-                    (label, token)
-                })
-                .collect();
-
-            InlineKeyboard::single_row(buttons)
+        let keyboard = ping.prompt.map(|prompt| match prompt {
+            PingPrompt::Permission(prompt) => {
+                let buttons: Vec<(String, String)> = prompt
+                    .buttons
+                    .into_iter()
+                    .map(|(label, decision)| {
+                        let token = Uuid::new_v4().simple().to_string();
+                        self.insert_pending_permission(
+                            token.clone(),
+                            (ping.pane, prompt.session, prompt.perm_id, decision),
+                        );
+                        (label, token)
+                    })
+                    .collect();
+                InlineKeyboard::single_row(buttons)
+            }
+            PingPrompt::Question(prompt) => InlineKeyboard {
+                rows: prompt
+                    .rows
+                    .into_iter()
+                    .map(|row| {
+                        row.into_iter()
+                            .map(|(label, button)| {
+                                let token =
+                                    format!("{QUESTION_TOKEN_PREFIX}:{}", Uuid::new_v4().simple());
+                                self.insert_pending_question(
+                                    token.clone(),
+                                    (ping.pane, prompt.question, prompt.step, button),
+                                );
+                                (label, token)
+                            })
+                            .collect()
+                    })
+                    .collect(),
+            },
         });
 
         PreparedPing {
@@ -317,6 +388,39 @@ impl<M: Eq + std::hash::Hash + Clone> RoutingCore<M> {
         }
     }
 
+    fn insert_pending_question(
+        &mut self,
+        token: String,
+        value: (PaneRef, QuestionPromptRef, u64, QuestionButton),
+    ) {
+        self.pending_questions.insert(token.clone(), value);
+        self.pending_questions_order.push_back(token);
+        if self.pending_questions_order.len() > PENDING_QUESTIONS_CAP
+            && let Some(oldest) = self.pending_questions_order.pop_front()
+        {
+            self.pending_questions.remove(&oldest);
+        }
+    }
+
+    /// Record that `message_id` is card `step` for `question`, so a text
+    /// reply to it answers that field while the card is live.
+    pub fn record_question_sent(
+        &mut self,
+        message_id: M,
+        pane: PaneRef,
+        question: QuestionPromptRef,
+        step: u64,
+    ) {
+        self.sent_questions
+            .insert(message_id.clone(), (pane, question, step));
+        self.sent_questions_order.push_back(message_id);
+        if self.sent_questions_order.len() > SENT_PINGS_CAP
+            && let Some(oldest) = self.sent_questions_order.pop_front()
+        {
+            self.sent_questions.remove(&oldest);
+        }
+    }
+
     /// Keep a bounded routing tombstone: a late flow tap still names its
     /// original question, and other settled taps cannot compete with edits.
     pub(crate) fn settle_card(&mut self, card: &crate::remote_channel::cards::CardId) {
@@ -356,6 +460,23 @@ impl<M: Eq + std::hash::Hash + Clone> RoutingCore<M> {
                 })
                 .map(|(token, _)| (token.clone(), InboundAction::Ignore))
                 .collect(),
+            CardId::Question {
+                pane,
+                question,
+                step,
+            } => {
+                self.settled_questions.push_back((*pane, *question, *step));
+                if self.settled_questions.len() > SETTLED_CALLBACKS_CAP {
+                    self.settled_questions.pop_front();
+                }
+                self.pending_questions
+                    .iter()
+                    .filter(|(_, (held, asked, sent, _))| {
+                        (held, asked, sent) == (pane, question, step)
+                    })
+                    .map(|(token, _)| (token.clone(), InboundAction::Ignore))
+                    .collect()
+            }
         };
         self.forget_card(card);
         for callback in callbacks {
@@ -394,6 +515,17 @@ impl<M: Eq + std::hash::Hash + Clone> RoutingCore<M> {
                 });
                 self.pending_permissions_order
                     .retain(|token| self.pending_permissions.contains_key(token));
+            }
+            CardId::Question {
+                pane,
+                question,
+                step,
+            } => {
+                self.pending_questions.retain(|_, (held, asked, sent, _)| {
+                    (&*held, &*asked, &*sent) != (pane, question, step)
+                });
+                self.pending_questions_order
+                    .retain(|token| self.pending_questions.contains_key(token));
             }
         }
     }

@@ -677,3 +677,90 @@ async fn a_config_edit_moves_live_sessions_off_unpicked_defaults(cx: &mut TestAp
     );
     assert_eq!(probes[1].drain().0, 1, "only the model is requested");
 }
+
+/// S6-b, Q17: a pane is born on its agent's question timeout, else the
+/// global one, and follows a config reload.
+#[gpui::test]
+async fn a_pane_follows_its_agents_question_timeout_from_birth_through_reload(
+    cx: &mut TestAppContext,
+) {
+    use std::time::Duration;
+
+    let entry = |id: &str, secs: Option<u32>| {
+        daruda_config::AgentEntry::custom(daruda_config::AgentDefinition {
+            id: id.to_string(),
+            name: id.to_string(),
+            question_timeout_secs: secs,
+            ..daruda_config::AgentDefinition::claude_default()
+        })
+    };
+    let config = |global: u32, a: Option<u32>| daruda_config::Config {
+        agent: daruda_config::AgentConfig {
+            question_timeout_secs: global,
+            ..daruda_config::AgentConfig::default()
+        },
+        agents: vec![
+            entry(TRANSCRIPT_AGENT_A, a),
+            entry(TRANSCRIPT_AGENT_B, None),
+        ],
+        ..daruda_config::Config::default()
+    };
+    let project_root = std::env::temp_dir().join(format!(
+        "daruda_agent_chat_question_timeout_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&project_root);
+    let _ = std::fs::create_dir_all(&project_root);
+    let project = daruda_store::project::Project::from_path(&project_root);
+    let (window_handle, workspace) =
+        super::super::build_workspace_with(cx, &config(300, Some(60)), Some(project));
+    cx.run_until_parked();
+
+    let (pane_a, pane_b) = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                (
+                    open_agent_chat_pane_on(ws, TRANSCRIPT_AGENT_A, window, cx),
+                    open_agent_chat_pane_on(ws, TRANSCRIPT_AGENT_B, window, cx),
+                )
+            })
+        })
+        .unwrap();
+    let view_a = workspace.read_with(cx, |ws, _| agent_view(ws, pane_a));
+    let view_b = workspace.read_with(cx, |ws, _| agent_view(ws, pane_b));
+    let timeouts = |cx: &mut TestAppContext| {
+        (
+            view_a.read_with(cx, |v, _| v.question_timeout_for_test()),
+            view_b.read_with(cx, |v, _| v.question_timeout_for_test()),
+        )
+    };
+    assert_eq!(
+        timeouts(cx),
+        (
+            Some(Duration::from_secs(60)),
+            Some(Duration::from_secs(300))
+        ),
+        "the agent's own value beats the global one"
+    );
+
+    for (global, a, expected) in [
+        (
+            120,
+            None,
+            (
+                Some(Duration::from_secs(120)),
+                Some(Duration::from_secs(120)),
+            ),
+        ),
+        (120, Some(0), (None, Some(Duration::from_secs(120)))),
+        (0, None, (None, None)),
+    ] {
+        cx.update_window(window_handle.into(), |_, _window, cx| {
+            workspace.update(cx, |ws, cx| ws.reload_config(&config(global, a), cx));
+        })
+        .unwrap();
+        cx.run_until_parked();
+        assert_eq!(timeouts(cx), expected, "global {global}, agent {a:?}");
+    }
+    let _ = std::fs::remove_dir_all(&project_root);
+}

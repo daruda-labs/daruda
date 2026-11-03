@@ -17,9 +17,9 @@ pub use assemble::{LaunchTransport, assemble_launch_command, is_valid_env_name};
 pub(crate) use chat_config::LegacyTranscript;
 pub use chat_config::{
     AgentConfig, FAST_MODE_PLAIN_DESCRIPTION, INPUT_MAX_ROWS_DEFAULT, INPUT_MAX_ROWS_MAX,
-    INPUT_MAX_ROWS_MIN, READING_WIDTH_DEFAULT, READING_WIDTH_MAX, READING_WIDTH_MIN,
-    SessionPreferences, TAIL_WINDOW_ALL, TAIL_WINDOW_CHOICES, TAIL_WINDOW_DEFAULT,
-    USE_READING_WIDTH_DEFAULT,
+    INPUT_MAX_ROWS_MIN, QUESTION_TIMEOUT_MAX_SECS, READING_WIDTH_DEFAULT, READING_WIDTH_MAX,
+    READING_WIDTH_MIN, SessionPreferences, TAIL_WINDOW_ALL, TAIL_WINDOW_CHOICES,
+    TAIL_WINDOW_DEFAULT, USE_READING_WIDTH_DEFAULT,
 };
 pub use entry::{AgentEntry, AgentSource, PresetOverrides};
 pub use preset::{
@@ -84,6 +84,10 @@ pub struct AgentDefinition {
     /// Persisted as a TOML table, so a loaded value is keyed — sorted and
     /// deduplicated — rather than in the order it was written.
     pub env: Option<Vec<(String, String)>>,
+    /// Seconds a question from this agent may wait untouched before it is
+    /// declined as expired, `0` meaning never. `None` follows the global
+    /// [`AgentConfig::question_timeout_secs`].
+    pub question_timeout_secs: Option<u32>,
 }
 
 /// How an ACP agent adapter is launched. `Raw` runs a bash-style command (or
@@ -366,6 +370,8 @@ struct AgentDefinitionRepr {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     display_filter: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    question_timeout_secs: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     env: Option<EnvRepr>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ssh: Option<SshLaunchRepr>,
@@ -499,6 +505,7 @@ impl From<AgentDefinition> for AgentDefinitionRepr {
             tail_window: v.tail_window,
             tail_window_calls: v.tail_window_calls,
             display_filter: v.display_filter,
+            question_timeout_secs: v.question_timeout_secs,
             env: env_to_repr(v.env),
             ssh,
             docker,
@@ -537,6 +544,7 @@ impl From<AgentDefinitionRepr> for AgentDefinition {
             tail_window_calls: v.tail_window_calls,
             display_filter: v.display_filter,
             env: env_from_repr(v.env),
+            question_timeout_secs: chat_config::clamp_question_timeout(v.question_timeout_secs),
         }
     }
 }
@@ -556,6 +564,7 @@ impl AgentDefinition {
             tail_window_calls: None,
             display_filter: None,
             env: None,
+            question_timeout_secs: None,
         }
     }
 
@@ -578,6 +587,7 @@ impl AgentDefinition {
             tail_window_calls: None,
             display_filter: None,
             env: None,
+            question_timeout_secs: None,
         }
     }
 

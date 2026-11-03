@@ -44,6 +44,8 @@ pub(in crate::workspace) struct InputDock {
     /// was meant for on the next input-pane focus. `None` until the first
     /// input-capable pane is focused.
     pub(in crate::workspace) owner: Option<PaneId>,
+    /// What the host remembers about the question the composer answers.
+    pub(in crate::workspace) question: super::question_binding_ops::QuestionMarks,
 }
 
 impl InputDock {
@@ -91,6 +93,11 @@ impl InputDock {
                 // through to the default outdent. Evaluated live on each press.
                 .on_secondary_tab(move |_window, app| {
                     ws_for_tab.upgrade().is_some_and(|ws| {
+                        // While a question is bound Shift+Tab moves between its
+                        // fields (`QuestionPrevField`), never the mode.
+                        if ws.read(app).focused_question_bound(app) {
+                            return false;
+                        }
                         let focused = ws.read(app).active_runtime().focused_pane_id;
                         ws.update(app, |ws, cx| ws.cycle_agent_mode(focused, cx))
                     })
@@ -101,11 +108,25 @@ impl InputDock {
                 // propagating normally otherwise). Fires only as a fallback after
                 // the input's own Escape handling (see `InputState::on_escape`),
                 // so an open completion menu still closes on the first Escape.
-                .on_escape(move |_window, app| {
-                    ws_for_escape.upgrade().is_some_and(|ws| {
-                        let focused = ws.read(app).active_runtime().focused_pane_id;
-                        ws.update(app, |ws, cx| ws.cancel_agent_turn_if_active(focused, cx))
-                    })
+                .on_escape(move |window, app| {
+                    let Some(ws) = ws_for_escape.upgrade() else {
+                        return false;
+                    };
+                    // A bound question's first Escape only leaves answer mode
+                    // (D5). Its sync writes this input's placeholder, so the
+                    // release waits past this hook (pitfall #5).
+                    if ws.read(app).focused_question_bound(app) {
+                        let ws_deferred = ws.downgrade();
+                        window.defer(app, move |_window, cx| {
+                            // SILENT-OK: workspace dropped between key press and defer
+                            if let Some(ws) = ws_deferred.upgrade() {
+                                ws.update(cx, |ws, cx| ws.question_escape(cx));
+                            }
+                        });
+                        return true;
+                    }
+                    let focused = ws.read(app).active_runtime().focused_pane_id;
+                    ws.update(app, |ws, cx| ws.cancel_agent_turn_if_active(focused, cx))
                 })
                 // ↑/↓ at the boundary of the multi-line input navigates the
                 // per-lane history buffer (shell-style). The hook checks whether
@@ -120,6 +141,18 @@ impl InputDock {
                     let Some(ws) = ws_for_history.upgrade() else {
                         return false;
                     };
+                    // An empty composer bound to a question moves the card's
+                    // highlight instead of recalling history.
+                    if ws.read(app).question_arrows_take(app) {
+                        let ws_deferred = ws.downgrade();
+                        window.defer(app, move |window, cx| {
+                            // SILENT-OK: workspace dropped between key press and defer
+                            if let Some(ws) = ws_deferred.upgrade() {
+                                ws.update(cx, |ws, cx| ws.move_question_highlight(dir, window, cx));
+                            }
+                        });
+                        return true;
+                    }
                     // Decide whether to consume before mutating any state.
                     // Reading ws (Workspace) is safe here: we're inside
                     // terminal_input's update, but Workspace is a different entity.
@@ -184,6 +217,9 @@ impl InputDock {
                     // The composer no longer holds what the resume gesture was
                     // armed against, so the next Enter sends rather than confirms.
                     this.disarm_queue_resume(cx);
+                    // The question's draft hint, held-back prompt and
+                    // placeholder all follow the composer's text.
+                    this.sync_question_composer(window, cx);
                 }
                 _ => {}
             },
@@ -196,6 +232,7 @@ impl InputDock {
             visible: false,
             drafts: HashMap::new(),
             owner: None,
+            question: Default::default(),
         }
     }
 }

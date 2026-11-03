@@ -67,8 +67,8 @@ pub use model::{
 pub use native_subagents::{NativeSubagentRouter, Routed};
 pub use node::{NodeError, NodeProgress, NodeRuntime, command_diagnostic, ensure_node};
 pub use question::{
-    QuestionAnswer, QuestionField, QuestionFieldKind, QuestionOption, QuestionRequest,
-    QuestionValue,
+    QuestionAnswer, QuestionDelivery, QuestionField, QuestionFieldKind, QuestionOption,
+    QuestionRequest, QuestionValue,
 };
 pub use session::{
     AcpEvent, AcpSessionHandle, ClientCapabilitiesView, ConnectPhase, InfoFieldChange,

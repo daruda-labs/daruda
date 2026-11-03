@@ -76,6 +76,20 @@ impl AgentChatView {
         }
     }
 
+    /// The oldest open question's keyboard focus: its field and the card row
+    /// highlighted there, if any. The send button is read through
+    /// `question_composer().send_highlighted`.
+    pub fn question_focus_for_test(&self) -> Option<(usize, Option<usize>)> {
+        use super::questions::QuestionHighlight;
+        self.questions.first().map(|q| {
+            let row = match q.focus.highlight {
+                Some(QuestionHighlight::Row(row)) => Some(row),
+                Some(QuestionHighlight::Send) | None => None,
+            };
+            (q.focus.field, row)
+        })
+    }
+
     pub fn host_cards_for_test(&self) -> Vec<(u64, Option<String>)> {
         self.host_cards
             .entries()
@@ -93,6 +107,11 @@ impl AgentChatView {
     /// The defaults the pane was last seeded with.
     pub fn defaults_for_test(&self) -> TranscriptDefaults {
         self.defaults
+    }
+
+    /// The question answer timeout the host last set.
+    pub fn question_timeout_for_test(&self) -> Option<std::time::Duration> {
+        self.questions.timeout
     }
 
     pub fn tail_steps_for_test(&self) -> PaneChoice<TailWindow> {
@@ -160,5 +179,23 @@ impl AgentChatView {
     /// are still outstanding.
     pub fn permissions_told_to_phone_count_for_test(&self) -> usize {
         self.permissions_told_to_phone.len()
+    }
+
+    /// Put question `id` in front of the person as if the agent had asked
+    /// it, with no session to answer to.
+    pub fn ask_question_for_test(
+        &mut self,
+        id: u64,
+        request: daruda_acp::QuestionRequest,
+        cx: &mut Context<Self>,
+    ) {
+        self.ask_question(id, request, self.composer_hint_empty, cx);
+    }
+
+    /// How the question asked on tool call `tool` ended, once it has.
+    pub fn question_end_for_test(&self, tool: &str) -> Option<super::QuestionEnd> {
+        self.questions
+            .record_for_tool(tool)
+            .map(|record| record.outcome.end())
     }
 }

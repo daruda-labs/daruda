@@ -5,6 +5,7 @@ use super::bars::{
     response_bar, thinking_group_bar, thought_icon, tool_group_bar, turn_stats_element,
 };
 use super::*;
+use crate::view::questions::Questions;
 
 /// Render one projected row: an item, a synthetic fold header, or a zero-height
 /// `Empty` when collapsed under an ancestor fold (the row stays in the sequence
@@ -224,6 +225,8 @@ fn render_agent_item(
             this.preferred_editor(),
             this.session_id(),
             this.offers_continue(),
+            this.questions(),
+            this.agent_name(),
             window,
             cx,
         ),
@@ -259,6 +262,8 @@ fn render_item(
     session_id: Option<&str>,
     // Gates offering to continue a cut-short answer (`offers_continue`).
     offers_continue: bool,
+    questions: &Questions,
+    agent_name: &str,
     window: &mut Window,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
@@ -302,6 +307,8 @@ fn render_item(
                 t,
                 dim,
                 preferred_editor,
+                questions,
+                agent_name,
             },
             window,
             cx,
