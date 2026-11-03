@@ -916,3 +916,23 @@ gpui surface (`div`, `Element`, mouse events) as the ones daruda does
 register, so a bump that breaks them very likely breaks the rest too. If a
 bump ever does break only an unused module, deleting it *then* is the same
 work, paid only if it is ever needed.
+
+## `gpui-component-input-empty-text-shortcuts.patch`
+
+Applied in place to `input/state.rs` and `input/movement.rs`. Reapply after
+restoring the other InputState divergences when re-vendoring.
+
+`InputState::on_empty_text_input` optionally handles committed text before
+insertion when the editor is empty and has no marked text. Explicit-range
+and silent programmatic replacements bypass the hook. A true result consumes
+the commit; false preserves normal editing. The callback must not read or
+update the same InputState. The bottom-dock host uses it for digit and Space
+question shortcuts because macOS IME input sources may commit these keys
+before GPUI keybindings run. Other editors retain their previous behavior.
+
+The history-navigation hook also skips marked text so stale host snapshots
+cannot consume composition arrow keys. Finalizing composition with `unmarkText`
+emits one `Change` event when a marked range existed, keeping host text snapshots
+current even when the IME does not send a replacement callback. Regression coverage lives in
+`workspace/tests/agent_chat/questions/keys.rs`, including native-style text
+commits, marked-text preservation, Space toggling and fallback typing.

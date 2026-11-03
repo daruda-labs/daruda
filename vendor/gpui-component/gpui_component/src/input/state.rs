@@ -408,6 +408,9 @@ pub struct InputState {
     /// &mut App`. daruda uses it to cancel the focused agent pane's in-flight
     /// turn (the keyboard counterpart of the bottom-dock "Stop" button).
     pub(super) on_escape: Option<Box<dyn Fn(&mut Window, &mut App) -> bool + 'static>>,
+    /// Host shortcut fallback for unmarked text input into an empty editor.
+    /// Programmatic replacements and IME composition bypass this handler.
+    on_empty_text_input: Option<Box<dyn Fn(&str, &mut Window, &mut App) -> bool>>,
     /// Optional handler invoked when ↑ or ↓ is pressed and the cursor is
     /// at the relevant boundary of the text (first visual line for ↑, last
     /// visual line for ↓). It performs the host's custom action (e.g. recall
@@ -529,6 +532,7 @@ impl InputState {
             on_secondary_tab: None,
             on_escape: None,
             on_history_navigate: None,
+            on_empty_text_input: None,
             on_completion_accept: None,
             mode: InputMode::default(),
             last_layout: None,
@@ -613,6 +617,16 @@ impl InputState {
         handler: impl Fn(HistoryDir, &mut Window, &mut App) -> bool + 'static,
     ) -> Self {
         self.on_history_navigate = Some(Box::new(handler));
+        self
+    }
+
+    /// Handle committed text before insertion into an empty, unmarked editor.
+    /// Return true to consume it. The callback must not re-enter this InputState.
+    pub fn on_empty_text_input(
+        mut self,
+        handler: impl Fn(&str, &mut Window, &mut App) -> bool + 'static,
+    ) -> Self {
+        self.on_empty_text_input = Some(Box::new(handler));
         self
     }
 
@@ -2472,8 +2486,13 @@ impl EntityInputHandler for InputState {
             .map(|range| self.range_to_utf16(&range.into()))
     }
 
-    fn unmark_text(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        self.ime_marked_range = None;
+    fn unmark_text(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        // unmarkText can commit composition without a replacement callback.
+        // Hosts must observe the committed value just as for insertText.
+        if self.ime_marked_range.take().is_some() {
+            cx.emit(InputEvent::Change);
+            cx.notify();
+        }
     }
 
     /// Replace text in range.
@@ -2488,6 +2507,20 @@ impl EntityInputHandler for InputState {
         cx: &mut Context<Self>,
     ) {
         if self.disabled {
+            return;
+        }
+
+        // IME input sources can commit printable keys before keybindings run.
+        // Only an untouched empty editor may hand them to a host shortcut.
+        if !self.silent_replace_text
+            && range_utf16.is_none()
+            && self.ime_marked_range.is_none()
+            && self.text.len() == 0
+            && self
+                .on_empty_text_input
+                .as_ref()
+                .is_some_and(|handler| handler(new_text, window, cx))
+        {
             return;
         }
 

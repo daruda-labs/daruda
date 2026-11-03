@@ -142,7 +142,7 @@ impl InputState {
     /// wrapper has not been prepared yet (no layout painted — same guard as
     /// `move_vertical`).
     fn try_history_navigate(&mut self, dir: HistoryDir, window: &mut Window, cx: &mut App) -> bool {
-        if self.on_history_navigate.is_none() {
+        if self.on_history_navigate.is_none() || self.ime_marked_range.is_some() {
             return false;
         }
         let total = self.text_wrapper.len();
