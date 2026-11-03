@@ -132,7 +132,7 @@ fn code_editor_chrome(
 
 /// Render `state` as a full-size code editor for the file-viewer pane (raw +
 /// diff). Standalone in its own pane, so it scrolls both axes
-/// ([`crate::ScrollWheelBehavior::Both`], the default) and fills the body
+/// using the editor defaults and fills the body
 /// via `.flex()` at the call site. Paints on the file-viewer surface, so the
 /// fallback text colour and editor-owned gutter/ghost-line fills are matched
 /// to that surface instead of the process-wide editor background.
@@ -158,7 +158,7 @@ pub fn file_viewer_editor(state: &Entity<EditorState>, cx: &App) -> Input {
 /// agent-chat transcript** — tool output and file diffs alike. Shares
 /// [`file_viewer_editor`]'s chrome but picks its fallback colour off the
 /// terminal-preset background the embed paints on, and keeps
-/// [`crate::ScrollWheelBehavior::Both`]: a capped embed hides rows below
+/// the editor's default two-axis scrolling: a capped embed hides rows below
 /// the bound, so internal vertical scroll is the only way to reach them.
 /// `InputState::on_scroll_wheel` calls `stop_propagation` only when the offset
 /// actually changed, so a gesture at either extreme still bubbles to the

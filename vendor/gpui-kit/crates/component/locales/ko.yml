@@ -145,6 +145,10 @@ Input:
   Hide Password:
     ko: "비밀번호 숨기기"
 Settings:
+  no_results:
+    ko: "일치하는 설정이 없습니다"
+  no_results_description:
+    ko: "다른 검색어를 입력하세요."
   search_placeholder:
     ko: "검색…"
   Reset All:

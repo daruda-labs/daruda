@@ -138,9 +138,9 @@ are applied for these paths.
 Taffy 0.15.0 to 0.15.1 while retaining the pinned Zed revision. Regenerate
 through `tools/vendor_gpui`; do not edit the generated manifest directly.
 
-## `vendor/gpui-kit/` — vendored gpui-component 0.8.1, **patched in place**
+## `vendor/gpui-kit/` — vendored gpui-component 0.9.0, **patched in place**
 
-daruda's widget library is upstream gpui-component 0.8.1 (`longbridge/gpui-kit`,
+daruda's widget library is upstream gpui-component 0.9.0 (`longbridge/gpui-kit`,
 Apache-2.0), vendored as four crates:
 
 | Directory | Cargo package | Library | Role |
@@ -183,7 +183,7 @@ daruda-authored patch tests and the upstream suites run in CI.
 
 ### Re-vendor procedure
 
-1. Copy the upstream 0.8.x `crates/{base,component,assets,component-macros}`
+1. Copy the upstream 0.9.x `crates/{base,component,assets,component-macros}`
    into `vendor/gpui-kit/crates/`, keeping the root files listed above and
    `crates/component/locales/ko.yml`.
 2. Regenerate each manifest: inherit root `[workspace.dependencies]` where an
@@ -217,16 +217,13 @@ dependencies on `workspace = true` when re-vendoring. The transcript's
 
 ### Why
 
-Upstream 0.8.1 builds against `gpui-pre`. A few sites behave differently on
+Upstream 0.9.0 builds against `gpui-pre`. A few sites behave differently on
 daruda's pinned GPUI; each is a marked adaptation, not a behavior change.
 
 ### What diverges
 
 | Site | Adaptation |
 |---|---|
-| `base/src/test_support.rs` (`window_key`) | The test-support element registry is keyed by `window.window_handle().window_id()`. Upstream keys by `Arc::as_ptr(window.text_system())`, which on the pinned GPUI deref-coerces to the App-wide text system, so every window shared one registry. |
-| `base/src/text/node.rs` (`TableColumnWidths::text_system`) | The table column-width cache is keyed by the window text system's address (`Rc::as_ptr(window.text_system()) as usize`). The pinned GPUI hands out an `Rc`, and the cache crosses the background parser's thread, so it keeps the identity rather than a `Weak`. |
-| `component/src/popover.rs` (`the_enter_motion_starts_over_every_time_the_dropdown_opens`) | The test advances the executor clock (`window.executor().advance_clock`) instead of sleeping: the pinned GPUI times animations by the executor's clock. |
 | `component/src/input/input.rs` (accessibility probe test) | The expected accessibility value is always `Some("initial")`. The flag that decides it belongs to `gpui-base`, whose `test-support` feature this crate's dev-dependency always enables. |
 
 The macro crate's package lookup is the remaining adaptation; see the next
@@ -234,9 +231,10 @@ section.
 
 ### Re-vendor procedure
 
-Re-apply the four sites. The first two fail the vendored suites when dropped
-(cross-window test lookups, a `Weak`/`Rc` type error); the last two are test
-expectations that fail as written upstream.
+Re-apply the accessibility probe expectation. Upstream 0.9 now uses the
+window text system's `Rc` identity for its test registry and table cache, and
+advances the executor clock in the popover test, so those adaptations are
+covered upstream and must not be reapplied.
 
 ---
 
@@ -474,7 +472,8 @@ warnings), and history recall writes through `set_value`.
 ### What diverges
 
 `set_value` calls `set_value_silently` (upstream's body, renamed) and then
-emits one `InputEvent::Change`. Vendored widgets that write their own field
+emits the full replacement as `InputEditsEvent` followed by one
+`InputEvent::Change`. Vendored widgets that write their own field
 programmatically keep upstream's silent write through `set_value_silently`, so
 a write made while handling a change does not feed back: the list query (`component/src/list/list.rs`, which starts its search
 itself), the color picker's hex field (`base/src/color_picker.rs`), the
@@ -484,7 +483,8 @@ the settings number and string fields.
 ### Re-vendor procedure
 
 Rename upstream's `set_value` to `set_value_silently`, add the emitting
-wrapper, then grep for `set_value(` inside `vendor/gpui-kit/crates` and switch
+wrapper with an `InputEditsEvent` replacement snapshot, then grep for
+`set_value(` inside `vendor/gpui-kit/crates` and switch
 every vendored widget that writes its own field to `set_value_silently`
 (`grep -rn set_value_silently vendor/gpui-kit/crates` lists the current
 sites). A missed site re-enters its own `Change` handling.
@@ -669,7 +669,7 @@ fail without the hooks and the list spacing.
 ## `vendor/gpui-kit/crates/component/locales/ko.yml` — vendored, **an added file, not a patch**
 
 The only Korean the vendored widgets have. Upstream's `locales/ui.yml` carries
-`en` / `pt-BR` / `zh-CN` / `zh-HK` / `zh-TW` / `it`, so
+`en` / `pt-BR` / `ru` / `zh-CN` / `zh-HK` / `zh-TW` / `it`, so
 `gpui_component::set_locale("ko")` would fall back to English, and a Korean
 window would show "Cut / Copy / Paste / Select All" in every text input's
 right-click menu and "Cancel" on every confirm dialog.
@@ -859,7 +859,7 @@ before GPUI keybindings run. Other editors retain their previous behavior.
 
 The host composer skips marked text through `has_marked_text()` so stale host snapshots
 cannot consume composition arrow keys. Finalizing composition with `unmarkText`
-emits one `Change` event when a marked range existed, keeping host text snapshots
+emits the edit snapshot and one `Change` event when a marked range existed, keeping host text snapshots
 current even when the IME does not send a replacement callback. Regression coverage lives in
 `workspace/tests/agent_chat/questions/keys.rs`, including native-style text
 commits, marked-text preservation, Space toggling and fallback typing.

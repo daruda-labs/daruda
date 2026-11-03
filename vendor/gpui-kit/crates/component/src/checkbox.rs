@@ -234,7 +234,8 @@ pub(crate) fn checkbox_check_icon(
             } else {
                 IconName::Check
             };
-            this.path(mark.path()).opacity(opacity)
+            this.path(crate::resolve_icon_path(mark.path(), cx))
+                .opacity(opacity)
         })
 }
 
@@ -533,5 +534,34 @@ mod tests {
             .expect("custom content must prepaint through the Base child seam");
         assert!(bounds.size.width > px(0.));
         assert!(bounds.size.height > px(0.));
+    }
+
+    #[gpui::test]
+    fn the_check_mark_asks_the_icon_resolver_for_its_path(cx: &mut TestAppContext) {
+        struct CheckedHarness;
+
+        impl Render for CheckedHarness {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                Checkbox::new("checked").checked(true)
+            }
+        }
+
+        let asked = Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+        cx.update(|cx| {
+            crate::init(cx);
+            cx.set_reduce_motion(true);
+            let asked = asked.clone();
+            crate::set_icon_resolver(cx, move |path, _| {
+                asked.borrow_mut().push(path.to_string());
+                None
+            });
+        });
+        let (_, cx) = cx.add_window_view(|_, _| CheckedHarness);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        assert!(
+            asked.borrow().contains(&IconName::Check.path().to_string()),
+            "the check mark must be drawn from the resolved path"
+        );
     }
 }

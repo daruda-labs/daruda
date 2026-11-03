@@ -152,7 +152,7 @@ access, ask first whether the access belongs in `ui/` instead.
 ## Vendor Dependencies
 
 `gpui_component` and `gpui_base` are vendored from upstream gpui-component
-0.8.1 (`longbridge/gpui-kit`, Apache-2.0) under `vendor/gpui-kit/crates/`.
+0.9.0 (`longbridge/gpui-kit`, Apache-2.0) under `vendor/gpui-kit/crates/`.
 `ferrum_flow` is a vendored `tu6ge/ferrum-flow` copy at `43b762ce`
 (Apache-2.0), providing the flow-editor canvas. Patch real defects only;
 exclude upstream code from unrelated Clippy/lint/comment-cleanup passes.

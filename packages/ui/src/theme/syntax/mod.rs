@@ -230,49 +230,49 @@ pub fn editor_syntax_colors_of(palette: SyntaxPalette, is_light: bool) -> Syntax
         }
         Some(ts)
     };
-    SyntaxColors {
-        keyword: b(Keyword),
-        function: b(Function),
-        title: b(Function),
-        type_: b(Type),
-        enum_: b(Type),
-        constructor: b(Type),
-        label: b(Type),
-        preproc: b(Type),
-        embedded: b(Type),
-        constant: b(Constant),
-        boolean: b(Constant),
-        number: b(Constant),
-        attribute: b(Constant),
-        variant: b(Constant),
-        link_uri: b(Constant),
-        string: b(String),
-        text_literal: b(String),
-        text_code_span: b(String),
-        string_escape: b(StringSpecial),
-        string_regex: b(StringSpecial),
-        string_special: b(StringSpecial),
-        string_special_symbol: b(StringSpecial),
-        tag: b(Tag),
-        variable_special: b(Tag),
-        link_text: b(Tag),
-        tag_doctype: b(TagDoctype),
-        comment: b(Comment),
-        comment_doc: b(Comment),
-        hint: b(Comment),
-        predictive: b(Comment),
-        variable: b(Default),
-        property: b(Default),
-        operator: b(Default),
-        punctuation: b(Default),
-        punctuation_bracket: b(Default),
-        punctuation_delimiter: b(Default),
-        punctuation_list_marker: b(Default),
-        punctuation_special: b(Default),
-        emphasis: b(Default),
-        emphasis_strong: b(Default),
-        primary: b(Default),
-    }
+    let mut colors = SyntaxColors::default();
+    colors.keyword = b(Keyword);
+    colors.function = b(Function);
+    colors.title = b(Function);
+    colors.type_ = b(Type);
+    colors.enum_ = b(Type);
+    colors.constructor = b(Type);
+    colors.label = b(Type);
+    colors.preproc = b(Type);
+    colors.embedded = b(Type);
+    colors.constant = b(Constant);
+    colors.boolean = b(Constant);
+    colors.number = b(Constant);
+    colors.attribute = b(Constant);
+    colors.variant = b(Constant);
+    colors.link_uri = b(Constant);
+    colors.string = b(String);
+    colors.text_literal = b(String);
+    colors.text_code_span = b(String);
+    colors.string_escape = b(StringSpecial);
+    colors.string_regex = b(StringSpecial);
+    colors.string_special = b(StringSpecial);
+    colors.string_special_symbol = b(StringSpecial);
+    colors.tag = b(Tag);
+    colors.variable_special = b(Tag);
+    colors.link_text = b(Tag);
+    colors.tag_doctype = b(TagDoctype);
+    colors.comment = b(Comment);
+    colors.comment_doc = b(Comment);
+    colors.hint = b(Comment);
+    colors.predictive = b(Comment);
+    colors.variable = b(Default);
+    colors.property = b(Default);
+    colors.operator = b(Default);
+    colors.punctuation = b(Default);
+    colors.punctuation_bracket = b(Default);
+    colors.punctuation_delimiter = b(Default);
+    colors.punctuation_list_marker = b(Default);
+    colors.punctuation_special = b(Default);
+    colors.emphasis = b(Default);
+    colors.emphasis_strong = b(Default);
+    colors.primary = b(Default);
+    colors
 }
 
 #[cfg(test)]

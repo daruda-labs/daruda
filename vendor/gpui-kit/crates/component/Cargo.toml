@@ -1,13 +1,13 @@
 [package]
 name = "gpui-component"
-version = "0.8.1"
+version = "0.9.0"
 license = "Apache-2.0"
 publish = false
 edition = "2024"
 autoexamples = false
 autobenches = false
 autotests = false
-description = "Vendored gpui-component v0.8.1 (longbridge/gpui-kit, Apache-2.0). Routed through daruda workspace gpui."
+description = "Vendored gpui-component v0.9.0 (longbridge/gpui-kit, Apache-2.0). Routed through daruda workspace gpui."
 
 [lib]
 doctest = false

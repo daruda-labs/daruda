@@ -14,6 +14,7 @@ use gpui::{
 use gpui::{ClickEvent, Half, MouseDownEvent, OwnedMenuItem, Point, Subscription};
 use gpui_base::TestSupportExt as _;
 
+use std::collections::HashSet;
 use std::rc::Rc;
 
 const CONTEXT: &str = "PopupMenu";
@@ -321,6 +322,9 @@ pub struct PopupMenu {
     /// daruda patch: fill and edge replacing the float chrome, for a menu
     /// opened over another float where the shared chrome is indistinguishable.
     chrome: Option<Rc<dyn Fn(&App) -> (gpui::Hsla, gpui::Hsla)>>,
+    /// Indexes of the items added as options that can be checked, so an
+    /// unchecked one reports its state rather than reading as a command.
+    checkable: HashSet<usize>,
 
     /// The parent menu of this menu, if this is a submenu
     parent_menu: Option<WeakEntity<Self>>,
@@ -367,6 +371,7 @@ impl PopupMenu {
             pinned_head: 0,
             pinned_foot: None,
             check_side: Side::Left,
+            checkable: HashSet::new(),
             bounds: Bounds::default(),
             scrollable: false,
             scroll_handle: ScrollHandle::default(),
@@ -646,6 +651,7 @@ impl PopupMenu {
         action: Box<dyn Action>,
         disabled: bool,
     ) -> Self {
+        self.checkable.insert(self.menu_items.len());
         self.add_menu_item(label, None, action, disabled, checked);
         self
     }
@@ -734,6 +740,7 @@ impl PopupMenu {
         F: Fn(&mut Window, &mut App) -> E + 'static,
         E: IntoElement,
     {
+        self.checkable.insert(self.menu_items.len());
         self.menu_items.push(
             PopupMenuItem::element(builder)
                 .action(action)
@@ -866,11 +873,13 @@ impl PopupMenu {
                     disabled,
                     ..
                 } => {
-                    self = self.menu_with_check_and_disabled(
-                        name,
-                        checked,
-                        action.boxed_clone(),
-                        disabled,
+                    // Every application menu action has a check state, so an
+                    // unchecked one is not known to be an option.
+                    self = self.item(
+                        PopupMenuItem::new(name)
+                            .action(action.boxed_clone())
+                            .disabled(disabled)
+                            .checked(checked),
                     )
                 }
                 OwnedMenuItem::Separator => {
@@ -937,6 +946,9 @@ impl PopupMenu {
         match self.selected_index {
             Some(index) => {
                 let item = self.menu_items.get(index);
+                if !item.is_some_and(PopupMenuItem::is_clickable) {
+                    return;
+                }
                 match item {
                     Some(PopupMenuItem::Item {
                         handler, action, ..
@@ -958,6 +970,11 @@ impl PopupMenu {
                             self.dispatch_confirm_action(action, window, cx);
                         }
                         self.dismiss(&Cancel, window, cx)
+                    }
+                    Some(PopupMenuItem::Submenu {
+                        disabled: false, ..
+                    }) => {
+                        self._select_submenu(window, cx);
                     }
                     _ => {}
                 }
@@ -1015,13 +1032,18 @@ impl PopupMenu {
         }
 
         let last_clickable_ix = self.clickable_menu_items().last().map(|(ix, _)| ix);
-        self.set_selected_index(last_clickable_ix.unwrap_or(0), cx);
+        if let Some(ix) = last_clickable_ix {
+            self.set_selected_index(ix, cx);
+        }
     }
 
     fn select_down(&mut self, _: &SelectDown, _: &mut Window, cx: &mut Context<Self>) {
         cx.stop_propagation();
         let Some(ix) = self.selected_index else {
-            self.set_selected_index(0, cx);
+            let first_clickable_ix = self.clickable_menu_items().next().map(|(ix, _)| ix);
+            if let Some(ix) = first_clickable_ix {
+                self.set_selected_index(ix, cx);
+            }
             return;
         };
 
@@ -1035,7 +1057,10 @@ impl PopupMenu {
             return;
         }
 
-        self.set_selected_index(0, cx);
+        let first_clickable_ix = self.clickable_menu_items().next().map(|(ix, _)| ix);
+        if let Some(ix) = first_clickable_ix {
+            self.set_selected_index(ix, cx);
+        }
     }
 
     fn select_left(&mut self, _: &SelectLeft, window: &mut Window, cx: &mut Context<Self>) {
@@ -1084,7 +1109,13 @@ impl PopupMenu {
         if let Some(active_submenu) = self.active_submenu() {
             // Focus the submenu, so that can be handle the action.
             active_submenu.update(cx, |view, cx| {
-                view.set_selected_index(0, cx);
+                let first_clickable_ix = view.clickable_menu_items().next().map(|(ix, _)| ix);
+                if let Some(ix) = first_clickable_ix {
+                    view.set_selected_index(ix, cx);
+                } else {
+                    view.selected_index = None;
+                    cx.notify();
+                }
                 view.focus_handle.focus(window, cx);
             });
             cx.notify();
@@ -1268,10 +1299,20 @@ impl PopupMenu {
     }
 
     /// Calculate the anchor corner and left offset for child submenu
-    fn update_submenu_menu_anchor(&mut self, window: &Window) {
+    fn update_submenu_menu_anchor(&mut self, window: &Window, cx: &App) {
         let bounds = self.bounds;
-        let max_width = self.max_width();
-        let (anchor, left) = if max_width + bounds.origin.x > window.bounds().size.width {
+        // Open the submenu on the left only when, placed at this menu's right
+        // edge, it would run past the window's. Its width is the one it was
+        // last drawn at, or this menu's own until it has been drawn.
+        let submenu_width = self
+            .selected_index
+            .and_then(|ix| match self.menu_items.get(ix) {
+                Some(PopupMenuItem::Submenu { menu, .. }) => Some(menu.read(cx).bounds.size.width),
+                _ => None,
+            })
+            .filter(|width| *width > Pixels::ZERO)
+            .unwrap_or(bounds.size.width);
+        let (anchor, left) = if bounds.right() + submenu_width > window.viewport_size().width {
             (Anchor::TopRight, -px(16.))
         } else {
             (Anchor::TopLeft, bounds.size.width - px(8.))
@@ -1345,7 +1386,10 @@ impl PopupMenu {
 
                 cx.notify();
             }))
-            .when_some(item.a11y_label(), |this, label| this.aria_label(label));
+            .when_some(item.a11y_label(), |this, label| this.aria_label(label))
+            .checked(
+                (item.is_checked() || self.checkable.contains(&ix)).then(|| item.is_checked()),
+            );
 
         match item {
             PopupMenuItem::Separator => this
@@ -1452,6 +1496,11 @@ impl PopupMenu {
                 menu,
                 disabled,
             } => this
+                .when(!disabled, |this| {
+                    this.on_click(cx.listener(move |this, event, window, cx| {
+                        this.on_click(ix, event, window, cx)
+                    }))
+                })
                 .selected(selected)
                 .disabled(*disabled)
                 .items_start()
@@ -1536,7 +1585,7 @@ struct RenderOptions {
 
 impl Render for PopupMenu {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.update_submenu_menu_anchor(window);
+        self.update_submenu_menu_anchor(window, cx);
 
         // Submenus attached via the public `item()` + `PopupMenuItem::submenu()`
         // path (from contexts that only have the menu value, e.g. a table
@@ -1656,7 +1705,21 @@ impl Render for PopupMenu {
                             )
                             .children(foot.into_iter().map(|(_, item)| item))
                     })
-                    .on_prepaint(move |bounds, _, cx| view.update(cx, |r, _| r.bounds = bounds)),
+                    .on_prepaint(move |bounds, _, cx| {
+                        view.update(cx, |menu, cx| {
+                            let width_changed = menu.bounds.size.width != bounds.size.width;
+                            menu.bounds = bounds;
+                            if width_changed {
+                                if let Some(parent) = menu
+                                    .parent_menu
+                                    .as_ref()
+                                    .and_then(|parent| parent.upgrade())
+                                {
+                                    parent.update(cx, |_, cx| cx.notify());
+                                }
+                            }
+                        });
+                    }),
             )
     }
 }

@@ -275,7 +275,7 @@ import exceptions, and GPUI safety are maintained in [UI Instructions](AGENTS.md
 
 ## Vendor patches in `vendor/gpui-kit/`
 
-The widgets come from upstream gpui-component 0.8.1, vendored at
+The widgets come from upstream gpui-component 0.9.0, vendored at
 `vendor/gpui-kit/crates/` as `gpui-base` (`gpui_base`: headless text/input
 engine, `TextView`, `SelectableText`, `Root`, window-wide text selection,
 dialog and popover primitives) and `gpui-component` (`gpui_component`: styled
@@ -283,7 +283,7 @@ widgets), plus `gpui-kit-assets` and `gpui-component-macros`. Outside this packa
 only the app's UI facade and infrastructure sites reach them directly. Each daruda change
 in vendored source is marked `// daruda patch:`; the full record, with the
 reason for each patch and the re-vendor procedure, is in
-[patches/README.md](../../patches/README.md#vendorgpui-kit--vendored-gpui-component-081-patched-in-place).
+[patches/README.md](../../patches/README.md#vendorgpui-kit--vendored-gpui-component-090-patched-in-place).
 
 The patches this package's wrappers depend on:
 
