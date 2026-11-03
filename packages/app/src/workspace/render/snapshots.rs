@@ -383,15 +383,10 @@ impl Workspace {
         // tab's row renderer can paint a `⟳ / ● / ⚠` glyph next to
         // each row's session-id badge without dipping into
         // the workspace.
-        let claude_status_per_session: std::collections::HashMap<
-            String,
-            daruda_agent::SessionStatus,
-        > = self
-            .claude_sessions
-            .status
-            .iter()
-            .map(|(sid, file)| (sid.to_string(), file.status))
-            .collect();
+        let claude_status_per_session =
+            crate::workspace::claude_status_aggregate::task_session_statuses(
+                &self.claude_sessions.status,
+            );
         // Mirror the per-session failure counters too — only entries
         // that have actually accumulated failures travel into the
         // snap so an idle session with 0 failures stays absent from

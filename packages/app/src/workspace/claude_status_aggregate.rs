@@ -33,6 +33,22 @@ pub(in crate::workspace) type LaneStatusMap =
 pub(in crate::workspace) type LaneSessionsMap =
     HashMap<daruda_store::project::LaneRef, Vec<(String, SessionStatus)>>;
 
+/// Task rows use logical session IDs; multiple terminal snapshots contribute
+/// their most urgent status without exposing terminal storage keys to the view.
+pub(in crate::workspace) fn task_session_statuses(
+    store: &daruda_agent::ClaudeStatusStore,
+) -> HashMap<String, SessionStatus> {
+    let mut statuses = HashMap::new();
+    for (_, file) in store.iter() {
+        let current = statuses
+            .entry(file.session_id.clone())
+            .or_insert(file.status);
+        *current = SessionStatus::aggregate([*current, file.status])
+            .expect("two statuses have an aggregate");
+    }
+    statuses
+}
+
 /// Aggregate Claude status over panes, attributing each pane's session to
 /// the lane that owns the pane (not the session's cwd).
 ///

@@ -475,3 +475,25 @@ fn resumed_sessions_in_distinct_terminals_keep_independent_badges() {
         Some(SessionStatus::Working)
     );
 }
+
+#[test]
+fn task_badges_use_session_ids_and_aggregate_resumed_terminals() {
+    let mut first = entry("shared-session", "/work", SessionStatus::Idle);
+    first.terminal_id = daruda_agent::hooks::route::TerminalId::parse("terminal-a");
+    let mut second = entry("shared-session", "/work", SessionStatus::NeedsAttention);
+    second.terminal_id = daruda_agent::hooks::route::TerminalId::parse("terminal-b");
+    let mut store = store_with(vec![first, second]);
+    let statuses = task_session_statuses(&store);
+    assert_eq!(statuses.len(), 1);
+    assert_eq!(
+        statuses.get("shared-session"),
+        Some(&SessionStatus::NeedsAttention)
+    );
+    assert!(!statuses.contains_key("terminal-a"));
+    assert!(!statuses.contains_key("terminal-b"));
+    store.remove_key("terminal-b");
+    assert_eq!(
+        task_session_statuses(&store).get("shared-session"),
+        Some(&SessionStatus::Idle)
+    );
+}
