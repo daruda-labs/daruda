@@ -3056,6 +3056,7 @@ dependencies = [
  "futures",
  "gpui",
  "gpui_macros",
+ "gpui_platform",
  "html5ever 0.27.0",
  "indoc",
  "instant",
