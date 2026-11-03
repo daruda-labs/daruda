@@ -198,6 +198,11 @@ never paste it:
 | Home/End/PageUp/PageDown dispatch | `handle_scroll_key` (`input.rs`) | shift **and** non-shift blocks (so they cannot drift) |
 | Key bytes → PTY (flush Hangul + snap + send + stop) | `send_key_bytes` (`input.rs`) | ctrl / alt / encoded / natural-edit |
 
+`send_key_bytes` also invokes the optional host interrupt handler for a single
+forwarded Ctrl+C or Escape. IME cancellation returns before this point; paste,
+protocol replies and Alt-prefixed input never invoke it. The app defers its
+pane operation until the terminal entity update has ended.
+
 Adding a new gesture or key branch? Find the matching helper and call it. If
 none fits, **extend the helper** — do not open a parallel path. `return`
 stays at the call site (a helper cannot return for its caller); everything

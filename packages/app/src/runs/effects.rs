@@ -20,12 +20,8 @@ pub(crate) trait RunsEffects {
     /// A flow run changed; the windows holding its worktree redraw it.
     fn flow_changed(&self, _change: &super::FlowChange, _cx: &mut App) {}
 
-    fn cli_event(
-        &self,
-        _pane: Option<super::RunPane>,
-        _event: daruda_agent::pty_tracker::PtyTrackerEvent,
-        _cx: &mut App,
-    ) {
+    fn cli_event(&self, event: daruda_agent::pty_tracker::ProcessExited, cx: &mut App) {
+        super::RunsHost::record_cli_exit(&event.session_id, event.pid, cx);
     }
 }
 

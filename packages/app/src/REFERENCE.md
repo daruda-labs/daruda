@@ -30,7 +30,7 @@ app/src/
     │   └── flows/        # The Flows list, and its detail — a flow's graph or a past run's report
     ├── render/           # GPUI render — `impl Render` for Workspace
     ├── right_dock/       # Right-dock views — usage, skills, tasks, tools
-    ├── sync/             # Background pumps — PTY, JSONL, limits, MCP, skills watchers
+    ├── sync/             # Background pumps — PTY, limits, MCP, skills watchers
     ├── toast_layer/      # Toast overlay entity rendered above workspace
     └── tests/            # Lifecycle + pure-op tests
 ```
@@ -72,6 +72,38 @@ callbacks for pane operations; this module does not depend on Workspace.
 Execution bindings are process-owned and identify both workspace and pane.
 The process owns one CLI tracker and event pump; closing a window removes its
 pane registrations but retains observed processes until their exit is confirmed.
+Each spawned terminal also registers a fresh hook terminal ID. Hook events
+resolve that ID through `RunsHost` before the owning workspace binds the
+session; a missing agent PID does not prevent routing or session attachment.
+`LanePrepared` records the CLI terminal ID in `TaskExecution` before PTY
+input is delivered. The task log uses schema 7; older preparation records
+without that optional identity still replay. A hook can attach an unbound run
+only when the live terminal matches its recorded ID and the event is at least
+as new as the start. Replacing a terminal invalidates its previous delivery.
+Only observed PIDs advance CLI process state. The tracker polls those PIDs;
+it has no pane discovery, process-tree walk or session-directory watcher.
+On restart, an already recorded Claude PID is verified against its account's
+single session file. No other PID is discovered by that check.
+A confirmed exit without a completion hook settles a still-running run as an
+error; a completed run or pending result read keeps its own outcome.
+Routed status and lock files use terminal IDs, while session IDs remain the
+run attachment key. Session replacement retires the old in-memory status;
+SessionEnd retains a final marker and removes the live session from memory,
+so even a session ending before the first watcher read can settle its run.
+The next SessionStart overwrites that marker. Pane teardown clears memory, and the first
+desktop startup sweeps retired terminal files without unlinking lock paths.
+Forwarded interrupt keys clear a busy terminal locally without a completion.
+The JSONL module only reads execution answers; it supplies no status fallback.
+`CliSessionEnded` retains the original terminal's end reason in the current
+execution and its ended-history snapshot: agent goodbye, observed process exit,
+pane closure, or restart reconciliation. A delayed goodbye can refine a process
+exit without replacing a deliberate pane closure or restart reason.
+CLI history continues through an exact ACP session load after confirmed exit.
+RunsHost grants one process-wide session lease, held by the destination pane
+through loading and interactive use. Failed loads, ended streams, session resets,
+and pane teardown release it. Other windows' routed sessions also block takeover
+when no PID was available. Restored interactive CLI conversations claim the same
+lease before connecting; snapshots remain read-only until load succeeds.
 `TaskStore` imports an existing `tasks.json` once and never rewrites it.
 Commands and the app-quit flush target only the task log; older builds read
 the preserved, potentially stale legacy file.
@@ -390,7 +422,7 @@ The Workspace entity and its subsystems.
 - **`pages/`** — Tasks and Flows, shown in place of the lane's tabs and belonging to no lane. What a page shows on top of its list lives in `Workspace.pages` and survives the page being hidden; only `leave_page_detail_then` (`pages/detail.rs`) clears it, asking first about unsaved edits. `tasks/editor/` is the Task editor and its prompt-file watcher; `flows/graph/` is the flow graph, which runs in the worktree it was opened for, not the active one.
 - **`right_dock/`** — Usage / skills / tasks / tools views.
 - **`render/`** — `impl Render for Workspace`. Reads only plain-data snapshots — no re-entrant entity reads.
-- **`sync/`** — Background event pumps: PTY drain (tick), JSONL NDJSON watcher, HTTP usage/limits poll, MCP filesystem watcher, skills filesystem watcher.
+- **`sync/`** — Background event pumps: PTY drain (tick), HTTP usage/limits poll, MCP filesystem watcher, skills filesystem watcher.
 - **`tests/`** — Async `#[gpui::test]` lifecycle tests and sync `#[test]` pure-op tests (layout, branch sanitization, etc.).
 
 ## `lane/` (`daruda_project::lane`)

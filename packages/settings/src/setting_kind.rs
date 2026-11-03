@@ -88,6 +88,7 @@ pub(crate) enum BoolSetting {
     FilesShowHidden,
     FilesUseGitignore,
     ClaudeStatusEnabled,
+    AgentHooksInstalled,
     UpdateAutoCheck,
     LeftCollapsedByDefault,
     PreviewTab,
@@ -243,7 +244,7 @@ impl SelectSetting {
 
 impl BoolSetting {
     #[cfg(test)]
-    pub(crate) const ALL: [Self; 28] = [
+    pub(crate) const ALL: [Self; 29] = [
         Self::AgentUseModifierToSend,
         Self::AgentUseReadingWidth,
         Self::AgentToolSummaryLabels,
@@ -269,6 +270,7 @@ impl BoolSetting {
         Self::GitConfirmPush,
         Self::GitDefaultCommitMessage,
         Self::ClaudeStatusEnabled,
+        Self::AgentHooksInstalled,
         Self::TelegramEnabled,
         Self::OrchestratorEnabled,
         Self::StopOnOverage,
@@ -304,6 +306,7 @@ impl BoolSetting {
             Self::GitConfirmPush => (),
             Self::GitDefaultCommitMessage => (),
             Self::ClaudeStatusEnabled => (),
+            Self::AgentHooksInstalled => (),
             Self::TelegramEnabled => (),
             Self::OrchestratorEnabled => (),
             Self::StopOnOverage => (),

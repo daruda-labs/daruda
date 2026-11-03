@@ -14,7 +14,10 @@ pub mod cli;
 pub mod machine;
 pub mod migrate;
 pub mod store;
-pub use cli::{AgentChatAccess, CliProcessState, ExecutionRef, TaskExecutionSource};
+pub use cli::{
+    AgentChatAccess, CliProcessState, CliSessionEnd, CliSessionEndReason, ExecutionRef,
+    TaskExecutionSource,
+};
 pub mod persistence;
 pub mod prompt_file;
 /// Branch-name rules live in `daruda_core::git` — shared with the app so a

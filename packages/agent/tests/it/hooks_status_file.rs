@@ -54,7 +54,6 @@ fn roundtrip_write_then_read() {
     assert_eq!(back.session_id, "sess-1");
     assert_eq!(back.status, SessionStatus::Working);
     assert_eq!(back.last_event, "PreToolUse");
-    assert_eq!(back.source, Source::Hook);
     assert_eq!(back.schema_version, SCHEMA_VERSION);
 }
 
@@ -176,4 +175,21 @@ fn atomic_rename_replaces_existing_file() {
     let back = read(&p).unwrap().unwrap();
     assert_eq!(back.status, SessionStatus::Idle);
     assert_eq!(back.last_event, "Stop");
+}
+
+#[test]
+fn legacy_source_is_ignored_and_routed_files_use_terminal_keys() {
+    let file = StatusFile::new_hook("legacy-session", "/tmp", SessionStatus::Idle, "Stop");
+    let mut value = serde_json::to_value(&file).unwrap();
+    value["source"] = serde_json::json!("jsonl");
+    let mut parsed: StatusFile = serde_json::from_value(value).unwrap();
+    assert_eq!(parsed.storage_key(), "legacy-session");
+    parsed.terminal_id = Some(daruda_agent::hooks::route::TerminalId::parse("terminal-a").unwrap());
+    assert_eq!(parsed.storage_key(), "terminal-a");
+    assert!(
+        serde_json::to_value(parsed)
+            .unwrap()
+            .get("source")
+            .is_none()
+    );
 }

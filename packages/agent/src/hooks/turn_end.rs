@@ -3,11 +3,10 @@
 //! The hook channel carries no "turn ended" signal beyond `Stop` /
 //! `StopFailure`, and the watcher re-delivers files it already handed over,
 //! so a turn counts as ended only when this channel also saw it open. The
-//! merged status store is no witness: the JSONL fallback writes it too and
-//! can settle a session to `Idle` before its `Stop` hook lands.
+//! file's last event timestamp can also be replayed by the watcher.
 //!
-//! A turn whose start and `Stop` reach the watcher as one coalesced read is
-//! never seen open and ends without an outcome.
+//! A turn whose start and Stop coalesce into one read has no observed opening
+//! and therefore produces no completion outcome.
 
 use std::collections::HashSet;
 

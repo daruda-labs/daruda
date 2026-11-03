@@ -117,6 +117,20 @@ impl WindowRegistry {
         handles
     }
 
+    /// Exclude the caller before reading entities so an operation inside a
+    /// workspace update never re-enters that same workspace.
+    pub(crate) fn any_other_workspace(
+        caller: gpui::EntityId,
+        cx: &App,
+        mut matches: impl FnMut(&Workspace) -> bool,
+    ) -> bool {
+        Self::workspace_pairs(cx)
+            .into_iter()
+            .filter(|(_, workspace)| workspace.entity_id() != caller)
+            .filter_map(|(_, workspace)| workspace.upgrade())
+            .any(|workspace| matches(workspace.read(cx)))
+    }
+
     /// Return the active window when it is a registered Workspace.
     pub(crate) fn active_workspace_handle(cx: &App) -> Option<AnyWindowHandle> {
         let active = cx.active_window()?;

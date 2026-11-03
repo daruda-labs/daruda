@@ -26,9 +26,9 @@ pub enum StatusEvent {
     /// File was created or modified — read it back and `update` the store.
     Changed(PathBuf),
     /// File was removed (typically `SessionEnd` via the hook handler).
-    /// `session_id` is the filename stem so the store can drop the
+    /// `key` is the filename stem (terminal ID, or a legacy session ID) so the store can drop the
     /// entry without re-reading the (now absent) file.
-    Removed { session_id: String },
+    Removed { key: String },
 }
 
 /// Classify a single notify event into zero or more [`StatusEvent`]s.
@@ -52,12 +52,12 @@ fn classify_status_event(event: &notify::Event) -> Vec<StatusEvent> {
             continue;
         }
         let item = if is_remove {
-            let session_id = path
+            let key = path
                 .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or_default()
                 .to_string();
-            StatusEvent::Removed { session_id }
+            StatusEvent::Removed { key }
         } else {
             StatusEvent::Changed(path.clone())
         };
@@ -180,7 +180,7 @@ mod tests {
         let mut ev = notify::Event::new(EventKind::Remove(RemoveKind::Any));
         ev.paths.push(std::path::PathBuf::from("/tmp/ses-42.json"));
         assert!(
-            matches!(&classify_status_event(&ev)[..], [StatusEvent::Removed { session_id }] if session_id == "ses-42")
+            matches!(&classify_status_event(&ev)[..], [StatusEvent::Removed { key }] if key == "ses-42")
         );
     }
 
@@ -259,7 +259,7 @@ mod tests {
         let ev = wait_for(
             &rx,
             Duration::from_secs(3),
-            |e| matches!(e, StatusEvent::Removed { session_id, .. } if session_id == "ses-2"),
+            |e| matches!(e, StatusEvent::Removed { key, .. } if key == "ses-2"),
         );
         assert!(ev.is_some(), "did not receive Removed event for ses-2");
     }

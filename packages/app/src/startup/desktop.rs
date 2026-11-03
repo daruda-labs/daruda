@@ -78,6 +78,7 @@ pub(super) fn run() {
         }
 
         watchers_lifecycle::spawn_all(cx);
+        crate::hooks::agent_hooks::AgentHooks::sync(cx);
         crate::telegram::global::install(cx);
         crate::remote_channel::global::install(cx);
 

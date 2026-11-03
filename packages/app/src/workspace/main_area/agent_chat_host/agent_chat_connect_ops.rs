@@ -222,6 +222,7 @@ impl Workspace {
             .and_then(|pane| pane.agent_chat_content_mut())
         {
             chat.restore = Default::default();
+            chat.cli_resume = None;
         }
         self.mutate_durable(cx, |_, _| {});
         self.notify_status_docks(cx);

@@ -409,6 +409,13 @@ pub(super) const BOOL_SETTINGS: &[BoolSpec] = &[
         show: |c| c.claude_status.enable,
     },
     BoolSpec {
+        setting: BoolSetting::AgentHooksInstalled,
+        get: |w| w.agent_hooks_installed,
+        set: |w, v| w.agent_hooks_installed = v,
+        patch: SettingsPatch::AgentHooksInstalled,
+        show: |c| c.claude_status.install_hooks,
+    },
+    BoolSpec {
         setting: BoolSetting::TelegramEnabled,
         get: |w| w.telegram_enabled,
         set: |w, v| w.telegram_enabled = v,

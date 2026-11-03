@@ -236,7 +236,7 @@ const AGENT: &[Card] = &[
     Card::Custom(CustomCard::AgentCatalog),
     Card::Rows {
         title: s::settings::section_claude_status,
-        rows: &[b(B::ClaudeStatusEnabled)],
+        rows: &[b(B::ClaudeStatusEnabled), b(B::AgentHooksInstalled)],
     },
     Card::Advanced(&[
         t(T::ClaudeStatusStaleSecs),

@@ -440,11 +440,16 @@ fn finalize_remove_active_lane_keeps_main_area_filled(cx: &mut TestAppContext) {
                     .collect();
                 assert!(!pane_ids.is_empty(), "opened tab spawns panes");
                 for id in &pane_ids {
-                    crate::runs::RunsHost::register_terminal(ws.run_pane(*id), 4242, cx);
+                    crate::runs::RunsHost::register_terminal(
+                        ws.run_pane(*id),
+                        crate::hooks::agent_hooks::mint_terminal_id(),
+                        cx,
+                    );
                     ws.claude_sessions.pty_bindings.insert(
                         *id,
                         daruda_agent::pty_tracker::PtyBinding {
-                            claude_pid: 4242,
+                            terminal_id: None,
+                            claude_pid: Some(4242),
                             session_id: format!("sess-{id}"),
                         },
                     );
@@ -478,7 +483,7 @@ fn finalize_remove_active_lane_keeps_main_area_filled(cx: &mut TestAppContext) {
                 "removed lane's pane binding must be dropped"
             );
             assert!(
-                crate::runs::RunsHost::tracked_terminal(ws.run_pane(*id), cx).is_none(),
+                crate::runs::RunsHost::terminal_id(ws.run_pane(*id), cx).is_none(),
                 "removed lane's pane must be unregistered from the tracker"
             );
         }

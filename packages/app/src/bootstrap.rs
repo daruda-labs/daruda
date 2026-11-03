@@ -12,17 +12,26 @@ use daruda_core::process_env;
 use gpui::{Application, QuitMode};
 
 /// Returns `Some(exit_code)` when invoked as `daruda --hook
-/// <eventType>`. Callers in `main()` should exit with that code
-/// immediately — the hook handler always exits 0 (see
+/// <eventType> [--harness <name>]`. Callers in `main()` should exit with
+/// that code immediately — the hook handler always exits 0 (see
 /// `daruda_agent::hooks::handler::run`) but we keep it generic in case future hook
-/// types want to signal failure.
+/// types want to signal failure. An entry without `--harness` predates
+/// codex support and is Claude Code's; an unknown harness is ignored.
 pub(crate) fn route_hook_subcommand() -> Option<i32> {
+    use daruda_agent::hooks::route::Harness;
     let mut args = std::env::args().skip(1);
-    if args.next().as_deref() == Some("--hook") {
-        let event_type = args.next().unwrap_or_default();
-        return Some(daruda_agent::hooks::handler::run(&event_type));
+    if args.next().as_deref() != Some("--hook") {
+        return None;
     }
-    None
+    let event_type = args.next().unwrap_or_default();
+    let harness = match (args.next().as_deref(), args.next()) {
+        (Some("--harness"), Some(name)) => Harness::parse(&name),
+        (None, _) => Some(Harness::Claude),
+        _ => None,
+    };
+    Some(harness.map_or(0, |harness| {
+        daruda_agent::hooks::handler::run(&event_type, harness)
+    }))
 }
 
 /// Returns `Some(exit_code)` when invoked as `daruda --mcp`.
@@ -83,11 +92,16 @@ pub(crate) fn init_observability() {
     );
     // Both are fixed in-process now, so no child — an adapter, a terminal
     // shell, a `cargo test` an agent runs — may inherit a sink this process
-    // owns: an inherited wire tap rotates the live capture away.
+    // owns: an inherited wire tap rotates the live capture away. A daruda
+    // started inside a daruda terminal drops that terminal's hook route the
+    // same way, or its chat adapters' hooks would report to the outer pane.
     // Removed BEFORE `LogWriter::init`, which spawns the log-writer worker
     // thread — afterwards the process is multi-threaded and `remove_var`
     // would be unsound.
-    for key in process_env::PROCESS_LOCAL_SINKS {
+    for key in process_env::PROCESS_LOCAL_SINKS
+        .into_iter()
+        .chain(process_env::TERMINAL_HOOK_ROUTE)
+    {
         // SAFETY: reached before `LogWriter::init` (below) spawns any thread and
         // after `shell_env` on the main thread, so the process is still
         // single-threaded — no other thread can read the environment concurrently.

@@ -249,7 +249,21 @@ fn render_cli_snapshot(
         None => s::task::cli_run_missing(),
         Some(CliProcessState::Discovering | CliProcessState::Unknown) => s::task::cli_unknown(),
         Some(CliProcessState::Running { .. }) => s::task::cli_running(),
-        Some(CliProcessState::ExitConfirmed { .. }) => s::task::cli_exited(),
+        Some(CliProcessState::ExitConfirmed { .. }) => match cli.end_reason {
+            Some(daruda_store::tasks::CliSessionEndReason::SessionEnded) => {
+                s::task::cli_session_ended()
+            }
+            Some(daruda_store::tasks::CliSessionEndReason::ProcessExited) => {
+                s::task::cli_process_lost()
+            }
+            Some(daruda_store::tasks::CliSessionEndReason::PaneClosed) => {
+                s::task::cli_pane_closed()
+            }
+            Some(daruda_store::tasks::CliSessionEndReason::AppRestart) => {
+                s::task::cli_app_restarted()
+            }
+            None => s::task::cli_exited(),
+        },
     };
     let exited = matches!(cli.process, Some(CliProcessState::ExitConfirmed { .. }));
     let pane_id = cli.pane_id;

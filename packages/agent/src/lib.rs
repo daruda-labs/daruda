@@ -8,17 +8,9 @@
 //! - **`usage`** / **`accounts`** cover both Claude and Codex providers.
 //! - **`activity`** scans Claude Code session logs; **`codex_activity`** scans
 //!   Codex rollout logs.
-//! - **`hooks`** — Claude Code's official hook system pushes JSON events.
-//!   `daruda --hook <type>` parses stdin, runs the FSM, writes a status
-//!   file under `~/.daruda/status/<session_id>.json`. Source of truth
-//!   when installed.
-//! - **`jsonl`** — Claude fallback for sessions without daruda hooks. Reads the
-//!   tail of `~/.claude/projects/<encoded>/<session>.jsonl` and infers
-//!   status from message structure. Ported from c9watch (MIT, see
-//!   `LICENSE-THIRD-PARTY.md`).
-//!
-//! Claude hook/jsonl channels feed the same [`SessionStatus`] enum; app-side
-//! aggregation merges them with hook-wins-on-tie semantics.
+//! - **`hooks`** receives Claude Code and Codex lifecycle events and writes
+//!   one profile-scoped status file per terminal ID.
+//! - **`jsonl`** extracts the last assistant answer for CLI execution results.
 
 pub mod accounts;
 pub mod activity;

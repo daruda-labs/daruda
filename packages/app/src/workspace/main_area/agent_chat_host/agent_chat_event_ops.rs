@@ -45,6 +45,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> PumpStep {
         let is_connected = matches!(&event, daruda_acp::AcpEvent::Connected { .. });
+        let is_error = matches!(&event, daruda_acp::AcpEvent::Error(_));
         let has_title_update = matches!(
             &event,
             daruda_acp::AcpEvent::SessionInfoChanged {
@@ -130,6 +131,9 @@ impl Workspace {
         let telegram_first_response = view.update(cx, |v, cx| {
             v.apply_event(event, &syntax_theme, is_light, cx)
         });
+        if is_error {
+            self.release_cli_resume(pane_id);
+        }
         self.relay_phone_ack_effect(pane_id, telegram_first_response, cx);
         // Before the activity tick below, so the stop's settle edge fires its
         // `Stopped` completion in this same fold.

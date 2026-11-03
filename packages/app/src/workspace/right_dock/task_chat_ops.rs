@@ -72,6 +72,7 @@ impl Workspace {
         // A fresh pane has no session yet; `record_task_chat_session` names
         // the run's once the pane connects.
         let identity = PaneIdentity {
+            terminal_id: None,
             agent_id: chat.agent_id.clone(),
             account_id: chat.account.to_persisted(),
             cwd,
@@ -114,6 +115,7 @@ impl Workspace {
         crate::runs::seed::commit_now(
             vec![
                 TaskEvent::LanePrepared {
+                    terminal_id: None,
                     exec: exec.clone(),
                     worktree: identity.cwd.clone(),
                     agent_id: identity.agent_id,

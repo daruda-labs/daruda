@@ -3,7 +3,7 @@
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
-use gpui::{Context, Window};
+use gpui::{BorrowAppContext as _, Context, Window};
 
 use crate::workspace::Workspace;
 use crate::workspace::{
@@ -195,7 +195,7 @@ impl Workspace {
         }
     }
 
-    // ---- Claude Code integration ----
+    // ---- Agent hook integration ----
 
     pub(in crate::workspace) fn on_install_agent_hooks(
         &mut self,
@@ -203,29 +203,7 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let result = match daruda_agent::hooks::installer::InstallerPaths::from_env() {
-            Ok(paths) => daruda_agent::hooks::installer::install(&paths),
-            Err(e) => Err(e),
-        };
-        match result {
-            Ok(()) => {
-                self.claude_sessions.hooks_installed = true;
-                // Restart the watcher so it picks up any lane
-                // path changes that may have occurred during install.
-                self.refresh_jsonl_watcher(cx);
-            }
-            Err(e) => {
-                let report =
-                    ErrorReport::new(crate::surface::strings::error::claude_hooks_install_failed())
-                        .severity(ErrorSeverity::Error)
-                        .from_error(&e)
-                        .at(file!(), line!())
-                        .dedup("hooks.install")
-                        .build();
-                self.report_error(report, cx);
-            }
-        }
-        cx.notify();
+        self.set_agent_hooks_installed(true, cx);
     }
 
     pub(in crate::workspace) fn on_uninstall_agent_hooks(
@@ -234,29 +212,28 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let result = match daruda_agent::hooks::installer::InstallerPaths::from_env() {
-            Ok(paths) => daruda_agent::hooks::installer::uninstall(&paths),
-            Err(e) => Err(e),
-        };
-        match result {
-            Ok(()) => {
-                self.claude_sessions.hooks_installed = false;
-                // Restart the watcher so it picks up any lane
-                // path changes that may have occurred during uninstall.
-                self.refresh_jsonl_watcher(cx);
-            }
-            Err(e) => {
-                let report = ErrorReport::new(
-                    crate::surface::strings::error::claude_hooks_uninstall_failed(),
-                )
-                .severity(ErrorSeverity::Error)
-                .from_error(&e)
-                .at(file!(), line!())
-                .dedup("hooks.uninstall")
-                .build();
-                self.report_error(report, cx);
-            }
+        self.set_agent_hooks_installed(false, cx);
+    }
+
+    /// Persist `[claude_status] install_hooks`; the settings observer runs
+    /// the install or removal through `AgentHooks::sync`, the same path the
+    /// Settings toggle takes.
+    fn set_agent_hooks_installed(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        let result = cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            store.apply_patch(daruda_config::SettingsPatch::AgentHooksInstalled(enabled))
+        });
+        if let Err(message) = result {
+            let report = ErrorReport::new(if enabled {
+                crate::surface::strings::error::claude_hooks_install_failed()
+            } else {
+                crate::surface::strings::error::claude_hooks_uninstall_failed()
+            })
+            .severity(ErrorSeverity::Error)
+            .message(message)
+            .at(file!(), line!())
+            .dedup("hooks.setting")
+            .build();
+            self.report_error(report, cx);
         }
-        cx.notify();
     }
 }

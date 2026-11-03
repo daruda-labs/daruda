@@ -98,11 +98,3 @@ fn missing_required_field_yields_none() {
     );
     assert!(read_session_meta_in(dir.path(), 42).is_none());
 }
-
-#[test]
-fn default_dir_resolves_under_home() {
-    // We don't assert the exact home, only the suffix shape.
-    let dir = default_sessions_dir().expect("home dir should resolve");
-    let s = dir.to_string_lossy();
-    assert!(s.ends_with(".claude/sessions") || s.ends_with(".claude\\sessions"));
-}

@@ -1,12 +1,12 @@
-//! The CLI tracker this process runs for every task terminal: which panes it
-//! watches, and the tracker events it turns into execution facts.
+//! Process-owned terminal routes and known CLI process exit observations.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use chrono::Utc;
-use daruda_agent::pty_tracker::{PtyTracker, PtyTrackerEvent};
+use daruda_agent::hooks::route::TerminalId;
+use daruda_agent::pty_tracker::{ProcessExited, PtyTracker};
 use daruda_store::accounts::{AccountId, AccountRecipeId};
 use daruda_store::project::WorkspaceUuid;
 use daruda_store::tasks::{CliProcessState, ExecutionRef, TaskEvent, TaskExecution, TaskRecord};
@@ -14,15 +14,16 @@ use gpui::{App, BorrowAppContext as _};
 
 use super::{GlobalTasks, RunPane, RunsHost};
 
+pub(in crate::runs) mod resume;
 mod session;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 pub(super) struct CliTracker {
     tracker: PtyTracker,
-    next_pane: u64,
-    panes: HashMap<RunPane, u64>,
-    reverse: HashMap<u64, RunPane>,
+    /// The live terminal of each registered pane, by the id its agent hooks
+    /// report. One entry per pane: a respawn replaces the old id.
+    terminals: HashMap<TerminalId, RunPane>,
     _pump: gpui::Task<()>,
 }
 
@@ -42,7 +43,7 @@ fn cli_runs<'a>(
     })
 }
 
-pub(crate) fn sessions_dir(data_dir: &Path, account: Option<AccountId>) -> Option<PathBuf> {
+fn sessions_dir(data_dir: &Path, account: Option<AccountId>) -> Option<PathBuf> {
     let home = match account {
         Some(id) => Some(daruda_agent::accounts::account_config_dir(data_dir, id)),
         None => daruda_agent::accounts::recipe_for(AccountRecipeId::Claude).system_home_dir(),
@@ -51,6 +52,14 @@ pub(crate) fn sessions_dir(data_dir: &Path, account: Option<AccountId>) -> Optio
 }
 
 impl RunsHost {
+    pub(crate) fn claim_cli_resume(
+        session: String,
+        owner: RunPane,
+        cx: &mut App,
+    ) -> Option<super::CliResumeLease> {
+        cx.update_global::<Self, _>(|host, _| host.cli_resumes.claim(session, owner))
+    }
+
     pub(super) fn install_cli_tracker(cx: &mut App) {
         let (tracker, receiver) = PtyTracker::spawn();
         let pump = cx.spawn(async move |cx| {
@@ -78,9 +87,7 @@ impl RunsHost {
         cx.update_global::<Self, _>(|host, _| {
             host.cli = Some(CliTracker {
                 tracker,
-                next_pane: 0,
-                panes: HashMap::new(),
-                reverse: HashMap::new(),
+                terminals: HashMap::new(),
                 _pump: pump,
             })
         });
@@ -95,26 +102,60 @@ impl RunsHost {
             .tracker
     }
 
-    pub(crate) fn register_terminal(pane: RunPane, shell_pid: u32, cx: &mut App) {
+    pub(crate) fn register_terminal(pane: RunPane, terminal: TerminalId, cx: &mut App) {
+        if Self::terminal_id(pane, cx).is_some_and(|current| current != &terminal) {
+            Self::release_execution(
+                pane,
+                daruda_store::tasks::machine::UndeliveredReason::PaneClosed,
+                cx,
+            );
+        }
         cx.update_global::<Self, _>(|host, _| {
             let cli = host.cli.as_mut().expect("installed CLI tracker");
-            let key = *cli.panes.entry(pane).or_insert_with(|| {
-                cli.next_pane += 1;
-                cli.reverse.insert(cli.next_pane, pane);
-                cli.next_pane
-            });
-            cli.tracker.register(key, shell_pid);
+            cli.terminals.retain(|_, owner| *owner != pane);
+            cli.terminals.insert(terminal, pane);
         });
     }
 
     pub(crate) fn unregister_terminal(pane: RunPane, cx: &mut App) {
         cx.update_global::<Self, _>(|host, _| {
             let cli = host.cli.as_mut().expect("installed CLI tracker");
-            if let Some(key) = cli.panes.remove(&pane) {
-                cli.reverse.remove(&key);
-                cli.tracker.unregister(key);
-            }
+            cli.terminals.retain(|_, owner| *owner != pane);
         });
+    }
+
+    pub(crate) fn terminal_id(pane: RunPane, cx: &App) -> Option<&TerminalId> {
+        cx.global::<Self>()
+            .cli
+            .as_ref()?
+            .terminals
+            .iter()
+            .find_map(|(terminal, owner)| (*owner == pane).then_some(terminal))
+    }
+
+    /// A replaced view can be released after its successor registered in
+    /// the same pane. Only the view still owning the terminal may detach it.
+    pub(crate) fn release_terminal(pane: RunPane, terminal: &TerminalId, cx: &mut App) {
+        if Self::terminal_pane(terminal, cx) != Some(pane) {
+            return;
+        }
+        Self::release_execution(
+            pane,
+            daruda_store::tasks::machine::UndeliveredReason::PaneClosed,
+            cx,
+        );
+        Self::unregister_terminal(pane, cx);
+    }
+
+    /// The pane whose live terminal is `terminal`; `None` once that shell
+    /// was replaced or its pane closed.
+    pub(crate) fn terminal_pane(terminal: &TerminalId, cx: &App) -> Option<RunPane> {
+        cx.global::<Self>()
+            .cli
+            .as_ref()?
+            .terminals
+            .get(terminal)
+            .copied()
     }
 
     pub(super) fn release_terminals(workspace: WorkspaceUuid, cx: &mut App) {
@@ -123,23 +164,12 @@ impl RunsHost {
             .cli
             .as_ref()
             .into_iter()
-            .flat_map(|cli| cli.panes.keys())
+            .flat_map(|cli| cli.terminals.values())
             .filter(|pane| pane.workspace == workspace)
             .copied()
             .collect();
         for pane in panes {
             Self::unregister_terminal(pane, cx);
-        }
-    }
-
-    pub(crate) fn track_cli(pane: RunPane, directory: PathBuf, cx: &App) {
-        let cli = cx
-            .global::<Self>()
-            .cli
-            .as_ref()
-            .expect("installed CLI tracker");
-        if let Some(key) = cli.panes.get(&pane) {
-            cli.tracker.track_task(*key, directory);
         }
     }
 
@@ -170,36 +200,12 @@ impl RunsHost {
         }
     }
 
-    fn apply_cli_tracker_event(event: PtyTrackerEvent, cx: &mut App) {
-        let pane = match &event {
-            PtyTrackerEvent::BindingChanged { pane_id, binding } => {
-                let pane = cx
-                    .global::<Self>()
-                    .cli
-                    .as_ref()
-                    .and_then(|cli| cli.reverse.get(pane_id))
-                    .copied();
-                if let Some(binding) = binding {
-                    Self::record_cli_binding(pane, binding, None, cx);
-                }
-                pane
-            }
-            PtyTrackerEvent::SessionProcessExited {
-                session_id,
-                claude_pid,
-            } => {
-                Self::record_cli_exit(session_id, *claude_pid, cx);
-                None
-            }
-        };
+    fn apply_cli_tracker_event(event: ProcessExited, cx: &mut App) {
         if let Some(effects) = cx.global::<Self>().effects.clone() {
-            effects.cli_event(pane, event, cx);
+            effects.cli_event(event, cx);
+        } else {
+            Self::record_cli_exit(&event.session_id, event.pid, cx);
         }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn tracked_terminal(pane: RunPane, cx: &App) -> Option<u64> {
-        cx.global::<Self>().cli.as_ref()?.panes.get(&pane).copied()
     }
 }
 

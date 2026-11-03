@@ -279,6 +279,8 @@ settings:
   editor_system_default: "System default"
   label_grid_columns: "Macro Grid Columns"
   label_claude_status_enable: "Enable Claude Code integration"
+  label_agent_hooks_installed: "Install agent hooks"
+  hint_agent_hooks_installed: "Keeps daruda's entries in Claude Code and codex settings so terminal agents report their status. Off removes them and hides terminal agent status."
   err_clipboard: "Streaming cap must be a number between 4 096 and 67 108 864 (4 KiB – 64 MiB)."
   err_grid_columns: "Macro grid columns must be a whole number between 1 and 16."
   # Settings-window banner for an action that could not be carried out. Each

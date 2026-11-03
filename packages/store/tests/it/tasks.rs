@@ -75,6 +75,8 @@ fn execution_identity_round_trips_and_legacy_tasks_have_none() {
             .is_none()
     );
     task.execution = Some(daruda_store::tasks::TaskExecution {
+        terminal_id: None,
+        cli_session_end: None,
         source: Default::default(),
         id: "run-1".into(),
         agent_id: "claude".into(),

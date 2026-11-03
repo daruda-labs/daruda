@@ -1,6 +1,4 @@
-//! Shared status types — produced by both the hook FSM
-//! ([`crate::hooks::fsm`]) and the JSONL fallback FSM
-//! ([`crate::jsonl::fsm`]).
+//! Shared agent status types produced by the hook FSM.
 
 use serde::{Deserialize, Serialize};
 

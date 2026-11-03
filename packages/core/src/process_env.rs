@@ -5,9 +5,6 @@
 //! Reading stays uncached: callers that need snapshot semantics own that
 //! decision, and bootstrap code that writes or removes names remains at the
 //! single-threaded process boundary.
-//!
-//! `DARUDA_BIN` is the one shell-only exception. The installed hook reads it
-//! in `packages/agent/src/hooks/notify.sh`; Rust neither reads nor writes it.
 
 use std::env::VarError;
 use std::ffi::OsString;
@@ -107,6 +104,23 @@ pub const FLOW_ATTEMPT: Key = Key::new("DARUDA_FLOW_ATTEMPT");
 
 /// Per-session MCP authentication channel. Its value must never be logged.
 pub const CONTROL_TOKEN: Key = Key::new("DARUDA_CONTROL_TOKEN");
+
+/// Identity of the terminal an agent hook fires in, injected into every
+/// terminal PTY so a hook event names its pane rather than being guessed.
+pub const TERMINAL_ID: Key = Key::new("DARUDA_TERMINAL_ID");
+
+/// The daruda executable that owns a terminal. Agent hook commands run it,
+/// so an event reaches the build and profile that spawned the terminal.
+pub const HOOK_BIN: Key = Key::new("DARUDA_HOOK_BIN");
+
+/// Status directory of the profile that owns a terminal; the hook handler
+/// writes there and nowhere else.
+pub const HOOK_STATUS_DIR: Key = Key::new("DARUDA_HOOK_STATUS_DIR");
+
+/// The route a terminal hands its agent hooks. The app removes these from
+/// its own environment at bootstrap: a daruda started inside a daruda
+/// terminal must not pass the outer terminal's route to its own children.
+pub const TERMINAL_HOOK_ROUTE: [Key; 3] = [TERMINAL_ID, HOOK_BIN, HOOK_STATUS_DIR];
 
 /// Read a registered millisecond value, falling back when absent or invalid.
 pub fn read_millis_or(key: Key, default: Duration) -> Duration {

@@ -264,6 +264,7 @@ pub(in crate::workspace) struct CliSnapshot {
     /// `None` when the run the pane mirrors no longer exists — the task was
     /// deleted or re-run — which offers nothing to continue.
     pub process: Option<daruda_store::tasks::CliProcessState>,
+    pub end_reason: Option<daruda_store::tasks::CliSessionEndReason>,
     pub loading: bool,
 }
 

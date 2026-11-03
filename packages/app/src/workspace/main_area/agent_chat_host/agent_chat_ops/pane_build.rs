@@ -140,6 +140,7 @@ impl Workspace {
         Pane {
             id: pane_id,
             content: PaneContent::AgentChat(AgentChatContent {
+                cli_resume: None,
                 restore: Default::default(),
                 view,
                 cwd,
@@ -352,6 +353,7 @@ impl Workspace {
         rt.panes.push(Pane {
             id: pane_id,
             content: PaneContent::AgentChat(AgentChatContent {
+                cli_resume: None,
                 restore: Default::default(),
                 view,
                 cwd,

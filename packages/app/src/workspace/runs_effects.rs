@@ -121,28 +121,24 @@ impl RunsEffects for WorkspaceEffects {
         crate::workspace::flow_events::deliver_flow_change(change, cx);
     }
 
-    fn cli_event(
-        &self,
-        pane: Option<crate::runs::RunPane>,
-        event: daruda_agent::pty_tracker::PtyTrackerEvent,
-        cx: &mut App,
-    ) {
-        WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
-            use daruda_agent::pty_tracker::PtyTrackerEvent;
-            let event = match &event {
-                PtyTrackerEvent::BindingChanged { binding, .. } => {
-                    let Some(pane) = pane.filter(|pane| pane.workspace == ws.uuid()) else {
-                        return;
-                    };
-                    PtyTrackerEvent::BindingChanged {
-                        pane_id: pane.pane,
-                        binding: binding.clone(),
-                    }
-                }
-                event @ PtyTrackerEvent::SessionProcessExited { .. } => event.clone(),
-            };
-            ws.apply_pty_tracker_event(event, cx);
+    fn cli_event(&self, event: daruda_agent::pty_tracker::ProcessExited, cx: &mut App) {
+        let mut pending = Vec::new();
+        WindowRegistry::for_each_workspace(cx, |ws, _window, _cx| {
+            pending.push(ws.claude_sessions.task_hook_tail.clone());
         });
+        cx.spawn(async move |cx| {
+            for tail in pending {
+                // SILENT-OK: closure means all earlier task hooks finished.
+                let _ = tail.recv().await;
+            }
+            cx.update(|cx| {
+                crate::runs::RunsHost::record_cli_exit(&event.session_id, event.pid, cx);
+                WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
+                    ws.apply_pty_tracker_event(event.clone(), cx);
+                });
+            });
+        })
+        .detach();
     }
 
     fn stop_execution(&self, exec: &ExecutionRef, cx: &mut App) {

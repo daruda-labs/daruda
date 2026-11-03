@@ -33,6 +33,30 @@ pub enum CliProcessState {
     Unknown,
 }
 
+/// Why a CLI session stopped being attached to its original terminal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CliSessionEndReason {
+    SessionEnded,
+    ProcessExited,
+    PaneClosed,
+    AppRestart,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CliSessionEnd {
+    pub reason: CliSessionEndReason,
+    pub at: DateTime<Utc>,
+}
+
+impl CliSessionEnd {
+    /// A delayed goodbye can explain an already observed process exit.
+    pub fn refines(&self, previous: &Self) -> bool {
+        previous.reason == CliSessionEndReason::ProcessExited
+            && self.reason == CliSessionEndReason::SessionEnded
+    }
+}
+
 impl TaskExecutionSource {
     pub fn cli_process(&self) -> Option<&CliProcessState> {
         match self {

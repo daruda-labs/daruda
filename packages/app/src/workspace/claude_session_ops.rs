@@ -1,9 +1,9 @@
-//! Claude-specific hooks, session status, PTY tracking, and JSONL fallback.
+//! Hook-driven terminal session status and pane bindings.
 //! Dropping the task and watcher guards stops their background pumps.
 
 use std::collections::HashMap;
 
-use gpui::{Context, Task};
+use gpui::Context;
 
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
@@ -12,34 +12,15 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
 
 pub(in crate::workspace) struct ClaudeSessionState {
-    /// Claude Code session-status mirror — driven by the hook channel and
-    /// JSONL fallback. Read by the left dock to render the per-lane
+    /// Terminal session-status mirror driven by agent hooks. The left dock
+    /// reads it to render each lane's
     /// Working/NeedsAttention/Idle/Connecting indicator.
     pub(in crate::workspace) status: daruda_agent::ClaudeStatusStore,
 
-    /// Whether daruda's hook entries are present in
-    /// `~/.claude/settings.json`. Cached: refreshed at startup and after
-    /// each install/uninstall action; on disk changes by the user
-    /// directly editing settings.json the cache will lag until daruda
-    /// restarts.
-    pub(in crate::workspace) hooks_installed: bool,
-
-    /// Last reported `(PaneId → claude session)` bindings from the
-    /// tracker. Used by sub-row badges to highlight the focused tab's
-    /// session and by `apply_pty_tracker_event` to detect dead sessions.
+    /// Pane sessions named by routed hooks, shared by badge aggregation
+    /// and the known-process exit projection.
     pub(in crate::workspace) pty_bindings: HashMap<PaneId, PtyBinding>,
     pub(in crate::workspace) task_hook_tail: smol::channel::Receiver<()>,
-
-    /// JSONL fallback watcher's shutdown half — engaged only when
-    /// the user has not installed the hook integration. The watcher
-    /// thread reads `~/.claude/projects/<encoded(cwd)>/` per lane
-    /// and feeds `JsonlEvent`s through the same store as hooks (with
-    /// `Source::Jsonl`). `None` when the claude_status feature is
-    /// disabled or no lane is active. Dropping this handle stops the
-    /// watcher (FSEvents unregisters); `refresh_jsonl_watcher`
-    /// reassigns it when install state or the lane set changes.
-    pub(in crate::workspace) _jsonl_watcher: Option<crate::dir_watch::DirWatcher>,
-    pub(in crate::workspace) _jsonl_event_pump: Option<Task<()>>,
 
     /// Running count of `PostToolUseFailure` hook events per Claude
     /// session. When a session crosses
@@ -79,9 +60,6 @@ pub(in crate::workspace) fn initial_claude_status(
 ) -> daruda_agent::ClaudeStatusStore {
     use daruda_agent::hooks::cold_restore;
     let mut store = daruda_agent::ClaudeStatusStore::new();
-    if !config.claude_status.enable {
-        return store;
-    }
     let Ok(dir) = daruda_agent::hooks::status_file::default_dir() else {
         return store;
     };
@@ -127,11 +105,24 @@ impl Workspace {
         match event {
             StatusEvent::Changed(path) => match daruda_agent::hooks::status_file::read(&path) {
                 Ok(Some(file)) => {
-                    self.record_task_cli_transcript(
-                        &file.session_id,
-                        file.transcript_path.as_deref(),
-                        cx,
-                    );
+                    if self
+                        .claude_sessions
+                        .status
+                        .get_key(file.storage_key())
+                        .is_some_and(|previous| previous.timestamp > file.timestamp)
+                    {
+                        return;
+                    }
+                    if !self.bind_routed_session(&file, cx) {
+                        return;
+                    }
+                    if file.terminal_id.is_none() {
+                        self.record_task_cli_transcript(
+                            &file.session_id,
+                            file.transcript_path.as_deref(),
+                            cx,
+                        );
+                    }
                     // A session starting or ending is the moment its process
                     // may have appeared or gone; a tool call's update is not.
                     if matches!(file.last_event.as_str(), "SessionStart" | "SessionEnd") {
@@ -148,7 +139,31 @@ impl Workspace {
                         self.apply_todo_write(&file.session_id, input, cx);
                     }
                     if let Some(reason) = Self::classify_hook_end_reason(&file.last_event) {
-                        self.apply_task_session_ended(&file.session_id, reason, cx);
+                        let session = file.session_id.clone();
+                        let terminal = file.terminal_id.as_ref().map(|id| id.as_str().to_owned());
+                        self.after_task_projection(
+                            move |workspace, cx| {
+                                workspace
+                                    .claude_sessions
+                                    .tool_use_failure_counts
+                                    .remove(&session);
+                                crate::runs::RunsHost::settle_cli_terminal(
+                                    &session, terminal, reason, cx,
+                                );
+                            },
+                            cx,
+                        );
+                    }
+                    if file.last_event == "SessionEnd" {
+                        self.claude_sessions.pty_bindings.retain(|_, binding| {
+                            match &file.terminal_id {
+                                Some(terminal) => binding.terminal_id.as_ref() != Some(terminal),
+                                None => binding.session_id != file.session_id,
+                            }
+                        });
+                        self.forget_terminal_session(file.storage_key());
+                        self.notify_status_docks(cx);
+                        return;
                     }
                     // Blocking hook notifications surface as a one-shot
                     // local + remote push here rather than latching the lane
@@ -156,25 +171,24 @@ impl Workspace {
                     // before `update` consumes `file`.
                     self.maybe_push_hook_notification(&file, cx);
                     #[cfg(debug_assertions)]
-                    let dbg_probe = self.probe_lane_status(&file.session_id);
+                    let dbg_probe = self.probe_lane_status(file.storage_key());
                     #[cfg(debug_assertions)]
                     let dbg_fields = (
-                        file.session_id.clone(),
+                        file.storage_key().to_owned(),
                         file.cwd.clone(),
                         file.last_event.clone(),
-                        file.source,
                     );
                     let turn_end = self
                         .claude_sessions
                         .open_turns
-                        .observe(&file.session_id, file.status, &file.last_event)
-                        .zip(self.session_pane_id(&file.session_id));
+                        .observe(file.storage_key(), file.status, &file.last_event)
+                        .zip(self.session_pane_id(file.storage_key()));
                     if self.claude_sessions.status.update(file) {
                         self.notify_status_docks(cx);
                         #[cfg(debug_assertions)]
                         {
-                            let (sid, cwd, event, source) = dbg_fields;
-                            self.log_lane_status_change(dbg_probe, &sid, &cwd, &event, source);
+                            let (sid, cwd, event) = dbg_fields;
+                            self.log_lane_status_change(dbg_probe, &sid, &cwd, &event);
                         }
                     }
                     if let Some((outcome, pane_id)) = turn_end {
@@ -197,36 +211,157 @@ impl Workspace {
                     self.report_error(report, cx);
                 }
             },
-            StatusEvent::Removed { session_id, .. } => {
+            StatusEvent::Removed { key, .. } => {
+                // A remove may arrive after the same terminal's next session
+                // rewrote the file. In that case ingest the current version.
+                if let Ok(dir) = daruda_agent::hooks::status_file::default_dir() {
+                    let path = daruda_agent::hooks::status_file::path_for(&dir, &key);
+                    if path.exists() {
+                        self.apply_claude_status_event(StatusEvent::Changed(path), cx);
+                        return;
+                    }
+                }
+                let session_id = key;
                 crate::runs::RunsHost::cli_tracker(cx).poke();
                 self.claude_sessions
                     .last_pushed_notification
                     .remove(&session_id);
                 self.claude_sessions.open_turns.forget(&session_id);
-                self.apply_task_session_ended(
-                    &session_id,
-                    daruda_store::tasks::SessionEndReason::Other,
-                    cx,
-                );
+                if let Some(file) = self.claude_sessions.status.get_key(&session_id).cloned() {
+                    let session = file.session_id;
+                    let terminal = file.terminal_id.map(|id| id.as_str().to_owned());
+                    self.after_task_projection(
+                        move |_, cx| {
+                            crate::runs::RunsHost::settle_cli_terminal(
+                                &session,
+                                terminal,
+                                daruda_store::tasks::SessionEndReason::Other,
+                                cx,
+                            );
+                        },
+                        cx,
+                    );
+                } else {
+                    self.apply_task_session_ended(
+                        &session_id,
+                        daruda_store::tasks::SessionEndReason::Other,
+                        cx,
+                    );
+                }
                 #[cfg(debug_assertions)]
                 let dbg_entry = self
                     .claude_sessions
                     .status
                     .get(&session_id)
-                    .map(|f| (f.cwd.clone(), f.source));
+                    .map(|f| f.cwd.clone());
                 #[cfg(debug_assertions)]
                 let dbg_probe = dbg_entry
                     .as_ref()
                     .map(|_| self.probe_lane_status(&session_id));
-                if self.claude_sessions.status.remove(&session_id).is_some() {
+                if self
+                    .claude_sessions
+                    .status
+                    .remove_key(&session_id)
+                    .is_some()
+                {
                     self.notify_status_docks(cx);
                     #[cfg(debug_assertions)]
-                    if let (Some((cwd, source)), Some(probe)) = (dbg_entry, dbg_probe) {
-                        self.log_lane_status_change(probe, &session_id, &cwd, "removed", source);
+                    if let (Some(cwd), Some(probe)) = (dbg_entry, dbg_probe) {
+                        self.log_lane_status_change(probe, &session_id, &cwd, "removed");
                     }
                 }
             }
         }
+    }
+
+    /// Bind a routed hook only in the window owning its live terminal.
+    /// The same event supplies run attachment and optional PID observations.
+    fn bind_routed_session(
+        &mut self,
+        file: &daruda_agent::hooks::status_file::StatusFile,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(terminal) = &file.terminal_id else {
+            return true;
+        };
+        let Some(pane) = crate::runs::RunsHost::terminal_pane(terminal, cx)
+            .filter(|pane| pane.workspace == self.uuid())
+        else {
+            return false;
+        };
+        crate::runs::RunsHost::record_cli_hook(file, cx);
+        let binding = PtyBinding {
+            terminal_id: file.terminal_id.clone(),
+            claude_pid: file.agent_pid,
+            session_id: file.session_id.clone(),
+        };
+        if self.claude_sessions.pty_bindings.get(&pane.pane) != Some(&binding) {
+            if let Some(pid) = file.agent_pid {
+                crate::runs::RunsHost::cli_tracker(cx).track_agent(file.session_id.clone(), pid);
+            }
+            if let Some(previous) = self.claude_sessions.pty_bindings.insert(pane.pane, binding)
+                && previous.session_id != file.session_id
+            {
+                let key = previous
+                    .terminal_id
+                    .as_ref()
+                    .map(|id| id.as_str())
+                    .unwrap_or(&previous.session_id);
+                self.forget_terminal_session(key);
+            }
+        }
+        true
+    }
+
+    /// Clear pane-owned status without unlinking a hook writer's files.
+    pub(in crate::workspace) fn forget_terminal_session(&mut self, session: &str) {
+        self.claude_sessions.status.remove_key(session);
+        self.claude_sessions.open_turns.forget(session);
+        self.claude_sessions
+            .last_pushed_notification
+            .remove(session);
+        // Task tallies are retired by the ordered task-projection queue;
+        // clearing them here could erase an earlier pending failure event.
+    }
+
+    /// An interrupt sent to the PTY ends the visible turn without completion.
+    pub(in crate::workspace) fn interrupt_terminal_agent(
+        &mut self,
+        pane_id: PaneId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self
+            .claude_sessions
+            .pty_bindings
+            .get(&pane_id)
+            .map(|binding| {
+                binding
+                    .terminal_id
+                    .as_ref()
+                    .map(|id| id.as_str().to_owned())
+                    .unwrap_or_else(|| binding.session_id.clone())
+            })
+        else {
+            return;
+        };
+        let Some(mut file) = self.claude_sessions.status.get(&session).cloned() else {
+            return;
+        };
+        if !matches!(
+            file.status,
+            daruda_agent::SessionStatus::Working
+                | daruda_agent::SessionStatus::ExecutingTool
+                | daruda_agent::SessionStatus::NeedsAttention
+        ) {
+            return;
+        }
+        file.status = daruda_agent::SessionStatus::Idle;
+        file.last_event = "Interrupt".to_owned();
+        file.notification = None;
+        file.timestamp = chrono::Utc::now();
+        self.claude_sessions.open_turns.forget(&session);
+        self.claude_sessions.status.update(file);
+        self.notify_status_docks(cx);
     }
 
     /// Raise transient desktop and remote pushes for a blocking Claude
@@ -275,7 +410,7 @@ impl Workspace {
         if self
             .claude_sessions
             .last_pushed_notification
-            .get(&file.session_id)
+            .get(file.storage_key())
             .is_some_and(|&t| file.timestamp <= t)
         {
             return;
@@ -285,18 +420,18 @@ impl Workspace {
         // moves away — the user already saw the TUI prompt.
         self.claude_sessions
             .last_pushed_notification
-            .insert(file.session_id.clone(), file.timestamp);
+            .insert(file.storage_key().to_owned(), file.timestamp);
 
         // In-view gate — silence when daruda is foreground and the
         // session's own pane is on screen, mirroring `handle_view_event`.
         if self.mirrors.notifications.skip_focused_pane
             && crate::platform::attention::is_app_active()
-            && self.session_pane_on_screen(&file.session_id)
+            && self.session_pane_on_screen(file.storage_key())
         {
             return;
         }
 
-        let pane_id = self.session_pane_id(&file.session_id);
+        let pane_id = self.session_pane_id(file.storage_key());
         let location = redact_home(&file.cwd);
         crate::platform::notifications::show(&title, &location);
         // The global watcher fans this event into every open workspace. Only
@@ -311,7 +446,14 @@ impl Workspace {
         self.claude_sessions
             .pty_bindings
             .iter()
-            .find(|(_, binding)| binding.session_id == session_id)
+            .find(|(_, binding)| {
+                binding
+                    .terminal_id
+                    .as_ref()
+                    .map(|id| id.as_str())
+                    .unwrap_or(&binding.session_id)
+                    == session_id
+            })
             .map(|(pane_id, _)| *pane_id)
     }
 
@@ -324,14 +466,8 @@ impl Workspace {
             .is_some_and(|pane_id| self.pane_on_screen(pane_id))
     }
 
-    /// Drop every trace of `pane_ids` from PTY→claude tracking: the
-    /// tracker stops walking their shell PIDs (keeping its idle guard
-    /// able to re-arm once nothing is registered) and their bindings
-    /// leave the map immediately instead of waiting for the next
-    /// poll's vanished-pane diff. Also drops their unseen turn outcomes,
-    /// chat panes' included, since this is the one point every
-    /// pane-teardown path (close pane / close tab / remove lane / close
-    /// project) goes through.
+    /// Retire pane routes, mirrored status and unseen outcomes at every
+    /// teardown edge. Known processes remain tracked until OS-confirmed exit.
     pub(in crate::workspace) fn release_pane_tracking(
         &mut self,
         pane_ids: &[PaneId],
@@ -344,7 +480,14 @@ impl Workspace {
                 cx,
             );
             crate::runs::RunsHost::unregister_terminal(self.run_pane(*id), cx);
-            self.claude_sessions.pty_bindings.remove(id);
+            if let Some(binding) = self.claude_sessions.pty_bindings.remove(id) {
+                let key = binding
+                    .terminal_id
+                    .as_ref()
+                    .map(|id| id.as_str())
+                    .unwrap_or(&binding.session_id);
+                self.forget_terminal_session(key);
+            }
         }
         self.unseen_outcomes.forget(pane_ids);
         // Dropped bindings feed the left-dock per-lane agent badges and

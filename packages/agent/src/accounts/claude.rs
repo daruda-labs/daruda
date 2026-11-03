@@ -50,7 +50,7 @@ const SYSTEM_HOME_HINT: &str = concat!("~/", system_home_dir!());
 /// The ambient Claude home every unmanaged pane reads: `$CLAUDE_CONFIG_DIR`
 /// when the user set it, else `~/.claude`. Mirrors
 /// [`super::codex::system_codex_home`].
-fn system_claude_home() -> Option<PathBuf> {
+pub(crate) fn system_claude_home() -> Option<PathBuf> {
     system_claude_home_from(std::env::var_os("CLAUDE_CONFIG_DIR"), dirs::home_dir())
 }
 

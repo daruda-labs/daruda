@@ -549,6 +549,7 @@ impl Workspace {
         .ok_or(TaskStartError::PaneUnavailable)?;
         let prepared = RunsHost::propose(
             TaskEvent::LanePrepared {
+                terminal_id: identity.terminal_id,
                 exec: exec.clone(),
                 worktree: worktree_path.to_path_buf(),
                 agent_id: identity.agent_id,
@@ -569,16 +570,7 @@ impl Workspace {
                 })?;
             let result = match ws.update_in(cx, |ws, window, cx| {
                 ws.deliver_prepared_task(
-                    &exec,
-                    &task,
-                    &worktree,
-                    &branch,
-                    pane_id,
-                    surface,
-                    identity.account_id,
-                    seq,
-                    window,
-                    cx,
+                    &exec, &task, &worktree, &branch, pane_id, surface, seq, window, cx,
                 )
             }) {
                 Ok(Ok(dispatched)) => dispatched.await,
@@ -601,7 +593,6 @@ impl Workspace {
         branch: &str,
         pane_id: PaneId,
         surface: TaskAgentSurface,
-        account_id: Option<daruda_store::accounts::AccountId>,
         prepared_seq: u64,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -614,6 +605,14 @@ impl Workspace {
     }) {
         return Err(TaskStartError::NotBacklog);
     }
+        if surface == TaskAgentSurface::Terminal {
+            let recorded = exec
+                .resolve(cx.global::<GlobalTasks>().book())
+                .and_then(|run| run.terminal_id.as_deref());
+            if recorded != RunsHost::terminal_id(self.run_pane(pane_id), cx).map(|id| id.as_str()) {
+                return Err(TaskStartError::PaneUnavailable);
+            }
+        }
         let rendered = daruda_store::tasks::prompt_file::render_task_prompt(task, branch);
         let dispatched = match surface {
             TaskAgentSurface::Terminal => {
@@ -625,7 +624,6 @@ impl Workspace {
                             error.to_string(),
                         ),
                     })?;
-                self.track_task_cli_execution(pane_id, account_id, cx);
                 let command = daruda_store::tasks::prompt_file::build_claude_command(
                     &prompt_path,
                     task.spec.auto_execute,
@@ -711,6 +709,7 @@ enum StartRoute {
 
 /// What the pane a run uses is, as `LanePrepared` records it.
 pub(super) struct PaneIdentity {
+    pub(super) terminal_id: Option<String>,
     pub(super) agent_id: String,
     pub(super) account_id: Option<daruda_store::accounts::AccountId>,
     pub(super) cwd: PathBuf,

@@ -106,8 +106,9 @@ async fn duplicate_pty_binding_is_counted_once_and_uses_focused_pane(cx: &mut Te
                 ws.claude_sessions.pty_bindings.insert(
                     pane,
                     PtyBinding {
+                        terminal_id: None,
                         session_id: "shared".into(),
-                        claude_pid: 1,
+                        claude_pid: Some(1),
                     },
                 );
             }

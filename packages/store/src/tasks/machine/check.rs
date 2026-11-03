@@ -34,7 +34,9 @@ pub(super) fn allowed(from: LifecycleKind, event: EventKind) -> bool {
         // CLI facts keep arriving after the run ends: the exit is usually
         // confirmed after the session-end hook already settled the task.
         // Before `LanePrepared` there is no run for them to describe.
-        E::CliProcessObserved | E::CliTranscriptFound => !matches!(from, L::Backlog | L::Preparing),
+        E::CliProcessObserved | E::CliSessionEnded | E::CliTranscriptFound => {
+            !matches!(from, L::Backlog | L::Preparing)
+        }
         E::CancelRequested | E::Reconciled => {
             matches!(from, L::Preparing | L::Dispatching | L::Running)
         }
@@ -129,6 +131,7 @@ fn check_payload(record: &TaskRecord, event: &TaskEvent) -> Result<(), TaskRejec
         TaskEvent::SessionAttached { .. }
         | TaskEvent::SessionDetached { .. }
         | TaskEvent::CliProcessObserved { .. }
+        | TaskEvent::CliSessionEnded { .. }
         | TaskEvent::CliTranscriptFound { .. }
             if !is_cli =>
         {

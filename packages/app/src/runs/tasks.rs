@@ -120,6 +120,7 @@ pub(crate) struct RunsHost {
     access: Access,
     pub(super) delivery: super::delivery::Delivery,
     pub(super) cli: Option<super::cli::CliTracker>,
+    pub(super) cli_resumes: super::cli::resume::ResumeClaims,
     pub(super) effects: Option<Rc<dyn RunsEffects>>,
     /// The flow runs in flight; they belong to the process, not to a log.
     pub(super) flows: super::flows::FlowRuns,
@@ -214,6 +215,7 @@ impl RunsHost {
                 access,
                 delivery: Default::default(),
                 cli: None,
+                cli_resumes: Default::default(),
                 effects: None,
                 flows: Default::default(),
                 watch: Default::default(),
@@ -422,13 +424,16 @@ impl RunsHost {
             .try_global::<GlobalTasks>()
             .map(|tasks| tasks.book.clone());
         if cx.try_global::<RunsHost>().is_some() {
-            let (flows, effects, watch) = cx.update_global::<RunsHost, _>(|host, _| {
-                (
-                    std::mem::take(&mut host.flows),
-                    host.effects.take(),
-                    std::mem::take(&mut host.watch),
-                )
-            });
+            let (flows, effects, watch, cli_resumes) =
+                cx.update_global::<RunsHost, _>(|host, _| {
+                    (
+                        std::mem::take(&mut host.flows),
+                        host.effects.take(),
+                        std::mem::take(&mut host.watch),
+                        std::mem::take(&mut host.cli_resumes),
+                    )
+                });
+            opened.host.cli_resumes = cli_resumes;
             opened.host.flows = flows;
             opened.host.watch = watch;
             opened.host.effects = opened.host.effects.take().or(effects);
@@ -542,6 +547,7 @@ impl OpenedRuns {
                 access: Access::Unavailable,
                 delivery: Default::default(),
                 cli: None,
+                cli_resumes: Default::default(),
                 effects: None,
                 flows: Default::default(),
                 watch: Default::default(),

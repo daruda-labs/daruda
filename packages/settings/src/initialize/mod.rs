@@ -408,6 +408,7 @@ impl SettingsView {
             file_icon_color_select,
             panels_grid_columns_input,
             claude_status_enable: config.claude_status.enable,
+            agent_hooks_installed: config.claude_status.install_hooks,
             telegram_enabled: config.telegram.enabled,
             remote_integrations,
             telegram_token_input,

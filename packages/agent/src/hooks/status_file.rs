@@ -1,7 +1,7 @@
-//! Status file persistence — `~/.daruda/status/<session_id>.json`.
+//! Status file persistence — `<profile status dir>/<terminal_id>.json`.
 //!
 //! daruda's hook handler ([`crate::hooks::fsm`]) writes one of these per
-//! Claude session. The main daruda process watches the directory with
+//! terminal. The main daruda process watches the directory with
 //! `notify` and reads files back into the in-memory store.
 //!
 //! Writes are atomic (tempfile in the same directory + rename). Reads of
@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::SessionStatus;
 use crate::hooks::events::{NotificationType, PermissionMode};
+use crate::hooks::route::{Harness, TerminalId};
 
 pub(super) mod lock;
 
@@ -26,16 +27,7 @@ pub(super) mod lock;
 /// `#[serde(default)]` on optional fields.
 pub const SCHEMA_VERSION: u32 = 1;
 
-/// Which channel produced this status entry. Hook is authoritative;
-/// JSONL is used as a fallback when hooks are unavailable.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Source {
-    Hook,
-    Jsonl,
-}
-
-/// On-disk schema for `~/.daruda/status/<session_id>.json`.
+/// On-disk schema for `<profile status dir>/<terminal_id>.json`.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct StatusFile {
     pub schema_version: u32,
@@ -59,11 +51,28 @@ pub struct StatusFile {
     #[serde(default)]
     pub notification: Option<NotificationType>,
     pub timestamp: DateTime<Utc>,
-    pub source: Source,
+    /// The daruda terminal the agent runs in, from the hook's route.
+    /// `None` for files written before routing existed.
+    #[serde(default)]
+    pub terminal_id: Option<TerminalId>,
+    /// Which agent CLI wrote this; `None` reads as Claude Code, the only
+    /// harness before codex.
+    #[serde(default)]
+    pub harness: Option<Harness>,
+    /// The agent process found above the hook, when one could be proven.
+    #[serde(default)]
+    pub agent_pid: Option<u32>,
 }
 
 impl StatusFile {
-    /// Build a current-time hook-source entry for the given session.
+    /// Filename and lock identity; legacy files remain keyed by session.
+    pub fn storage_key(&self) -> &str {
+        self.terminal_id
+            .as_ref()
+            .map_or(self.session_id.as_str(), TerminalId::as_str)
+    }
+
+    /// Build a current-time hook entry for the given session.
     pub fn new_hook(
         session_id: impl Into<String>,
         cwd: impl Into<PathBuf>,
@@ -82,8 +91,15 @@ impl StatusFile {
             permission_mode: None,
             notification: None,
             timestamp: Utc::now(),
-            source: Source::Hook,
+            terminal_id: None,
+            harness: None,
+            agent_pid: None,
         }
+    }
+
+    /// The harness that wrote this file.
+    pub fn harness(&self) -> Harness {
+        self.harness.unwrap_or(Harness::Claude)
     }
 
     /// `true` when the recorded event time is at least `max_age` in the
@@ -152,12 +168,12 @@ pub fn default_dir() -> Result<PathBuf, StatusFileError> {
     Ok(daruda_store::persistence::default_data_dir().join("status"))
 }
 
-/// Path for a single session's status file inside `dir`.
+/// Path for a terminal key, or a legacy session key, inside `dir`.
 pub fn path_for(dir: &Path, session_id: &str) -> PathBuf {
     dir.join(format!("{session_id}.json"))
 }
 
-/// Path for a single session's advisory lock file inside `dir`. The
+/// Path for a status key's advisory lock file inside `dir`. The
 /// hook handler and startup maintenance lock this during read-modify-write.
 /// The pathname stays in place: unlinking it can let a second writer lock
 /// a new file while a previous writer still owns the old one.

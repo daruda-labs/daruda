@@ -179,6 +179,8 @@ const SEARCH_KEY_CONTEXT: &str = "TerminalSearch";
 // TerminalInput
 // ---------------------------------------------------------------------------
 
+type InterruptHandler = dyn Fn(&mut App) + 'static;
+
 type TerminalSendFn = dyn Fn(&[u8]) + Send + Sync + 'static;
 
 pub struct TerminalInput {
@@ -210,6 +212,7 @@ pub struct TerminalView {
     pub(super) line_layout_key: Option<(Pixels, Pixels, Pixels, u64)>,
     pub(super) focus_handle: FocusHandle,
     pub(super) input: Option<TerminalInput>,
+    pub(super) interrupt_handler: Option<Box<InterruptHandler>>,
     /// Shared paint+event data. Carries every field that both the
     /// renderer and the event path read or mutate (Pitfall #8 quartet,
     /// search, selection, viewport snapshot, IME, jump). The entity
@@ -455,6 +458,13 @@ impl TerminalView {
         Self::build(session, focus_handle, Some(input))
     }
 
+    /// Observe interrupt keys actually forwarded to the PTY. Composition
+    /// cancellation, paste, and terminal protocol replies do not call this.
+    pub fn with_interrupt_handler(mut self, handler: impl Fn(&mut App) + 'static) -> Self {
+        self.interrupt_handler = Some(Box::new(handler));
+        self
+    }
+
     /// Send raw bytes to the PTY exactly as if the user had typed
     /// them on the keyboard. No-op when the view was constructed
     /// without a PTY backing (test stubs). Used by external dispatchers
@@ -492,6 +502,7 @@ impl TerminalView {
             line_layout_key: None,
             focus_handle,
             input,
+            interrupt_handler: None,
             state,
             autoscroll_task: None,
             _focus_in_sub: None,

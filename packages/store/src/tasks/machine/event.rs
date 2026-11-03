@@ -82,6 +82,8 @@ pub enum TaskEvent {
     },
     /// The pane the run uses exists; its identity completes the run.
     LanePrepared {
+        #[serde(default)]
+        terminal_id: Option<String>,
         exec: ExecutionRef,
         worktree: PathBuf,
         agent_id: String,
@@ -124,6 +126,11 @@ pub enum TaskEvent {
     CliProcessObserved {
         exec: ExecutionRef,
         process: CliProcessState,
+        at: DateTime<Utc>,
+    },
+    CliSessionEnded {
+        exec: ExecutionRef,
+        end: crate::tasks::CliSessionEnd,
         at: DateTime<Utc>,
     },
     CliTranscriptFound {
@@ -253,6 +260,7 @@ pub enum EventKind {
     SessionAttached,
     SessionDetached,
     CliProcessObserved,
+    CliSessionEnded,
     CliTranscriptFound,
     Settled,
     ToolFailuresEscalated,
@@ -284,6 +292,7 @@ impl TaskEvent {
             Self::SessionAttached { .. } => EventKind::SessionAttached,
             Self::SessionDetached { .. } => EventKind::SessionDetached,
             Self::CliProcessObserved { .. } => EventKind::CliProcessObserved,
+            Self::CliSessionEnded { .. } => EventKind::CliSessionEnded,
             Self::CliTranscriptFound { .. } => EventKind::CliTranscriptFound,
             Self::Settled { .. } => EventKind::Settled,
             Self::ToolFailuresEscalated { .. } => EventKind::ToolFailuresEscalated,
@@ -306,6 +315,7 @@ impl TaskEvent {
             | Self::SessionAttached { exec, .. }
             | Self::SessionDetached { exec, .. }
             | Self::CliProcessObserved { exec, .. }
+            | Self::CliSessionEnded { exec, .. }
             | Self::CliTranscriptFound { exec, .. }
             | Self::Settled { exec, .. }
             | Self::ToolFailuresEscalated { exec, .. }
@@ -350,6 +360,7 @@ impl TaskEvent {
             | Self::SessionAttached { exec, .. }
             | Self::SessionDetached { exec, .. }
             | Self::CliProcessObserved { exec, .. }
+            | Self::CliSessionEnded { exec, .. }
             | Self::CliTranscriptFound { exec, .. }
             | Self::Settled { exec, .. }
             | Self::ToolFailuresEscalated { exec, .. }

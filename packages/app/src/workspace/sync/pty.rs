@@ -3,61 +3,34 @@
 use gpui::Context;
 
 use crate::workspace::Workspace;
-use daruda_agent::pty_tracker::PtyTrackerEvent;
+use daruda_agent::pty_tracker::ProcessExited;
 
 impl Workspace {
-    /// Apply one tracker event. Updates `pty_claude_bindings` and the owning
-    /// task run for `BindingChanged`. `SessionProcessExited` is the one proof
-    /// a CLI is gone (its PID left the OS table), so it confirms the task
-    /// run's exit and sweeps the session's status file.
-    pub fn apply_pty_tracker_event(&mut self, event: PtyTrackerEvent, cx: &mut Context<Self>) {
-        match event {
-            PtyTrackerEvent::BindingChanged { pane_id, binding } => {
-                if let Some(binding) = &binding {
-                    let transcript = self
-                        .claude_sessions
-                        .status
-                        .get(&binding.session_id)
-                        .and_then(|file| file.transcript_path.clone());
-                    self.record_task_cli_transcript(&binding.session_id, transcript.as_deref(), cx);
-                }
-                let changed = match binding {
-                    Some(new) => {
-                        let prev = self.claude_sessions.pty_bindings.get(&pane_id);
-                        let same = prev == Some(&new);
-                        if !same {
-                            self.claude_sessions.pty_bindings.insert(pane_id, new);
-                        }
-                        !same
-                    }
-                    None => self.claude_sessions.pty_bindings.remove(&pane_id).is_some(),
-                };
-                if changed {
-                    // `pty_claude_bindings` change → `agent_active_session_id`
-                    // in the left dock snapshot changes; a workspace render
-                    // re-stages the dock and the staging diff invalidates the
-                    // `.cached()` left dock. A bound session also counts
-                    // toward the Dock badge.
-                    self.notify_status_docks(cx);
-                }
-            }
-            PtyTrackerEvent::SessionProcessExited {
-                session_id,
-                claude_pid: _,
-            } => {
-                self.claude_sessions
-                    .last_pushed_notification
-                    .remove(&session_id);
-                if self.claude_sessions.status.remove(&session_id).is_some() {
-                    if let Ok(dir) = daruda_agent::hooks::status_file::default_dir() {
-                        use daruda_agent::hooks::status_file as sf;
-                        let _ = sf::delete(&sf::path_for(&dir, &session_id));
-                        // Queued hook subprocesses can outlive the CLI.
-                        // Retain their shared lock identity even after exit.
-                    }
-                    self.notify_status_docks(cx);
-                }
-            }
+    /// A confirmed OS exit retires the session mirror, independently of
+    /// whether its terminal or window is still present.
+    pub fn apply_pty_tracker_event(&mut self, event: ProcessExited, cx: &mut Context<Self>) {
+        let ProcessExited { session_id, pid } = event;
+        let keys: Vec<_> = self
+            .claude_sessions
+            .status
+            .iter()
+            .filter(|(_, file)| {
+                file.session_id == session_id
+                    && (file.agent_pid == Some(pid)
+                        || (file.terminal_id.is_none() && file.agent_pid.is_none()))
+            })
+            .map(|(key, _)| key.to_owned())
+            .collect();
+        self.claude_sessions.pty_bindings.retain(|_, binding| {
+            binding.session_id != session_id
+                || (binding.claude_pid != Some(pid)
+                    && (binding.terminal_id.is_some() || binding.claude_pid.is_some()))
+        });
+        for key in &keys {
+            self.forget_terminal_session(key);
+        }
+        if !keys.is_empty() {
+            self.notify_status_docks(cx);
         }
     }
 }

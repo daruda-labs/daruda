@@ -252,6 +252,10 @@ pub(super) fn bool(setting: BoolSetting) -> RowCopy {
             label: s::settings::label_claude_status_enable,
             hint: String::new,
         },
+        BoolSetting::AgentHooksInstalled => RowCopy {
+            label: s::settings::label_agent_hooks_installed,
+            hint: s::settings::hint_agent_hooks_installed,
+        },
         BoolSetting::LeftCollapsedByDefault => RowCopy {
             label: s::settings::label_left_collapsed,
             hint: s::settings::hint_new_windows_state,

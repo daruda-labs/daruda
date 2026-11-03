@@ -1,4 +1,6 @@
-//! Hook event serde models — 10 of Claude Code's 28 events that daruda subscribes to.
+//! Hook event serde models — the Claude Code and codex events daruda
+//! subscribes to. codex uses the same payload shape and event names, plus
+//! `Interrupt`.
 //!
 //! Schema source: <https://code.claude.com/docs/en/hooks.md>.
 
@@ -54,8 +56,8 @@ pub enum SessionStartSource {
     Unknown,
 }
 
-/// `SessionEnd.end_reason`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+/// `SessionEnd.end_reason`. codex sends none, which reads as `Unknown`.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionEndReason {
     Clear,
@@ -64,6 +66,7 @@ pub enum SessionEndReason {
     PromptInputExit,
     BypassPermissionsDisabled,
     Other,
+    #[default]
     #[serde(other)]
     Unknown,
 }
@@ -106,6 +109,7 @@ pub enum HookEvent {
     SessionEnd {
         #[serde(flatten)]
         common: CommonFields,
+        #[serde(default)]
         end_reason: SessionEndReason,
     },
     UserPromptSubmit {
@@ -171,6 +175,12 @@ pub enum HookEvent {
         #[serde(flatten)]
         common: CommonFields,
     },
+    /// The user interrupted the turn (codex only; Claude Code sends no
+    /// hook for an interrupt). The turn is over without an outcome.
+    Interrupt {
+        #[serde(flatten)]
+        common: CommonFields,
+    },
 }
 
 impl HookEvent {
@@ -186,7 +196,8 @@ impl HookEvent {
             | Self::PermissionRequest { common, .. }
             | Self::Notification { common, .. }
             | Self::Stop { common, .. }
-            | Self::StopFailure { common, .. } => common,
+            | Self::StopFailure { common, .. }
+            | Self::Interrupt { common } => common,
         }
     }
 
@@ -215,6 +226,7 @@ impl HookEvent {
             Self::Notification { .. } => "Notification",
             Self::Stop { .. } => "Stop",
             Self::StopFailure { .. } => "StopFailure",
+            Self::Interrupt { .. } => "Interrupt",
         }
     }
 }

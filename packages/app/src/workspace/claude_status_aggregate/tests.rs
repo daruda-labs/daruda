@@ -17,7 +17,10 @@ fn entry(session_id: &str, cwd: &str, status: SessionStatus) -> StatusFile {
         // Timestamp is irrelevant to the priority/filter logic under
         // test; the store applies no age-based transform.
         timestamp: chrono::Utc::now(),
-        source: Source::Hook,
+
+        terminal_id: None,
+        harness: None,
+        agent_pid: None,
     }
 }
 
@@ -37,7 +40,8 @@ fn binding(pane_id: PaneId, session_id: &str) -> (PaneId, PtyBinding) {
     (
         pane_id,
         PtyBinding {
-            claude_pid: 0,
+            terminal_id: None,
+            claude_pid: Some(0),
             session_id: session_id.into(),
         },
     )
@@ -283,7 +287,6 @@ fn session_report_is_info_with_transition_message_and_context() {
         "sess-1",
         &PathBuf::from("/tmp/wt"),
         "PreToolUse",
-        Source::Hook,
         Some(42),
         "demo-project",
         "feature/x",
@@ -330,7 +333,6 @@ fn session_report_omits_pane_and_marks_unbound_lane() {
         "sess-2",
         &PathBuf::from("/tmp/wt"),
         "Stop",
-        Source::Jsonl,
         None,
         "(unbound)",
         "(unbound)",
@@ -432,4 +434,44 @@ fn icon_attention_is_static_but_does_not_hide_a_busy_sibling() {
         &daruda_config::StatusIconTheme::Icons,
         &crate::status_icon_themes::Catalog::default()
     ));
+}
+
+#[test]
+fn resumed_sessions_in_distinct_terminals_keep_independent_badges() {
+    let lane = lane_ref(1, 7);
+    let mut first = entry("shared", "/work", SessionStatus::Idle);
+    first.terminal_id = daruda_agent::hooks::route::TerminalId::parse("terminal-a");
+    let mut second = entry("shared", "/work", SessionStatus::Working);
+    second.terminal_id = daruda_agent::hooks::route::TerminalId::parse("terminal-b");
+    let bindings = HashMap::from([
+        (
+            1,
+            PtyBinding {
+                terminal_id: first.terminal_id.clone(),
+                session_id: first.session_id.clone(),
+                claude_pid: None,
+            },
+        ),
+        (
+            2,
+            PtyBinding {
+                terminal_id: second.terminal_id.clone(),
+                session_id: second.session_id.clone(),
+                claude_pid: None,
+            },
+        ),
+    ]);
+    let store = store_with(vec![first, second]);
+    let (statuses, sessions) =
+        aggregate_over_panes(&[(1, lane), (2, lane)], &bindings, &store, &[]);
+    assert_eq!(statuses[&lane], SessionStatus::Working);
+    assert_eq!(sessions[&lane].len(), 2);
+    assert_eq!(
+        tab_session_status(&[1], &bindings, &store, &[]),
+        Some(SessionStatus::Idle)
+    );
+    assert_eq!(
+        tab_session_status(&[2], &bindings, &store, &[]),
+        Some(SessionStatus::Working)
+    );
 }

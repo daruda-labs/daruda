@@ -94,9 +94,6 @@ impl Workspace {
         self.write_shared_surface_globals(config, cx);
         self.rebuild_agent_chat_for_config(&delta, cx);
         self.rebuild_file_panes_for_config(&delta, cx);
-        if delta.claude_status_enabled {
-            self.refresh_jsonl_watcher(cx);
-        }
         self.defer_window_config_passes(cx);
         cx.notify();
     }

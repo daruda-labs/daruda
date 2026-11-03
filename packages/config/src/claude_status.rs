@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 /// ```toml
 /// [claude_status]
 /// enable = true
+/// install_hooks = true         # keep daruda's Claude Code / codex hook entries installed
 /// stale_threshold_secs = 300   # 5 min: status file age past this resets to Connecting
 /// file_ttl_days = 7            # 7 days: cleanup ceiling for orphaned files
 /// ```
@@ -22,6 +23,12 @@ pub struct ClaudeStatusConfig {
     /// fresh data immediately) but the left dock skips the indicator
     /// cell entirely.
     pub enable: bool,
+
+    /// Keep daruda's hook entries in Claude Code's `settings.json` and
+    /// codex's `hooks.json`, re-merged at every launch. The entries only
+    /// act inside daruda terminals. Off removes them; terminal agents then
+    /// report no status.
+    pub install_hooks: bool,
 
     /// Age in seconds past which a status file's `state` is treated as
     /// stale on cold restore — the entry is loaded but its state is
@@ -47,6 +54,7 @@ impl Default for ClaudeStatusConfig {
     fn default() -> Self {
         Self {
             enable: true,
+            install_hooks: true,
             stale_threshold_secs: DEFAULT_STALE_THRESHOLD_SECS,
             file_ttl_days: DEFAULT_FILE_TTL_DAYS,
         }
@@ -72,6 +80,7 @@ mod tests {
     fn clamp_pulls_outliers_in_range() {
         let mut c = ClaudeStatusConfig {
             enable: true,
+            install_hooks: true,
             stale_threshold_secs: 1,
             file_ttl_days: 0,
         };
@@ -81,6 +90,7 @@ mod tests {
 
         let mut c = ClaudeStatusConfig {
             enable: true,
+            install_hooks: true,
             stale_threshold_secs: 10_000_000,
             file_ttl_days: 9999,
         };

@@ -77,6 +77,12 @@ impl Workspace {
             self.prepare_account_dir(prepared, cx);
             apply_account_env(&mut pty_config, &prepared.env);
         }
+        // Agent hooks fired inside this shell name this terminal; a respawn
+        // in place gets a new id, so the old shell's late events name none.
+        let terminal = crate::hooks::agent_hooks::mint_terminal_id();
+        pty_config
+            .env
+            .extend(crate::hooks::agent_hooks::terminal_env(&terminal));
         let handle = spawn_pty(&pty_config).map_err(PaneSpawnError::Pty)?;
         let pty_pid = handle.child_pid;
         let (stdin_tx, stdout_rx, exit_rx, error_rx, master) = handle.into_parts();
@@ -105,13 +111,23 @@ impl Workspace {
         let input_poke_tx = poke_tx.clone();
 
         let font_family = self.mirrors.font_family.clone();
+        let interrupt_workspace = cx.entity().downgrade();
+        let interrupt_terminal = terminal.clone();
         let view = cx.new(|cx| {
             let focus_handle = cx.focus_handle();
             let input = TerminalInput::new(move |bytes| {
                 let _ = stdin_tx.send(bytes.to_vec());
                 let _ = input_poke_tx.unbounded_send(());
             });
-            let mut tv = TerminalView::new_with_input(session, focus_handle, input);
+            let mut tv = TerminalView::new_with_input(session, focus_handle, input)
+                .with_interrupt_handler(move |cx| {
+                    queue_terminal_interrupt(
+                        interrupt_workspace.clone(),
+                        pane_id,
+                        interrupt_terminal.clone(),
+                        cx,
+                    )
+                });
             tv.set_font(daruda_terminal::terminal_font_with_family(&font_family));
             tv
         });
@@ -143,22 +159,13 @@ impl Workspace {
             },
         );
 
-        // Register the pane's shell PID with the PTY tracker so the
-        // sysinfo poller can find `claude` descendants of this pane
-        // and bind them back to its session_id. Stub
-        // panes (no pty_pid) skip registration.
-        if let Some(pid) = pty_pid {
-            crate::runs::RunsHost::register_terminal(self.run_pane(pane_id), pid, cx);
-        }
+        // Every spawned terminal owns a hook route, including a PTY backend
+        // that cannot report a shell PID. No process discovery is needed.
+        crate::runs::RunsHost::register_terminal(self.run_pane(pane_id), terminal.clone(), cx);
         let tracked = self.run_pane(pane_id);
         view.update(cx, |_, cx| {
             cx.on_release(move |_, cx| {
-                crate::runs::RunsHost::release_execution(
-                    tracked,
-                    daruda_store::tasks::machine::UndeliveredReason::PaneClosed,
-                    cx,
-                );
-                crate::runs::RunsHost::unregister_terminal(tracked, cx);
+                crate::runs::RunsHost::release_terminal(tracked, &terminal, cx);
             })
             .detach();
         });
@@ -180,4 +187,19 @@ impl Workspace {
             }),
         })
     }
+}
+
+fn queue_terminal_interrupt(
+    workspace: gpui::WeakEntity<Workspace>,
+    pane_id: PaneId,
+    terminal: daruda_agent::hooks::route::TerminalId,
+    cx: &mut gpui::App,
+) {
+    cx.defer(move |cx| {
+        if crate::runs::RunsHost::terminal_pane(&terminal, cx).is_none() {
+            return;
+        }
+        // SILENT-OK: the workspace may close before its terminal interrupt is dispatched.
+        let _ = workspace.update(cx, |ws, cx| ws.interrupt_terminal_agent(pane_id, cx));
+    });
 }

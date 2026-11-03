@@ -33,7 +33,6 @@ pub(super) struct ConfigDelta {
     /// The terminal's foreground or background — the colours the chat pane
     /// and the file viewer bake into their mermaid rasters and diff rows.
     terminal_palette: bool,
-    pub(super) claude_status_enabled: bool,
 }
 
 impl ConfigDelta {
@@ -78,7 +77,6 @@ impl Workspace {
             window_opacity: was_surface.window_opacity != now_surface.window_opacity,
             terminal_palette: was_surface.terminal_bg != now_surface.terminal_bg
                 || was_surface.terminal_fg != now_surface.terminal_fg,
-            claude_status_enabled: was.claude_status_enabled != now.claude_status_enabled,
         };
         (delta, mirrors)
     }

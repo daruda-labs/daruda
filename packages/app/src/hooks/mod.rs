@@ -1,10 +1,10 @@
-//! Claude Code hook integration — push channel.
+//! Agent hook integration — push channel — and the app's file watchers.
 //!
 //! Wires `daruda_agent::hooks::*` into the GPUI app. The `daruda --hook
 //! <eventType>` subcommand body is `daruda_agent::hooks::handler`.
 //!
+pub(crate) mod agent_hooks;
 pub mod flow_watcher;
-pub mod jsonl_watcher;
 #[cfg(test)]
 pub mod mcp_watcher;
 #[cfg(test)]

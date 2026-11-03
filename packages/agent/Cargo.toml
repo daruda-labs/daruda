@@ -15,14 +15,6 @@ workspace = true
 # shipping default.
 test-support = []
 
-# `pty_tracker` watches the session directory. Feature selection mirrors the
-# app's: `macos_fsevent` is the only opt-in backend.
-[target.'cfg(target_os = "macos")'.dependencies]
-notify = { workspace = true, default-features = false, features = ["macos_fsevent"] }
-
-[target.'cfg(not(target_os = "macos"))'.dependencies]
-notify = { workspace = true, default-features = false }
-
 [dev-dependencies]
 shell-words = { workspace = true }
 test_process = { workspace = true }
@@ -40,6 +32,8 @@ hex = { workspace = true }
 # Which process each pane runs, for `pty_tracker`.
 sysinfo = { workspace = true }
 tempfile = { workspace = true }
+# codex hook trust lives in its `config.toml`, edited in place.
+toml_edit = { workspace = true }
 thiserror = { workspace = true }
 ureq = { workspace = true, default-features = false, features = ["rustls"] }
 # A clear "claude not found" before a plugin install spawns it.

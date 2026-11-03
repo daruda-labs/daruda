@@ -186,6 +186,11 @@ pub struct TaskExecution {
     pub cwd: PathBuf,
     /// Absent until the adapter or CLI reports its session identity.
     pub session_id: Option<String>,
+    /// Hook route of the terminal used by a CLI run. Older runs have none.
+    #[serde(default)]
+    pub terminal_id: Option<String>,
+    #[serde(default)]
+    pub cli_session_end: Option<super::CliSessionEnd>,
 }
 
 impl TaskExecution {
@@ -203,6 +208,8 @@ impl TaskExecution {
             account_id,
             cwd,
             session_id: None,
+            terminal_id: None,
+            cli_session_end: None,
         }
     }
 

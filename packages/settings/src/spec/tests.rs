@@ -169,6 +169,7 @@ fn coverage_of(patch: &SettingsPatch) -> Coverage {
         | SettingsPatch::FileIconColorMode(_)
         | SettingsPatch::PanelsGridColumns(_)
         | SettingsPatch::ClaudeStatusEnabled(_)
+        | SettingsPatch::AgentHooksInstalled(_)
         | SettingsPatch::TelegramEnabled(_)
         | SettingsPatch::OrchestratorEnabled(_)
         | SettingsPatch::OrchestratorAgentId(_)

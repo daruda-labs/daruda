@@ -109,6 +109,26 @@ impl Workspace {
                 cx,
             );
         }
+        // A managed home has its own agent configuration, so hooks live
+        // there too; without them a pane on this account reports no status.
+        if let Err(e) = crate::hooks::agent_hooks::prepare_account_home(
+            prepared.recipe,
+            &prepared.config_dir,
+            cx,
+        ) {
+            self.report_error(
+                daruda_store::observability::error_report::ErrorReport::new(
+                    crate::surface::strings::agent_hooks::install_failed(),
+                )
+                .severity(daruda_store::observability::error_report::ErrorSeverity::Warning)
+                .from_error(&e)
+                .at(file!(), line!())
+                .with_context("dir", prepared.config_dir.display().to_string())
+                .dedup("account.pane.agent_hooks")
+                .build(),
+                cx,
+            );
+        }
     }
 
     /// [`resolve_pane_account`] against this window's account cache and

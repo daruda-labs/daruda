@@ -18,6 +18,7 @@ pub(crate) struct SeedRun {
     pub(crate) agent_id: String,
     pub(crate) cwd: PathBuf,
     pub(crate) session_id: Option<String>,
+    pub(crate) terminal_id: Option<String>,
     pub(crate) execution_id: String,
     /// CLI sessions attached once the run is up.
     pub(crate) attached: Vec<String>,
@@ -30,6 +31,7 @@ impl SeedRun {
             agent_id: "claude".into(),
             cwd: cwd.into(),
             session_id: None,
+            terminal_id: None,
             execution_id: uuid::Uuid::new_v4().to_string(),
             attached: Vec::new(),
         }
@@ -117,6 +119,7 @@ pub(crate) fn run(id: &str, run: &SeedRun, end: SeedEnd) -> Vec<TaskEvent> {
         return events;
     }
     events.push(TaskEvent::LanePrepared {
+        terminal_id: run.terminal_id.clone(),
         exec: exec.clone(),
         worktree: run.cwd.clone(),
         agent_id: run.agent_id.clone(),

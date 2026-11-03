@@ -35,6 +35,7 @@ impl Workspace {
             view.queue_output_bytes(notice.as_bytes(), cx);
             view.flush_pending_output(cx);
         });
+        self.release_pane_tracking(&[pane_id], cx);
         cx.notify();
     }
 

@@ -104,6 +104,7 @@ fn apply_to(record: &mut TaskRecord, event: &TaskEvent) {
             record.updated_at = *at;
         }
         TaskEvent::LanePrepared {
+            terminal_id,
             exec,
             worktree,
             agent_id,
@@ -122,6 +123,8 @@ fn apply_to(record: &mut TaskRecord, event: &TaskEvent) {
                 account_id: *account_id,
                 cwd: cwd.clone(),
                 session_id: None,
+                terminal_id: terminal_id.clone(),
+                cli_session_end: None,
             });
             record.lifecycle = Lifecycle::Dispatching {
                 exec: exec.clone(),
@@ -179,6 +182,28 @@ fn apply_to(record: &mut TaskRecord, event: &TaskEvent) {
                 && current != process
             {
                 current.clone_from(process);
+                record.updated_at = *at;
+            }
+        }
+        TaskEvent::CliSessionEnded { exec, end, at } => {
+            let mut changed = false;
+            for run in record.execution.iter_mut().chain(
+                record
+                    .ended_executions
+                    .iter_mut()
+                    .filter(|ended| &ended.exec == exec)
+                    .filter_map(|ended| ended.execution.as_mut()),
+            ) {
+                if run
+                    .cli_session_end
+                    .as_ref()
+                    .is_none_or(|previous| end.refines(previous))
+                {
+                    run.cli_session_end = Some(end.clone());
+                    changed = true;
+                }
+            }
+            if changed {
                 record.updated_at = *at;
             }
         }

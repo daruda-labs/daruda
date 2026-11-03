@@ -70,7 +70,7 @@ impl Workspace {
                     self.claude_sessions
                         .pty_bindings
                         .get(&pane.id)
-                        .is_some_and(|b| b.session_id == *id)
+                        .is_some_and(|b| b.storage_key() == id)
                         || id == &format!("acp:{}", pane.id)
                 };
                 let pane = runtime

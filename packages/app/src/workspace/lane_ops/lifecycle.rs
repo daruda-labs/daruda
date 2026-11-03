@@ -155,9 +155,6 @@ impl Workspace {
                 s.forget_lane(&path);
             });
         }
-        // Watcher pair list is fixed at spawn, so removing a lane leaves
-        // a dead JSONL subscription — re-spawn to match the live lane set.
-        self.refresh_jsonl_watcher(cx);
         // Skill scope follows the active lane's root; restart the watcher.
         self.refresh_skills_watcher(cx);
         self.refresh_mcp_watcher(window, cx);
@@ -333,8 +330,6 @@ impl Workspace {
             }
         }
         self.page_details_follow_projects(window, cx);
-        // New cwd → new JSONL dir to watch.
-        self.refresh_jsonl_watcher(cx);
         // New lane root → new project-skills directory to watch.
         self.refresh_skills_watcher(cx);
         self.refresh_mcp_watcher(window, cx);

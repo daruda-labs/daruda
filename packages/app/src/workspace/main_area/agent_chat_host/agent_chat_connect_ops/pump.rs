@@ -32,6 +32,19 @@ impl Workspace {
         resume: Option<String>,
         cx: &mut Context<Self>,
     ) {
+        if let Some(session) = resume.as_deref()
+            && self
+                .agent_chat_view(pane_id)
+                .is_some_and(|view| !view.read(cx).is_read_only())
+            && !self.claim_restored_cli_chat(pane_id, session, cx)
+        {
+            if let Some(view) = self.agent_chat_view(pane_id).cloned() {
+                view.update(cx, |view, cx| {
+                    view.set_error(s::task::cli_session_in_use(), daruda_acp::Remedy::Retry, cx)
+                });
+            }
+            return;
+        }
         #[cfg(test)]
         if let Some(probes) = cx
             .try_global::<super::TestAgentConnections>()
@@ -419,6 +432,7 @@ impl Workspace {
         let Some(view) = self.agent_chat_view(pane_id).cloned() else {
             return;
         };
+        self.release_cli_resume(pane_id);
         let needs_disconnect_error = view.read(cx).needs_disconnect_error();
         let failed_to_start_prompt = {
             let view = view.read(cx);

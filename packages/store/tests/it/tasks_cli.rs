@@ -28,12 +28,16 @@ fn legacy_execution_is_agent_chat() {
     }))
     .unwrap();
     assert_eq!(execution.source, TaskExecutionSource::AgentChat);
+    assert_eq!(execution.terminal_id, None);
+    assert_eq!(execution.cli_session_end, None);
     assert!(execution.chat_available());
 }
 
 #[test]
 fn cli_execution_opens_chat_only_once_its_session_is_known() {
     let mut execution = daruda_store::tasks::TaskExecution {
+        terminal_id: None,
+        cli_session_end: None,
         source: TaskExecutionSource::ClaudeCli {
             transcript_path: None,
             process: CliProcessState::Discovering,

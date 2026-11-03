@@ -15,8 +15,7 @@ pub enum ToolCategory {
     Fetch,
     /// A tool an MCP server provided, named `mcp__<server>__<tool>` on the
     /// wire. Keyed on that spelling because the kind cannot say it: every
-    /// adapter reports these as `other`. The same prefix is read in
-    /// `daruda_agent::jsonl::permissions`.
+    /// adapter reports these as `other`.
     Mcp,
     /// A delegated agent. Sits beside the file-work categories rather than
     /// under [`Self::Other`]: the card holds a whole run of someone else's
@@ -134,8 +133,7 @@ const TOOL_NAME_CATEGORIES: [(&str, ToolCategory); 12] = [
     ("killshell", ToolCategory::Run),
 ];
 
-/// How every agent spells a tool an MCP server provided. Also read by
-/// `daruda_agent::jsonl::permissions`, which matches allow-patterns on it.
+/// How every agent spells a tool an MCP server provided.
 const MCP_TOOL_PREFIX: &str = "mcp__";
 
 /// Whether `name` is an MCP server's tool.

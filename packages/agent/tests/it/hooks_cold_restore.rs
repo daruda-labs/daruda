@@ -333,3 +333,19 @@ fn run_skips_non_lock_non_json_files() {
     run(dir.path(), &policy()).unwrap();
     assert!(stray.exists());
 }
+
+#[test]
+fn startup_removes_retired_terminal_files_but_later_windows_only_read_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut file = fresh_file(SessionStatus::Working);
+    file.terminal_id = Some(daruda_agent::hooks::route::TerminalId::parse("terminal-a").unwrap());
+    let path = path_for(dir.path(), file.storage_key());
+    write_atomic(&path, &file).unwrap();
+    assert_eq!(load(dir.path()).unwrap().len(), 1);
+    assert!(path.exists());
+    assert!(run(dir.path(), &policy()).unwrap().is_empty());
+    assert!(!path.exists());
+    assert!(
+        daruda_agent::hooks::status_file::lock_path_for(dir.path(), file.storage_key()).exists()
+    );
+}

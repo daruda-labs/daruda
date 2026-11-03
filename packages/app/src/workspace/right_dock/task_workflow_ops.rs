@@ -46,7 +46,7 @@ struct TodoWritePayload {
 }
 
 impl Workspace {
-    fn after_task_projection(
+    pub(in crate::workspace) fn after_task_projection(
         &mut self,
         operation: impl FnOnce(&mut Self, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
@@ -328,6 +328,7 @@ impl Workspace {
         cause: daruda_store::tasks::machine::StartFailure,
         cx: &mut Context<Self>,
     ) {
+        self.release_cli_resume(pane_id);
         if let Some(exec) = RunsHost::pane_execution(self.run_pane(pane_id), cx).cloned() {
             RunsHost::delivery_failed(exec, crate::runs::DeliveryFailure::Start(cause), cx);
             if let Some(view) = self.agent_chat_view(pane_id).cloned() {
@@ -366,6 +367,7 @@ impl Workspace {
     ) -> Option<daruda_store::tasks::SessionEndReason> {
         match last_event {
             "Stop" => Some(daruda_store::tasks::SessionEndReason::Stop),
+            "StopFailure" => Some(daruda_store::tasks::SessionEndReason::Error),
             "SessionEnd" => Some(daruda_store::tasks::SessionEndReason::Other),
             _ => None,
         }

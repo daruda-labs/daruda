@@ -357,6 +357,7 @@ pub struct SettingsView {
     panels_grid_columns_input: Entity<InputState>,
     // Claude Status
     claude_status_enable: bool,
+    agent_hooks_installed: bool,
     // Notifications (Telegram)
     telegram_enabled: bool,
     /// The Slack / Discord channel settings, a view the host builds over its

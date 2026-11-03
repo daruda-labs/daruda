@@ -84,8 +84,8 @@ command:
   edit_window_title: "Edit Window Title…"
   zoom_window: "Zoom Window"
   check_flow: "Check Flow…"
-  claude_install_hooks: "Claude: Install Hook Integration"
-  claude_uninstall_hooks: "Claude: Uninstall Hook Integration"
+  claude_install_hooks: "Agent: Install Hooks"
+  claude_uninstall_hooks: "Agent: Remove Hooks"
   cancel_task: "Cancel Task…"
   close_pane: "Close Pane"
   close_project: "Close Project"
@@ -338,6 +338,11 @@ task:
   cli_run_missing: "Original task run no longer exists · Read-only snapshot"
   cli_refresh: "Refresh CLI history"
   cli_continue: "Continue in Agent Chat"
+  cli_session_ended: "CLI session ended"
+  cli_process_lost: "CLI process exited without a session-end hook"
+  cli_pane_closed: "Original terminal pane closed"
+  cli_app_restarted: "Original CLI session was interrupted by an app restart"
+  cli_session_in_use: "This conversation is already being continued in another pane."
   cli_not_exited: "CLI exit could not be confirmed. Close the original CLI before continuing."
   chat_missing_session: "No saved conversation is linked to this task yet."
   chat_missing_agent: "The original agent or account is unavailable. Restore it in Settings to open this conversation."
@@ -2161,6 +2166,10 @@ orchestrator:
   tab_unavailable: "The orchestrator tab cannot open in this worktree. The session is still running."
 
 # Status bar keep-awake segment — the pill, its tooltip and its menu
+agent_hooks:
+  install_failed: "Could not update agent hook settings"
+  installed_notice: "daruda added its hooks to Claude Code and codex settings so terminal agents report their status. Turn this off in Settings › Agents & Chat."
+
 keep_awake:
   # The pill's tooltip, one per state; mode names come from Settings.
   status_off: "Keep computer awake: Off"

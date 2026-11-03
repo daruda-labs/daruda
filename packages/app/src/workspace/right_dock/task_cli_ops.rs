@@ -13,8 +13,6 @@ use crate::surface::strings as s;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane::PaneContent;
 use crate::workspace::main_area::pane_tree::PaneId;
-#[cfg(test)]
-use daruda_agent::pty_tracker::PtyBinding;
 use daruda_chat::view::LoadIntent;
 
 impl Workspace {
@@ -49,48 +47,20 @@ impl Workspace {
             .map(|agent| agent.id.clone())
             .unwrap_or_else(|| daruda_config::AgentDefinition::claude_default().id);
         RunsHost::bind_execution(self.run_pane(pane_id), exec.clone(), cx);
+        let terminal_id = RunsHost::terminal_id(self.run_pane(pane_id), cx)?
+            .as_str()
+            .to_owned();
         Some(PaneIdentity {
+            terminal_id: Some(terminal_id),
             agent_id,
             account_id,
             cwd: cwd.to_path_buf(),
         })
     }
 
-    /// Watch for the CLI in this terminal, using the process-wide tracker.
-    pub(super) fn track_task_cli_execution(
-        &mut self,
-        pane_id: PaneId,
-        account_id: Option<daruda_store::accounts::AccountId>,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(dir) = crate::runs::cli_sessions_dir(&self.data_dir, account_id) {
-            RunsHost::track_cli(self.run_pane(pane_id), dir, cx);
-        }
-    }
-
     #[cfg(test)]
     pub(in crate::workspace) fn restore_task_cli_tracking(&mut self, cx: &mut Context<Self>) {
         RunsHost::restore_cli_tracking(&self.data_dir, cx);
-    }
-
-    #[cfg(test)]
-    pub(in crate::workspace) fn record_task_cli_binding(
-        &mut self,
-        pane_id: PaneId,
-        binding: &PtyBinding,
-        cx: &mut Context<Self>,
-    ) {
-        let transcript = self
-            .claude_sessions
-            .status
-            .get(&binding.session_id)
-            .and_then(|file| file.transcript_path.clone());
-        RunsHost::record_cli_binding(
-            Some(self.run_pane(pane_id)),
-            binding,
-            transcript.as_deref(),
-            cx,
-        );
     }
 
     pub(in crate::workspace) fn record_task_cli_transcript(
@@ -116,17 +86,28 @@ impl Workspace {
 
     /// Whether anything still shows a process writing `session_id`: a pane
     /// bound to it, or a process the tracker has not seen exit.
-    fn cli_session_live(&self, session_id: &str, cx: &gpui::App) -> bool {
+    fn cli_session_live(&self, session_id: &str, cx: &Context<Self>) -> bool {
         self.claude_sessions
             .pty_bindings
             .values()
             .any(|binding| binding.session_id == session_id)
             || RunsHost::cli_tracker(cx).is_running(session_id)
+            || crate::window_registry::WindowRegistry::any_other_workspace(
+                cx.entity_id(),
+                cx,
+                |workspace| {
+                    workspace
+                        .claude_sessions
+                        .pty_bindings
+                        .values()
+                        .any(|binding| binding.session_id == session_id)
+                },
+            )
     }
 
     /// Continuing is safe only once the run's exit is confirmed and nothing
     /// has since resumed its session.
-    fn cli_run_may_continue(&self, run: &ExecutionRef, session: &str, cx: &gpui::App) -> bool {
+    fn cli_run_may_continue(&self, run: &ExecutionRef, session: &str, cx: &Context<Self>) -> bool {
         matches!(
             self.cli_run_process(run, cx),
             Some(CliProcessState::ExitConfirmed { .. })
@@ -162,6 +143,62 @@ impl Workspace {
         self.load_cli_chat(pane_id, LoadIntent::Continue, cx);
     }
 
+    pub(in crate::workspace) fn release_cli_resume(&mut self, pane_id: PaneId) {
+        if let Some(chat) = self
+            .main_area
+            .pane_mut(pane_id)
+            .and_then(|pane| pane.agent_chat_content_mut())
+        {
+            chat.cli_resume = None;
+        }
+    }
+
+    fn claim_cli_chat_resume(
+        &mut self,
+        pane_id: PaneId,
+        session: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let owner = self.run_pane(pane_id);
+        if let Some(lease) = self
+            .main_area
+            .pane(pane_id)
+            .and_then(|pane| pane.agent_chat_content())
+            .and_then(|chat| chat.cli_resume.as_ref())
+        {
+            return lease.matches(session, owner);
+        }
+        let Some(lease) = RunsHost::claim_cli_resume(session.to_owned(), owner, cx) else {
+            return false;
+        };
+        let Some(chat) = self
+            .main_area
+            .pane_mut(pane_id)
+            .and_then(|pane| pane.agent_chat_content_mut())
+        else {
+            return false;
+        };
+        chat.cli_resume = Some(lease);
+        true
+    }
+
+    /// Restored interactive chats must take the same claim as explicit Continue.
+    pub(in crate::workspace) fn claim_restored_cli_chat(
+        &mut self,
+        pane_id: PaneId,
+        session: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let mirrors_cli = cx.global::<GlobalTasks>().records().any(|task| {
+            task.execution.as_ref().is_some_and(|run| {
+                run.source.cli_process().is_some() && run.session_id.as_deref() == Some(session)
+            })
+        });
+        !mirrors_cli
+            || (!self.cli_session_live(session, cx)
+                && self.claim_cli_chat_resume(pane_id, session, cx))
+    }
+
     fn load_cli_chat(&mut self, pane_id: PaneId, intent: LoadIntent, cx: &mut Context<Self>) {
         let Some(view) = self.agent_chat_view(pane_id).cloned() else {
             return;
@@ -179,6 +216,10 @@ impl Workspace {
             return;
         }
         let Some(cwd) = v.cwd().cloned() else { return };
+        if intent == LoadIntent::Continue && !self.claim_cli_chat_resume(pane_id, &session, cx) {
+            self.task_chat_error(s::task::cli_session_in_use(), cx);
+            return;
+        }
         // A user-asked reload is also a moment to re-check the process.
         RunsHost::cli_tracker(cx).poke();
         view.update(cx, |v, cx| {
@@ -204,9 +245,18 @@ impl Workspace {
         };
         let v = view.read(cx);
         let Some(run) = v.mirrored_run() else { return };
+        let session = v.session_id().map(str::to_owned);
         let allow = v.load_intent() == Some(LoadIntent::Continue)
-            && v.session_id()
+            && session
+                .as_deref()
                 .is_some_and(|session| self.cli_run_may_continue(run, session, cx));
+        let allow = allow
+            && session
+                .as_deref()
+                .is_some_and(|session| self.claim_cli_chat_resume(pane_id, session, cx));
+        if !allow {
+            self.release_cli_resume(pane_id);
+        }
         view.update(cx, |v, cx| {
             if allow {
                 v.make_interactive();
@@ -261,6 +311,16 @@ impl Workspace {
             &run,
             crate::runs::seed::SeedEnd::Running,
         ));
+        if exited {
+            events.push(daruda_store::tasks::TaskEvent::CliSessionEnded {
+                exec: run.exec(&spec.id),
+                end: daruda_store::tasks::CliSessionEnd {
+                    reason: daruda_store::tasks::CliSessionEndReason::ProcessExited,
+                    at: Utc::now(),
+                },
+                at: Utc::now(),
+            });
+        }
         crate::runs::seed::commit_now(events, cx);
         self.open_agent_chat_pane_seeded(
             None,

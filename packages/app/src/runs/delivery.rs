@@ -60,6 +60,13 @@ impl RunsHost {
 
     pub(crate) fn release_execution(pane: RunPane, reason: UndeliveredReason, cx: &mut App) {
         if let Some(exec) = Self::unbind_execution(pane, cx) {
+            if matches!(reason, UndeliveredReason::PaneClosed) {
+                Self::record_cli_session_end(
+                    exec.clone(),
+                    daruda_store::tasks::CliSessionEndReason::PaneClosed,
+                    cx,
+                );
+            }
             Self::delivery_failed(exec, DeliveryFailure::Dropped(reason), cx);
         }
     }

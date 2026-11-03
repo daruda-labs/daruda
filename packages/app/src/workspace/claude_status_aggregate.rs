@@ -15,12 +15,6 @@ use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_agent::SessionStatus;
 use daruda_agent::pty_tracker::PtyBinding;
 
-// `Path` and `Source` are only named by the debug-only transition logger
-// (and `Source` also by the always-compiled test fixtures), so gate the
-// imports to those profiles to avoid an unused-import warning in release
-// non-test builds.
-#[cfg(any(debug_assertions, test))]
-use daruda_agent::hooks::status_file::Source;
 #[cfg(debug_assertions)]
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 #[cfg(debug_assertions)]
@@ -112,9 +106,9 @@ fn pane_session(
     acp: &HashMap<PaneId, SessionStatus>,
 ) -> Option<(String, SessionStatus)> {
     if let Some(binding) = bindings.get(&pane_id)
-        && let Some(file) = store.get(&binding.session_id)
+        && let Some(file) = store.for_binding(binding)
     {
-        return Some((binding.session_id.clone(), file.status));
+        return Some((file.storage_key().to_owned(), file.status));
     }
     acp.get(&pane_id)
         .map(|&status| (format!("acp:{pane_id}"), status))
@@ -180,7 +174,7 @@ pub(in crate::workspace) fn any_pane_session_animating(
         // PTY-bound session.
         let pty_animating = bindings
             .get(pane_id)
-            .and_then(|binding| store.get(&binding.session_id))
+            .and_then(|binding| store.for_binding(binding))
             .is_some_and(|file| animates(file.status));
         if pty_animating {
             return true;
@@ -311,7 +305,7 @@ impl Workspace {
             .claude_sessions
             .pty_bindings
             .iter()
-            .find(|(_, binding)| binding.session_id == session_id)
+            .find(|(_, binding)| binding.storage_key() == session_id)
             .map(|(pane_id, _)| *pane_id);
         let lane_ref =
             pane_id.and_then(|pane_id| index.iter().find(|(p, _)| *p == pane_id).map(|(_, l)| *l));
@@ -328,7 +322,7 @@ impl Workspace {
         let aggregate = lane_ref.and_then(|lane_ref| {
             // ACP (agent chat) statuses are not included in the probe
             // because this path only triggers for PTY-bound session
-            // transitions (hook / JSONL watcher).
+            // hook transitions.
             let (per_lane, _) = aggregate_over_panes(
                 &index,
                 &self.claude_sessions.pty_bindings,
@@ -362,7 +356,6 @@ impl Workspace {
         session_id: &str,
         cwd: &Path,
         last_event: &str,
-        source: Source,
     ) {
         let after = self.probe_lane_status(session_id);
         // Skip sessions not bound to any pane in this workspace (claude
@@ -397,7 +390,6 @@ impl Workspace {
                 session_id,
                 cwd,
                 last_event,
-                source,
                 after.pane_id,
                 project,
                 &lane,
@@ -429,14 +421,6 @@ fn status_label(status: Option<SessionStatus>) -> &'static str {
 }
 
 #[cfg(debug_assertions)]
-fn source_label(source: Source) -> &'static str {
-    match source {
-        Source::Hook => "hook",
-        Source::Jsonl => "jsonl",
-    }
-}
-
-#[cfg(debug_assertions)]
 #[allow(clippy::too_many_arguments)]
 fn session_transition_report(
     prev: Option<SessionStatus>,
@@ -444,7 +428,6 @@ fn session_transition_report(
     session_id: &str,
     cwd: &Path,
     last_event: &str,
-    source: Source,
     pane: Option<PaneId>,
     project: &str,
     lane: &str,
@@ -456,7 +439,7 @@ fn session_transition_report(
         .with_context("session", session_id)
         .with_context("cwd", redact_home(cwd))
         .with_context("event", last_event)
-        .with_context("source", source_label(source))
+        .with_context("source", "hook")
         .with_context("project", project)
         .with_context("lane", lane);
     // Pane id is only meaningful while a live binding exists; omit the

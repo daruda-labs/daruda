@@ -66,6 +66,8 @@ enum Source {
 
 fn execution(id: &str, source: Source) -> TaskExecution {
     TaskExecution {
+        terminal_id: None,
+        cli_session_end: None,
         source: source_of(source),
         id: id.into(),
         agent_id: "claude".into(),
@@ -233,6 +235,7 @@ fn sample(kind: EventKind) -> TaskEvent {
             at: t,
         },
         EventKind::LanePrepared => TaskEvent::LanePrepared {
+            terminal_id: None,
             exec,
             worktree: worktree(),
             agent_id: "claude".into(),
@@ -273,6 +276,14 @@ fn sample(kind: EventKind) -> TaskEvent {
         EventKind::CliProcessObserved => TaskEvent::CliProcessObserved {
             exec,
             process: CliProcessState::Running { pid: 7 },
+            at: t,
+        },
+        EventKind::CliSessionEnded => TaskEvent::CliSessionEnded {
+            exec,
+            end: daruda_store::tasks::CliSessionEnd {
+                reason: daruda_store::tasks::CliSessionEndReason::ProcessExited,
+                at: t,
+            },
             at: t,
         },
         EventKind::CliTranscriptFound => TaskEvent::CliTranscriptFound {
@@ -375,6 +386,10 @@ const TABLE: &[(EventKind, [Cell; 9])] = &[
     ),
     (
         EventKind::CliProcessObserved,
+        [No, No, Same, Same, Same, Same, Same, Same, Same],
+    ),
+    (
+        EventKind::CliSessionEnded,
         [No, No, Same, Same, Same, Same, Same, Same, Same],
     ),
     (
@@ -548,6 +563,7 @@ fn start(book: &mut TasksBook, source: Source, run: &str) {
     commit(
         book,
         TaskEvent::LanePrepared {
+            terminal_id: None,
             exec: exec_of(run),
             worktree: worktree(),
             agent_id: "claude".into(),
@@ -1267,6 +1283,7 @@ fn an_undelivered_reason_round_trips_through_the_task_log() {
                 at: at(1),
             },
             TaskEvent::LanePrepared {
+                terminal_id: None,
                 exec: exec(),
                 worktree: worktree(),
                 agent_id: "claude".into(),
@@ -1301,8 +1318,8 @@ fn an_undelivered_reason_round_trips_through_the_task_log() {
 }
 
 #[test]
-fn continued_runs_require_schema_five() {
-    assert_eq!(TaskMachine::SCHEMA, 5);
+fn cli_session_end_records_require_schema_seven() {
+    assert_eq!(TaskMachine::SCHEMA, 7);
 }
 
 fn continued(prior: &str, run: &str, seconds: i64) -> TaskEvent {
@@ -1566,7 +1583,7 @@ fn provenance_survives_log_reopening_and_an_old_machine_refuses_it() {
             RunLog::<OldTaskMachine, _>::open(FileBackend::new(dir.path()), "old"),
             Err(OpenError::TooNew {
                 what: Versioned::Schema,
-                found: 5,
+                found: 7,
                 supported: 2
             })
         ));
@@ -1707,4 +1724,260 @@ fn a_rejected_delete_of_an_unknown_task_leaves_apply_a_no_op() {
         },
     );
     assert!(book.is_empty());
+}
+
+#[test]
+fn terminal_identity_replays_and_schema_five_preparation_remains_readable() {
+    use daruda_runlog::{FileBackend, OpenError, RunLog, Versioned};
+
+    struct SchemaFive;
+    impl daruda_runlog::Machine for SchemaFive {
+        type State = TasksBook;
+        type Event = serde_json::Value;
+        type Rejected = TaskRejected;
+        const SCHEMA: u32 = 5;
+        fn check(state: &TasksBook, value: &Self::Event) -> Result<(), TaskRejected> {
+            TaskMachine::check(state, &serde_json::from_value(value.clone()).unwrap())
+        }
+        fn apply(state: &mut TasksBook, value: &Self::Event) {
+            TaskMachine::apply(state, &serde_json::from_value(value.clone()).unwrap());
+        }
+    }
+
+    let preparation = |terminal_id| TaskEvent::LanePrepared {
+        terminal_id,
+        exec: exec(),
+        worktree: worktree(),
+        agent_id: "claude".into(),
+        account_id: None,
+        cwd: worktree(),
+        at: at(2),
+    };
+    let prefix = || {
+        [
+            TaskEvent::Created { spec: spec() },
+            TaskEvent::DispatchRequested {
+                id: ID.into(),
+                execution_id: RUN.into(),
+                source: source_of(Source::Cli),
+                started_by: None,
+                at: at(1),
+            },
+        ]
+    };
+    let old = tempfile::tempdir().unwrap();
+    let mut log =
+        RunLog::<SchemaFive, _>::open(FileBackend::new(old.path()), "schema-five").unwrap();
+    for event in prefix().into_iter().chain([preparation(None)]) {
+        let mut value = serde_json::to_value(event).unwrap();
+        value.as_object_mut().unwrap().remove("terminal_id");
+        log.commit(value).unwrap();
+    }
+    drop(log);
+    let current = RunLog::<TaskMachine, _>::open(FileBackend::new(old.path()), "current").unwrap();
+    assert!(
+        task(current.state())
+            .execution
+            .as_ref()
+            .unwrap()
+            .terminal_id
+            .is_none()
+    );
+    drop(current);
+
+    let directory = tempfile::tempdir().unwrap();
+    let mut log =
+        RunLog::<TaskMachine, _>::open(FileBackend::new(directory.path()), "current").unwrap();
+    for event in prefix()
+        .into_iter()
+        .chain([preparation(Some("terminal-a".into()))])
+    {
+        log.commit(event).unwrap();
+    }
+    drop(log);
+    let reopened =
+        RunLog::<TaskMachine, _>::open(FileBackend::new(directory.path()), "current").unwrap();
+    assert_eq!(
+        task(reopened.state())
+            .execution
+            .as_ref()
+            .unwrap()
+            .terminal_id
+            .as_deref(),
+        Some("terminal-a")
+    );
+    drop(reopened);
+    assert!(matches!(
+        RunLog::<SchemaFive, _>::open(FileBackend::new(directory.path()), "old"),
+        Err(OpenError::TooNew {
+            what: Versioned::Schema,
+            found: 7,
+            supported: 5
+        })
+    ));
+}
+
+#[test]
+fn cli_session_end_refines_a_process_exit_without_losing_deliberate_disposal() {
+    use daruda_store::tasks::{CliSessionEnd, CliSessionEndReason as R};
+    for (first, expected) in [
+        (R::ProcessExited, R::SessionEnded),
+        (R::PaneClosed, R::PaneClosed),
+        (R::AppRestart, R::AppRestart),
+    ] {
+        let mut book = book(L::Done, Source::Cli);
+        for (reason, time) in [(first, 10), (R::SessionEnded, 11), (R::ProcessExited, 12)] {
+            commit(
+                &mut book,
+                TaskEvent::CliSessionEnded {
+                    exec: exec(),
+                    end: CliSessionEnd {
+                        reason,
+                        at: at(time),
+                    },
+                    at: at(time),
+                },
+            );
+        }
+        assert_eq!(
+            task(&book)
+                .execution
+                .as_ref()
+                .unwrap()
+                .cli_session_end
+                .as_ref()
+                .unwrap()
+                .reason,
+            expected
+        );
+        let saved = serde_json::to_vec(&book).unwrap();
+        let restored: TasksBook = serde_json::from_slice(&saved).unwrap();
+        assert_eq!(
+            task(&restored).execution.as_ref().unwrap().cli_session_end,
+            task(&book).execution.as_ref().unwrap().cli_session_end
+        );
+    }
+}
+
+#[test]
+fn cli_session_end_survives_durable_replay() {
+    use daruda_runlog::{FileBackend, RunLog};
+    use daruda_store::tasks::{CliSessionEnd, CliSessionEndReason};
+    let directory = tempfile::tempdir().unwrap();
+    let end = CliSessionEnd {
+        reason: CliSessionEndReason::SessionEnded,
+        at: at(4),
+    };
+    let mut log =
+        RunLog::<TaskMachine, _>::open(FileBackend::new(directory.path()), "current").unwrap();
+    for event in [
+        sample(EventKind::Created),
+        sample(EventKind::DispatchRequested),
+        sample(EventKind::LanePrepared),
+        sample(EventKind::Dispatched),
+        TaskEvent::CliSessionEnded {
+            exec: exec(),
+            end: end.clone(),
+            at: at(4),
+        },
+    ] {
+        log.commit(event).unwrap();
+    }
+    drop(log);
+    let reopened =
+        RunLog::<TaskMachine, _>::open(FileBackend::new(directory.path()), "current").unwrap();
+    assert_eq!(
+        task(reopened.state())
+            .execution
+            .as_ref()
+            .unwrap()
+            .cli_session_end
+            .as_ref(),
+        Some(&end)
+    );
+}
+
+#[test]
+fn a_late_cli_goodbye_is_retained_in_history_after_reopening_the_task() {
+    use daruda_store::tasks::{CliSessionEnd, CliSessionEndReason as R};
+    let mut book = book(L::Running, Source::Cli);
+    commit(&mut book, sample(EventKind::Settled));
+    let end = CliSessionEnd {
+        reason: R::SessionEnded,
+        at: at(20),
+    };
+    commit(
+        &mut book,
+        TaskEvent::CliSessionEnded {
+            exec: exec(),
+            end: end.clone(),
+            at: at(20),
+        },
+    );
+    commit(
+        &mut book,
+        TaskEvent::Reopened {
+            id: ID.into(),
+            run_in: TaskRunIn::NewWorktree,
+            at: at(21),
+        },
+    );
+    assert!(task(&book).execution.is_none());
+    assert_eq!(
+        task(&book).ended_executions[0]
+            .execution
+            .as_ref()
+            .unwrap()
+            .cli_session_end
+            .as_ref(),
+        Some(&end)
+    );
+}
+
+#[test]
+fn schema_six_runs_default_the_end_reason_and_refuse_schema_seven_logs() {
+    use daruda_runlog::{FileBackend, OpenError, RunLog, Versioned};
+    struct SchemaSix;
+    impl daruda_runlog::Machine for SchemaSix {
+        type State = TasksBook;
+        type Event = serde_json::Value;
+        type Rejected = TaskRejected;
+        const SCHEMA: u32 = 6;
+        fn check(state: &TasksBook, value: &Self::Event) -> Result<(), TaskRejected> {
+            TaskMachine::check(state, &serde_json::from_value(value.clone()).unwrap())
+        }
+        fn apply(state: &mut TasksBook, value: &Self::Event) {
+            TaskMachine::apply(state, &serde_json::from_value(value.clone()).unwrap());
+        }
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let mut old = RunLog::<SchemaSix, _>::open(FileBackend::new(directory.path()), "old").unwrap();
+    for event in [
+        sample(EventKind::Created),
+        sample(EventKind::DispatchRequested),
+        sample(EventKind::LanePrepared),
+        sample(EventKind::Dispatched),
+    ] {
+        old.commit(serde_json::to_value(event).unwrap()).unwrap();
+    }
+    drop(old);
+    let current =
+        RunLog::<TaskMachine, _>::open(FileBackend::new(directory.path()), "current").unwrap();
+    assert!(
+        task(current.state())
+            .execution
+            .as_ref()
+            .unwrap()
+            .cli_session_end
+            .is_none()
+    );
+    drop(current);
+    assert!(matches!(
+        RunLog::<SchemaSix, _>::open(FileBackend::new(directory.path()), "old"),
+        Err(OpenError::TooNew {
+            what: Versioned::Schema,
+            found: 7,
+            supported: 6
+        })
+    ));
 }

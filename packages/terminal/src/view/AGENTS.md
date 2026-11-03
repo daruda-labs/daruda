@@ -88,7 +88,7 @@ Input:  GPUI -> TerminalInput / IME commit -> stdin_tx -> PTY -> Shell
 
 - `TerminalView` fields are `pub(super)` — accessible only within `view/`.
 - External crates (app) use the `pub` methods only:
-  `new`, `new_with_input`, `feed_output_bytes`, `queue_output_bytes`,
+  `new`, `new_with_input`, `with_interrupt_handler`, `feed_output_bytes`, `queue_output_bytes`,
   `resize_terminal`, `set_search_query`, `search_step`, `clear_search`,
   `jump_to_prompt`, `jump_to_command`, `search_state`,
   `set_dim_amount` / `dim_amount` (inactive-pane dim; see `layout.rs`),

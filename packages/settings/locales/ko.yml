@@ -271,6 +271,8 @@ settings:
   editor_system_default: "시스템 기본값"
   label_grid_columns: "매크로 그리드 열 수"
   label_claude_status_enable: "Claude Code 연동 활성화"
+  label_agent_hooks_installed: "에이전트 hook 설치"
+  hint_agent_hooks_installed: "터미널 에이전트가 상태를 알리도록 Claude Code와 codex 설정에 daruda 항목을 유지합니다. 끄면 항목을 제거하고 터미널 에이전트 상태를 표시하지 않습니다."
   err_clipboard: "스트리밍 한도는 4,096에서 67,108,864 (4 KiB – 64 MiB) 사이의 숫자여야 합니다."
   err_grid_columns: "매크로 그리드 열 수는 1에서 16 사이의 정수여야 합니다."
   err_save_settings: "설정을 저장하지 못했습니다: %{error}"

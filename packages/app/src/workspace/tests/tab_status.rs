@@ -236,7 +236,8 @@ fn claude_terminal_behind_a_tab(
                 ws.claude_sessions.pty_bindings.insert(
                     pane,
                     daruda_agent::pty_tracker::PtyBinding {
-                        claude_pid: 4242,
+                        terminal_id: None,
+                        claude_pid: Some(4242),
                         session_id: SESSION.into(),
                     },
                 );
@@ -300,36 +301,6 @@ async fn a_redelivered_stop_ends_no_turn(cx: &mut TestAppContext) {
     ws.update(cx, |ws, _| ws.unseen_outcomes.forget(&[pane]));
     hook(&ws, &dir, SESSION, SessionStatus::Idle, "Stop", cx);
     assert_eq!(unseen(&ws, pane, cx), None);
-}
-
-/// The JSONL fallback writes the same status store and can settle the
-/// session to `Idle` — with a newer timestamp than the last hook — before
-/// the `Stop` hook lands. The turn still ends with its outcome.
-#[gpui::test]
-async fn a_jsonl_idle_ahead_of_the_stop_hook_keeps_the_outcome(cx: &mut TestAppContext) {
-    let (ws, pane, dir) = claude_terminal_behind_a_tab(cx);
-    ws.update(cx, |ws, cx| {
-        ws.apply_claude_jsonl_event(
-            crate::hooks::jsonl_watcher::JsonlEvent {
-                session_id: SESSION.into(),
-                cwd: dir.path().to_path_buf(),
-                jsonl_path: dir.path().join("sess-pty.jsonl"),
-                status: SessionStatus::Idle,
-                timestamp: chrono::Utc::now() + chrono::Duration::seconds(5),
-            },
-            cx,
-        )
-    });
-    cx.run_until_parked();
-    ws.read_with(cx, |ws, _| {
-        assert_eq!(
-            ws.claude_sessions.status.get(SESSION).map(|f| f.status),
-            Some(SessionStatus::Idle),
-            "the fallback did overtake the hook's Working"
-        );
-    });
-    hook(&ws, &dir, SESSION, SessionStatus::Idle, "Stop", cx);
-    assert_eq!(unseen(&ws, pane, cx), Some(AgentOutcome::Completed));
 }
 
 /// Hook events fan out to every workspace; one that holds no terminal for

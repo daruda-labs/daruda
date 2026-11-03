@@ -188,6 +188,12 @@ impl TerminalView {
                 input.send(bytes);
             }
         }
+        if self.input.is_some()
+            && matches!(parts, [bytes] if *bytes == [crate::ansi::INTERRUPT] || *bytes == [crate::ansi::ESC])
+            && let Some(handler) = &self.interrupt_handler
+        {
+            handler(cx);
+        }
         cx.stop_propagation();
     }
 
@@ -659,3 +665,7 @@ impl EntityInputHandler for TerminalView {
         None
     }
 }
+
+#[cfg(test)]
+#[path = "input/tests.rs"]
+mod tests;

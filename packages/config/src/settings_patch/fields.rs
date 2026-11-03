@@ -71,6 +71,7 @@ macro_rules! with_settings_fields {
             PreferredEditor: editor.preferred, "editor.preferred", clone, |value: String| value;
             PanelsGridColumns: panels.grid_columns, "panels.grid_columns", copy, |value: u8| i64::from(value);
             ClaudeStatusEnabled: claude_status.enable, "claude_status.enable", copy, |value: bool| value;
+            AgentHooksInstalled: claude_status.install_hooks, "claude_status.install_hooks", copy, |value: bool| value;
             TelegramEnabled: telegram.enabled, "telegram.enabled", copy, |value: bool| value;
             OrchestratorEnabled: orchestrator.enabled, "orchestrator.enabled", copy, |value: bool| value;
         }

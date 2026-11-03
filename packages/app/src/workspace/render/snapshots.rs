@@ -22,7 +22,7 @@ impl Workspace {
     ) -> LeftDockSnapshot {
         // Aggregate Claude status over every pane once per frame, keyed by
         // the lane that owns each pane. PTY-bound sessions are surfaced
-        // once the PtyTracker has bound a live PID to a pane daruda owns.
+        // once a routed hook has named a terminal pane daruda owns.
         // Agent chat (ACP) panes contribute their own session status
         // directly, so the lane indicator reflects both PTY and ACP
         // sessions.
@@ -192,7 +192,7 @@ impl Workspace {
                 .claude_sessions
                 .pty_bindings
                 .get(&self.active_runtime().focused_pane_id)
-                .map(|b| b.session_id.clone())
+                .map(|b| b.storage_key().to_owned())
                 .or_else(|| {
                     // If the focused pane is an agent chat with a live session,
                     // use its synthetic ACP id so the sub-row badge highlights.
@@ -351,6 +351,10 @@ impl Workspace {
                 Some(crate::workspace::layout::snap::CliSnapshot {
                     pane_id: focused_id,
                     process: self.cli_run_process(run, cx),
+                    end_reason: run
+                        .resolve(cx.global::<crate::runs::GlobalTasks>().book())
+                        .and_then(|run| run.cli_session_end.as_ref())
+                        .map(|end| end.reason),
                     loading: v.status().is_connecting(),
                 })
             }),

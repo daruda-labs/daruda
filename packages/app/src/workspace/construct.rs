@@ -34,7 +34,7 @@ impl Workspace {
     }
 
     /// Test-only constructor that skips the heavy runtime systems:
-    /// initial tab + PTY spawn, JSONL/skills/MCP filesystem watchers,
+    /// initial tab + PTY spawn, skills/MCP filesystem watchers,
     /// `persist_state`, macro-shortcut
     /// registration, and `WindowRegistry` register. Tests that exercise
     /// any of those must opt in by calling the matching `refresh_*` /
@@ -168,13 +168,8 @@ impl Workspace {
             },
             claude_sessions: claude_session_ops::ClaudeSessionState {
                 status: claude_session_ops::initial_claude_status(config, cx),
-                hooks_installed: daruda_agent::hooks::installer::InstallerPaths::from_env()
-                    .map(|p| daruda_agent::hooks::installer::is_installed(&p))
-                    .unwrap_or(false),
                 pty_bindings: HashMap::new(),
                 task_hook_tail: smol::channel::bounded(1).1,
-                _jsonl_watcher: None,
-                _jsonl_event_pump: None,
                 tool_use_failure_counts: HashMap::new(),
                 last_pushed_notification: HashMap::new(),
                 open_turns: Default::default(),
@@ -336,9 +331,6 @@ impl Workspace {
         if !ws.projects.is_empty() {
             ws.add_tab(window, cx);
         }
-        // After tabs/lanes are seeded, decide whether the JSONL
-        // fallback watcher should run for this Workspace and start it.
-        ws.refresh_jsonl_watcher(cx);
         // Skills watcher: subscribes to project + personal skill dirs
         // and re-scans on every filesystem change.
         ws.refresh_skills_watcher(cx);

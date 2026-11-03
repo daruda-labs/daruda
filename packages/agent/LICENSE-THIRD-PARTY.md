@@ -1,8 +1,6 @@
 # Third-Party Licenses
 
-This crate ports code from the projects below. Each entry lists the
-upstream source, license, and the daruda files that incorporate the
-ported code.
+Third-party attribution retained for components distributed with this crate.
 
 ## c9watch
 
@@ -12,21 +10,9 @@ ported code.
 
 The MIT license text is reproduced at the bottom of this file.
 
-The following daruda files are derived from c9watch sources:
-
-| daruda file | c9watch source | lines |
-|-------------|---------------|-------|
-| `src/jsonl/parser.rs` | `src-tauri/src/session/parser.rs` | 34-240 (SessionEntry, MessageContent, UserMessage) |
-| `src/jsonl/tail.rs` | `src-tauri/src/session/parser.rs` | 255-303 (read_last_n_lines reverse-read) |
-| `src/jsonl/fsm/mod.rs` | `src-tauri/src/session/status.rs` | 38-238 (determine_status + helpers) |
-| `src/jsonl/permissions.rs` | `src-tauri/src/session/permissions.rs` | 1-208 (allow patterns + auto-approve whitelist) |
-
-Modifications:
-- Adapted to daruda's `SessionStatus` enum (Working / NeedsAttention /
-  Idle / Connecting). c9watch's `WaitingForInput` maps to `Idle`.
-- Removed sysinfo-based process discovery (`detector.rs`) — daruda owns
-  its own PTY and matches sessions via cwd/transcript_path from hook
-  payloads.
+The c9watch-derived JSONL status parser, classifier, tail reader, and
+permission matcher are no longer included. The attribution and license text
+remain available for distributions containing those components.
 
 ---
 

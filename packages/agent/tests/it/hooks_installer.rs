@@ -1,136 +1,101 @@
-//! Public API tests for hooks installer.
+//! Public API tests for the hooks installer.
 
 use daruda_agent::hooks::installer::*;
-use serde_json::{Value, json};
-use std::fs::{self};
-use std::path::Path;
+use daruda_agent::hooks::route::Harness;
+use serde_json::Value;
+use std::fs;
 use tempfile::TempDir;
 
-fn paths_in(dir: &TempDir) -> InstallerPaths {
-    let home = dir.path();
-    InstallerPaths {
-        notify_script: home.join(".daruda").join("hooks").join("notify.sh"),
-        claude_settings: home.join(".claude").join("settings.json"),
-    }
-}
-
-fn read_settings(p: &Path) -> Value {
-    let bytes = fs::read(p).unwrap();
-    serde_json::from_slice(&bytes).unwrap()
+fn read(target: &HookTarget) -> Value {
+    serde_json::from_slice(&fs::read(target.hooks_file()).unwrap()).unwrap()
 }
 
 #[test]
-fn install_writes_notify_script_executable() {
-    let home = TempDir::new().unwrap();
-    let paths = paths_in(&home);
-    install(&paths).unwrap();
-
-    let bytes = fs::read(&paths.notify_script).unwrap();
-    let text = String::from_utf8(bytes).unwrap();
-    assert!(text.starts_with("#!/usr/bin/env bash"));
-    assert!(text.contains("--hook"));
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mode = fs::metadata(&paths.notify_script)
-            .unwrap()
-            .permissions()
-            .mode();
-        assert!(mode & 0o111 != 0, "notify.sh should be executable");
+fn install_then_uninstall_round_trips_for_every_harness() {
+    for harness in Harness::ALL {
+        let home = TempDir::new().unwrap();
+        let target = HookTarget::new(harness, home.path());
+        assert!(!is_installed(&target));
+        assert_eq!(install(&target).unwrap(), Change::Written);
+        assert!(is_installed(&target), "{harness:?}");
+        assert_eq!(install(&target).unwrap(), Change::Unchanged);
+        uninstall(&target).unwrap();
+        assert!(!is_installed(&target), "{harness:?}");
     }
 }
 
 #[test]
-fn notification_matcher_filters_subtypes() {
+fn every_entry_runs_the_guarded_hook_command() {
     let home = TempDir::new().unwrap();
-    let paths = paths_in(&home);
-    install(&paths).unwrap();
-    let settings = read_settings(&paths.claude_settings);
-    let m = settings["hooks"]["Notification"][0]["matcher"]
-        .as_str()
+    let target = HookTarget::new(Harness::Claude, home.path());
+    install(&target).unwrap();
+    let settings = read(&target);
+    for event in CLAUDE_EVENTS {
+        let command = settings["hooks"][*event][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap();
+        assert_eq!(command, hook_command(Harness::Claude, event));
+        assert!(command.ends_with("|| true"));
+    }
+}
+
+#[test]
+fn is_installed_is_false_for_a_missing_or_malformed_file() {
+    let home = TempDir::new().unwrap();
+    let target = HookTarget::new(Harness::Claude, home.path());
+    assert!(!is_installed(&target));
+    fs::write(target.hooks_file(), b"{ malformed").unwrap();
+    assert!(!is_installed(&target));
+}
+
+#[test]
+fn codex_trust_follows_foreign_groups_and_mixed_handlers() {
+    use serde_json::json;
+    for mixed in [false, true] {
+        let home = TempDir::new().unwrap();
+        let target = HookTarget::new(Harness::Codex, home.path());
+        let own = json!({"type": "command", "command": hook_command(Harness::Codex, "Stop")});
+        let foreign = json!({"type": "command", "command": "echo user-hook"});
+        let (groups, group, handler) = if mixed {
+            (json!([{"hooks": [own, foreign]}]), 0, 1)
+        } else {
+            (json!([{"hooks": [own]}, {"hooks": [foreign]}]), 1, 0)
+        };
+        fs::write(
+            target.hooks_file(),
+            serde_json::to_vec(&json!({"hooks": {"Stop": groups}})).unwrap(),
+        )
         .unwrap();
-    assert_eq!(m, "permission_prompt|elicitation_dialog");
-    // Stop has no matcher (fires always).
-    let m = settings["hooks"]["Stop"][0]["matcher"].as_str().unwrap();
-    assert_eq!(m, "");
-}
-
-#[test]
-fn install_is_idempotent() {
-    let home = TempDir::new().unwrap();
-    let paths = paths_in(&home);
-    install(&paths).unwrap();
-    install(&paths).unwrap();
-    install(&paths).unwrap();
-
-    let settings = read_settings(&paths.claude_settings);
-    for event in SUBSCRIBED_EVENTS {
-        let array = settings["hooks"][*event].as_array().unwrap();
-        assert_eq!(array.len(), 1, "{event} got duplicated");
-    }
-}
-
-#[test]
-fn is_installed_negative_on_missing_or_malformed_file() {
-    let home = TempDir::new().unwrap();
-    let paths = paths_in(&home);
-    assert!(!is_installed(&paths));
-
-    fs::create_dir_all(paths.claude_settings.parent().unwrap()).unwrap();
-    fs::write(&paths.claude_settings, b"{ malformed").unwrap();
-    assert!(!is_installed(&paths));
-}
-
-#[test]
-fn install_refuses_when_event_value_is_not_array() {
-    let home = TempDir::new().unwrap();
-    let paths = paths_in(&home);
-    fs::create_dir_all(paths.claude_settings.parent().unwrap()).unwrap();
-    // User has hand-written hooks.PreToolUse as a *string* (wrong
-    // schema). We must not silently overwrite the field.
-    let pre = json!({
-        "hooks": {
-            "PreToolUse": "broken-string-value"
+        let prefix = daruda_core::path::canonicalize(target.hooks_file()).unwrap();
+        let old_key = format!("{}:stop:{group}:{handler}", prefix.display());
+        let new_key = format!("{}:stop:0:0", prefix.display());
+        let text = format!(
+            "[hooks.state.{}]\ntrusted_hash = \"foreign-trust\"\ncustom = \"preserved\"\n",
+            serde_json::to_string(&old_key).unwrap()
+        );
+        fs::write(home.path().join("config.toml"), text).unwrap();
+        for enabled in [true, true, false] {
+            if enabled {
+                install(&target).unwrap();
+            } else {
+                uninstall(&target).unwrap();
+            }
+            let doc: toml_edit::DocumentMut = fs::read_to_string(home.path().join("config.toml"))
+                .unwrap()
+                .parse()
+                .unwrap();
+            assert_eq!(
+                doc["hooks"]["state"][&new_key]["trusted_hash"].as_str(),
+                Some("foreign-trust")
+            );
+            assert_eq!(
+                doc["hooks"]["state"][&new_key]["custom"].as_str(),
+                Some("preserved")
+            );
+            assert_eq!(
+                read(&target)["hooks"]["Stop"][0]["hooks"][0]["command"],
+                "echo user-hook"
+            );
         }
-    });
-    fs::write(
-        &paths.claude_settings,
-        serde_json::to_vec_pretty(&pre).unwrap(),
-    )
-    .unwrap();
-
-    let err = install(&paths).expect_err("install should refuse bad schema");
-    match err {
-        InstallerError::BadSchema {
-            event,
-            actual_kind: _,
-        } => {
-            assert_eq!(event, "PreToolUse");
-        }
-        other => panic!("expected BadSchema, got {other:?}"),
     }
-    // Original file untouched.
-    let after = read_settings(&paths.claude_settings);
-    assert_eq!(after["hooks"]["PreToolUse"], "broken-string-value");
-}
-
-#[test]
-fn install_refuses_when_top_level_is_not_object() {
-    let home = TempDir::new().unwrap();
-    let paths = paths_in(&home);
-    fs::create_dir_all(paths.claude_settings.parent().unwrap()).unwrap();
-    fs::write(&paths.claude_settings, b"[1, 2, 3]").unwrap();
-    let err = install(&paths).expect_err("install should refuse non-object top-level");
-    assert!(matches!(err, InstallerError::BadSchema { .. }));
-}
-
-#[test]
-fn install_refuses_malformed_json() {
-    let home = TempDir::new().unwrap();
-    let paths = paths_in(&home);
-    fs::create_dir_all(paths.claude_settings.parent().unwrap()).unwrap();
-    fs::write(&paths.claude_settings, b"{ malformed json").unwrap();
-    let err = install(&paths).expect_err("install should refuse unparseable JSON");
-    assert!(matches!(err, InstallerError::Json(_)));
 }

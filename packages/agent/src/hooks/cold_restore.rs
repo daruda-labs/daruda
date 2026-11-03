@@ -117,6 +117,19 @@ pub fn run(dir: &Path, policy: &ColdRestorePolicy) -> Result<Vec<StatusFile>, St
             continue;
         };
         match read(&entry.path) {
+            Ok(Some(file)) if file.terminal_id.is_some() => {
+                // The first desktop startup has no surviving PTYs. Later
+                // windows only load, preserving other windows' terminals.
+                if let Err(error) = delete(&entry.path) {
+                    LogWriter::log(
+                        ErrorReport::new("Retired terminal status cleanup failed")
+                            .severity(ErrorSeverity::Warning)
+                            .from_error(&error)
+                            .with_context("path", redact_home(&entry.path))
+                            .build(),
+                    );
+                }
+            }
             Ok(Some(mut file)) => match classify(system_time_from_utc(file.timestamp), now, policy)
             {
                 ColdRestoreAction::Load => loaded.push(file),
@@ -172,5 +185,6 @@ pub fn load(dir: &Path) -> Result<Vec<StatusFile>, StatusFileError> {
     Ok(list_dir(dir)?
         .into_iter()
         .filter_map(|entry| read(&entry.path).ok().flatten())
+        .filter(|file| file.last_event != "SessionEnd")
         .collect())
 }
