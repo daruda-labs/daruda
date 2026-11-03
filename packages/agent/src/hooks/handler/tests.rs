@@ -78,3 +78,47 @@ fn subagent_hooks_do_not_change_the_terminal() {
     handle_event(&route, Harness::Claude, &event, None).unwrap();
     assert!(status_file::list_dir(dir.path()).unwrap().is_empty());
 }
+
+#[test]
+fn hook_journal_compaction_preserves_successive_sessions_and_the_final_timestamp() {
+    let dir = tempfile::tempdir().unwrap();
+    let route = HookRoute {
+        terminal: super::super::route::TerminalId::parse("terminal-a").unwrap(),
+        status_dir: dir.path().to_path_buf(),
+    };
+    for session in ["first", "second"] {
+        handle_event(
+            &route,
+            Harness::Claude,
+            &event("SessionStart", session),
+            None,
+        )
+        .unwrap();
+        for _ in 0..40 {
+            handle_event(
+                &route,
+                Harness::Claude,
+                &event("UserPromptSubmit", session),
+                None,
+            )
+            .unwrap();
+        }
+        handle_event(&route, Harness::Claude, &event("SessionEnd", session), None).unwrap();
+    }
+    let live = read(&path_for(dir.path(), route.terminal.as_str()))
+        .unwrap()
+        .unwrap();
+    let history = super::super::history::read(dir.path(), &route.terminal).unwrap();
+    assert_eq!(history.executions.len(), 2);
+    for (run, session) in history.executions.iter().zip(["first", "second"]) {
+        assert_eq!(run.conversation.session_id, session);
+        assert!(matches!(
+            run.state,
+            daruda_store::terminal_sessions::ExecutionState::Ended {
+                reason: daruda_store::terminal_sessions::EndReason::SessionEnded,
+                ..
+            }
+        ));
+    }
+    assert_eq!(history.executions[1].last_observed_at, live.timestamp);
+}

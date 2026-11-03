@@ -259,3 +259,26 @@ fn should_compact_trips_past_the_record_budget() {
     log.compact().unwrap();
     assert!(!log.should_compact());
 }
+
+#[test]
+fn a_custom_record_budget_survives_reopen_and_resets_after_compaction() {
+    let mut log = RunLog::<Toy, _>::open(FaultBackend::new(), BUILD).unwrap();
+    for _ in 0..2 {
+        log.commit(add(0)).unwrap();
+    }
+    assert!(!log.should_compact_after_records(3));
+    let mut reopened = RunLog::<Toy, _>::open(log.backend().crash(), BUILD).unwrap();
+    assert!(reopened.should_compact_after_records(3));
+    assert!(!reopened.should_compact());
+    reopened.compact().unwrap();
+    assert!(!reopened.should_compact_after_records(3));
+    let reopened = RunLog::<Toy, _>::open(reopened.backend().crash(), BUILD).unwrap();
+    assert!(!reopened.should_compact_after_records(3));
+}
+
+#[test]
+fn a_custom_record_budget_retains_the_shared_byte_limit() {
+    let mut log = RunLog::<Toy, _>::open(FaultBackend::new(), BUILD).unwrap();
+    log.commit(insert(&"x".repeat(1024 * 1024))).unwrap();
+    assert!(log.should_compact_after_records(u64::MAX));
+}

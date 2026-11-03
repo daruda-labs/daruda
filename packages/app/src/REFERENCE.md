@@ -104,7 +104,10 @@ by `RunsHost::record_task_cli_hook`. Shared `HookEnd` semantics are interpreted
 by the GPUI-free `runs/cli/hook_policy.rs` for both live and PID-exit recovery.
 Task-independent terminal history lives in `daruda_store::terminal_sessions`
 (schema 1), separate from the task log. Each terminal has a runlog below the
-profile-routed `status/history/` directory. Hook processes commit observations
+profile-routed `status/history/` directory. Terminal journals compact after
+64 records to bound per-hook replay; snapshots retain every execution and its
+latest observation. The shared runlog default and byte limit keep their policy.
+Hook processes commit observations
 under the terminal's stable status lock before publishing the live status file;
 watcher coalescing cannot replace an execution's history. Journals retain
 provider/configuration-home/session conversation identity and numbered physical

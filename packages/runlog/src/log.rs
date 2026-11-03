@@ -321,7 +321,13 @@ impl<M: Machine, B: LogBackend> RunLog<M, B> {
     }
 
     pub fn should_compact(&self) -> bool {
-        self.log_records > COMPACT_AFTER_RECORDS || self.log_bytes > COMPACT_AFTER_BYTES
+        self.should_compact_after_records(COMPACT_AFTER_RECORDS)
+    }
+
+    /// Use a caller-owned replay budget while retaining the shared byte limit.
+    /// Opened markers count too, including those restored by a reopen.
+    pub fn should_compact_after_records(&self, record_budget: u64) -> bool {
+        self.log_records > record_budget || self.log_bytes > COMPACT_AFTER_BYTES
     }
 
     pub fn state(&self) -> &M::State {

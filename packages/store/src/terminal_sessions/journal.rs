@@ -16,6 +16,10 @@ pub enum HistoryError {
     Commit(#[from] daruda_runlog::CommitError<std::convert::Infallible>),
 }
 
+// A hook reopens its journal for every event, so replay needs a smaller
+// budget than a long-lived writer. Compaction preserves the complete state.
+const COMPACT_AFTER_RECORDS: u64 = 64;
+
 pub struct SessionJournal(RunLog<SessionMachine, FileBackend>);
 
 impl SessionJournal {
@@ -39,7 +43,7 @@ impl SessionJournal {
 
     pub fn commit(&mut self, event: SessionEvent) -> Result<(), HistoryError> {
         self.0.commit(event)?;
-        if self.0.should_compact() {
+        if self.0.should_compact_after_records(COMPACT_AFTER_RECORDS) {
             self.0.compact()?;
         }
         Ok(())
@@ -47,55 +51,5 @@ impl SessionJournal {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn an_empty_journal_survives_reopen() {
-        let dir = tempfile::tempdir().unwrap();
-        let journal = SessionJournal::open(dir.path()).unwrap();
-        assert!(journal.state().executions.is_empty());
-        drop(journal);
-        assert!(
-            SessionJournal::read(dir.path())
-                .unwrap()
-                .executions
-                .is_empty()
-        );
-    }
-
-    #[test]
-    fn a_corrupt_journal_is_refused_without_overwriting_it() {
-        let dir = tempfile::tempdir().unwrap();
-        drop(SessionJournal::open(dir.path()).unwrap());
-        let path = FileBackend::new(dir.path()).log_path(0);
-        std::fs::write(&path, b"corrupt\ncorrupt\n").unwrap();
-        assert!(SessionJournal::read(dir.path()).is_err());
-        assert!(SessionJournal::open(dir.path()).is_err());
-        assert_eq!(std::fs::read(path).unwrap(), b"corrupt\ncorrupt\n");
-    }
-
-    #[test]
-    fn newer_schemas_are_refused_without_overwriting_them() {
-        struct FutureMachine;
-        impl daruda_runlog::Machine for FutureMachine {
-            type State = super::super::SessionHistory;
-            type Event = super::super::SessionEvent;
-            type Rejected = std::convert::Infallible;
-            const SCHEMA: u32 = 2;
-            fn check(_: &Self::State, _: &Self::Event) -> Result<(), Self::Rejected> {
-                Ok(())
-            }
-            fn apply(_: &mut Self::State, _: &Self::Event) {}
-        }
-        let dir = tempfile::tempdir().unwrap();
-        drop(RunLog::<FutureMachine, _>::open(FileBackend::new(dir.path()), "future").unwrap());
-        let path = FileBackend::new(dir.path()).log_path(0);
-        let before = std::fs::read(&path).unwrap();
-        assert!(matches!(
-            SessionJournal::open(dir.path()),
-            Err(HistoryError::Open(daruda_runlog::OpenError::TooNew { .. }))
-        ));
-        assert_eq!(std::fs::read(path).unwrap(), before);
-    }
-}
+#[path = "journal_tests.rs"]
+mod tests;
