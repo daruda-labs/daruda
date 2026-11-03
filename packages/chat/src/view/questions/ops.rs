@@ -286,6 +286,7 @@ impl AgentChatView {
         if self.questions.is_empty() {
             return;
         }
+        self.questions.phone_drafts.clear();
         for question in std::mem::take(&mut self.questions.open) {
             if let Some(handle) = self.any_handle() {
                 handle.respond_question(question.id, QuestionAnswer::Cancel);

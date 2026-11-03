@@ -3,7 +3,7 @@
 
 use daruda_acp::{QuestionField, QuestionFieldKind, ToolCallItem};
 use daruda_ui::theme::{self, PaneSurfaceTokens};
-use daruda_ui::{ButtonVariants as _, Disableable as _, icons};
+use daruda_ui::{ButtonCustomVariant, ButtonVariants as _, Disableable as _, icons};
 use gpui::{
     AnyElement, Context, Div, FontWeight, IntoElement, SharedString, Stateful, div, prelude::*, px,
 };
@@ -25,11 +25,12 @@ pub(in crate::render) fn question_card(
     open: &OpenQuestion,
     may_write: bool,
     agent: &str,
+    dim: f32,
     surface: &PaneSurfaceTokens,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
     let tool = tc.id.clone();
-    question_form(open, may_write, agent, surface, cx)
+    question_form(open, may_write, agent, dim, surface, cx)
         .id(SharedString::from(format!(
             "agent-chat-question-card-{tool}"
         )))
@@ -45,6 +46,7 @@ pub(in crate::render) fn question_form(
     open: &OpenQuestion,
     may_write: bool,
     agent: &str,
+    dim: f32,
     surface: &PaneSurfaceTokens,
     cx: &mut Context<AgentChatView>,
 ) -> Div {
@@ -68,7 +70,7 @@ pub(in crate::render) fn question_form(
                 .enumerate()
                 .map(|(index, field)| field_block(open, may_write, index, field, surface, cx)),
         )
-        .child(actions(open, surface, cx))
+        .child(actions(open, dim, surface, cx))
 }
 
 /// `? Claude asks` on the left; on the right that it waits, which question
@@ -302,7 +304,7 @@ fn option_row(selector: String, row: OptionRow<'_>, surface: &PaneSurfaceTokens)
 /// What was committed shows in its place.
 fn write_row(
     target: Option<WriteTarget>,
-    _number: usize,
+    number: usize,
     typed: Option<String>,
     highlighted: bool,
     surface: &PaneSurfaceTokens,
@@ -313,7 +315,17 @@ fn write_row(
         .border_color(surface.border_tint)
         .pt(px(theme::PAD_STANDARD))
         .when(highlighted, |el| el.bg(surface.active_tint));
-    let row = write_row_content(frame, typed, surface);
+    let row = write_row_content(frame, typed, surface).child(
+        div()
+            .flex_none()
+            .px(px(theme::PAD_XS))
+            .border_1()
+            .border_color(surface.border_tint)
+            .rounded(px(theme::RADIUS_XS))
+            .text_size(px(theme::FONT_SIZE_XS))
+            .text_color(surface.foreground_subtle)
+            .child(SharedString::from(number.to_string())),
+    );
     let Some(WriteTarget { question, field }) = target else {
         return row.into_any_element();
     };
@@ -339,19 +351,27 @@ fn write_row_content(frame: Div, typed: Option<String>, surface: &PaneSurfaceTok
                 .whitespace_normal()
                 .child(SharedString::from(typed)),
         ),
-        None => frame
-            .child(
-                div()
-                    .flex_none()
-                    .text_color(surface.foreground_muted)
-                    .child(SharedString::from(s::agent_chat::question_write())),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .text_color(surface.foreground_subtle)
-                    .child(SharedString::from(s::agent_chat::question_write_hint())),
-            ),
+        None => frame.child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_wrap()
+                .gap(px(theme::GAP_SM))
+                .child(
+                    div()
+                        .flex_none()
+                        .text_color(surface.foreground_muted)
+                        .child(SharedString::from(s::agent_chat::question_write())),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .text_color(surface.foreground_subtle)
+                        .whitespace_normal()
+                        .child(SharedString::from(s::agent_chat::question_write_hint())),
+                ),
+        ),
     }
 }
 
@@ -360,6 +380,7 @@ fn write_row_content(frame: Div, typed: Option<String>, surface: &PaneSurfaceTok
 /// beside that select: a pick would then no longer send on its own.
 fn actions(
     open: &OpenQuestion,
+    dim: f32,
     surface: &PaneSurfaceTokens,
     cx: &mut Context<AgentChatView>,
 ) -> Div {
@@ -390,11 +411,18 @@ fn actions(
             )
         })
         .child(
-            daruda_ui::button(
+            daruda_ui::button_on_surface(
                 SharedString::from(skip.clone()),
                 SharedString::from(s::agent_chat::question_skip()),
+                surface,
+                cx,
             )
-            .ghost()
+            .custom(
+                ButtonCustomVariant::new(cx)
+                    .foreground(surface.foreground_muted)
+                    .hover(surface.hover_tint)
+                    .active(surface.active_tint),
+            )
             .debug_selector(move || skip.clone())
             .on_click(cx.listener(move |view, _, _, cx| view.skip_question(id, cx))),
         )
@@ -423,7 +451,26 @@ fn actions(
                             SharedString::from(submit.clone()),
                             SharedString::from(s::agent_chat::question_submit()),
                         )
-                        .primary()
+                        .custom(
+                            ButtonCustomVariant::new(cx)
+                                .color(theme::dim_toward_gray(theme::PRIMARY, dim))
+                                .foreground(if ready {
+                                    theme::dim_toward_gray(theme::TEXT_PRIMARY, dim)
+                                } else {
+                                    surface.foreground_subtle
+                                })
+                                .hover(theme::dim_toward_gray(theme::ACCENT_HOVER, dim))
+                                .active(theme::dim_toward_gray(theme::PRIMARY, dim)),
+                        )
+                        .when(!ready, |button| {
+                            button
+                                .child(
+                                    div().text_color(surface.foreground_subtle).child(
+                                        SharedString::from(s::agent_chat::question_submit()),
+                                    ),
+                                )
+                                .label(SharedString::default())
+                        })
                         .disabled(!ready)
                         .debug_selector(move || submit.clone())
                         .on_click(

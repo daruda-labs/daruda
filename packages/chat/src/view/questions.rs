@@ -28,6 +28,7 @@ pub(crate) struct Questions {
     open: Vec<OpenQuestion>,
     /// The last step number a phone card was sent with.
     phone_steps: u64,
+    pub(in crate::view) phone_drafts: std::collections::BTreeMap<(u64, usize), QuestionDraft>,
     /// Questions without a tool call id have no row to show a record in, so
     /// they leave none.
     records: HashMap<String, QuestionRecord>,
@@ -196,6 +197,7 @@ impl Questions {
 
     fn take(&mut self, id: u64) -> Option<OpenQuestion> {
         let at = self.open.iter().position(|q| q.id == id)?;
+        self.phone_drafts.retain(|(question, _), _| *question != id);
         Some(self.open.remove(at))
     }
 

@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use daruda_acp::{QuestionField, QuestionFieldKind, QuestionRequest, QuestionValue};
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub(crate) struct QuestionDraft {
     /// Picked option values per select field, in pick order.
     picks: BTreeMap<String, Vec<String>>,
@@ -114,6 +114,12 @@ impl QuestionDraft {
 
     /// The person answered primary field `primary_key`, or accepted what it
     /// holds, without changing it.
+    /// A concurrent edit requires reviewing the form again before submission.
+    pub(crate) fn require_review(&mut self) {
+        self.confirmed.clear();
+        self.left_blank.clear();
+    }
+
     pub(crate) fn confirm(&mut self, primary_key: &str) {
         self.touched = true;
         self.confirmed.insert(primary_key.to_owned());

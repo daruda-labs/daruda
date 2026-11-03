@@ -111,7 +111,7 @@ pub(in crate::render) fn interaction_surface(cx: &gpui::App) -> PaneSurfaceToken
         foreground: t.text_primary,
         foreground_muted: t.text_body,
         foreground_subtle: t.text_muted,
-        hover_tint: t.button_widget_bg,
+        hover_tint: t.button_widget_bg_hover,
         active_tint: t.button_widget_bg.blend(t.link_color.opacity(0.12)),
         border_tint: t.border,
         control_border: t.link_color,

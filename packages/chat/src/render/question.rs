@@ -26,12 +26,19 @@ pub(super) fn question_panel(
     let max_height =
         theme::agent_chat_font_size(cx) * theme::agent_chat_line_height(cx) * MAX_VISIBLE_TEXT_ROWS;
     let may_write = view.questions().first().map(|q| q.id) == Some(question.id);
-    let card = question_form(question, may_write, view.agent_name(), &surface, cx)
-        .id(("agent-chat-question", question.id as usize))
-        .debug_selector(|| "agent-chat-question".into())
-        .flex_none()
-        .max_h(px(max_height))
-        .overflow_y_scroll();
+    let card = question_form(
+        question,
+        may_write,
+        view.agent_name(),
+        view.dim_amount,
+        &surface,
+        cx,
+    )
+    .id(("agent-chat-question", question.id as usize))
+    .debug_selector(|| "agent-chat-question".into())
+    .flex_none()
+    .max_h(px(max_height))
+    .overflow_y_scroll();
     Some(
         div()
             .flex_none()

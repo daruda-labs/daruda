@@ -425,3 +425,70 @@ fn confirming_a_phone_default_stops_the_form_timeout(cx: &mut gpui::TestAppConte
     });
     assert_eq!(answer.answer(), None);
 }
+
+#[gpui::test]
+fn phone_send_refreshes_a_draft_changed_after_the_card_was_sent(cx: &mut gpui::TestAppContext) {
+    let mut text = field("path", QuestionFieldKind::Text, None);
+    text.default = Some(QuestionValue::Text("src/".into()));
+    let request = QuestionRequest {
+        fields: vec![text],
+        ..form()
+    };
+    let (view, mut answer, _) = asked(cx, request);
+    view.update(cx, |view, cx| {
+        let cards = view.take_questions_untold_to_phone();
+        assert_eq!(cards[0].answer_text.as_deref(), Some("src/"));
+        view.questions
+            .get_mut(1)
+            .unwrap()
+            .draft
+            .commit_text("path", "lib/");
+        let PhoneAnswerResult::Next(card) =
+            view.answer_question_from_phone(1, 0, PhoneReply::Send, cx)
+        else {
+            panic!("changed draft must be reviewed first")
+        };
+        assert_eq!(card.answer_text.as_deref(), Some("lib/"));
+        assert!(view.has_pending_question());
+        assert_eq!(
+            view.answer_question_from_phone(1, 0, PhoneReply::Send, cx),
+            PhoneAnswerResult::Submitted
+        );
+    });
+    assert!(answer.answer().is_some());
+}
+
+#[gpui::test]
+fn phone_text_does_not_submit_other_fields_changed_after_delivery(cx: &mut gpui::TestAppContext) {
+    let mut path = field("path", QuestionFieldKind::Text, None);
+    path.default = Some(QuestionValue::Text("src/".into()));
+    let request = QuestionRequest {
+        fields: vec![path, field("reason", QuestionFieldKind::Text, None)],
+        ..form()
+    };
+    let (view, mut answer, _) = asked(cx, request);
+    view.update(cx, |view, cx| {
+        view.take_questions_untold_to_phone();
+        view.questions
+            .get_mut(1)
+            .unwrap()
+            .draft
+            .commit_text("reason", "Changed on desktop");
+        view.questions.get_mut(1).unwrap().draft.confirm("reason");
+        let result = view.answer_question_from_phone(1, 0, PhoneReply::Text("lib/".into()), cx);
+        assert!(matches!(result, PhoneAnswerResult::Next(_)));
+        assert_eq!(
+            view.questions.get(1).unwrap().draft.text("path"),
+            Some("src/")
+        );
+        assert!(view.has_pending_question());
+        let PhoneAnswerResult::Next(card) =
+            view.answer_question_from_phone(1, 0, PhoneReply::Send, cx)
+        else {
+            panic!("concurrently changed field needs review")
+        };
+        assert_eq!(card.field, 1);
+        assert_eq!(card.answer_text.as_deref(), Some("Changed on desktop"));
+    });
+    assert_eq!(answer.answer(), None);
+}

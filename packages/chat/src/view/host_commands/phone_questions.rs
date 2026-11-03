@@ -89,7 +89,10 @@ impl AgentChatView {
             .filter_map(|(id, field)| {
                 let step = self.questions.mint_phone_step();
                 let question = self.questions.open().find(|q| q.id == id)?;
-                phone_question(question, field, step, &agent)
+                let card = phone_question(question, field, step, &agent);
+                let draft = question.draft.clone();
+                self.questions.phone_drafts.insert((id, field), draft);
+                card
             })
             .collect()
     }
@@ -134,6 +137,19 @@ impl AgentChatView {
         reply: PhoneReply,
         cx: &mut Context<Self>,
     ) -> PhoneAnswerResult {
+        if !matches!(reply, PhoneReply::Skip)
+            && self.questions.get(id).is_some_and(|q| {
+                self.questions
+                    .phone_drafts
+                    .get(&(id, field))
+                    .is_some_and(|shown| shown != &q.draft)
+            })
+        {
+            if let Some(question) = self.questions.get_mut(id) {
+                question.draft.require_review();
+            }
+            return self.phone_card_for(id, field, cx);
+        }
         let Some(question) = self.questions.get_mut(id) else {
             return PhoneAnswerResult::AlreadySettled;
         };
@@ -238,6 +254,10 @@ impl AgentChatView {
         cx.notify();
         let step = self.questions.mint_phone_step();
         let agent = self.agent_name.clone();
+        if let Some(question) = self.questions.get(id) {
+            let draft = question.draft.clone();
+            self.questions.phone_drafts.insert((id, field), draft);
+        }
         self.questions
             .open()
             .find(|q| q.id == id)

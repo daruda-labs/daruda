@@ -133,7 +133,7 @@ pub(super) fn tool_card(
     if let Some(open) = questions.open_for_tool(&tc.id) {
         let surface = question::interaction_surface(cx).dimmed(dim);
         let may_write = questions.first().map(|q| q.id) == Some(open.id);
-        return question_card(tc, open, may_write, agent_name, &surface, cx);
+        return question_card(tc, open, may_write, agent_name, dim, &surface, cx);
     }
     if let Some(record) = questions.record_for_tool(&tc.id) {
         let surface = theme::PaneSurfaceTokens::agent_chat(cx).dimmed(dim);
