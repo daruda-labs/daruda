@@ -17,6 +17,7 @@ pub mod cold_restore;
 pub mod events;
 pub mod fsm;
 pub mod handler;
+pub mod history;
 pub mod installer;
 pub mod route;
 pub mod status_file;

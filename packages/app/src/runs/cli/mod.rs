@@ -14,6 +14,7 @@ use gpui::{App, BorrowAppContext as _};
 
 use super::{GlobalTasks, RunPane, RunsHost};
 
+pub(crate) mod history;
 mod hook_policy;
 pub(in crate::runs) mod resume;
 mod session;
@@ -26,6 +27,7 @@ pub(super) struct CliTracker {
     /// The live terminal of each registered pane, by the id its agent hooks
     /// report. One entry per pane: a respawn replaces the old id.
     terminals: HashMap<TerminalId, RunPane>,
+    history: history::Writer,
     _pump: gpui::Task<()>,
 }
 
@@ -86,9 +88,10 @@ impl RunsHost {
                 }
             }
         });
-        cx.update_global::<Self, _>(|host, _| {
+        cx.update_global::<Self, _>(|host, cx| {
             host.cli = Some(CliTracker {
                 tracker,
+                history: history::Writer::spawn(cx),
                 terminals: HashMap::new(),
                 _pump: pump,
             })
@@ -111,6 +114,7 @@ impl RunsHost {
                 daruda_store::tasks::machine::UndeliveredReason::PaneClosed,
                 cx,
             );
+            Self::unregister_terminal(pane, cx);
         }
         cx.update_global::<Self, _>(|host, _| {
             let cli = host.cli.as_mut().expect("installed CLI tracker");
@@ -120,6 +124,16 @@ impl RunsHost {
     }
 
     pub(crate) fn unregister_terminal(pane: RunPane, cx: &mut App) {
+        if let Some(terminal) = Self::terminal_id(pane, cx).cloned() {
+            history::record(
+                terminal,
+                daruda_store::terminal_sessions::SessionEvent::TerminalClosed {
+                    reason: daruda_store::terminal_sessions::TerminalEndReason::PaneClosed,
+                    at: chrono::Utc::now(),
+                },
+                cx,
+            );
+        }
         cx.update_global::<Self, _>(|host, _| {
             let cli = host.cli.as_mut().expect("installed CLI tracker");
             cli.terminals.retain(|_, owner| *owner != pane);

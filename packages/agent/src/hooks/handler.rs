@@ -33,7 +33,12 @@ use super::status_file::{self, StatusFile, path_for, read, write_atomic};
 /// should pass to `std::process::exit` — currently always 0.
 pub fn run(event_type: &str, harness: Harness) -> i32 {
     if let Err(err) = run_inner(harness) {
-        eprintln!("daruda --hook {event_type}: {err}");
+        daruda_store::observability::log_writer::LogWriter::log(
+            daruda_store::observability::error_report::ErrorReport::new("Agent hook failed")
+                .message(err.to_string())
+                .with_context("event", event_type)
+                .build(),
+        );
     }
     0
 }
@@ -126,7 +131,9 @@ fn handle_event(
     };
     // Retain the end marker until a successor or startup replaces it:
     // a short session can end before the watcher reads its first event.
+    let history_result = super::history::observe_locked(dir, &file);
     write_atomic(&path, &file)?;
+    history_result?;
 
     Ok(())
 }

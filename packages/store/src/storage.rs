@@ -94,8 +94,12 @@ impl StorageLayout {
         self.data.clone()
     }
 
-    /// The task run log's directory. Resolving it creates nothing; the
-    /// opener creates it.
+    /// Journals share the explicitly routed status directory's profile.
+    pub(crate) fn terminal_history(status_dir: &Path) -> PathBuf {
+        status_dir.join("history")
+    }
+
+    /// The task log resolver creates nothing; the opener creates its directory.
     pub(crate) fn task_log(&self) -> PathBuf {
         self.data.join("task-log")
     }

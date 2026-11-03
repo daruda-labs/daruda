@@ -12,6 +12,7 @@ impl Workspace {
         mut poke_rx: UnboundedReceiver<()>,
         workspace: Entity<Workspace>,
         pane_id: PaneId,
+        terminal_id: daruda_agent::hooks::route::TerminalId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Task<()> {
@@ -196,7 +197,19 @@ impl Workspace {
                     // share a closure — avoids any ambiguity with
                     // GPUI's reentrant-update guard.
                     let should_close = cx
-                        .update(|_, app_cx| workspace.read(app_cx).mirrors.close_pane_on_exit)
+                        .update(|_, app_cx| {
+                            let ws = workspace.read(app_cx);
+                            if crate::runs::RunsHost::terminal_id(ws.run_pane(pane_id), app_cx)
+                                == Some(&terminal_id)
+                            {
+                                crate::runs::record_terminal_history(terminal_id.clone(),
+                                    daruda_store::terminal_sessions::SessionEvent::TerminalClosed {
+                                        reason: daruda_store::terminal_sessions::TerminalEndReason::TerminalExited,
+                                        at: chrono::Utc::now(),
+                                    }, app_cx);
+                            }
+                            ws.mirrors.close_pane_on_exit
+                        })
                         .unwrap_or(false);
 
                     if !should_close {

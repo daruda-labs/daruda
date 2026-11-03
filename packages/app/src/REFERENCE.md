@@ -102,6 +102,21 @@ The workspace hook receiver owns file ingestion and pane observation. Task-speci
 consumption lives in `right_dock/task_hook_ops.rs`, with execution facts owned
 by `RunsHost::record_task_cli_hook`. Shared `HookEnd` semantics are interpreted
 by the GPUI-free `runs/cli/hook_policy.rs` for both live and PID-exit recovery.
+Task-independent terminal history lives in `daruda_store::terminal_sessions`
+(schema 1), separate from the task log. Each terminal has a runlog below the
+profile-routed `status/history/` directory. Hook processes commit observations
+under the terminal's stable status lock before publishing the live status file;
+watcher coalescing cannot replace an execution's history. Journals retain
+provider/configuration-home/session conversation identity and numbered physical
+executions, plus transcript references and PID observations, without tool inputs
+or transcript copies. `runs/cli/history.rs` serializes desktop context and
+teardown facts off the UI thread. Context includes workspace, full LaneRef,
+account selection and initial cwd. Pane deletion keeps these journals; first
+startup captures old terminal identities and reconciles them off the UI thread
+as `ObservationLost`, which does not prove process exit. `hooks::history::{terminals, read}` provides discovery
+without a live pane or task. History does not imply resume eligibility and does
+not launch agents. Existing task history and ACP Continue keep their own policy.
+
 `CliSessionEnded` retains the original terminal's end reason in the current
 execution and its ended-history snapshot: agent goodbye, observed process exit,
 pane closure, or restart reconciliation. A delayed goodbye can refine a process
@@ -113,8 +128,9 @@ and pane teardown release it. Other windows' routed sessions also block takeover
 when no PID was available. Restored interactive CLI conversations claim the same
 lease before connecting; snapshots remain read-only until load succeeds.
 `TaskStore` imports an existing `tasks.json` once and never rewrites it.
-Commands and the app-quit flush target only the task log; older builds read
-the preserved, potentially stale legacy file.
+Task commands target only the task log; older builds read the preserved,
+potentially stale legacy file. App quit flushes both task and terminal-history
+queues within the shared flow-shutdown deadline.
 
 `RunsHost` also owns every flow run in flight (`runs/flows/`), keyed by
 worktree: its thread, stop switch, and one pump that folds the run's

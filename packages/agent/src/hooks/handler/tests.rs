@@ -51,6 +51,17 @@ fn one_terminal_owns_one_file_and_old_session_end_cannot_delete_its_successor() 
         "a late event cannot revive an ended session"
     );
     assert!(status_file::lock_path_for(dir.path(), route.terminal.as_str()).exists());
+    let history = super::super::history::read(dir.path(), &route.terminal).unwrap();
+    assert_eq!(history.executions.len(), 2);
+    assert_eq!(history.executions[0].conversation.session_id, "first");
+    assert_eq!(history.executions[1].conversation.session_id, "second");
+    assert!(matches!(
+        history.executions[0].state,
+        daruda_store::terminal_sessions::ExecutionState::Ended {
+            reason: daruda_store::terminal_sessions::EndReason::SessionReplaced,
+            ..
+        }
+    ));
 }
 
 #[test]

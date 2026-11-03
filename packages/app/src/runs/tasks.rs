@@ -380,10 +380,8 @@ impl RunsHost {
         }
     }
 
-    /// Wait for every queued task commit to become durable before quitting,
-    /// and for running flows to end what they started. Both share one
-    /// deadline: flows are told first, so their threads wind down while the
-    /// task log flushes, and the wait for them gets what time is left.
+    /// Task commits, terminal history and flow shutdown share one deadline.
+    /// Signal flows first so their processes wind down while journals flush.
     pub(crate) fn install_quit_flush(cx: &mut App) {
         cx.on_app_quit(|cx| {
             let until = std::time::Instant::now() + QUIT_FLUSH_DEADLINE;
@@ -398,6 +396,14 @@ impl RunsHost {
                         .from_error(&error)
                         .at(file!(), line!())
                         .dedup("tasks.quit_flush")
+                        .build(),
+                );
+            }
+            if !super::cli::history::flush(until, cx) {
+                LogWriter::log(
+                    ErrorReport::new("Terminal history was not fully persisted at quit")
+                        .severity(ErrorSeverity::Warning)
+                        .dedup("terminal_history.quit_flush")
                         .build(),
                 );
             }

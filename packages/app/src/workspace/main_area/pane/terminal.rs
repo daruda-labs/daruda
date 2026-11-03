@@ -83,6 +83,18 @@ impl Workspace {
         pty_config
             .env
             .extend(crate::hooks::agent_hooks::terminal_env(&terminal));
+        crate::runs::record_terminal_history(
+            terminal.clone(),
+            daruda_store::terminal_sessions::SessionEvent::Context {
+                context: daruda_store::terminal_sessions::TerminalContext {
+                    workspace: self.uuid(),
+                    lane: self.active_lane().map(|_| self.active_ref()),
+                    account: account.to_persisted(),
+                    cwd: pty_config.cwd.clone(),
+                },
+            },
+            cx,
+        );
         let handle = spawn_pty(&pty_config).map_err(PaneSpawnError::Pty)?;
         let pty_pid = handle.child_pid;
         let (stdin_tx, stdout_rx, exit_rx, error_rx, master) = handle.into_parts();
@@ -141,6 +153,7 @@ impl Workspace {
             poke_rx,
             workspace_entity,
             pane_id,
+            terminal.clone(),
             window,
             cx,
         );

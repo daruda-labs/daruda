@@ -125,6 +125,12 @@ pub fn default_data_dir() -> PathBuf {
     directory
 }
 
+/// Terminal journals follow the owning hook route, including an explicitly
+/// injected status directory. Resolving this path creates or migrates nothing.
+pub fn terminal_history_dir(status_dir: &Path) -> PathBuf {
+    StorageLayout::terminal_history(status_dir)
+}
+
 /// User-authored status icon packages in the current profile.
 pub fn status_icon_themes_dir() -> PathBuf {
     StorageLayout::current().status_icon_themes()

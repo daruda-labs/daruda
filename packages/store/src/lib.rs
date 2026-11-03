@@ -25,3 +25,4 @@ pub mod remote_channels;
 mod storage;
 pub mod tasks;
 pub mod telegram;
+pub mod terminal_sessions;

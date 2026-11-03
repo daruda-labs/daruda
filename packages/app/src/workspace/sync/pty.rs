@@ -27,6 +27,17 @@ impl Workspace {
                     && (binding.terminal_id.is_some() || binding.claude_pid.is_some()))
         });
         for key in &keys {
+            if let daruda_agent::StatusKey::Terminal(terminal) = key {
+                crate::runs::record_terminal_history(
+                    terminal.clone(),
+                    daruda_store::terminal_sessions::SessionEvent::ProcessExited {
+                        session_id: session_id.clone(),
+                        pid,
+                        at: chrono::Utc::now(),
+                    },
+                    cx,
+                );
+            }
             self.forget_terminal_session(key);
         }
         if !keys.is_empty() {

@@ -67,6 +67,32 @@ pub(in crate::workspace) fn initial_claude_status(
         cold_restore::load(&dir)
     } else {
         cx.set_global(ClaudeStatusSwept);
+        match daruda_agent::hooks::history::terminals(&dir) {
+            Ok(terminals) => {
+                let history_dir = dir.clone();
+                cx.background_executor()
+                    .spawn(async move {
+                        if let Err(error) = daruda_agent::hooks::history::reconcile_terminals(
+                            &history_dir,
+                            &terminals,
+                        ) {
+                            daruda_store::observability::log_writer::LogWriter::log(
+                                ErrorReport::new("Terminal history startup reconciliation failed")
+                                    .from_error(&error)
+                                    .build(),
+                            );
+                        }
+                    })
+                    .detach();
+            }
+            Err(error) => {
+                daruda_store::observability::log_writer::LogWriter::log(
+                    ErrorReport::new("Terminal history startup discovery failed")
+                        .from_error(&error)
+                        .build(),
+                );
+            }
+        }
         let policy = cold_restore::ColdRestorePolicy::from_config_secs(
             config.claude_status.stale_threshold_secs,
             config.claude_status.file_ttl_days,
