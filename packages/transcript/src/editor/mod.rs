@@ -368,9 +368,9 @@ mod tests {
         use std::rc::Rc;
 
         use gpui::{
-            AppContext as _, Bounds, Context, Entity, IntoElement, ParentElement as _, Render,
-            SharedString, Styled as _, TestAppContext, VisualTestContext, Window, WindowBounds,
-            WindowOptions, div, point, px, size,
+            AppContext as _, Bounds, Context, Entity, InteractiveElement as _, IntoElement,
+            ParentElement as _, Render, SharedString, Styled as _, TestAppContext,
+            VisualTestContext, Window, WindowBounds, WindowOptions, div, point, px, size,
         };
 
         use super::super::{TextRoles, dismiss_press, panel_header, panel_root};
@@ -386,24 +386,27 @@ mod tests {
         impl Render for ShellProbe {
             fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
                 let slot = self.slot.clone();
-                div().size_full().child(
-                    Popover::new(SharedString::from("shell-probe"))
-                        .default_open(true)
-                        .p_0()
-                        .trigger(daruda_ui::button("shell-trigger", "View"))
-                        .content(move |state, window, cx| {
-                            *slot.borrow_mut() = Some(cx.entity());
-                            let close = dismiss_press(window, cx);
-                            panel_root(window, state)
-                                .child(panel_header(
-                                    SharedString::from("shell-close"),
-                                    String::from("View options"),
-                                    TextRoles::from_base(theme::AGENT_CHAT_MSG_FONT_SIZE),
-                                    close,
-                                    cx,
-                                ))
-                                .into_any_element()
-                        }),
+                // Off the window edge, which the positioner keeps a margin from.
+                div().size_full().pl(px(40.)).pt(px(40.)).child(
+                    div().debug_selector(|| "shell-anchor".into()).child(
+                        Popover::new(SharedString::from("shell-probe"))
+                            .default_open(true)
+                            .p_0()
+                            .trigger(daruda_ui::button("shell-trigger", "View"))
+                            .content(move |state, window, cx| {
+                                *slot.borrow_mut() = Some(cx.entity());
+                                let close = dismiss_press(window, cx);
+                                panel_root(window, state)
+                                    .child(panel_header(
+                                        SharedString::from("shell-close"),
+                                        String::from("View options"),
+                                        TextRoles::from_base(theme::AGENT_CHAT_MSG_FONT_SIZE),
+                                        close,
+                                        cx,
+                                    ))
+                                    .into_any_element()
+                            }),
+                    ),
                 )
             }
         }
@@ -439,8 +442,9 @@ mod tests {
             assert_eq!(outer, theme::TRANSCRIPT_EDITOR_RULES_PANEL_W);
             // The popover opens at the trigger's left edge; only its border
             // sits between that edge and the panel, no padding.
+            let anchor = vcx.debug_bounds("shell-anchor").expect("trigger painted");
             assert_eq!(
-                f32::from(panel.origin.x),
+                f32::from(panel.origin.x - anchor.origin.x),
                 theme::TRANSCRIPT_EDITOR_PANEL_BORDER
             );
         }

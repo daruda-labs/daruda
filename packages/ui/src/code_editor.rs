@@ -14,7 +14,9 @@
 use crate::theme;
 use gpui::{App, AppContext as _, Entity, Hsla, SharedString, Styled as _, Window, px, relative};
 use gpui_component::Sizable as _;
-use gpui_component::input::{CodeEditorSurface, Input, InputState};
+use gpui_component::input::{EditorState, Input, TextareaState};
+
+use crate::input::{TextState, input_element};
 
 /// Re-export so app code (the diff viewer) can build per-row editor
 /// decorations without importing `gpui_component` directly.
@@ -27,13 +29,13 @@ pub use gpui_component::input::LineDecoration;
 /// gpui_component's default (which pulls `theme.background` and is
 /// slightly lighter than the bespoke `TextInput`) so every input on
 /// the Task editor shares the same surface color.
-pub fn markdown_editor(state: &Entity<InputState>, cx: &App) -> Input {
-    Input::new(state)
+pub fn markdown_editor(state: &impl TextState, cx: &App) -> Input {
+    input_element(state)
         .small()
         .bordered(true)
         .px(px(theme::INPUT_TEXTAREA_PAD_X))
         .py(px(theme::INPUT_TEXTAREA_PAD_Y))
-        .disabled(state.read(cx).is_disabled())
+        .disabled(state.is_disabled(cx))
         .bg(theme::current(cx).modal_input_bg)
         // Follow the config-driven editor font (`font.editor.size`) like the
         // file-viewer editor; rows remain sized by the configured line height.
@@ -42,28 +44,29 @@ pub fn markdown_editor(state: &Entity<InputState>, cx: &App) -> Input {
         .line_height(relative(theme::editor_line_height(cx)))
 }
 
-/// Build an `Entity<InputState>` configured for markdown editing in
+/// Build an `Entity<EditorState>` configured for markdown editing in
 /// code-editing style — line-number gutter on, syntax highlight on.
-/// Sets the initial text + `rows` baseline so the editor renders with
-/// a reasonable height even when its container does not constrain it.
+/// Sets the initial text; the caller sizes the editor (a code editor has no
+/// row-count baseline of its own).
 /// Use this for buffers that read as code / structured markdown
 /// (READMEs viewed in a settings pane, future MCP config previews,
 /// etc.).
 pub fn make_markdown_state(
     initial: &str,
     placeholder: impl Into<SharedString>,
-    rows: usize,
     window: &mut Window,
     cx: &mut App,
-) -> Entity<InputState> {
+) -> Entity<EditorState> {
     let placeholder = placeholder.into();
     let state = cx.new(|cx| {
-        InputState::new(window, cx)
-            .code_editor("markdown")
+        EditorState::new(window, cx)
+            .language("markdown")
             .placeholder(placeholder)
-            .rows(rows)
     });
-    apply_initial(state.clone(), initial, window, cx);
+    if !initial.is_empty() {
+        let initial = initial.to_string();
+        state.update(cx, |state, cx| state.set_value(initial, window, cx));
+    }
     state
 }
 
@@ -78,26 +81,19 @@ pub fn make_markdown_prose_state(
     rows: usize,
     window: &mut Window,
     cx: &mut App,
-) -> Entity<InputState> {
+) -> Entity<TextareaState> {
     let placeholder = placeholder.into();
     let state = cx.new(|cx| {
-        InputState::new(window, cx)
+        TextareaState::new(window, cx)
             .auto_grow(rows, rows)
             .placeholder(placeholder)
     });
-    apply_initial(state.clone(), initial, window, cx);
-    state
-}
-
-/// `set_value` requires `&mut Window` and a `Context<InputState>` so
-/// we cannot run it from inside `cx.new`'s closure (that only sees
-/// `Context<Self>`, not the workspace `App`).
-fn apply_initial(state: Entity<InputState>, initial: &str, window: &mut Window, cx: &mut App) {
-    if initial.is_empty() {
-        return;
+    // `set_value` needs the window's `App`, which `cx.new`'s closure lacks.
+    if !initial.is_empty() {
+        let initial = initial.to_string();
+        state.update(cx, |state, cx| state.set_value(initial, window, cx));
     }
-    let initial = initial.to_string();
-    state.update(cx, |state, cx| state.set_value(initial, window, cx));
+    state
 }
 
 /// Shared chrome for the borderless, read-only code/diff editors: no
@@ -116,18 +112,18 @@ fn apply_initial(state: Entity<InputState>, initial: &str, window: &mut Window, 
 /// it to match whatever background it actually paints on (see
 /// [`file_viewer_editor`] vs [`embedded_code_viewer`]).
 fn code_editor_chrome(
-    state: &Entity<InputState>,
+    state: &Entity<EditorState>,
     fg: Hsla,
     family: SharedString,
     size: f32,
     line_height: f32,
     cx: &App,
 ) -> Input {
-    Input::new(state)
+    input_element(state)
         .appearance(false)
         .input_padding(false)
         .show_scrollbar(false)
-        .disabled(state.read(cx).is_disabled())
+        .disabled(state.is_disabled(cx))
         .font_family(family)
         .text_size(px(size))
         .line_height(relative(line_height))
@@ -140,7 +136,7 @@ fn code_editor_chrome(
 /// via `.flex()` at the call site. Paints on the file-viewer surface, so the
 /// fallback text colour and editor-owned gutter/ghost-line fills are matched
 /// to that surface instead of the process-wide editor background.
-pub fn file_viewer_editor(state: &Entity<InputState>, cx: &App) -> Input {
+pub fn file_viewer_editor(state: &Entity<EditorState>, cx: &App) -> Input {
     let bg = theme::file_viewer_pane_bg(cx);
     let fg = theme::syntax_theme_of(
         theme::active_syntax_palette(cx),
@@ -155,7 +151,7 @@ pub fn file_viewer_editor(state: &Entity<InputState>, cx: &App) -> Input {
         theme::editor_line_height(cx),
         cx,
     )
-    .code_editor_surface(CodeEditorSurface::background(bg))
+    .editor_background(bg)
 }
 
 /// Render `state` as a read-only viewer **embedded, height-capped, in the
@@ -171,7 +167,7 @@ pub fn file_viewer_editor(state: &Entity<InputState>, cx: &App) -> Input {
 /// (`crate::ui::scrollbar::vertical_thumb`, paired with
 /// `InputState::last_bounds`/`scroll_size`), matching every other scrollable
 /// surface in the app instead of gpui_component's globally-themed bar.
-pub fn embedded_code_viewer(state: &Entity<InputState>, background: Hsla, cx: &App) -> Input {
+pub fn embedded_code_viewer(state: &Entity<EditorState>, background: Hsla, cx: &App) -> Input {
     // The light/dark pick goes through `agent_chat_syntax_is_light` — the same
     // judgment `Workspace::agent_chat_theme_params` feeds the tree-sitter spans,
     // so the fallback colour and the highlighted runs stay in lockstep.
@@ -188,5 +184,5 @@ pub fn embedded_code_viewer(state: &Entity<InputState>, background: Hsla, cx: &A
         theme::agent_chat_line_height(cx),
         cx,
     )
-    .code_editor_surface(CodeEditorSurface::background(background))
+    .editor_background(background)
 }

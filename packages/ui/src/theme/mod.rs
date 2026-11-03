@@ -30,7 +30,7 @@ pub use pane_surface::{
     agent_chat_tint, file_viewer_pane_active_tint, file_viewer_pane_bg,
     file_viewer_pane_border_tint, file_viewer_pane_fg, file_viewer_pane_fg_muted,
     file_viewer_pane_fg_subtle, file_viewer_pane_link_color, file_viewer_pane_syntax_is_light,
-    file_viewer_pane_tint, set_agent_chat_bg, set_agent_chat_fg,
+    file_viewer_pane_tint, neutral_tint_over, set_agent_chat_bg, set_agent_chat_fg,
 };
 
 /// Read the currently installed `DarudaTheme` palette.
@@ -306,199 +306,243 @@ pub fn apply_daruda_palette(cx: &mut App) {
     } else {
         SURFACE_1
     };
-    let t = Theme::global_mut(cx);
+    // `Theme::update` rederives the component tokens and the gpui-base
+    // projection from these colors; a direct `global_mut` edit leaves both
+    // at the upstream defaults.
+    Theme::update(cx, |t| {
+        // ---------------------------------------------------------------
+        // Surfaces
+        // ---------------------------------------------------------------
+        t.background = s_surface_1;
+        // `Theme::popover` is the vendor's one float slot: `popover_style` (the
+        // Popover panel, every PopupMenu, the input completion and hover popovers),
+        // the tooltip, and — via a patch — the dialog all read it.
+        t.popover = d.float_panel_bg;
+        t.popover_foreground = d.text_primary;
+        // `Theme::list` is now the list settings; the colour lives on `colors`.
+        t.colors.list = s_surface_1;
+        t.list_head = d.tab_inactive_bg;
+        t.list_even = d.modal_panel_bg;
+        // Transparent accordion bg so the right-bar Skills tab's plugin
+        // groups read as nested rows on the same surface instead of a
+        // panel-on-panel sandwich. `hsla(_, _, _, 0.0)` = invisible — the
+        // parent's background shows through. `accordion_hover` keeps its
+        // subtle tint below for affordance.
+        t.accordion = TRANSPARENT;
+        t.muted = d.tab_inactive_bg;
+        t.group_box = d.modal_panel_bg;
+        t.group_box_foreground = d.text_muted;
 
-    // ---------------------------------------------------------------
-    // Surfaces
-    // ---------------------------------------------------------------
-    t.background = s_surface_1;
-    // `Theme::popover` is the vendor's one float slot: `popover_style` (the
-    // Popover panel, every PopupMenu, the input completion and hover popovers),
-    // the tooltip, and — via a patch — the dialog all read it.
-    t.popover = d.float_panel_bg;
-    t.popover_foreground = d.text_primary;
-    t.list = s_surface_1;
-    t.list_head = d.tab_inactive_bg;
-    t.list_even = d.modal_panel_bg;
-    // Transparent accordion bg so the right-bar Skills tab's plugin
-    // groups read as nested rows on the same surface instead of a
-    // panel-on-panel sandwich. `hsla(_, _, _, 0.0)` = invisible — the
-    // parent's background shows through. `accordion_hover` keeps its
-    // subtle tint below for affordance.
-    t.accordion = TRANSPARENT;
-    t.muted = d.tab_inactive_bg;
-    t.group_box = d.modal_panel_bg;
-    t.group_box_foreground = d.text_muted;
+        // ---------------------------------------------------------------
+        // Foreground (text)
+        // ---------------------------------------------------------------
+        t.foreground = d.text_primary;
+        t.muted_foreground = d.text_muted;
+        t.description_list_label_foreground = d.text_muted;
 
-    // ---------------------------------------------------------------
-    // Foreground (text)
-    // ---------------------------------------------------------------
-    t.foreground = d.text_primary;
-    t.muted_foreground = d.text_muted;
-    t.description_list_label_foreground = d.text_muted;
+        // ---------------------------------------------------------------
+        // Borders
+        // ---------------------------------------------------------------
+        t.border = d.border;
+        t.input = d.border;
+        t.drag_border = PRIMARY;
 
-    // ---------------------------------------------------------------
-    // Borders
-    // ---------------------------------------------------------------
-    t.border = d.border;
-    t.input = d.border;
-    t.drag_border = PRIMARY;
+        // ---------------------------------------------------------------
+        // Primary / accent / focus ring
+        // ---------------------------------------------------------------
+        t.primary = PRIMARY;
+        t.primary_hover = ACCENT_HOVER;
+        t.primary_active = PRIMARY;
+        t.primary_foreground = TEXT_PRIMARY;
+        t.accent = d.lane_row_hover_bg;
+        t.accent_foreground = d.text_primary;
+        t.ring = PRIMARY;
 
-    // ---------------------------------------------------------------
-    // Primary / accent / focus ring
-    // ---------------------------------------------------------------
-    t.primary = PRIMARY;
-    t.primary_hover = ACCENT_HOVER;
-    t.primary_active = PRIMARY;
-    t.primary_foreground = TEXT_PRIMARY;
-    t.accent = d.lane_row_hover_bg;
-    t.accent_foreground = d.text_primary;
-    t.ring = PRIMARY;
+        // ---------------------------------------------------------------
+        // Info keeps the primary blue tint; link takes its own pastel so
+        // small body text clears contrast (DESIGN §Saturation on dark
+        // surfaces). All three link slots share one value — the `Link`
+        // widget derives its own hover feedback by opacity, and a hover
+        // that jumped back to `accent` would darken the link instead.
+        // ---------------------------------------------------------------
+        t.info = PRIMARY;
+        t.info_hover = ACCENT_HOVER;
+        t.info_active = PRIMARY;
+        t.info_foreground = TEXT_PRIMARY;
+        t.link = d.link_color;
+        t.link_hover = d.link_color;
+        t.link_active = d.link_color;
 
-    // ---------------------------------------------------------------
-    // Info keeps the primary blue tint; link takes its own pastel so
-    // small body text clears contrast (DESIGN §Saturation on dark
-    // surfaces). All three link slots share one value — the `Link`
-    // widget derives its own hover feedback by opacity, and a hover
-    // that jumped back to `accent` would darken the link instead.
-    // ---------------------------------------------------------------
-    t.info = PRIMARY;
-    t.info_hover = ACCENT_HOVER;
-    t.info_active = PRIMARY;
-    t.info_foreground = TEXT_PRIMARY;
-    t.link = d.link_color;
-    t.link_hover = d.link_color;
-    t.link_active = d.link_color;
+        // ---------------------------------------------------------------
+        // Secondary
+        // ---------------------------------------------------------------
+        t.secondary = d.button_widget_bg;
+        t.secondary_hover = d.button_widget_bg_hover;
+        t.secondary_active = s_canvas;
+        t.secondary_foreground = d.text_body;
 
-    // ---------------------------------------------------------------
-    // Secondary
-    // ---------------------------------------------------------------
-    t.secondary = d.button_widget_bg;
-    t.secondary_hover = d.button_widget_bg_hover;
-    t.secondary_active = s_canvas;
-    t.secondary_foreground = d.text_body;
+        // ---------------------------------------------------------------
+        // List rows / accordion (hover + selection)
+        // ---------------------------------------------------------------
+        t.list_hover = d.lane_row_hover_bg;
+        t.list_active = s_canvas;
+        t.list_active_border = PRIMARY;
 
-    // ---------------------------------------------------------------
-    // List rows / accordion (hover + selection)
-    // ---------------------------------------------------------------
-    t.list_hover = d.lane_row_hover_bg;
-    t.list_active = s_canvas;
-    t.list_active_border = PRIMARY;
-    t.accordion_hover = d.lane_row_hover_bg;
+        // ---------------------------------------------------------------
+        // Danger / Warning / Success — semantic states. Light mode keeps
+        // the same hue family at a slightly darker lightness so the icon
+        // / state colour remains readable on the light surface.
+        // ---------------------------------------------------------------
+        t.danger = ERROR;
+        t.danger_hover = with_lightness(ERROR, 0.68);
+        t.danger_active = with_lightness(ERROR, 0.53);
+        t.danger_foreground = TEXT_PRIMARY;
 
-    // ---------------------------------------------------------------
-    // Danger / Warning / Success — semantic states. Light mode keeps
-    // the same hue family at a slightly darker lightness so the icon
-    // / state colour remains readable on the light surface.
-    // ---------------------------------------------------------------
-    t.danger = ERROR;
-    t.danger_hover = with_lightness(ERROR, 0.68);
-    t.danger_active = with_lightness(ERROR, 0.53);
-    t.danger_foreground = TEXT_PRIMARY;
+        t.warning = WARNING;
+        t.warning_hover = with_lightness(WARNING, 0.68);
+        t.warning_active = with_lightness(WARNING, 0.53);
+        t.warning_foreground = TEXT_PRIMARY;
 
-    t.warning = WARNING;
-    t.warning_hover = with_lightness(WARNING, 0.68);
-    t.warning_active = with_lightness(WARNING, 0.53);
-    t.warning_foreground = TEXT_PRIMARY;
+        t.success = SUCCESS;
+        t.success_hover = with_lightness(SUCCESS, 0.59);
+        t.success_active = with_lightness(SUCCESS, 0.44);
+        t.success_foreground = TEXT_PRIMARY;
 
-    t.success = SUCCESS;
-    t.success_hover = with_lightness(SUCCESS, 0.59);
-    t.success_active = with_lightness(SUCCESS, 0.44);
-    t.success_foreground = TEXT_PRIMARY;
+        // ---------------------------------------------------------------
+        // Caret / selection / drop target
+        // ---------------------------------------------------------------
+        t.caret = PRIMARY;
+        t.selection = SELECTION_BG;
+        t.drop_target = d.lane_drop_target_bg;
 
-    // ---------------------------------------------------------------
-    // Caret / selection / drop target
-    // ---------------------------------------------------------------
-    t.caret = PRIMARY;
-    t.selection = SELECTION_BG;
-    t.drop_target = d.lane_drop_target_bg;
+        // ---------------------------------------------------------------
+        // Tab — daruda renders its own tab strip; these cover gpui_component
+        // sub-tab usage (left/right dock view tabs, segmented controls).
+        // ---------------------------------------------------------------
+        t.tab = d.tab_inactive_bg;
+        t.tab_active = s_canvas;
+        t.tab_active_foreground = d.text_primary;
+        t.tab_bar = s_surface_1;
+        t.tab_bar_segmented = d.tab_inactive_bg;
+        t.tab_foreground = d.text_muted;
 
-    // ---------------------------------------------------------------
-    // Tab — daruda renders its own tab strip; these cover gpui_component
-    // sub-tab usage (left/right dock view tabs, segmented controls).
-    // ---------------------------------------------------------------
-    t.tab = d.tab_inactive_bg;
-    t.tab_active = s_canvas;
-    t.tab_active_foreground = d.text_primary;
-    t.tab_bar = s_surface_1;
-    t.tab_bar_segmented = d.tab_inactive_bg;
-    t.tab_foreground = d.text_muted;
+        // ---------------------------------------------------------------
+        // Scrollbar / progress / skeleton
+        // ---------------------------------------------------------------
+        // Transparent track: daruda's design draws a thumb only (the app-side
+        // custom scrollbar `crate::ui::scrollbar` has no track), so the built-in
+        // gpui_component scrollbar's track bar must not paint a background.
+        t.scrollbar = gpui::transparent_black();
+        // Same slot the app-side custom thumbs read (translucent white) — an
+        // opaque surface-ladder gray vanishes on popover/modal surfaces that sit
+        // on the same rung (popover bg is byte-identical to `button_widget_bg`).
+        t.scrollbar_thumb = d.scrollbar_thumb;
+        // Match the app-side custom scrollbar's hover (white-45%) so the built-in
+        // scrollbar reads the same on hover as the panes' thumb.
+        t.scrollbar_thumb_hover = d.file_viewer_scrollbar_thumb_hover;
+        // Always-visible thumb (no idle fade) like the panes' persistent custom
+        // scrollbar. The renderer still hides the thumb when content fits (scroll
+        // area <= container), so short, non-scrollable lists show nothing.
+        t.scrollbar_mode = gpui_component::scroll::ScrollbarMode::Always;
+        t.skeleton = d.button_widget_bg;
+        t.progress_bar = PRIMARY;
 
-    // ---------------------------------------------------------------
-    // Scrollbar / progress / skeleton
-    // ---------------------------------------------------------------
-    // Transparent track: daruda's design draws a thumb only (the app-side
-    // custom scrollbar `crate::ui::scrollbar` has no track), so the built-in
-    // gpui_component scrollbar's track bar must not paint a background.
-    t.scrollbar = gpui::transparent_black();
-    // Same slot the app-side custom thumbs read (translucent white) — an
-    // opaque surface-ladder gray vanishes on popover/modal surfaces that sit
-    // on the same rung (popover bg is byte-identical to `button_widget_bg`).
-    t.scrollbar_thumb = d.scrollbar_thumb;
-    // Match the app-side custom scrollbar's hover (white-45%) so the built-in
-    // scrollbar reads the same on hover as the panes' thumb.
-    t.scrollbar_thumb_hover = d.file_viewer_scrollbar_thumb_hover;
-    // Always-visible thumb (no idle fade) like the panes' persistent custom
-    // scrollbar. The renderer still hides the thumb when content fits (scroll
-    // area <= container), so short, non-scrollable lists show nothing.
-    t.scrollbar_show = gpui_component::scroll::ScrollbarShow::Always;
-    t.skeleton = d.button_widget_bg;
-    t.progress_bar = PRIMARY;
+        // ---------------------------------------------------------------
+        // Switch / slider — muted gray track + bright thumb.
+        // ---------------------------------------------------------------
+        t.switch = d.button_widget_bg;
+        t.switch_thumb = TEXT_PRIMARY;
+        t.slider_bar = d.button_widget_bg;
+        t.slider_thumb = TEXT_PRIMARY;
 
-    // ---------------------------------------------------------------
-    // Switch / slider — muted gray track + bright thumb.
-    // ---------------------------------------------------------------
-    t.switch = d.button_widget_bg;
-    t.switch_thumb = TEXT_PRIMARY;
-    t.slider_bar = d.button_widget_bg;
-    t.slider_thumb = TEXT_PRIMARY;
+        // ---------------------------------------------------------------
+        // Overlay (backdrop behind dialogs)
+        // ---------------------------------------------------------------
+        t.overlay = with_alpha(CANVAS, MODAL_BACKDROP_ALPHA);
 
-    // ---------------------------------------------------------------
-    // Overlay (backdrop behind dialogs)
-    // ---------------------------------------------------------------
-    t.overlay = with_alpha(CANVAS, MODAL_BACKDROP_ALPHA);
+        // ---------------------------------------------------------------
+        // Radii
+        // ---------------------------------------------------------------
+        t.radius = px(p::MODAL_BUTTON_RADIUS);
+        t.radius_lg = px(p::MODAL_PANEL_RADIUS);
 
-    // ---------------------------------------------------------------
-    // Radii
-    // ---------------------------------------------------------------
-    t.radius = px(p::MODAL_BUTTON_RADIUS);
-    t.radius_lg = px(p::MODAL_PANEL_RADIUS);
+        // ---------------------------------------------------------------
+        // Code highlighting — install daruda's `base16-ocean.dark` syntax
+        // palette so the raw editor (gpui_component `highlight_theme`) and the
+        // diff view (`syntax_color`) share one colour source (`syntax_theme`).
+        // Without this the editor keeps gpui_component's default theme and
+        // diverges from the diff view.
+        // ---------------------------------------------------------------
+        let mut highlight = (*HighlightTheme::default_dark()).clone();
+        highlight.style.editor_foreground =
+            Some(p::syntax_theme_of(palette, syntax_is_light).default);
+        highlight.style.syntax = p::editor_syntax_colors_of(palette, syntax_is_light);
+        // `default_dark()` carries a dark `editor_background`, which the editor
+        // element paints behind the line-number gutter (and ghost rows) via
+        // `cx.theme().editor_background()`. Left unset it stays dark on the light
+        // theme — a black gutter stripe beside the light content. Keep the global
+        // default on the UI editor surface; hosts with a different surface can
+        // override it per input instance.
+        highlight.style.editor_background = Some(d.file_viewer_bg);
+        // The current-line band is one App-wide slot shared by every editor
+        // instance (the File viewer's UI-themed surface *and* the agent-chat
+        // diff embed's terminal-preset-derived background — see
+        // `theme::agent_chat_bg`), so it can't be tuned to match either
+        // surface's exact color. A translucent neutral overlay (the same
+        // white-lift/black-recess technique as `agent_chat_tint`) instead of a
+        // fixed solid color reads reasonably on any background under it,
+        // regardless of which surface a given editor instance is painting on.
+        let active_line_overlay = if syntax_is_light {
+            p::OVERLAY_BLACK
+        } else {
+            p::OVERLAY_WHITE
+        };
+        highlight.style.editor_active_line = Some(p::with_alpha(
+            active_line_overlay,
+            p::EDITOR_ACTIVE_LINE_ALPHA,
+        ));
+        t.highlight_theme = Arc::new(highlight);
+        mirror_button_colors(t);
+        // A focused control tints its own border rather than drawing a second
+        // ring outside it: the outer ring doubles every field's edge and is
+        // cut off by the docks' and modals' clipping.
+        t.focus_ring = false;
+    });
+}
 
-    // ---------------------------------------------------------------
-    // Code highlighting — install daruda's `base16-ocean.dark` syntax
-    // palette so the raw editor (gpui_component `highlight_theme`) and the
-    // diff view (`syntax_color`) share one colour source (`syntax_theme`).
-    // Without this the editor keeps gpui_component's default theme and
-    // diverges from the diff view.
-    // ---------------------------------------------------------------
-    let mut highlight = (*HighlightTheme::default_dark()).clone();
-    highlight.style.editor_foreground = Some(p::syntax_theme_of(palette, syntax_is_light).default);
-    highlight.style.syntax = p::editor_syntax_colors_of(palette, syntax_is_light);
-    // `default_dark()` carries a dark `editor_background`, which the editor
-    // element paints behind the line-number gutter (and ghost rows) via
-    // `cx.theme().editor_background()`. Left unset it stays dark on the light
-    // theme — a black gutter stripe beside the light content. Keep the global
-    // default on the UI editor surface; hosts with a different surface can
-    // override it per input instance.
-    highlight.style.editor_background = Some(d.file_viewer_bg);
-    // The current-line band is one App-wide slot shared by every editor
-    // instance (the File viewer's UI-themed surface *and* the agent-chat
-    // diff embed's terminal-preset-derived background — see
-    // `theme::agent_chat_bg`), so it can't be tuned to match either
-    // surface's exact color. A translucent neutral overlay (the same
-    // white-lift/black-recess technique as `agent_chat_tint`) instead of a
-    // fixed solid color reads reasonably on any background under it,
-    // regardless of which surface a given editor instance is painting on.
-    let active_line_overlay = if syntax_is_light {
-        p::OVERLAY_BLACK
-    } else {
-        p::OVERLAY_WHITE
-    };
-    highlight.style.editor_active_line = Some(p::with_alpha(
-        active_line_overlay,
-        p::EDITOR_ACTIVE_LINE_ALPHA,
-    ));
-    t.highlight_theme = Arc::new(highlight);
+/// gpui-component 0.8 paints buttons from their own `button_*` slots, which
+/// only a theme file seeds from the generic colors. Point every variant back
+/// at the generic slot the palette above sets, as 0.5 read them; the
+/// variant-less `Default` reads the `secondary` family, 0.5's default.
+fn mirror_button_colors(t: &mut Theme) {
+    t.button = t.secondary;
+    t.button_hover = t.secondary_hover;
+    t.button_active = t.secondary_active;
+    t.button_foreground = t.secondary_foreground;
+    t.button_primary = t.primary;
+    t.button_primary_hover = t.primary_hover;
+    t.button_primary_active = t.primary_active;
+    t.button_primary_foreground = t.primary_foreground;
+    t.button_secondary = t.secondary;
+    t.button_secondary_hover = t.secondary_hover;
+    t.button_secondary_active = t.secondary_active;
+    t.button_secondary_foreground = t.secondary_foreground;
+    t.button_danger = t.danger;
+    t.button_danger_hover = t.danger_hover;
+    t.button_danger_active = t.danger_active;
+    t.button_danger_foreground = t.danger_foreground;
+    t.button_warning = t.warning;
+    t.button_warning_hover = t.warning_hover;
+    t.button_warning_active = t.warning_active;
+    t.button_warning_foreground = t.warning_foreground;
+    t.button_success = t.success;
+    t.button_success_hover = t.success_hover;
+    t.button_success_active = t.success_active;
+    t.button_success_foreground = t.success_foreground;
+    t.button_info = t.info;
+    t.button_info_hover = t.info_hover;
+    t.button_info_active = t.info_active;
+    t.button_info_foreground = t.info_foreground;
 }
 
 #[cfg(test)]

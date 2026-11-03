@@ -15,7 +15,7 @@ pub(in crate::workspace) mod snap;
 pub(in crate::workspace) use self::snap::{
     BottomDockSnapshot, ComposerExpand, DockSnapshot, GroupSnapshot, LeftDockSnapshot,
     ProjectSnapshot, QuestionStripSnapshot, QueuedPromptView, QueuedPromptsSnapshot,
-    RightDockSnapshot, TaskProjects,
+    RightDockSnapshot, SlashMenuView, TaskProjects,
 };
 
 use crate::ui::theme;

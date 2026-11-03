@@ -89,7 +89,8 @@ pub(in crate::workspace) fn open_validated_single_field_dialog<Cb>(
     let on_submit = Rc::new(on_submit);
     let state_for_focus = state.clone();
 
-    window.open_dialog(cx, move |dialog, _window, cx| {
+    // Only an `AlertDialog` builds its OK / Cancel footer from `button_props`.
+    window.open_alert_dialog(cx, move |dialog, _window, cx| {
         let state_for_body = state.clone();
         let state_for_ok = state.clone();
         let error_for_ok = field_error.clone();
@@ -161,11 +162,10 @@ pub(in crate::workspace) fn open_alert_dialog(
     let title: SharedString = title.into();
     let body: SharedString = body.into();
     let ok_label: SharedString = ok_label.into();
-    window.open_dialog(cx, move |dialog, _window, _cx| {
+    window.open_alert_dialog(cx, move |dialog, _window, _cx| {
         dialog
             .title(title.clone())
-            .child(body.clone())
-            .alert()
+            .description(body.clone())
             .button_props(DialogButtonProps::default().ok_text(ok_label.clone()))
     });
 }
@@ -225,22 +225,18 @@ where
             let footer_entity = entity.clone();
             d = d
                 .p(px(theme::FORM_MODAL_PADDING))
-                .footer(move |_, _, _window, cx| {
+                .footer({
                     let close_entity = footer_entity.clone();
-                    vec![
-                        div()
-                            .w_full()
-                            .on_key_down(move |event, window, cx| {
-                                if guarded && event.keystroke.key == "escape" {
-                                    cx.stop_propagation();
-                                    close_entity
-                                        .update(cx, |modal, cx| modal.request_close(window, cx));
-                                }
-                            })
-                            .children(
-                                footer_entity.update(cx, |modal, cx| modal.render_footer(cx)),
-                            ),
-                    ]
+                    div()
+                        .w_full()
+                        .on_key_down(move |event, window, cx| {
+                            if guarded && event.keystroke.key == "escape" {
+                                cx.stop_propagation();
+                                close_entity
+                                    .update(cx, |modal, cx| modal.request_close(window, cx));
+                            }
+                        })
+                        .children(footer_entity.update(cx, |modal, cx| modal.render_footer(cx)))
                 })
                 .margin_top(px(theme::PAD_XL))
                 .max_h(

@@ -23,6 +23,7 @@ impl FlowInputsModal {
         };
         let control = match &field.control {
             Control::Text(state) => form_input(state, cx, tab).into_any_element(),
+            Control::Prose(state) => form_input(state, cx, tab).into_any_element(),
             Control::Choice(state) => select::form_select(state, cx, tab).into_any_element(),
             // The description is what the box says yes to, so it sits beside
             // the box rather than above it.

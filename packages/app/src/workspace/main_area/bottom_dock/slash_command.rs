@@ -1,29 +1,21 @@
-//! Slash-command completion provider for the bottom-dock input.
+//! Slash-command completion for the bottom-dock composer.
 //!
-//! When a `/`-prefixed token is typed at the start of the current line
-//! while an AgentChat pane is focused, this provider feeds the native
-//! completion menu with the ACP-advertised commands stored on
-//! `AgentChatView::available_commands` (`daruda_chat`). The
-//! provider is installed on `Workspace.terminal_input` (the shared
-//! bottom-dock `InputState`); the menu's accept hook routes back through
+//! When a `/`-prefixed token is typed at the start of the current line while
+//! an AgentChat pane is focused, the composer lists the ACP-advertised
+//! commands stored on `AgentChatView::available_commands` (`daruda_chat`).
+//! The list is daruda's own: [`slash_match`] computes it from the text and
+//! cursor, the composer ops keep it on the input dock, and the dock renders
+//! it above the field. Accepting routes back through
 //! [`Workspace::complete_slash_command`](crate::workspace::Workspace) for the
 //! adaptive send.
 //!
-//! The trigger / parsing logic is split into pure, GPUI-free helpers (tested
-//! below); the trait impl only walks the rope and reads the focused pane's
-//! command list off the workspace.
+//! Everything here is pure and GPUI-free, so it is tested below.
 
-use anyhow::Result;
+use std::ops::Range;
+
 use daruda_acp::{SlashCommand, SlashCommandInput};
-use gpui::{Context, Task, WeakEntity, Window};
-use lsp_types::{
-    CompletionContext, CompletionItem, CompletionItemKind, CompletionResponse, CompletionTextEdit,
-    Range, TextEdit,
-};
 
 use crate::surface::strings as s;
-use crate::ui::{CompletionProvider, InputState, Rope, RopeExt as _};
-use crate::workspace::Workspace;
 use daruda_chat::slash_dispatch::CLEAR_COMMAND_NAME;
 
 /// Removes any agent-advertised `/clear` entry and prepends daruda's own
@@ -32,7 +24,9 @@ use daruda_chat::slash_dispatch::CLEAR_COMMAND_NAME;
 /// so daruda's entry (with its own description and `NoInput`) must be the
 /// only one shown, or the menu misrepresents what actually happens on
 /// submit.
-fn with_builtin_clear(mut commands: Vec<SlashCommand>) -> Vec<SlashCommand> {
+pub(in crate::workspace) fn with_builtin_clear(
+    mut commands: Vec<SlashCommand>,
+) -> Vec<SlashCommand> {
     commands.retain(|c| c.name != CLEAR_COMMAND_NAME);
     commands.insert(
         0,
@@ -43,13 +37,6 @@ fn with_builtin_clear(mut commands: Vec<SlashCommand>) -> Vec<SlashCommand> {
         },
     );
     commands
-}
-
-/// Completion provider that surfaces ACP slash commands in the bottom-dock
-/// input. Holds a weak reference to the workspace so it can read the focused
-/// AgentChat pane's advertised commands at completion time.
-pub(in crate::workspace) struct SlashCommandProvider {
-    pub(in crate::workspace) workspace: WeakEntity<Workspace>,
 }
 
 /// The substring after the last `\n` — the line the cursor is on. The
@@ -91,100 +78,56 @@ fn matching_commands<'a>(commands: &'a [SlashCommand], prefix: &str) -> Vec<&'a 
         .collect()
 }
 
-impl CompletionProvider for SlashCommandProvider {
-    fn completions(
-        &self,
-        text: &Rope,
-        offset: usize,
-        _trigger: CompletionContext,
-        _window: &mut Window,
-        cx: &mut Context<InputState>,
-    ) -> Task<Result<CompletionResponse>> {
-        let empty = || Task::ready(Ok(CompletionResponse::Array(vec![])));
+/// One command the list offers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::workspace) struct SlashItem {
+    pub(in crate::workspace) name: String,
+    pub(in crate::workspace) description: String,
+    /// What accepting writes over the token: `/name`, plus a trailing space
+    /// when the command takes an argument, so the user lands on it.
+    pub(in crate::workspace) insert: String,
+}
 
-        let before = text.slice(0..offset).to_string();
-        let line = current_line_before_cursor(&before);
-        if !is_command_position(line) {
-            return empty();
-        }
-        // Chars after the `/` on the current line.
-        let prefix = &line.trim_start()[1..];
+/// The commands matching the `/`-token under the cursor, and the byte range
+/// of that token (from the `/` through the end of the token, so accepting
+/// mid-token leaves no trailing fragment).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::workspace) struct SlashMatch {
+    pub(in crate::workspace) token: Range<usize>,
+    pub(in crate::workspace) items: Vec<SlashItem>,
+}
 
-        // The workspace is a different entity than this `InputState`, so reading
-        // it (and, transitively, the focused AgentChat view) during the
-        // InputState update is safe.
-        let Some(ws) = self.workspace.upgrade() else {
-            return empty();
-        };
-        let ws = ws.read(cx);
-        // A bound composer's text is an answer, `/usr/bin` included.
-        if ws.focused_question_bound(cx) {
-            return empty();
-        }
-        let focused = ws.active_runtime().focused_pane_id;
-        let commands: Vec<SlashCommand> = with_builtin_clear(
-            ws.agent_chat_view(focused)
-                .map(|v| v.read(cx).session_config().available_commands().to_vec())
-                .unwrap_or_default(),
-        );
-
-        // Replace range = the `/<prefix>` token on the current line: from the
-        // `/` (offset - prefix bytes - 1) through the end of the token.
-        let start = offset - prefix.len() - 1;
-        let start_pos = text.offset_to_position(start);
-        // Replace through the end of the token under the cursor, not just up to it,
-        // so accepting mid-token (e.g. "/com|mand") doesn't leave a trailing fragment.
-        let after = text.slice(offset..).to_string();
-        let token_end = offset + token_end_len(&after);
-        let end_pos = text.offset_to_position(token_end);
-
-        let items: Vec<CompletionItem> = matching_commands(&commands, prefix)
-            .into_iter()
-            .map(|c| CompletionItem {
-                label: c.name.clone(),
-                filter_text: Some(c.name.clone()),
-                detail: Some(c.description.clone()),
-                // `documentation` is the LSP "rich docs" aside panel. ACP commands
-                // carry only a short description (already shown inline via `detail`)
-                // and an argument `hint`. The `hint` is an INPUT placeholder
-                // ("display when the input hasn't been provided yet"), not docs —
-                // surfacing it here rendered a large side panel that also vanished
-                // on accept, exactly when the argument is needed. Leave docs empty.
-                kind: Some(CompletionItemKind::FUNCTION),
-                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
-                    range: Range {
-                        start: start_pos,
-                        end: end_pos,
-                    },
-                    new_text: match &c.input {
-                        SlashCommandInput::NoInput => format!("/{}", c.name),
-                        // Trailing space so the user lands on the argument.
-                        SlashCommandInput::FreeText { .. } => format!("/{} ", c.name),
-                    },
-                })),
-                ..Default::default()
-            })
-            .collect();
-
-        Task::ready(Ok(CompletionResponse::Array(items)))
+/// The list for `text` with the cursor at byte `cursor`, or `None` when the
+/// cursor is not in command position or nothing matches.
+pub(in crate::workspace) fn slash_match(
+    text: &str,
+    cursor: usize,
+    commands: &[SlashCommand],
+) -> Option<SlashMatch> {
+    let before = text.get(..cursor)?;
+    let line = current_line_before_cursor(before);
+    if !is_command_position(line) {
+        return None;
     }
-
-    fn is_completion_trigger(
-        &self,
-        _offset: usize,
-        _new_text: &str,
-        cx: &mut Context<InputState>,
-    ) -> bool {
-        // Trigger broadly while a chat pane is focused — `completions` returns
-        // an empty list (closing the menu) when not in command position. The
-        // InputState's own text is mid-update here, so the text check belongs in
-        // `completions` (which receives the rope), not here.
-        self.workspace.upgrade().is_some_and(|ws| {
-            let ws = ws.read(cx);
-            ws.is_agent_chat_pane(ws.active_runtime().focused_pane_id)
-                && !ws.focused_question_bound(cx)
+    // Chars after the `/` on the current line.
+    let prefix = &line.trim_start()[1..];
+    let start = cursor - prefix.len() - 1;
+    let end = cursor + token_end_len(&text[cursor..]);
+    let items: Vec<SlashItem> = matching_commands(commands, prefix)
+        .into_iter()
+        .map(|c| SlashItem {
+            name: c.name.clone(),
+            description: c.description.clone(),
+            insert: match &c.input {
+                SlashCommandInput::NoInput => format!("/{}", c.name),
+                SlashCommandInput::FreeText { .. } => format!("/{} ", c.name),
+            },
         })
-    }
+        .collect();
+    (!items.is_empty()).then_some(SlashMatch {
+        token: start..end,
+        items,
+    })
 }
 
 #[cfg(test)]
@@ -290,5 +233,35 @@ mod tests {
         assert_eq!(matching_commands(&cmds, "").len(), 3);
         // No match.
         assert!(matching_commands(&cmds, "zzz").is_empty());
+    }
+
+    #[test]
+    fn slash_match_covers_the_whole_token_under_the_cursor() {
+        let cmds = vec![
+            cmd("commit", SlashCommandInput::NoInput),
+            cmd(
+                "review",
+                SlashCommandInput::FreeText {
+                    hint: "what".to_string(),
+                },
+            ),
+        ];
+        let text = "hello\n/com|mand rest".replace('|', "");
+        let cursor = "hello\n/com".len();
+        let matched = slash_match(&text, cursor, &cmds).expect("in command position");
+        assert_eq!(&text[matched.token.clone()], "/command");
+        assert_eq!(matched.items.len(), 1);
+        assert_eq!(matched.items[0].insert, "/commit");
+
+        let matched = slash_match("/re", 3, &cmds).expect("matches review");
+        assert_eq!(matched.items[0].insert, "/review ");
+    }
+
+    #[test]
+    fn slash_match_is_none_outside_command_position_or_without_matches() {
+        let cmds = vec![cmd("commit", SlashCommandInput::NoInput)];
+        assert!(slash_match("say /com", 8, &cmds).is_none());
+        assert!(slash_match("/zzz", 4, &cmds).is_none());
+        assert!(slash_match("/commit now", 11, &cmds).is_none());
     }
 }

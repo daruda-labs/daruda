@@ -1,10 +1,10 @@
-//! Composed input: multi-line [`InputState`] + configurable action buttons.
+//! Composed input: multi-line [`TextareaState`] + configurable action buttons.
 //!
 //! Wraps a `gpui_component::Input` (multi-line) with a list of
 //! [`PanelAction`]s rendered either to the right of the area
 //! (`ActionsRight`), below it (`ActionsBelow`), or floating along the
 //! bottom edge (`ActionsFloating`). `InputEvent`s from the underlying
-//! `InputState` are forwarded as [`InputPanelEvent`].
+//! `TextareaState` are forwarded as [`InputPanelEvent`].
 //!
 //! Single-line callers go through `crate::ui::input` instead — this
 //! composite exists because `bottom/terminal_input`, the git commit
@@ -20,7 +20,7 @@ use gpui::{
 };
 
 use super::{ButtonVariants as _, DropdownMenu as _, PopupMenuItem};
-use super::{InputEvent, InputState};
+use super::{InputEvent, TextareaState};
 
 /// Visual treatment for an action button rendered inside an
 /// [`InputPanel`]. Mirrors the three modal-footer variants exposed by
@@ -122,7 +122,7 @@ impl PanelAction {
 }
 
 pub struct InputPanel {
-    pub area: gpui::Entity<InputState>,
+    pub area: gpui::Entity<TextareaState>,
     layout: InputPanelLayout,
     /// `true` keeps the inner `Input::appearance(true)` chrome (bg /
     /// border / radius) — set via [`with_borderless(false)`] (the
@@ -136,12 +136,12 @@ pub struct InputPanel {
 
 impl InputPanel {
     pub fn new(layout: InputPanelLayout, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let area = cx.new(|cx_state| InputState::new(window, cx_state).multi_line(true));
+        let area = cx.new(|cx_state| TextareaState::new(window, cx_state));
         let sub = cx.subscribe_in(&area, window, |_, _, ev: &InputEvent, _, cx| match ev {
             // Submit on the `secondary` flavour of PressEnter, which
             // `gpui_component::Input` emits for `Cmd+Enter` in
             // multi-line mode (plain Enter inserts a newline).
-            InputEvent::PressEnter { secondary } if *secondary => {
+            InputEvent::PressEnter { secondary, .. } if *secondary => {
                 cx.emit(InputPanelEvent::Submit);
             }
             InputEvent::Change => cx.emit(InputPanelEvent::Changed),

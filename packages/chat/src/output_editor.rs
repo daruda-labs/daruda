@@ -203,7 +203,7 @@ pub(super) fn create_output_editor(
     pane_id: PaneId,
     text: String,
     language: Option<&str>,
-) -> Option<Entity<daruda_ui::InputState>> {
+) -> Option<Entity<daruda_ui::EditorState>> {
     let language = language.map_or_else(|| SharedString::from(PLAIN_LANGUAGE), language_for_name);
     let text = without_trailing_terminator(text);
     match access.with(cx, move |window, cx_w| {
@@ -212,13 +212,17 @@ pub(super) fn create_output_editor(
             // in place instead of behind a sideways scroll. The wrap makes
             // `display_rows()` width-dependent, which the embed's height absorbs
             // — see `render/embed.rs` for how that stays in step with the list.
-            let mut state = daruda_ui::InputState::new(window, cx_state)
-                .multi_line(true)
+            // No bounce and no space past the last row: a capped embed hands
+            // the rest of a wheel gesture to the transcript, and its scroll
+            // extent is exactly its rows.
+            let mut state = daruda_ui::EditorState::new(window, cx_state)
+                .scroll_bounce(false)
+                .scroll_beyond_last_line(Some(0))
                 .soft_wrap(true)
                 // The built-in tree-sitter path extracts styles for the visible
                 // range only; a `set_highlight_override` would instead colour
                 // the entire text on the main thread at creation.
-                .code_editor(language)
+                .language(language)
                 // A `Read` is often partial and the adapter's line numbers were
                 // already stripped upstream, so a gutter "1" would not be the
                 // file's line 1.

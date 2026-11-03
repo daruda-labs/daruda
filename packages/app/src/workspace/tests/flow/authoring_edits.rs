@@ -29,11 +29,11 @@ async fn prompt_results_follow_reload_and_hidden_nodes_but_refuse_conflicts(
             assert!(v.apply_prompt_edit(&next, "hidden draft".into(), window, cx));
             v.select_node_for_test(&"design".into(), window, cx);
             let states = v.form().unwrap().body_states(cx);
-            let input = match field {
-                PromptField::Inline => &states.prompt.inline,
-                PromptField::File => &states.prompt.file,
+            let input: crate::ui::FieldState = match field {
+                PromptField::Inline => states.prompt.inline.clone().into(),
+                PromptField::File => states.prompt.file.clone().into(),
             };
-            assert_eq!(input.read(cx).value().as_ref(), "hidden draft");
+            assert_eq!(input.value(cx).as_ref(), "hidden draft");
         });
     }
     let edit = view.read_with(&vcx, |v, cx| {

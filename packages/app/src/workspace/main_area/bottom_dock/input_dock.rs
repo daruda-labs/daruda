@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use gpui::{AppContext, Context, Subscription, WeakEntity, Window};
+use gpui::{AppContext, Context, Subscription, Window};
 
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
@@ -17,7 +17,7 @@ pub(in crate::workspace) struct InputDock {
     /// live in [`super::terminal_input`] rather than wrapping the state in an
     /// `InputPanel` composite (the commit input still uses `InputPanel` for
     /// its dropdown + floating-bar layout).
-    pub(in crate::workspace) input: gpui::Entity<crate::ui::InputState>,
+    pub(in crate::workspace) input: gpui::Entity<crate::ui::TextareaState>,
     /// Keeps the input's subscription alive with the Workspace.
     _subscription: Subscription,
     /// Cached line count of `input`. Updated on every `InputEvent::Change`
@@ -46,6 +46,15 @@ pub(in crate::workspace) struct InputDock {
     pub(in crate::workspace) owner: Option<PaneId>,
     /// What the host remembers about the question the composer answers.
     pub(in crate::workspace) question: super::question_binding_ops::QuestionMarks,
+    /// The slash-command list open over the composer, recomputed on every
+    /// edit; `None` when the cursor is not on a `/`-token or nothing matches.
+    pub(in crate::workspace) slash: Option<SlashMenu>,
+}
+
+/// The open slash-command list and its highlighted row.
+pub(in crate::workspace) struct SlashMenu {
+    pub(in crate::workspace) matched: super::slash_command::SlashMatch,
+    pub(in crate::workspace) selected: usize,
 }
 
 impl InputDock {
@@ -60,164 +69,40 @@ impl InputDock {
     }
 
     pub(in crate::workspace) fn new(
-        workspace: &WeakEntity<Workspace>,
         config: &daruda_config::Config,
         window: &mut Window,
         cx: &mut Context<Workspace>,
     ) -> Self {
-        let ws_for_input = workspace.clone();
-        let ws_for_tab = workspace.clone();
-        let ws_for_escape = workspace.clone();
-        let ws_for_accept = workspace.clone();
-        let ws_for_provider = workspace.clone();
-        let ws_for_history = workspace.clone();
-        let ws_for_text = workspace.clone();
+        let ws_for_text = cx.entity().downgrade();
         let terminal_input = cx.new(|cx_state| {
             let max_rows = usize::from(config.agent.input_max_rows);
-            let mut state = crate::ui::InputState::new(window, cx_state)
+            let mut state = crate::ui::TextareaState::new(window, cx_state)
                 .auto_grow(1, max_rows)
                 .on_empty_text_input(move |text, _, app| {
                     ws_for_text.upgrade().is_some_and(|ws| {
                         ws.update(app, |ws, cx| ws.question_text_shortcut(text, cx))
                     })
-                })
-                // While an agent chat pane is focused and the user hasn't opted
-                // into modifier-to-send, plain Enter submits and Shift+Enter
-                // inserts a newline (Zed's agent-panel default). Evaluated live
-                // on each Enter so it tracks focus + config without any sync.
-                .submit_on_enter(move |app| {
-                    ws_for_input.upgrade().is_some_and(|ws| {
-                        let ws = ws.read(app);
-                        ws.is_agent_chat_pane(ws.active_runtime().focused_pane_id)
-                            && !ws.mirrors.agent.use_modifier_to_send
-                    })
-                })
-                // Shift+Tab cycles the focused agent pane's session mode (Claude
-                // Code's permission-mode cycle). `cycle_agent_mode` returns true
-                // only when it actually switched (agent pane focused with ≥2
-                // modes); the input then skips outdent. Otherwise it falls
-                // through to the default outdent. Evaluated live on each press.
-                .on_secondary_tab(move |_window, app| {
-                    ws_for_tab.upgrade().is_some_and(|ws| {
-                        // While a question is bound Shift+Tab moves between its
-                        // fields (`QuestionPrevField`), never the mode.
-                        if ws.read(app).focused_question_bound(app) {
-                            return false;
-                        }
-                        let focused = ws.read(app).active_runtime().focused_pane_id;
-                        ws.update(app, |ws, cx| ws.cycle_agent_mode(focused, cx))
-                    })
-                })
-                // Escape cancels the focused agent pane's activity — the
-                // keyboard counterpart of the bottom-dock "Stop" button. Returns
-                // true only when the pane was actually busy (so Escape keeps
-                // propagating normally otherwise). Fires only as a fallback after
-                // the input's own Escape handling (see `InputState::on_escape`),
-                // so an open completion menu still closes on the first Escape.
-                .on_escape(move |window, app| {
-                    let Some(ws) = ws_for_escape.upgrade() else {
-                        return false;
-                    };
-                    // A bound question's first Escape only leaves answer mode.
-                    // Its sync writes this input's placeholder, so the
-                    // release waits past this hook (pitfall #5).
-                    if ws.read(app).focused_question_bound(app) {
-                        let ws_deferred = ws.downgrade();
-                        window.defer(app, move |_window, cx| {
-                            // SILENT-OK: workspace dropped between key press and defer
-                            if let Some(ws) = ws_deferred.upgrade() {
-                                ws.update(cx, |ws, cx| ws.question_escape(cx));
-                            }
-                        });
-                        return true;
-                    }
-                    let focused = ws.read(app).active_runtime().focused_pane_id;
-                    ws.update(app, |ws, cx| ws.cancel_agent_turn_if_active(focused, cx))
-                })
-                // ↑/↓ at the boundary of the multi-line input navigates the
-                // per-lane history buffer (shell-style). The hook checks whether
-                // navigation is possible (entries exist / cursor is active), then
-                // defers the actual `set_value` call. Deferring is the same re-
-                // entry guard as `on_completion_accept`: the hook fires inside
-                // `InputState`'s update, so we cannot call `terminal_input.update`
-                // or `terminal_input.read` synchronously (AGENTS.md pitfall #5).
-                // Reading the workspace's lane history is fine — Workspace is a
-                // different entity from terminal_input.
-                .on_history_navigate(move |dir, window, app| {
-                    let Some(ws) = ws_for_history.upgrade() else {
-                        return false;
-                    };
-                    // An empty composer bound to a question moves the card's
-                    // highlight instead of recalling history.
-                    if ws.read(app).question_arrows_take(app) {
-                        let ws_deferred = ws.downgrade();
-                        window.defer(app, move |window, cx| {
-                            // SILENT-OK: workspace dropped between key press and defer
-                            if let Some(ws) = ws_deferred.upgrade() {
-                                ws.update(cx, |ws, cx| ws.move_question_highlight(dir, window, cx));
-                            }
-                        });
-                        return true;
-                    }
-                    // Decide whether to consume before mutating any state.
-                    // Reading ws (Workspace) is safe here: we're inside
-                    // terminal_input's update, but Workspace is a different entity.
-                    if !ws.read(app).history_navigate_possible(dir, app) {
-                        return false;
-                    }
-                    let ws_deferred = ws.downgrade();
-                    window.defer(app, move |window, cx| {
-                        // SILENT-OK: workspace dropped between key press and defer
-                        if let Some(ws) = ws_deferred.upgrade() {
-                            ws.update(cx, |ws, cx| ws.do_history_navigate(dir, window, cx));
-                        }
-                    });
-                    true
-                })
-                // Accepting a slash-command completion routes through the
-                // workspace. The accept hook fires inside this `InputState`'s
-                // update; `cx.defer_in` would re-lease this same InputState, so
-                // `complete_slash_command` -> `send_terminal_input` (which
-                // reads/clears `terminal_input`) would re-enter and panic. Defer
-                // at window/app level — no entity re-lease (AGENTS.md pitfall #5).
-                .on_completion_accept(move |item, window, cx| {
-                    let name = item.label.clone();
-                    let ws = ws_for_accept.clone();
-                    window.defer(cx, move |window, cx| {
-                        if let Some(ws) = ws.upgrade() {
-                            ws.update(cx, |ws, cx| ws.complete_slash_command(name, window, cx));
-                        }
-                    });
                 });
             state.set_placeholder(
                 crate::surface::strings::bottom_dock::input_placeholder(),
                 window,
                 cx_state,
             );
-            // Feed the native completion menu with ACP slash commands when a
-            // chat pane is focused and a `/`-token is being typed.
-            state.lsp.completion_provider = Some(std::rc::Rc::new(
-                crate::workspace::main_area::bottom_dock::slash_command::SlashCommandProvider {
-                    workspace: ws_for_provider,
-                },
-            ));
             state
         });
-        // The bottom-dock body wires the Submit-button click →
-        // `send_terminal_input`; this subscription covers the keyboard path.
-        // `PressEnter { secondary: true }` is emitted on every *submit* —
-        // Cmd+Enter always, plus a plain Enter when the `submit_on_enter`
-        // predicate above is active (agent pane focused, modifier-to-send off).
-        // Shift+Tab mode cycling is handled directly by the `on_secondary_tab`
-        // handler installed above (no event round-trip needed).
+        // Composer actions run in capture phase; this subscription follows
+        // text changes and handles submits emitted by the field itself.
         let terminal_input_sub = cx.subscribe_in(
             &terminal_input,
             window,
             |this, _, ev: &crate::ui::InputEvent, window, cx| match ev {
-                crate::ui::InputEvent::PressEnter { secondary: true } => {
+                crate::ui::InputEvent::PressEnter {
+                    secondary: true, ..
+                } => {
                     this.send_terminal_input(window, cx);
                 }
                 crate::ui::InputEvent::Change => {
+                    this.refresh_slash_menu(cx);
                     this.collapse_composer_if_empty(window, cx);
                     this.adapt_dock_to_input_lines(window, cx);
                     // The composer no longer holds what the resume gesture was
@@ -239,6 +124,7 @@ impl InputDock {
             drafts: HashMap::new(),
             owner: None,
             question: Default::default(),
+            slash: None,
         }
     }
 }

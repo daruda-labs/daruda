@@ -3,13 +3,13 @@
 
 use gpui::{
     AppContext as _, Bounds, Context, InteractiveElement as _, IntoElement, Modifiers, MouseButton,
-    MouseDownEvent, ParentElement as _, Pixels, Render, SharedString, Styled as _, TestAppContext,
-    VisualTestContext, Window, WindowBounds, WindowOptions, deferred, div, point,
-    prelude::FluentBuilder as _, px, size,
+    MouseDownEvent, ParentElement as _, Pixels, Render, SharedString,
+    StatefulInteractiveElement as _, Styled as _, TestAppContext, VisualTestContext, Window,
+    WindowBounds, WindowOptions, deferred, div, point, prelude::FluentBuilder as _, px, size,
 };
 
-use std::cell::Cell;
-use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::test_support::init_gpui_component;
 
@@ -356,6 +356,104 @@ fn a_full_width_body_shrinks_inside_a_flex_row(cx: &mut TestAppContext) {
     );
 }
 
+/// A one-line body in the middle of a tall scrolled column, as a reply sits in
+/// the agent-chat transcript.
+struct ScrolledBodyProbe {
+    scroll: gpui::ScrollHandle,
+    text: &'static str,
+}
+
+impl Render for ScrolledBodyProbe {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .relative()
+            .size_full()
+            .child(crate::TextSelectionLayer)
+            .child(
+                div()
+                    .id("column")
+                    .size_full()
+                    .flex()
+                    .flex_col()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.scroll)
+                    .child(div().flex_none().h(px(150.)))
+                    .child(
+                        div()
+                            .debug_selector(|| "scrolled-body".into())
+                            .child(super::markdown("probe", self.text, copy_tooltips())),
+                    )
+                    .child(div().flex_none().h(px(1000.))),
+            )
+    }
+}
+
+/// Press on `text` at the height `at` picks from the body's bounds, drag
+/// along that line, and report the column's scroll offset after the
+/// auto-scroll would have run.
+fn scroll_after_dragging_along(
+    cx: &mut TestAppContext,
+    text: &'static str,
+    at: impl Fn(Bounds<Pixels>) -> Pixels,
+) -> Pixels {
+    init_gpui_component(cx);
+    let bounds = Bounds::new(point(px(0.), px(0.)), size(px(600.), px(400.)));
+    let opts = WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        ..Default::default()
+    };
+    let scroll = gpui::ScrollHandle::new();
+    let probe_scroll = scroll.clone();
+    let window = cx
+        .update(|cx| {
+            cx.open_window(opts, |_window, cx| {
+                cx.new(|_cx| ScrolledBodyProbe {
+                    scroll: probe_scroll,
+                    text,
+                })
+            })
+        })
+        .expect("window opens");
+    let mut vcx = VisualTestContext::from_window(window.into(), cx);
+    vcx.run_until_parked();
+    vcx.update(|window, _| window.refresh());
+    vcx.run_until_parked();
+
+    let body = vcx.debug_bounds("scrolled-body").expect("body painted");
+    let y = at(body);
+    vcx.simulate_event(MouseDownEvent {
+        position: point(px(30.), y),
+        modifiers: Modifiers::default(),
+        button: MouseButton::Left,
+        click_count: 1,
+        first_mouse: false,
+    });
+    vcx.simulate_event(gpui::MouseMoveEvent {
+        position: point(px(200.), y),
+        modifiers: Modifiers::default(),
+        pressed_button: Some(MouseButton::Left),
+    });
+    vcx.run_until_parked();
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(500));
+    vcx.run_until_parked();
+
+    assert!(
+        vcx.update(crate::TextSelection::has_selection),
+        "no drag-selection started"
+    );
+    scroll.offset().y
+}
+
+/// Drag-selecting along a reply's only line must not scroll the column. Drag
+/// auto-scroll measures against the nearest clip; if the body wrapper clipped
+/// overflow it became that clip, and the line sits inside its edge zone.
+#[gpui::test]
+fn dragging_along_a_body_line_does_not_scroll_its_column(cx: &mut TestAppContext) {
+    let offset = scroll_after_dragging_along(cx, PROBE_TEXT, |body| body.center().y);
+    assert_eq!(offset, px(0.), "the drag scrolled the column");
+}
+
 /// The body size the reported defects were visible at. Any size works for the
 /// properties below; 13px happened to sit within a quarter pixel of the old
 /// absolute `rems(1.3)` line, which is why they went unnoticed at the default.
@@ -541,6 +639,7 @@ impl Render for SelectionProbe {
         div()
             .relative()
             .size_full()
+            .child(crate::TextSelectionLayer)
             .child(super::markdown(
                 "probe",
                 SharedString::from(PROBE_TEXT),
@@ -562,10 +661,8 @@ impl Render for SelectionProbe {
     }
 }
 
-/// Press (no release) over the prose and report whether a text block took
-/// the grab. Mouse-down only on purpose: a click that never drags selects
-/// nothing, and the release deregisters the empty selection — so the press
-/// is the only moment the grab is observable.
+/// Press over the prose and drag along it (no release), then report whether
+/// the window's text selection took the grab.
 fn press_grabs_the_prose(cx: &mut TestAppContext, occluded: bool) -> bool {
     init_gpui_component(cx);
     let bounds = Bounds::new(point(px(0.), px(0.)), size(px(600.), px(400.)));
@@ -592,9 +689,14 @@ fn press_grabs_the_prose(cx: &mut TestAppContext, occluded: bool) -> bool {
         click_count: 1,
         first_mouse: false,
     });
+    vcx.simulate_event(gpui::MouseMoveEvent {
+        position: point(px(200.), px(10.)),
+        modifiers: Modifiers::default(),
+        pressed_button: Some(MouseButton::Left),
+    });
     vcx.run_until_parked();
 
-    vcx.update(|_window, cx| crate::active_text_selection(cx).is_some())
+    vcx.update(crate::TextSelection::has_selection)
 }
 
 /// The control for the pair below: with nothing over it, a press on
@@ -626,7 +728,7 @@ fn a_press_inside_an_occluding_panel_does_not_grab_the_prose_under_it(cx: &mut T
 /// each other.
 struct LinkProbe {
     occluded: bool,
-    opened: Rc<Cell<bool>>,
+    opened: Arc<AtomicBool>,
 }
 
 /// Height the link block is confined to, so the space under it is genuinely
@@ -650,7 +752,7 @@ impl Render for LinkProbe {
                     .link_click_handler({
                         let opened = self.opened.clone();
                         move |_url, _window, _cx| {
-                            opened.set(true);
+                            opened.store(true, Ordering::SeqCst);
                             true
                         }
                     }),
@@ -677,9 +779,9 @@ fn with_link_probe<R>(
     cx: &mut TestAppContext,
     occluded: bool,
     drive: impl FnOnce(&mut VisualTestContext) -> R,
-) -> (R, Rc<Cell<bool>>) {
+) -> (R, Arc<AtomicBool>) {
     init_gpui_component(cx);
-    let opened = Rc::new(Cell::new(false));
+    let opened = Arc::new(AtomicBool::new(false));
     let bounds = Bounds::new(point(px(0.), px(0.)), size(px(600.), px(400.)));
     let opts = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -739,7 +841,7 @@ fn click_opens_the_link(cx: &mut TestAppContext, occluded: bool, button: MouseBu
         press(vcx, on_link(), button);
         release(vcx, on_link(), button);
     });
-    opened.get()
+    opened.load(Ordering::SeqCst)
 }
 
 /// Press somewhere that is not the link, drag onto it, release. Reports
@@ -754,7 +856,7 @@ fn drag_onto_link_opens_it(cx: &mut TestAppContext, from: gpui::Point<gpui::Pixe
         });
         release(vcx, on_link(), MouseButton::Left);
     });
-    opened.get()
+    opened.load(Ordering::SeqCst)
 }
 
 /// Drive the probe and hand back whatever the driver read.

@@ -54,7 +54,7 @@ import sys
 from pathlib import Path
 
 # Vendored trees scanned with first-party code, for the reason above.
-VENDORED = ("vendor/gpui-component", "vendor/ferrum-flow")
+VENDORED = ("vendor/gpui-kit", "vendor/ferrum-flow")
 
 # The raw tier is `window.on_mouse_event(..)` and nothing else: the safe
 # tier (`.on_mouse_down(MouseButton::X, ..)`) names the button in the call,
@@ -269,7 +269,7 @@ if [[ "${1-}" == "--self-test" ]]; then
     exec python3 "$SCANNER" --self-test
 fi
 
-for dir in packages vendor/gpui-component vendor/ferrum-flow; do
+for dir in packages vendor/gpui-kit vendor/ferrum-flow; do
     if [[ ! -d "$dir" ]]; then
         echo "lint-raw-mouse-button: $dir/ not found — run from the repo root." >&2
         exit 2

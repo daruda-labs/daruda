@@ -75,10 +75,12 @@ impl CreateSkillModal {
             ),
             (&self.paths_input, fm.paths.clone().unwrap_or_default()),
             (&self.model_input, fm.model.clone().unwrap_or_default()),
-            (&self.body_editor, imported.body.clone()),
         ] {
             input.update(cx, |input, cx| input.set_value(value, window, cx));
         }
+        let body = imported.body.clone();
+        self.body_editor
+            .update(cx, |input, cx| input.set_value(body, window, cx));
         self.user_invocable = fm.user_invocable;
         self.disable_model_invocation = fm.disable_model_invocation;
         self.imported = Some(imported);

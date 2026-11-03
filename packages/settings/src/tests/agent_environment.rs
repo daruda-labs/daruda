@@ -192,15 +192,18 @@ fn a_typed_environment_overrides_and_an_empty_one_stays_unstated(cx: &mut TestAp
 /// Emit the event the input widget raises for Enter. `secondary` is the
 /// Cmd/Ctrl+Enter flavour; a multi-line field raises the plain one *after*
 /// inserting the newline (`enter` in the vendored input state).
-fn press_enter(
+fn press_enter<S: gpui::EventEmitter<InputEvent>>(
     wh: &WindowHandle<daruda_ui::Root>,
-    state: &Entity<InputState>,
+    state: &Entity<S>,
     cx: &mut TestAppContext,
     secondary: bool,
 ) {
     wh.update(cx, |_root, _window, cx| {
         state.update(cx, |_, cx_state| {
-            cx_state.emit(InputEvent::PressEnter { secondary })
+            cx_state.emit(InputEvent::PressEnter {
+                secondary,
+                shift: false,
+            })
         });
     })
     .expect("settings window should still be open during the test");

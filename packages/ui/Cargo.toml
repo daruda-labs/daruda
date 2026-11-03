@@ -24,6 +24,7 @@ daruda_terminal = { workspace = true }
 ferrum_flow = { workspace = true }
 gpui = { workspace = true }
 gpui_component = { workspace = true }
+gpui_base = { workspace = true }
 image = { workspace = true, default-features = false }
 schemars = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

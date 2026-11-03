@@ -275,10 +275,16 @@ async fn up_arrow_consumes_queue_and_edits_last_prompt(cx: &mut TestAppContext) 
     // Empty queue, no history → ↑ falls through to cursor movement.
     workspace.read_with(cx, |ws, cx| {
         assert!(
-            !ws.history_navigate_possible(crate::ui::HistoryDir::Up, cx),
+            !ws.history_navigate_possible(
+                crate::workspace::main_area::bottom_dock::composer_ops::HistoryDir::Up,
+                cx
+            ),
             "no queue and no history → ↑ is not consumed"
         );
-        assert!(!ws.history_navigate_possible(crate::ui::HistoryDir::Down, cx));
+        assert!(!ws.history_navigate_possible(
+            crate::workspace::main_area::bottom_dock::composer_ops::HistoryDir::Down,
+            cx
+        ));
     });
 
     // Enqueue offline (no handle → buffered, not sent); no input history is
@@ -304,7 +310,11 @@ async fn up_arrow_consumes_queue_and_edits_last_prompt(cx: &mut TestAppContext) 
 
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
-            ws.do_history_navigate(crate::ui::HistoryDir::Up, window, cx)
+            ws.do_history_navigate(
+                crate::workspace::main_area::bottom_dock::composer_ops::HistoryDir::Up,
+                window,
+                cx,
+            )
         });
     })
     .unwrap();
@@ -333,18 +343,28 @@ async fn up_arrow_consumes_queue_and_edits_last_prompt(cx: &mut TestAppContext) 
 
     workspace.read_with(cx, |ws, cx| {
         assert!(
-            ws.history_navigate_possible(crate::ui::HistoryDir::Up, cx),
+            ws.history_navigate_possible(
+                crate::workspace::main_area::bottom_dock::composer_ops::HistoryDir::Up,
+                cx
+            ),
             "a queued prompt makes Up consumable even without input history"
         );
         assert!(
-            !ws.history_navigate_possible(crate::ui::HistoryDir::Down, cx),
+            !ws.history_navigate_possible(
+                crate::workspace::main_area::bottom_dock::composer_ops::HistoryDir::Down,
+                cx
+            ),
             "Down is unaffected by the queue"
         );
     });
 
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
-            ws.do_history_navigate(crate::ui::HistoryDir::Up, window, cx)
+            ws.do_history_navigate(
+                crate::workspace::main_area::bottom_dock::composer_ops::HistoryDir::Up,
+                window,
+                cx,
+            )
         });
     })
     .unwrap();

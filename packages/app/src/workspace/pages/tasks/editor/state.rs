@@ -34,8 +34,8 @@ pub(in crate::workspace) struct TaskEditContent {
     /// Prompt editor state (`code_editor("markdown")` for line numbers +
     /// syntax highlight), shared with the renderer via
     /// `crate::ui::markdown_editor(&state)`.
-    pub(in crate::workspace) prompt_state: Entity<gpui_component::input::InputState>,
-    pub(in crate::workspace) notes_state: Entity<gpui_component::input::InputState>,
+    pub(in crate::workspace) prompt_state: Entity<crate::ui::TextareaState>,
+    pub(in crate::workspace) notes_state: Entity<crate::ui::TextareaState>,
     pub(in crate::workspace::pages::tasks) auto_execute: bool,
     /// Execution surface the task will run on when started — mirrors
     /// `Task::agent_surface`. Terminal CLI (default) or in-app Agent
@@ -69,7 +69,7 @@ pub(in crate::workspace) struct TaskEditContent {
     pub(in crate::workspace::pages::tasks) editing_subtask_input: Entity<crate::ui::InputState>,
     /// The prompt file as it is on disk, shown read-only beside the prompt
     /// after the conflict prompt's `[Diff]`, so both versions are in view.
-    pub(in crate::workspace::pages::tasks) disk_copy: Option<Entity<crate::ui::InputState>>,
+    pub(in crate::workspace::pages::tasks) disk_copy: Option<Entity<crate::ui::TextareaState>>,
     /// Scroll handle for the form-body absolute scroll container.
     /// `vertical_scrollbar(&handle)` on the relative parent renders
     /// the visible thumb; `track_scroll(&handle)` on the scroll

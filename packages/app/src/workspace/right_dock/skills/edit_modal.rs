@@ -23,7 +23,7 @@ use crate::agent::skills::{
 use crate::surface::strings;
 use crate::ui::Disableable as _;
 use crate::ui::WindowExt as _;
-use crate::ui::{InputEvent, InputState, button, button_primary, checkbox};
+use crate::ui::{InputEvent, InputState, TextareaState, button, button_primary, checkbox};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 use crate::workspace::right_dock::skills::modal_shared::field_label;
@@ -55,7 +55,7 @@ pub struct EditSkillModal {
     allowed_tools_input: Entity<InputState>,
     paths_input: Entity<InputState>,
     model_input: Entity<InputState>,
-    body_editor: Entity<InputState>,
+    body_editor: Entity<TextareaState>,
 
     user_invocable: bool,
     disable_model_invocation: bool,
@@ -144,7 +144,7 @@ impl EditSkillModal {
             s
         });
         let body_editor = cx.new(|cx_state| {
-            let mut s = InputState::new(window, cx_state)
+            let mut s = TextareaState::new(window, cx_state)
                 .auto_grow(8, 12)
                 .placeholder(strings::skills::placeholder_body_loading());
             if !body_text.is_empty() {
@@ -211,12 +211,14 @@ impl EditSkillModal {
                                 ),
                                 (&modal.paths_input, frontmatter.paths.as_deref()),
                                 (&modal.model_input, frontmatter.model.as_deref()),
-                                (&modal.body_editor, Some(body)),
                             ] {
                                 input.update(cx, |input, cx| {
                                     input.set_value(value.unwrap_or(""), window, cx)
                                 });
                             }
+                            modal
+                                .body_editor
+                                .update(cx, |input, cx| input.set_value(body, window, cx));
                             modal.user_invocable = frontmatter.user_invocable;
                             modal.disable_model_invocation = frontmatter.disable_model_invocation;
                             modal.original_frontmatter = frontmatter;
@@ -514,16 +516,16 @@ impl EditSkillModal {
         ]
     }
 
-    fn inputs(&self) -> Vec<Entity<InputState>> {
+    fn inputs(&self) -> Vec<crate::ui::FieldState> {
         vec![
-            self.invocation_input.clone(),
-            self.description_input.clone(),
-            self.when_to_use_input.clone(),
-            self.argument_hint_input.clone(),
-            self.allowed_tools_input.clone(),
-            self.paths_input.clone(),
-            self.model_input.clone(),
-            self.body_editor.clone(),
+            self.invocation_input.clone().into(),
+            self.description_input.clone().into(),
+            self.when_to_use_input.clone().into(),
+            self.argument_hint_input.clone().into(),
+            self.allowed_tools_input.clone().into(),
+            self.paths_input.clone().into(),
+            self.model_input.clone().into(),
+            self.body_editor.clone().into(),
         ]
     }
 
@@ -589,7 +591,7 @@ fn forward_input(
 /// clears the banner. Plain Enter inserts a newline; Escape dismisses
 /// through Dialog.
 fn forward_body_editor(
-    state: &Entity<InputState>,
+    state: &Entity<TextareaState>,
     window: &mut Window,
     cx: &mut Context<EditSkillModal>,
 ) -> Subscription {
@@ -597,7 +599,7 @@ fn forward_body_editor(
         state,
         window,
         |this, _, ev: &InputEvent, window, cx| match ev {
-            InputEvent::PressEnter { secondary } if *secondary => this.submit(window, cx),
+            InputEvent::PressEnter { secondary, .. } if *secondary => this.submit(window, cx),
             InputEvent::Change => this.clear_error(cx),
             _ => {}
         },

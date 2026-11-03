@@ -25,7 +25,7 @@ impl FormBinding {
     fn text_slots<'a>(
         &'a self,
         raw: &'a mut RawInputs,
-    ) -> [(&'a Entity<InputState>, &'a mut String); 19] {
+    ) -> [(crate::ui::FieldState, &'a mut String); 19] {
         let RawInputs {
             id,
             deps,
@@ -54,25 +54,25 @@ impl FormBinding {
         } = raw;
         let fail = &self.body.on_fail;
         [
-            (&self.id, id),
-            (&self.deps, deps),
-            (&self.timeout, timeout),
-            (&self.max_turns, max_turns),
-            (&self.cwd, cwd),
-            (&self.agent.id, agent_id),
-            (&self.agent.model, agent_model),
-            (&self.agent.mode, agent_mode),
-            (&self.agent.effort, agent_effort),
-            (&self.body.prompt.inline, prompt_inline),
-            (&self.body.prompt.file, prompt_file),
-            (&self.body.output, output),
-            (&self.body.run, run),
-            (&fail.hint.inline, hint_inline),
-            (&fail.hint.file, hint_file),
-            (&fail.fix, fix),
-            (&fail.rerun, rerun),
-            (&fail.max_attempts, max_attempts),
-            (&fail.wait, wait),
+            (self.id.clone().into(), id),
+            (self.deps.clone().into(), deps),
+            (self.timeout.clone().into(), timeout),
+            (self.max_turns.clone().into(), max_turns),
+            (self.cwd.clone().into(), cwd),
+            (self.agent.id.clone().into(), agent_id),
+            (self.agent.model.clone().into(), agent_model),
+            (self.agent.mode.clone().into(), agent_mode),
+            (self.agent.effort.clone().into(), agent_effort),
+            (self.body.prompt.inline.clone().into(), prompt_inline),
+            (self.body.prompt.file.clone().into(), prompt_file),
+            (self.body.output.clone().into(), output),
+            (self.body.run.clone().into(), run),
+            (fail.hint.inline.clone().into(), hint_inline),
+            (fail.hint.file.clone().into(), hint_file),
+            (fail.fix.clone().into(), fix),
+            (fail.rerun.clone().into(), rerun),
+            (fail.max_attempts.clone().into(), max_attempts),
+            (fail.wait.clone().into(), wait),
         ]
     }
 
@@ -86,7 +86,7 @@ impl FormBinding {
             ..RawInputs::default()
         };
         for (input, value) in self.text_slots(&mut raw) {
-            *value = read(input, cx);
+            *value = input.value(cx).to_string();
         }
         raw
     }
@@ -122,9 +122,8 @@ impl FormBinding {
     ) {
         let mut target = raw.clone();
         for (input, value) in self.text_slots(&mut target) {
-            if read(input, cx) != *value {
-                let value = value.clone();
-                input.update(cx, |input, cx| input.set_value(value, window, cx));
+            if input.value(cx).as_ref() != value.as_str() {
+                input.set_value(value.clone(), window, cx);
             }
         }
         for (state, value) in [
@@ -203,11 +202,11 @@ impl FormBinding {
 
     pub(in crate::workspace::pages::flows::graph) fn watch_inputs(
         &self,
-    ) -> Vec<Entity<InputState>> {
+    ) -> Vec<crate::ui::FieldState> {
         let mut raw = RawInputs::default();
         self.text_slots(&mut raw)
             .into_iter()
-            .map(|(input, _)| input.clone())
+            .map(|(input, _)| input)
             .collect()
     }
 

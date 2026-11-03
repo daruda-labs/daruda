@@ -10,34 +10,193 @@ use crate::field_geometry::FieldGeometry;
 use crate::theme as d;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, Element as _, Entity, Focusable as _, InteractiveElement as _, IntoElement,
-    MouseButton, ParentElement as _, SharedString, Styled as _, Window, div, px,
+    AnyElement, App, Element as _, Entity, FocusHandle, InteractiveElement as _, IntoElement,
+    MouseButton, ParentElement as _, Pixels, Point, SharedString, Styled as _, Window, div, px,
 };
 use gpui_component::{Disableable as _, Sizable as _};
 
-use gpui_component::input::Input;
 pub use gpui_component::input::Paste as InputPaste;
 pub use gpui_component::input::{
-    CompletionProvider, HistoryDir, InputEvent, InputState, Rope, RopeExt, ScrollWheelBehavior,
+    CompletionProvider, EditorState, InputEvent, InputState, Rope, RopeExt, TextDecoration,
+    TextareaState,
 };
+/// Field actions a host can intercept in the capture phase, before the
+/// field's own handling (the composer's submit, history and mode keys).
+pub use gpui_component::input::{
+    Enter as InputEnter, Escape as InputEscape, IndentInline as InputIndent,
+    MoveDown as InputMoveDown, MoveUp as InputMoveUp, OutdentInline as InputOutdent,
+};
+
+/// The cursor's row among the rows a multi-line field shows (soft wraps
+/// count as rows), and how many rows there are.
+pub fn cursor_display_row(state: &TextareaState) -> (usize, usize) {
+    let point = state.text().offset_to_point(state.cursor());
+    let map = state.display_map();
+    let row = map
+        .buffer_pos_to_display_pos(gpui_component::input::BufferPoint::new(
+            point.row,
+            point.column,
+        ))
+        .row;
+    (row, map.display_row_count().max(1))
+}
+use gpui_component::input::{Input, TextInputState};
+
+/// A single-line, multi-line or code-editor state, rendered by the same
+/// `Input` builder. The three are separate types upstream; the wrappers below
+/// only need what every kind shares.
+pub trait TextState {
+    fn text_input_state(&self) -> TextInputState;
+    fn focus_handle(&self, cx: &App) -> FocusHandle;
+    fn is_disabled(&self, cx: &App) -> bool;
+    /// The editor's own scroll offset (negative y = rows hidden above).
+    fn scroll_offset(&self, cx: &App) -> Point<Pixels>;
+}
+
+macro_rules! impl_text_state {
+    ($state:ty) => {
+        impl TextState for Entity<$state> {
+            fn text_input_state(&self) -> TextInputState {
+                self.clone().into()
+            }
+            fn focus_handle(&self, cx: &App) -> FocusHandle {
+                gpui::Focusable::focus_handle(self.read(cx), cx)
+            }
+            fn is_disabled(&self, cx: &App) -> bool {
+                self.read(cx).presentation().is_disabled()
+            }
+            fn scroll_offset(&self, cx: &App) -> Point<Pixels> {
+                self.read(cx).scroll_offset()
+            }
+        }
+    };
+}
+impl_text_state!(InputState);
+impl_text_state!(TextareaState);
+impl_text_state!(EditorState);
+
+/// A form field that is either one line or several, for code that keeps a
+/// form's fields together (tab order, freezing, focusing the failing one).
+#[derive(Clone)]
+pub enum FieldState {
+    Line(Entity<InputState>),
+    Text(Entity<TextareaState>),
+}
+
+impl From<Entity<InputState>> for FieldState {
+    fn from(state: Entity<InputState>) -> Self {
+        Self::Line(state)
+    }
+}
+
+impl From<Entity<TextareaState>> for FieldState {
+    fn from(state: Entity<TextareaState>) -> Self {
+        Self::Text(state)
+    }
+}
+
+impl FieldState {
+    pub fn set_disabled(&self, disabled: bool, cx: &mut App) {
+        match self {
+            Self::Line(state) => state.update(cx, |state, cx| state.set_disabled(disabled, cx)),
+            Self::Text(state) => state.update(cx, |state, cx| state.set_disabled(disabled, cx)),
+        }
+    }
+
+    pub fn set_value(&self, value: impl Into<SharedString>, window: &mut Window, cx: &mut App) {
+        let value = value.into();
+        match self {
+            Self::Line(state) => state.update(cx, |state, cx| state.set_value(value, window, cx)),
+            Self::Text(state) => state.update(cx, |state, cx| state.set_value(value, window, cx)),
+        }
+    }
+
+    /// Runs `f` on every `InputEvent` the field emits.
+    pub fn subscribe_in<V: 'static>(
+        &self,
+        window: &mut Window,
+        cx: &mut gpui::Context<V>,
+        f: impl Fn(&mut V, &InputEvent, &mut Window, &mut gpui::Context<V>) + 'static,
+    ) -> gpui::Subscription {
+        match self {
+            Self::Line(state) => {
+                cx.subscribe_in(state, window, move |this, _, event, window, cx| {
+                    f(this, event, window, cx)
+                })
+            }
+            Self::Text(state) => {
+                cx.subscribe_in(state, window, move |this, _, event, window, cx| {
+                    f(this, event, window, cx)
+                })
+            }
+        }
+    }
+
+    pub fn value(&self, cx: &App) -> SharedString {
+        match self {
+            Self::Line(state) => state.read(cx).value(),
+            Self::Text(state) => state.read(cx).value(),
+        }
+    }
+
+    pub fn focus_handle(&self, cx: &App) -> FocusHandle {
+        TextState::focus_handle(self, cx)
+    }
+
+    pub fn is_disabled(&self, cx: &App) -> bool {
+        TextState::is_disabled(self, cx)
+    }
+}
+
+impl TextState for FieldState {
+    fn text_input_state(&self) -> TextInputState {
+        match self {
+            Self::Line(state) => state.text_input_state(),
+            Self::Text(state) => state.text_input_state(),
+        }
+    }
+    fn focus_handle(&self, cx: &App) -> FocusHandle {
+        match self {
+            Self::Line(state) => TextState::focus_handle(state, cx),
+            Self::Text(state) => TextState::focus_handle(state, cx),
+        }
+    }
+    fn is_disabled(&self, cx: &App) -> bool {
+        match self {
+            Self::Line(state) => TextState::is_disabled(state, cx),
+            Self::Text(state) => TextState::is_disabled(state, cx),
+        }
+    }
+    fn scroll_offset(&self, cx: &App) -> Point<Pixels> {
+        match self {
+            Self::Line(state) => TextState::scroll_offset(state, cx),
+            Self::Text(state) => TextState::scroll_offset(state, cx),
+        }
+    }
+}
+
+/// The styled `Input` element over any [`TextState`].
+pub(crate) fn input_element(state: &impl TextState) -> Input {
+    Input::from_state(state.text_input_state())
+}
 
 /// Tab-participation specifier for [`input`].
 pub trait InputTabSpec {
-    fn apply(self, state: &Entity<InputState>, cx: &App, input: Input) -> Input;
+    fn apply(self, state: &impl TextState, cx: &App, input: Input) -> Input;
 }
 
 impl InputTabSpec for isize {
-    fn apply(self, _state: &Entity<InputState>, _cx: &App, input: Input) -> Input {
+    fn apply(self, _state: &impl TextState, _cx: &App, input: Input) -> Input {
         input.tab_index(self)
     }
 }
 
 impl InputTabSpec for () {
-    fn apply(self, state: &Entity<InputState>, cx: &App, input: Input) -> Input {
+    fn apply(self, state: &impl TextState, cx: &App, input: Input) -> Input {
         // `Input` has no `tab_stop` builder; mutate the underlying
         // `FocusHandle` so the focus map registers this input as
         // non-tab-stoppable.
-        let _ = state.read(cx).focus_handle(cx).tab_stop(false);
+        let _ = state.focus_handle(cx).tab_stop(false);
         input
     }
 }
@@ -57,7 +216,7 @@ impl InputTabSpec for () {
 /// rectangle in a dark pane. The same reason [`crate::file_viewer_editor`]
 /// takes the file-viewer background.
 pub fn input_on<T: InputTabSpec>(
-    state: &Entity<InputState>,
+    state: &impl TextState,
     surface: gpui::Hsla,
     cx: &App,
     tab: T,
@@ -66,16 +225,19 @@ pub fn input_on<T: InputTabSpec>(
 }
 
 fn field_input<T: InputTabSpec>(
-    state: &Entity<InputState>,
+    state: &impl TextState,
     surface: gpui::Hsla,
     geometry: FieldGeometry,
     cx: &App,
     tab: T,
 ) -> Input {
     let inner = geometry.apply(
-        Input::new(state)
-            .disabled(state.read(cx).is_disabled())
+        input_element(state)
+            .disabled(state.is_disabled(cx))
             .small()
+            // `FieldGeometry` owns the inset; the size tier's would stack on
+            // it inside a multi-line editor.
+            .input_padding(false)
             .bordered(true)
             .w_full()
             .h_auto()
@@ -86,16 +248,12 @@ fn field_input<T: InputTabSpec>(
 }
 
 /// Standard 28px field. Multi-line states grow with their row count.
-pub fn input<T: InputTabSpec>(state: &Entity<InputState>, cx: &App, tab: T) -> impl IntoElement {
+pub fn input<T: InputTabSpec>(state: &impl TextState, cx: &App, tab: T) -> impl IntoElement {
     input_on(state, d::current(cx).modal_input_bg, cx, tab)
 }
 
 /// Roomier 36px field for authoring forms; shares typography with [`input`].
-pub fn form_input<T: InputTabSpec>(
-    state: &Entity<InputState>,
-    cx: &App,
-    tab: T,
-) -> impl IntoElement {
+pub fn form_input<T: InputTabSpec>(state: &impl TextState, cx: &App, tab: T) -> impl IntoElement {
     field_input(
         state,
         d::current(cx).modal_input_bg,
@@ -106,11 +264,7 @@ pub fn form_input<T: InputTabSpec>(
 }
 
 /// Search fields use standard geometry and keep the caller's Tab policy.
-pub fn search_input<T: InputTabSpec>(
-    state: &Entity<InputState>,
-    cx: &App,
-    tab: T,
-) -> impl IntoElement {
+pub fn search_input<T: InputTabSpec>(state: &impl TextState, cx: &App, tab: T) -> impl IntoElement {
     input(state, cx, tab)
 }
 
@@ -118,7 +272,7 @@ pub fn search_input<T: InputTabSpec>(
 pub fn search_with_clear(
     clear_id: &'static str,
     tooltip: SharedString,
-    state: &Entity<InputState>,
+    state: &impl TextState,
     has_query: bool,
     on_clear: impl Fn(&mut Window, &mut App) + 'static,
     cx: &App,
@@ -133,8 +287,8 @@ pub fn search_with_clear(
     if !has_query {
         return input;
     }
-    let focus = state.read(cx).focus_handle(cx);
-    let disabled = state.read(cx).is_disabled();
+    let focus = state.focus_handle(cx);
+    let disabled = state.is_disabled(cx);
     input.suffix(
         div()
             .relative()
@@ -158,7 +312,7 @@ pub fn search_with_clear(
 
 /// Borderless search inside a pane-owned search toolbar.
 pub fn search_input_on<T: InputTabSpec>(
-    state: &Entity<InputState>,
+    state: &impl TextState,
     background: gpui::Hsla,
     foreground: gpui::Hsla,
     cx: &App,
@@ -228,26 +382,26 @@ pub enum InputGrowMode {
     AutoGrow,
 }
 
-pub(crate) fn composer_input(state: &Entity<InputState>, cx: &App) -> Input {
+pub(crate) fn composer_input(state: &impl TextState, cx: &App) -> Input {
     composer_input_sized(state, cx, d::UiMetrics::default())
 }
 
 pub(crate) fn composer_input_sized(
-    state: &Entity<InputState>,
+    state: &impl TextState,
     cx: &App,
     metrics: d::UiMetrics,
 ) -> Input {
-    Input::new(state)
+    input_element(state)
         .small()
         .appearance(false)
         .input_padding(false)
-        .disabled(state.read(cx).is_disabled())
+        .disabled(state.is_disabled(cx))
         .text_size(px(metrics.text(d::FONT_SIZE_MD)))
         .line_height(px(metrics.row(d::INPUT_LINE_HEIGHT)))
 }
 
 pub fn input_with_action<T: InputTabSpec>(
-    state: &Entity<InputState>,
+    state: &impl TextState,
     action: impl IntoElement,
     cx: &App,
     tab: T,
@@ -259,7 +413,7 @@ pub fn input_with_action<T: InputTabSpec>(
 /// mode. Used by the bottom-dock terminal input to switch to content-
 /// driven auto-grow.
 pub fn input_with_action_grow<T: InputTabSpec>(
-    state: &Entity<InputState>,
+    state: &impl TextState,
     action: impl IntoElement,
     cx: &App,
     tab: T,
@@ -289,10 +443,10 @@ pub fn input_with_action_grow<T: InputTabSpec>(
     let inner = tab.apply(state, cx, inner);
     let t = d::current(cx);
     // Focus-within accent border.
-    let focus_handle = state.read(cx).focus_handle(cx);
+    let focus_handle = state.focus_handle(cx);
     // The editor scrolls itself (negative y = rows hidden above). Read from the
     // last paint; an input scroll notifies its ancestors, so this re-renders.
-    let scrolled_past_top = state.read(cx).scroll_handle().offset().y < px(-0.5);
+    let scrolled_past_top = state.scroll_offset(cx).y < px(-0.5);
 
     match grow_mode {
         InputGrowMode::Fill => {

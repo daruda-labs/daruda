@@ -5,7 +5,7 @@
 
 use gpui::{Context, Window};
 
-use crate::ui::HistoryDir;
+use super::composer_ops::HistoryDir;
 use crate::workspace::Workspace;
 
 /// A key bound in the composer's answer context.

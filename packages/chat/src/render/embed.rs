@@ -30,7 +30,7 @@ use daruda_ui::theme;
 /// a height bound is lost here.
 pub(crate) fn bounded_editor_embed(
     id: &str,
-    editor: &Entity<daruda_ui::InputState>,
+    editor: &Entity<daruda_ui::EditorState>,
     copy_source: Option<SharedString>,
     max_rows: usize,
     t: &theme::DarudaTheme,
@@ -38,9 +38,9 @@ pub(crate) fn bounded_editor_embed(
     cx: &App,
 ) -> AnyElement {
     let rows = editor.read(cx).display_rows().max(1);
-    // The bound is the whole point: `calculate_visible_range`
-    // (`gpui_component/src/input/element.rs`) derives the shaped row range from
-    // the painted height, so an unbounded embed shapes every row on every paint.
+    // The bound is the whole point: `calculate_visible_range` (gpui-base
+    // `input/base/element.rs`) derives the shaped row range from the painted
+    // height, so an unbounded embed shapes every row on every paint.
     let row_height = theme::agent_chat_embed_row_height(cx);
     let height = bounded_embed_height(rows, max_rows, row_height);
     // `scroll_handle().bounds()` / `.max_offset()` are permanently zero for this
@@ -51,10 +51,10 @@ pub(crate) fn bounded_editor_embed(
         let state = editor.read(cx);
         (
             state
-                .last_bounds()
+                .text_bounds()
                 .map(|b| b.size.height)
                 .unwrap_or_default(),
-            state.scroll_handle().offset().y,
+            state.scroll_offset().y,
         )
     };
     // The vertical thumb measures the text extent, not `scroll_size().height`:
@@ -139,8 +139,12 @@ impl RenderOnce for CopyOverlay {
             .absolute()
             .top_1()
             .right_1()
-            .invisible()
-            .group_hover(self.group, |s| s.visible())
+            // The chip occludes, so with the pointer on it the embed's group is
+            // no longer hovered; its own hover keeps it shown. Opacity rather
+            // than visibility keeps its hitbox, which that hover needs.
+            .opacity(0.)
+            .group_hover(self.group, |s| s.opacity(1.))
+            .hover(|s| s.opacity(1.))
             .bg(self.chip_bg)
             .rounded(px(theme::AGENT_CHAT_INPUT_RADIUS))
             .child(crate::localized::code_copy_button(

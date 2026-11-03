@@ -35,7 +35,7 @@ pub(super) fn diff_block(
     tool_id: &str,
     di: usize,
     diff: &DiffView,
-    editor: Option<&Entity<daruda_ui::InputState>>,
+    editor: Option<&Entity<daruda_ui::EditorState>>,
     diff_stats: &DiffStats,
     fold: &FoldState,
     context: FoldContext,
@@ -186,7 +186,7 @@ pub(super) fn diff_block(
 /// the inline old/new colored monospace fallback otherwise.
 fn diff_body(
     diff: &DiffView,
-    editor: Option<&Entity<daruda_ui::InputState>>,
+    editor: Option<&Entity<daruda_ui::EditorState>>,
     t: &theme::DarudaTheme,
     diff_key: &str,
     dim: f32,

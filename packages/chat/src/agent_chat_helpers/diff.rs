@@ -81,13 +81,6 @@ pub(crate) struct DiffStat {
     pub(crate) removed: usize,
 }
 
-/// Language id for an editor's syntax tree, from the diff's file extension.
-/// Resolves through the shared registry-backed resolver, so it never names a
-/// language the highlighter cannot load.
-pub(crate) fn diff_editor_language(diff: &DiffView) -> gpui::SharedString {
-    daruda_ui::highlighter::language_for_extension(extension_str(&diff.path))
-}
-
 /// Convert a tool-call [`DiffView`] into the editor inputs the shared
 /// diff-through-editor renderer consumes, plus the [`DiffStat`] for the same
 /// diff. Pure / GPUI-free: builds the unified diff from `old_text`/`new_text`,
@@ -168,31 +161,33 @@ pub(crate) fn create_diff_editor(
     cx: &mut Context<AgentChatView>,
     access: &mut WindowAccess<'_>,
     pane_id: PaneId,
-    language: &str,
     model: DiffEditorModel,
-) -> Option<Entity<daruda_ui::InputState>> {
-    let language = language.to_owned();
+) -> Option<Entity<daruda_ui::EditorState>> {
     match access.with(cx, move |window, cx_w| {
         cx_w.new(|cx_state| {
-            // One synthetic-buffer line per decoration (no trailing newline in
-            // `model.text`), so this is the editor's display-row count until its
-            // first paint wraps it to a width. Seeding it makes `display_rows()`
-            // size the (parent-height-less) editor to its content on that first
-            // render instead of a collapsed single line.
-            let rows = model.decorations.len().max(1);
-            // `language` selects CodeEditor mode (gutter, indent guides), not
-            // the colours: `set_highlight_override` below short-circuits the
-            // tree-sitter path entirely, because a synthetic +/- diff buffer
-            // is not valid source for any grammar.
-            let mut state = daruda_ui::InputState::new(window, cx_state)
-                .multi_line(true)
-                .soft_wrap(true)
-                .code_editor(language)
-                .rows(rows);
+            // The plain language keeps tree-sitter off: a synthetic +/- diff
+            // buffer is not valid source for any grammar, and the model's own
+            // syntax-and-change spans paint as decorations instead. Until its
+            // first paint wraps it, the editor reports one display row per
+            // logical line, so the embed sizes to its content from the start.
+            // No bounce and no space past the last row, so the transcript
+            // takes over the wheel at the embed's end.
+            let mut state = daruda_ui::EditorState::new(window, cx_state)
+                .scroll_bounce(false)
+                .scroll_beyond_last_line(Some(0))
+                .language(daruda_ui::highlighter::PLAIN_LANGUAGE)
+                .soft_wrap(true);
             state.set_value(model.text, window, cx_state);
             state.set_disabled(true, cx_state);
             state.set_line_decorations(model.decorations, cx_state);
-            state.set_highlight_override(Some(model.highlights), cx_state);
+            let spans = model
+                .highlights
+                .into_iter()
+                .map(|(range, style)| daruda_ui::TextDecoration::new(range, style))
+                .collect();
+            // The collection lives as long as the state; the handle is not
+            // needed because the buffer is never edited.
+            let _ = state.create_decorations_collection(spans, cx_state);
             state
         })
     }) {

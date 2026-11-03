@@ -1,5 +1,5 @@
-//! Copy-to-clipboard button with checkmark feedback, plus the hover-reveal
-//! wrapper used for rendered-markdown code blocks.
+//! Copy-to-clipboard button with checkmark feedback, plus the wrapper used
+//! for rendered-markdown code blocks.
 //!
 //! Ports zed's `CopyButton` feedback pattern (checkmark on click, then a 2s
 //! revert driven by a *targeted* `cx.notify` — never `window.refresh`, per the
@@ -7,13 +7,11 @@
 //! the sibling mermaid copy button.
 //!
 //! The app's localized `code_copy_button` renders inside the vendored `TextView`
-//! code-block actions overlay (`vendor/gpui-component/gpui_component/src/text/node.rs`), which
-//! is hover-revealed against the `"gpui-code-block"` group, so the button
-//! itself stays presentation-neutral (always visible within its
-//! conditionally-visible parent). [`copy_button`] is the icon/tooltip-agnostic
-//! base every such affordance shares — e.g. the agent-chat diff header's
-//! copy-path action, which is always-visible rather than hover-revealed and
-//! uses a different icon pair.
+//! code-block actions overlay (`vendor/gpui-kit/crates/base/src/text/node.rs`),
+//! which pins it to the block's top-right corner and reveals it only while the
+//! block is hovered, so the button itself stays presentation-neutral. [`copy_button`] is the icon/tooltip-agnostic base
+//! every such affordance shares — e.g. the agent-chat diff header's copy-path
+//! action, which uses a different icon pair.
 //!
 //! State (the "just copied" instant) is owned by GPUI keyed state, keyed by the
 //! caller-supplied `id`, so there is no per-block entity to manage — the same

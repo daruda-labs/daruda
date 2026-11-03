@@ -1,0 +1,27 @@
+[package]
+name = "gpui-component-macros"
+version = "0.8.1"
+license = "Apache-2.0"
+publish = false
+edition = "2024"
+autoexamples = false
+autobenches = false
+autotests = false
+description = "Vendored gpui-component-macros v0.8.1 (longbridge/gpui-kit, Apache-2.0). Routed through daruda workspace gpui."
+
+[lib]
+proc-macro = true
+doctest = false
+
+[lints.clippy]
+all = "allow"
+
+[lints.rust]
+unused = "allow"
+dead_code = "allow"
+
+[dependencies]
+"proc-macro2" = { version = "1.0" }
+"proc-macro-crate" = { version = "3.5" }
+"quote" = { version = "1.0" }
+"syn" = { workspace = true }

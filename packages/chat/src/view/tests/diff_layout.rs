@@ -44,23 +44,20 @@ fn max_visible_rows() -> usize {
 }
 
 struct DiffProbe {
-    editor: Entity<daruda_ui::InputState>,
+    editor: Entity<daruda_ui::EditorState>,
     focus_handle: gpui::FocusHandle,
 }
 
 impl DiffProbe {
     /// Mirrors `agent_chat_helpers::create_diff_editor` construction:
-    /// multi-line, soft-wrapped, code-editor mode, `rows` seeded to the
-    /// display-row count, value set, then read-only.
+    /// soft-wrapped code-editor mode (one display row per logical line until
+    /// its first paint), value set, then read-only.
     fn new(text: &str, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let rows = text.lines().count().max(1);
         let text = text.to_owned();
         let editor = cx.new(|cx_state| {
-            let mut state = daruda_ui::InputState::new(window, cx_state)
-                .multi_line(true)
+            let mut state = daruda_ui::EditorState::new(window, cx_state)
                 .soft_wrap(true)
-                .code_editor("rust")
-                .rows(rows);
+                .language("rust");
             state.set_value(text, window, cx_state);
             state.set_disabled(true, cx_state);
             state
@@ -111,7 +108,7 @@ async fn diff_editor_keeps_seeded_rows_and_paints_full_height(cx: &mut TestAppCo
 
     let rows_frame1 = probe.read_with(cx, |p, cx| p.editor.read(cx).display_rows());
     assert!(
-        probe.read_with(cx, |p, cx| p.editor.read(cx).is_disabled()),
+        probe.read_with(cx, |p, cx| p.editor.read(cx).presentation().is_disabled()),
         "frame 1: read-only flag survived the first paint"
     );
 
@@ -124,13 +121,13 @@ async fn diff_editor_keeps_seeded_rows_and_paints_full_height(cx: &mut TestAppCo
 
     let rows_frame2 = probe.read_with(cx, |p, cx| p.editor.read(cx).display_rows());
     assert!(
-        probe.read_with(cx, |p, cx| p.editor.read(cx).is_disabled()),
+        probe.read_with(cx, |p, cx| p.editor.read(cx).presentation().is_disabled()),
         "frame 2: read-only flag clobbered by Input::render"
     );
     let wrapper = cx
         .debug_bounds("diff-wrapper")
         .expect("wrapper painted (debug bounds recorded)");
-    let editor_bounds = probe.read_with(cx, |p, cx| p.editor.read(cx).last_bounds());
+    let editor_bounds = probe.read_with(cx, |p, cx| p.editor.read(cx).text_bounds());
 
     assert_eq!(
         rows_frame1, DIFF_ROWS,
@@ -181,7 +178,7 @@ async fn diff_editor_keeps_seeded_rows_and_paints_full_height(cx: &mut TestAppCo
         .debug_bounds("diff-wrapper")
         .expect("wrapper painted under min-content sizing");
     let editor_h = editor
-        .read_with(cx, |e, _| e.last_bounds())
+        .read_with(cx, |e, _| e.text_bounds())
         .expect("editor text element painted")
         .size
         .height;
@@ -273,7 +270,7 @@ async fn streaming_write_diff_rebuilds_and_collapsed_header_keeps_height(cx: &mu
             .expect("diff editor built for the tool call");
         (
             editor.read(cx).display_rows(),
-            editor.read(cx).last_bounds(),
+            editor.read(cx).text_bounds(),
         )
     });
 
@@ -424,7 +421,7 @@ async fn a_large_write_diff_renders_through_the_capped_embed(cx: &mut TestAppCon
             .read(cx);
         (
             state.display_rows(),
-            state.visible_rows(),
+            state.visible_row_range(),
             state.scroll_size().height,
         )
     });
@@ -527,7 +524,7 @@ async fn long_diff_lines_wrap_to_the_embed_width(cx: &mut TestAppContext) {
             state.value().lines().count(),
             state.display_rows(),
             state
-                .last_bounds()
+                .text_bounds()
                 .expect("the embedded editor painted")
                 .size
                 .width,

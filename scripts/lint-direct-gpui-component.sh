@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Lint: direct `gpui_component` / `daruda_ui` access outside `crate::ui::*`.
+# Lint: direct `gpui_component` / `gpui_base` / `daruda_ui` access outside
+# `crate::ui::*`.
 #
 # Background: `packages/ui/` (`daruda_ui`) is the wrapper home for the
-# vendored `gpui_component` crate, and `packages/app/src/ui/` is the app's
+# vendored gpui-kit crates (`gpui_base` + `gpui_component`), and `packages/app/src/ui/` is the app's
 # facade over it. App code must always go through `crate::ui::*` so that:
 #   - `xsmall()` is auto-applied at one place (packages/ui/AGENTS.md, Wrapper Contracts),
 #   - widget defaults / variants stay consistent across the app,
@@ -12,15 +13,14 @@
 #
 # A small allow-list covers infrastructure files that legitimately
 # touch `gpui_component` directly (init / Root wrapping / Theme):
-#   - src/ui/                     — the facade (the entire point)
-#   - src/main.rs                 — `gpui_component::init(cx)` at startup
-#   - src/test_support.rs         — `init(cx)` for unit tests
-#   - src/windows.rs              — `gpui_component::Root::new(...)`
-#   - src/workspace/render/mod.rs — `Root::render_*_layer` in Workspace
+#   - src/ui/             — the facade (the entire point)
+#   - src/main.rs         — `gpui_component::init(cx)` at startup
+#   - src/test_support.rs — `init(cx)` for unit tests
+#   - src/windows.rs      — `gpui_component::Root::new(...)`
 #
 # Sibling widget packages (`packages/transcript/`, `packages/chat/`,
 # `packages/settings/`) have no app facade to go through, so they reach
-# `daruda_ui` directly — but never `gpui_component`.
+# `daruda_ui` directly — but never `gpui_component` or `gpui_base`.
 #
 # Usage:
 #   scripts/lint-direct-gpui-component.sh
@@ -34,16 +34,16 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-ALLOW='\bpackages/app/src/ui/|\bpackages/app/src/(main|test_support|windows)\.rs|\bpackages/app/src/workspace/render/mod\.rs'
+ALLOW='\bpackages/app/src/ui/|\bpackages/app/src/(main|test_support|windows)\.rs'
 
 violations=$(
-    grep -rnE --include="*.rs" '(^[[:space:]]*use[[:space:]]+(gpui_component|daruda_ui)\b|\bdaruda_ui::)' packages/app/src \
+    grep -rnE --include="*.rs" '(^[[:space:]]*use[[:space:]]+(gpui_component|gpui_base|daruda_ui)\b|\b(gpui_base|daruda_ui)::)' packages/app/src \
         | grep -Ev "$ALLOW" \
         || true
 )
 
 if [ -n "$violations" ]; then
-    echo "Direct gpui_component / daruda_ui access outside crate::ui::*:"
+    echo "Direct gpui_component / gpui_base / daruda_ui access outside crate::ui::*:"
     echo "$violations"
     echo
     echo "Route through crate::ui::*. See packages/app/src/ui/mod.rs."
@@ -51,12 +51,12 @@ if [ -n "$violations" ]; then
 fi
 
 package_violations=$(
-    grep -rnE --include="*.rs" '(^[[:space:]]*use[[:space:]]+gpui_component\b|\bgpui_component::)' \
+    grep -rnE --include="*.rs" '(^[[:space:]]*use[[:space:]]+(gpui_component|gpui_base)\b|\b(gpui_component|gpui_base)::)' \
         packages/transcript/src packages/chat/src packages/settings/src || true
 )
 
 if [ -n "$package_violations" ]; then
-    echo "Direct gpui_component access outside daruda_ui:"
+    echo "Direct gpui_component / gpui_base access outside daruda_ui:"
     echo "$package_violations"
     echo
     echo "Route through daruda_ui and re-export what you need there."

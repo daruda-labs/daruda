@@ -58,7 +58,7 @@ fn numbered_lines(rows: usize) -> String {
 }
 
 struct OutputProbe {
-    editor: Entity<daruda_ui::InputState>,
+    editor: Entity<daruda_ui::EditorState>,
     focus_handle: gpui::FocusHandle,
 }
 
@@ -68,10 +68,9 @@ impl OutputProbe {
     fn new(rows: usize, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let text = numbered_lines(rows);
         let editor = cx.new(|cx_state| {
-            let mut state = daruda_ui::InputState::new(window, cx_state)
-                .multi_line(true)
+            let mut state = daruda_ui::EditorState::new(window, cx_state)
                 .soft_wrap(true)
-                .code_editor(daruda_ui::highlighter::PLAIN_LANGUAGE)
+                .language(daruda_ui::highlighter::PLAIN_LANGUAGE)
                 .line_number(false);
             state.set_value(text, window, cx_state);
             state.set_disabled(true, cx_state);
@@ -124,9 +123,9 @@ async fn large_output_embed_is_capped_and_shapes_only_visible_rows(cx: &mut Test
         let state = p.editor.read(cx);
         (
             state.display_rows(),
-            state.visible_rows(),
+            state.visible_row_range(),
             state.scroll_size().height,
-            state.last_bounds().map(|b| b.size.height),
+            state.text_bounds().map(|b| b.size.height),
         )
     });
     let wrapper = cx
@@ -198,7 +197,7 @@ async fn large_output_embed_is_capped_and_shapes_only_visible_rows(cx: &mut Test
     let wrapper = cx
         .debug_bounds(PROBE_EMBED)
         .expect("wrapper painted under min-content sizing");
-    let (editor_h, visible) = editor.read_with(cx, |e, _| (e.last_bounds(), e.visible_rows()));
+    let (editor_h, visible) = editor.read_with(cx, |e, _| (e.text_bounds(), e.visible_row_range()));
     let editor_h = editor_h.expect("editor text element painted").size.height;
     let visible = visible.expect("editor text element painted");
 
@@ -335,7 +334,7 @@ fn output_editor_wrap_facts(
         (
             state.display_rows(),
             state
-                .last_bounds()
+                .text_bounds()
                 .expect("the embedded editor painted")
                 .size
                 .width,
@@ -528,7 +527,7 @@ async fn capped_embed_wheel_chains_only_after_the_embed_is_exhausted(cx: &mut Te
             .get("b1#0")
             .expect("output editor built for the codex shell block")
             .read(cx)
-            .visible_rows();
+            .visible_row_range();
         (raw, visible)
     });
     assert!(
@@ -561,8 +560,7 @@ async fn capped_embed_wheel_chains_only_after_the_embed_is_exhausted(cx: &mut Te
                 .get("b1#0")
                 .expect("output editor built")
                 .read(cx)
-                .scroll_handle()
-                .offset()
+                .scroll_offset()
                 .y,
         )
     });
@@ -584,8 +582,7 @@ async fn capped_embed_wheel_chains_only_after_the_embed_is_exhausted(cx: &mut Te
                 .get("b1#0")
                 .expect("output editor built")
                 .read(cx)
-                .scroll_handle()
-                .offset()
+                .scroll_offset()
                 .y
         }));
     }
@@ -612,7 +609,7 @@ async fn capped_embed_wheel_chains_only_after_the_embed_is_exhausted(cx: &mut Te
         state.set_scroll_offset(point(px(0.), px(-1_000_000.)), cx);
     });
     vcx.run_until_parked();
-    let end = editor.read_with(&vcx, |state, _| state.scroll_handle().offset().y);
+    let end = editor.read_with(&vcx, |state, _| state.scroll_offset().y);
     assert!(
         end < px(0.),
         "the embed should have scrolled somewhere, got {end:?}"
@@ -629,8 +626,7 @@ async fn capped_embed_wheel_chains_only_after_the_embed_is_exhausted(cx: &mut Te
                 .get("b1#0")
                 .expect("output editor built")
                 .read(cx)
-                .scroll_handle()
-                .offset()
+                .scroll_offset()
                 .y,
         )
     });
@@ -820,10 +816,10 @@ async fn read_tool_outputs_render_through_the_capped_embed(cx: &mut TestAppConte
             .expect("no output editor built — the read fell back to markdown")
             .read(cx);
         (
-            state.code_editor_language().cloned(),
+            Some(state.language_name()),
             state.value().to_string(),
             state.display_rows(),
-            state.visible_rows(),
+            state.visible_row_range(),
         )
     });
     assert_eq!(
@@ -872,7 +868,7 @@ fn output_editor_extents(
             .read(cx);
         (
             state
-                .last_bounds()
+                .text_bounds()
                 .expect("the embedded editor painted")
                 .size
                 .height,
@@ -898,40 +894,6 @@ fn fold_in_window<R>(
         view.update(cx, |v, cx| f(v, window, cx))
     })
     .expect("the window is open")
-}
-
-/// A descendant that stops mouse-up propagation must not strand the transcript
-/// container's drag lifetime: its mouse-down starts the selection-autoscroll
-/// poll, so if the matching mouse-up never reaches it the poll keeps ticking.
-#[gpui::test]
-async fn clicking_a_floating_button_still_ends_the_selection_drag(cx: &mut TestAppContext) {
-    let (window_handle, view) = render_shell_output_card(cx, 3, true);
-    push_filler_cards(cx, window_handle, &view, 30);
-    cx.update_window(window_handle, |_, window, _| window.refresh())
-        .unwrap();
-    cx.run_until_parked();
-    let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
-    vcx.run_until_parked();
-
-    let button = vcx
-        .debug_bounds("agent-chat-scroll-bottom")
-        .expect("scrolled up off the bottom, so the jump-to-bottom button paints");
-    vcx.simulate_mouse_move(button.center(), None, Default::default());
-    vcx.run_until_parked();
-    vcx.simulate_mouse_down(button.center(), gpui::MouseButton::Left, Default::default());
-    vcx.run_until_parked();
-    assert!(
-        view.read_with(&vcx, |v, _| v.selection_drag_active),
-        "the container's mouse-down starts the drag, so the fixture is vacuous \
-         if it never does"
-    );
-
-    vcx.simulate_mouse_up(button.center(), gpui::MouseButton::Left, Default::default());
-    vcx.run_until_parked();
-    assert!(
-        !view.read_with(&vcx, |v, _| v.selection_drag_active),
-        "the drag outlived its mouse-up, so the autoscroll poll is still running"
-    );
 }
 
 /// A transcript long enough to scroll, following its tail, with its scrollbar
@@ -1057,13 +1019,48 @@ async fn copy_chip_press_leaves_the_embed_scroll_alone(cx: &mut TestAppContext) 
     let chip = vcx
         .debug_bounds("agent-chat-out-copy-b1#0-chip")
         .expect("the copy chip painted");
-    let before = editor.read_with(&vcx, |s, _| s.scroll_handle().offset().y);
+    let before = editor.read_with(&vcx, |s, _| s.scroll_offset().y);
     assert!(before < px(0.), "the fixture must start scrolled");
     vcx.simulate_click(
         point(chip.right() - px(1.), chip.center().y),
         gpui::Modifiers::default(),
     );
     vcx.run_until_parked();
-    let after = editor.read_with(&vcx, |s, _| s.scroll_handle().offset().y);
+    let after = editor.read_with(&vcx, |s, _| s.scroll_offset().y);
     assert_eq!(before, after, "the chip press scrolled the embed");
+}
+
+/// The chip occludes the embed under it, so pointing at the chip leaves the
+/// embed's hover group; the chip must stay shown regardless.
+#[gpui::test]
+async fn copy_chip_stays_shown_while_the_pointer_is_on_it(cx: &mut TestAppContext) {
+    let (window_handle, _view) = render_shell_output_card(cx, LARGE_ROWS, true);
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
+    let embed = vcx
+        .debug_bounds("agent-chat-out-embed-b1#0")
+        .expect("the bounded embed painted");
+    vcx.simulate_mouse_move(embed.center(), None, gpui::Modifiers::default());
+    vcx.update(|window, _| window.refresh());
+    vcx.run_until_parked();
+    let chip = vcx
+        .debug_bounds("agent-chat-out-copy-b1#0-chip")
+        .expect("the copy chip painted");
+    vcx.simulate_mouse_move(chip.center(), None, gpui::Modifiers::default());
+    vcx.update(|window, _| window.refresh());
+    vcx.run_until_parked();
+    let chip = vcx
+        .debug_bounds("agent-chat-out-copy-b1#0-chip")
+        .expect("the copy chip painted");
+    let scale = vcx.update(|window, _| window.scale_factor());
+    let shown = vcx.update(|window, _| {
+        window.painted_quads().into_iter().any(|quad| {
+            (quad.bounds.origin.x.0 - f32::from(chip.origin.x) * scale).abs() < 1.0
+                && (quad.bounds.origin.y.0 - f32::from(chip.origin.y) * scale).abs() < 1.0
+                && quad
+                    .background
+                    .as_solid()
+                    .is_some_and(|color| color.a > 0.5)
+        })
+    });
+    assert!(shown, "the chip faded out under the pointer");
 }

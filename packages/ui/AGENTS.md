@@ -2,8 +2,8 @@
 
 Domain-free widgets, shared theme metrics, and the app's UI facade.
 App callers use `crate::ui::*`; sibling widget packages use `daruda_ui`.
-Direct `gpui_component` and `ferrum_flow` paths outside their allowed
-infrastructure sites are forbidden, including fully qualified paths.
+Direct `gpui_component`, `gpui_base`, and `ferrum_flow` paths outside their
+allowed infrastructure sites are forbidden, including fully qualified paths.
 The flow canvas is exposed through `crate::ui::flow_canvas`. The boundary
 is enforced by `lint-direct-gpui-component.sh` and `lint-direct-ferrum-flow.sh`
 under `scripts/`.
@@ -17,7 +17,7 @@ wrappers or vendored behavior. These detailed contracts are not optional.
 |---|---|
 | New or changed wrapper | [Shapes and examples](REFERENCE.md#three-wrapper-shapes), [trait exports](REFERENCE.md#trait-re-exports--what-to-put-in-modrs), [checklist](REFERENCE.md#adding-a-new-wrapper) |
 | Widget placement or the current wrapper catalogue | [Module layout](REFERENCE.md#wrapper-module-layout), [app UI](../app/src/REFERENCE.md#ui) |
-| Vendored widgets or an upstream update | [Preserved patches](REFERENCE.md#vendor-patches-in-vendorgpui-componentgpui_component), [patch workflow](../../patches/README.md) |
+| Vendored widgets or an upstream update | [Preserved patches](REFERENCE.md#vendor-patches-in-vendorgpui-kit), [patch workflow](../../patches/README.md) |
 | Modals and input focus | [App modal rules](../app/src/AGENTS.md#g9--modals-go-through-gpui_componentdialog), [tab navigation](../app/src/REFERENCE.md#tab-navigation-in-modals) |
 | Theme presets | [Theme instructions](../../assets/themes/AGENTS.md), [Design](../../DESIGN.md) |
 
@@ -98,15 +98,14 @@ never confirms.
 ## Allowed exceptions to the import rule
 
 A small set of infrastructure files legitimately calls `gpui_component::*`
-directly. The lint script (`scripts/lint-direct-gpui-component.sh`)
-allow-lists them:
+or `gpui_base::*` directly. The lint script
+(`scripts/lint-direct-gpui-component.sh`) allow-lists them:
 
 | File | Why |
 |---|---|
 | `src/main.rs` | `gpui_component::init(cx)` + `ui::theme::apply_daruda_palette(cx)` at app startup |
 | `src/test_support.rs` | `init(cx)` + palette overlay for unit-test fixtures |
 | `src/windows.rs` | `gpui_component::Root::new(...)` Workspace window wrapping |
-| `src/workspace/render/mod.rs` | `Root::render_*_layer(...)` in `Workspace::render` |
 | `src/ui/` | The facade over this package |
 
 Don't grow this list. If a new file needs direct `gpui_component`
@@ -152,19 +151,28 @@ access, ask first whether the access belongs in `ui/` instead.
 
 ## Vendor Dependencies
 
-`gpui_component` is a vendored `longbridge/gpui-component` copy (Apache-2.0).
+`gpui_component` and `gpui_base` are vendored from upstream gpui-component
+0.8.1 (`longbridge/gpui-kit`, Apache-2.0) under `vendor/gpui-kit/crates/`.
 `ferrum_flow` is a vendored `tu6ge/ferrum-flow` copy at `43b762ce`
 (Apache-2.0), providing the flow-editor canvas. Patch real defects only;
 exclude upstream code from unrelated Clippy/lint/comment-cleanup passes.
 
 Existing explicit gates still apply: the raw-mouse lint scans both trees,
-daruda-authored `gpui_component` patch tests run in CI, and `ferrum_flow`
-declares `rust-version` with `clippy::incompatible_msrv` armed.
+the `gpui-base` and `gpui-component` suites (including daruda-authored patch
+tests) run in CI, and `ferrum_flow` declares `rust-version` with
+`clippy::incompatible_msrv` armed.
 The app accesses both through its UI facade; sibling widget packages use
-`daruda_ui`, never `gpui_component`.
+`daruda_ui`, never `gpui_component` or `gpui_base`.
 
-`ferrum_flow` uses `gpui = { workspace = true }` so its types share daruda's
-pinned GPUI instance. Preserve upstream modules for reproducible re-vendoring,
+Theme writes go through `gpui_component::Theme::update`: 0.8 rederives the
+component tokens and the `gpui_base` projection only there, so a
+`Theme::global_mut` edit leaves widgets on upstream defaults. Buttons read
+their own `button_*` slots; `theme::apply_daruda_palette` mirrors them from the
+generic colors, and turns `focus_ring` off so a focused control tints its own
+border instead of adding an outer ring that doubles the edge and is clipped.
+
+The gpui-kit manifests and `ferrum_flow` use `gpui = { workspace = true }`
+so their types share daruda's pinned GPUI instance. Preserve upstream modules for reproducible re-vendoring,
 rather than pruning unused ones. Provenance, retained patches, and re-vendor
 procedures live in [patches/README.md](../../patches/README.md).
 

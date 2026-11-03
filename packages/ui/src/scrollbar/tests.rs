@@ -176,7 +176,7 @@ mod track_press_tests {
         point, prelude::*, px, size,
     };
 
-    use super::{Scrollbar, ScrollbarShow};
+    use super::{Scrollbar, ScrollbarMode};
     use crate::test_support::init_gpui_component;
 
     /// A scroll area far taller than its window, with the draggable scrollbar
@@ -208,7 +208,7 @@ mod track_press_tests {
                         .bottom_0()
                         .child(
                             Scrollbar::vertical(&self.handle)
-                                .scrollbar_show(ScrollbarShow::Always)
+                                .mode(ScrollbarMode::Always)
                                 .id("probe-scrollbar"),
                         ),
                 )

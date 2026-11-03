@@ -90,8 +90,20 @@ async fn an_async_save_freezes_every_checklist_edit_until_it_finishes(cx: &mut T
                     .push(original.clone());
                 let (id, saved) = workspace.commit_task_editor(editor, window, cx).unwrap();
                 let content = workspace.task_editor(editor).unwrap();
-                assert!(content.new_subtask_input.read(cx).is_disabled());
-                assert!(content.editing_subtask_input.read(cx).is_disabled());
+                assert!(
+                    content
+                        .new_subtask_input
+                        .read(cx)
+                        .presentation()
+                        .is_disabled()
+                );
+                assert!(
+                    content
+                        .editing_subtask_input
+                        .read(cx)
+                        .presentation()
+                        .is_disabled()
+                );
                 let input = content.new_subtask_input.clone();
                 input.update(cx, |input, cx| input.set_value("later", window, cx));
                 workspace.submit_new_subtask(editor, window, cx);
@@ -122,8 +134,20 @@ async fn an_async_save_freezes_every_checklist_edit_until_it_finishes(cx: &mut T
     cx.update_window(fixture.window.into(), |_, window, cx| {
         fixture.workspace.update(cx, |workspace, cx| {
             let content = workspace.task_editor(editor).unwrap();
-            assert!(!content.new_subtask_input.read(cx).is_disabled());
-            assert!(!content.editing_subtask_input.read(cx).is_disabled());
+            assert!(
+                !content
+                    .new_subtask_input
+                    .read(cx)
+                    .presentation()
+                    .is_disabled()
+            );
+            assert!(
+                !content
+                    .editing_subtask_input
+                    .read(cx)
+                    .presentation()
+                    .is_disabled()
+            );
             assert_eq!(
                 cx.global::<GlobalTasks>().get(&id).unwrap().subtasks,
                 vec![original]
@@ -171,6 +195,7 @@ async fn a_failed_async_save_unlocks_the_checklist(cx: &mut TestAppContext) {
                         .unwrap()
                         .new_subtask_input
                         .read(cx)
+                        .presentation()
                         .is_disabled()
                 );
                 (editor, saved)
@@ -182,8 +207,20 @@ async fn a_failed_async_save_unlocks_the_checklist(cx: &mut TestAppContext) {
         fixture.workspace.update(cx, |workspace, cx| {
             let content = workspace.task_editor(editor).unwrap();
             assert!(content.can_save(cx));
-            assert!(!content.new_subtask_input.read(cx).is_disabled());
-            assert!(!content.editing_subtask_input.read(cx).is_disabled());
+            assert!(
+                !content
+                    .new_subtask_input
+                    .read(cx)
+                    .presentation()
+                    .is_disabled()
+            );
+            assert!(
+                !content
+                    .editing_subtask_input
+                    .read(cx)
+                    .presentation()
+                    .is_disabled()
+            );
             content
                 .new_subtask_input
                 .clone()
@@ -1541,7 +1578,10 @@ fn the_disk_version_shows_read_only_beside_the_prompt(cx: &mut TestAppContext) {
                 .clone()
                 .expect("shown");
             assert_eq!(copy.read(cx).value().as_ref(), "on disk");
-            assert!(copy.read(cx).is_disabled(), "the disk version is read-only");
+            assert!(
+                copy.read(cx).presentation().is_disabled(),
+                "the disk version is read-only"
+            );
             ws.close_prompt_disk_copy(editor, cx);
             let te = ws.task_editor(editor).unwrap();
             assert!(te.disk_copy.is_none());

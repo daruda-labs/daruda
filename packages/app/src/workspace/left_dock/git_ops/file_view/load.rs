@@ -225,12 +225,9 @@ impl Workspace {
 /// No-op if the window is gone (logged by `try_update_workspace_window`).
 fn configure_file_editor(
     cx: &mut Context<Workspace>,
-    editor: gpui::Entity<gpui_component::input::InputState>,
-    apply: impl FnOnce(
-        &mut gpui_component::input::InputState,
-        &mut Window,
-        &mut Context<gpui_component::input::InputState>,
-    ) + 'static,
+    editor: gpui::Entity<crate::ui::EditorState>,
+    apply: impl FnOnce(&mut crate::ui::EditorState, &mut Window, &mut Context<crate::ui::EditorState>)
+    + 'static,
 ) {
     let entity_id = cx.entity_id();
     if let Some(wh) = crate::window_registry::WindowRegistry::handle_for_workspace(entity_id, cx) {

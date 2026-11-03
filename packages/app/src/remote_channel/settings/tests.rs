@@ -30,12 +30,9 @@ struct Host {
 }
 
 impl gpui::Render for Host {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl gpui::IntoElement {
         use gpui::{ParentElement as _, Styled as _};
-        gpui::div()
-            .size_full()
-            .child(self.view.clone())
-            .children(gpui_component::Root::render_dialog_layer(window, cx))
+        gpui::div().size_full().child(self.view.clone())
     }
 }
 

@@ -8,10 +8,15 @@
 use crate::ui::ScrollableElement as _;
 use crate::ui::theme;
 use crate::ui::{ButtonVariants as _, Disableable as _};
-use gpui::{AnyElement, ClickEvent, Context, ExternalPaths, IntoElement, div, prelude::*, px};
+use gpui::{
+    AnyElement, App, ClickEvent, Context, ExternalPaths, IntoElement, SharedString, WeakEntity,
+    Window, div, prelude::*, px,
+};
 
+use crate::workspace::Workspace;
 use crate::workspace::layout::Dock;
-use crate::workspace::layout::{BottomDockSnapshot, ComposerExpand};
+use crate::workspace::layout::{BottomDockSnapshot, ComposerExpand, SlashMenuView};
+use crate::workspace::main_area::bottom_dock::composer_ops::HistoryDir;
 use crate::workspace::path_drag::PathDrag;
 
 /// Build the terminal input panel body.
@@ -172,6 +177,7 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
             context
         });
     let mut cell = div()
+        .relative()
         .flex_1()
         .flex()
         .when_some(answer_context, |el, context| el.key_context(context))
@@ -232,12 +238,50 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
                 .child(attachments),
         );
     }
+    if let Some(menu) = &snap.slash_menu {
+        // Deferred: laid out in place above the composer, but painted after
+        // the window without the dock's clip, so it can rise over the panes.
+        cell = cell.child(
+            gpui::deferred(render_slash_menu(menu, snap.workspace.0.clone(), cx)).with_priority(1),
+        );
+    }
+    let ws = snap.workspace.0.clone();
     super::bottom_panel_body()
         .capture_action(move |_: &crate::ui::InputPaste, _, cx| {
             if let Some(ws) = ws_for_paste.upgrade() {
                 ws.update(cx, |ws, cx| ws.composer_paste_action(cx));
             }
         })
+        // The composer's own keys run before the field's (capture phase); an
+        // op that handles one stops it there.
+        .capture_action(composer_key(
+            ws.clone(),
+            |ws, action: &crate::ui::InputEnter, window, cx| ws.composer_enter(action, window, cx),
+        ))
+        .capture_action(composer_key(
+            ws.clone(),
+            |ws, _: &crate::ui::InputEscape, _, cx| ws.composer_escape(cx),
+        ))
+        .capture_action(composer_key(
+            ws.clone(),
+            |ws, _: &crate::ui::InputMoveUp, window, cx| {
+                ws.composer_move(HistoryDir::Up, window, cx)
+            },
+        ))
+        .capture_action(composer_key(
+            ws.clone(),
+            |ws, _: &crate::ui::InputMoveDown, window, cx| {
+                ws.composer_move(HistoryDir::Down, window, cx)
+            },
+        ))
+        .capture_action(composer_key(
+            ws.clone(),
+            |ws, _: &crate::ui::InputIndent, window, cx| ws.composer_tab(window, cx),
+        ))
+        .capture_action(composer_key(
+            ws,
+            |ws, _: &crate::ui::InputOutdent, _, cx| ws.composer_shift_tab(cx),
+        ))
         .drag_over::<PathDrag>(|style, _, _, cx| {
             style.bg(theme::current(cx).input_panel_drop_target_bg)
         })
@@ -261,6 +305,88 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
             }),
         )
         .child(cell)
+        .into_any_element()
+}
+
+/// A capture-phase listener that runs a composer op and stops the action
+/// when the op handled it.
+fn composer_key<A: gpui::Action>(
+    ws: WeakEntity<Workspace>,
+    op: impl Fn(&mut Workspace, &A, &mut Window, &mut Context<Workspace>) -> bool + 'static,
+) -> impl Fn(&A, &mut Window, &mut App) + 'static {
+    move |action, window, cx| {
+        let handled = ws
+            .upgrade()
+            .is_some_and(|ws| ws.update(cx, |ws, cx| op(ws, action, window, cx)));
+        if handled {
+            cx.stop_propagation();
+        }
+    }
+}
+
+/// The slash-command list, floating above the composer. Rows are clickable;
+/// the keyboard drives it through the composer ops.
+fn render_slash_menu(
+    menu: &SlashMenuView,
+    ws: WeakEntity<Workspace>,
+    cx: &mut Context<Dock>,
+) -> AnyElement {
+    let t = theme::current(cx);
+    let rows = menu
+        .items
+        .iter()
+        .enumerate()
+        .map(|(index, (name, description))| {
+            let ws = ws.clone();
+            div()
+                .id(("slash-item", index))
+                .flex()
+                .flex_row()
+                .items_baseline()
+                .gap(px(theme::GAP_SM))
+                .px(px(theme::PAD_SM))
+                .py(px(theme::GAP_SM))
+                .rounded(px(theme::RADIUS_SM))
+                .when(index == menu.selected, |row| row.bg(t.lane_row_hover_bg))
+                .hover(|row| row.bg(t.lane_row_hover_bg))
+                .cursor_pointer()
+                .child(
+                    div()
+                        .flex_none()
+                        .text_color(t.text_primary)
+                        .child(SharedString::from(format!("/{name}"))),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .text_color(t.text_muted)
+                        .child(description.clone()),
+                )
+                .on_click(move |_, window, cx| {
+                    if let Some(ws) = ws.upgrade() {
+                        ws.update(cx, |ws, cx| ws.accept_slash_item(Some(index), window, cx));
+                    }
+                })
+        });
+    div()
+        .id("composer-slash-menu")
+        .debug_selector(|| "composer-slash-menu".into())
+        .absolute()
+        .bottom_full()
+        .left_0()
+        .right_0()
+        .mb(px(theme::GAP_SM))
+        .p(px(theme::GAP_SM))
+        .max_h(px(theme::COMPOSER_SLASH_MENU_MAX_H))
+        .overflow_y_scroll()
+        .bg(t.float_panel_bg)
+        .border_1()
+        .border_color(t.border)
+        .rounded(px(theme::RADIUS_MD))
+        .text_size(px(theme::FONT_SIZE_MD))
+        .occlude()
+        .children(rows)
         .into_any_element()
 }
 

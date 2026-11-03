@@ -3,11 +3,11 @@
 mod render;
 use super::super::FlowGraphView;
 use super::prompt_edit::{PromptEdit, PromptField};
-use crate::ui::{InputState, WindowExt as _, make_markdown_prose_state, theme};
+use crate::ui::{TextareaState, WindowExt as _, make_markdown_prose_state, theme};
 use gpui::{App, Context, Entity, FocusHandle, Focusable, Subscription, WeakEntity, Window};
 
 pub(super) struct Editor {
-    input: Entity<InputState>,
+    input: Entity<TextareaState>,
     target: WeakEntity<FlowGraphView>,
     edit: PromptEdit,
     error: Option<String>,
@@ -21,7 +21,13 @@ impl Editor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if matches!(event, crate::ui::InputEvent::PressEnter { secondary: true }) {
+        if matches!(
+            event,
+            crate::ui::InputEvent::PressEnter {
+                secondary: true,
+                ..
+            }
+        ) {
             self.apply(window, cx);
         }
     }

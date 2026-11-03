@@ -22,7 +22,7 @@ packages=(
 
 case "$gate" in
     clippy) command=(cargo clippy --locked "$@") ;;
-    test) command=(cargo test --locked "$@"); packages+=(gpui_component) ;;
+    test) command=(cargo test --locked "$@"); packages+=(gpui-base gpui-component) ;;
     app-features)
         exec cargo clippy --locked "$@" -p daruda --all-features --all-targets -- -D warnings
         ;;

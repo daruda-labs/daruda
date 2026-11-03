@@ -176,7 +176,7 @@ fn build_config(hint: LanguageHint<'_>) -> Option<Arc<HighlightConfiguration>> {
         return Some(hit.clone());
     }
     let mut config = HighlightConfiguration::new(
-        lang.language.clone(),
+        lang.language.clone()?,
         lang.name.to_string(),
         lang.highlights.as_ref(),
         lang.injections.as_ref(),
@@ -491,9 +491,11 @@ mod tests {
         let rope = gpui_component::Rope::from_str(code);
 
         let mut highlighter = gpui_component::highlighter::SyntaxHighlighter::new("rust");
-        highlighter.update(None, &rope);
+        highlighter.update(None, &rope, None);
 
-        let theme = gpui_component::highlighter::HighlightTheme::default_dark();
+        let theme = gpui_component::highlighter::HighlightTheme::default_dark()
+            .as_ref()
+            .clone();
         let styles = highlighter.styles(&(0..code.len()), &theme);
 
         let colored = styles.iter().filter(|(_, s)| s.color.is_some()).count();
@@ -518,9 +520,11 @@ mod tests {
         for (ext, code) in cases {
             let language = crate::highlighter::language_for_extension(ext);
             let mut highlighter = gpui_component::highlighter::SyntaxHighlighter::new(&language);
-            highlighter.update(None, &gpui_component::Rope::from_str(code));
+            highlighter.update(None, &gpui_component::Rope::from_str(code), None);
 
-            let theme = gpui_component::highlighter::HighlightTheme::default_dark();
+            let theme = gpui_component::highlighter::HighlightTheme::default_dark()
+                .as_ref()
+                .clone();
             let styles = highlighter.styles(&(0..code.len()), &theme);
             let colored = styles.iter().filter(|(_, s)| s.color.is_some()).count();
             assert!(
@@ -536,8 +540,10 @@ mod tests {
         let (_, java) = cases[0];
         let mut plain =
             gpui_component::highlighter::SyntaxHighlighter::new(crate::highlighter::PLAIN_LANGUAGE);
-        plain.update(None, &gpui_component::Rope::from_str(java));
-        let theme = gpui_component::highlighter::HighlightTheme::default_dark();
+        plain.update(None, &gpui_component::Rope::from_str(java), None);
+        let theme = gpui_component::highlighter::HighlightTheme::default_dark()
+            .as_ref()
+            .clone();
         assert!(
             plain
                 .styles(&(0..java.len()), &theme)
@@ -560,7 +566,7 @@ mod tests {
         let rope = gpui_component::Rope::from_str(code);
 
         let mut highlighter = gpui_component::highlighter::SyntaxHighlighter::new("rust");
-        highlighter.update(None, &rope);
+        highlighter.update(None, &rope, None);
 
         let mut theme = (*gpui_component::highlighter::HighlightTheme::default_dark()).clone();
         theme.style.syntax = syntax::editor_syntax_colors_of(syntax::SyntaxPalette::Daruda, false);

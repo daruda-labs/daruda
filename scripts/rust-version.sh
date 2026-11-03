@@ -17,7 +17,7 @@ select_version() {
           elif ($version | test("^[0-9]+\\.[0-9]+(\\.[0-9]+)?$")) | not
           then error("invalid Rust floor") else . end
         | [.packages[]
-           | select((.name | startswith("gpui_component")) | not)
+           | select((.name | startswith("gpui-")) | not)
            | select(.rust_version != $version) | .name] as $drift
         | if ($drift | length) > 0
           then error("Rust floor differs in: " + ($drift | join(", ")))
@@ -31,7 +31,7 @@ if [ "${1:-}" = "--self-test" ]; then
             {name: "daruda", rust_version: $version},
             {name: "daruda_core", rust_version: $version},
             {name: "ferrum_flow", rust_version: $version},
-            {name: "gpui_component", rust_version: "1.85"}
+            {name: "gpui-component", rust_version: null}
         ]}')
         [ "$(printf '%s' "$fixture" | select_version)" = "$version" ]
     done

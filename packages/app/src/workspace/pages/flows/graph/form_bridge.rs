@@ -136,11 +136,19 @@ impl FlowGraphView {
         self._form_watches.clear();
         if let Some(form) = &self.form {
             for input in form.watch_inputs() {
-                self._form_watches.push(cx.subscribe_in(
-                    &input,
-                    window,
-                    |view, _, event, window, cx| view.on_bound_input(event, window, cx),
-                ));
+                let watch = match &input {
+                    crate::ui::FieldState::Line(state) => {
+                        cx.subscribe_in(state, window, |view, _, event, window, cx| {
+                            view.on_bound_input(event, window, cx)
+                        })
+                    }
+                    crate::ui::FieldState::Text(state) => {
+                        cx.subscribe_in(state, window, |view, _, event, window, cx| {
+                            view.on_bound_input(event, window, cx)
+                        })
+                    }
+                };
+                self._form_watches.push(watch);
             }
             for select in form.watch_selects(cx) {
                 self._form_watches.push(cx.subscribe_in(

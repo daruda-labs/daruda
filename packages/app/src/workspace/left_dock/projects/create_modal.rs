@@ -612,7 +612,7 @@ mod tests {
             px(36.)
         );
         let text = modal.read_with(&vcx, |modal, cx| {
-            modal.branch_input.read(cx).last_bounds().unwrap()
+            modal.branch_input.read(cx).text_bounds().unwrap()
         });
         assert_eq!(text.left() - branch.left(), px(10.));
         assert_eq!(text.top() - branch.top(), px(8.));

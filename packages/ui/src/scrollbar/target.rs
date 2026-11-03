@@ -7,7 +7,7 @@
 use gpui::{App, Entity, ListState, Pixels, ScrollHandle, UniformListScrollHandle};
 
 use super::Axis;
-use crate::InputState;
+use crate::{EditorState, TextareaState};
 
 /// A region a scrollbar thumb can move.
 pub trait ThumbTarget: 'static {
@@ -50,13 +50,19 @@ impl ThumbTarget for ListState {
     }
 }
 
-impl ThumbTarget for Entity<InputState> {
-    fn scroll_to(&self, axis: Axis, offset: Pixels, cx: &mut App) {
-        // `set_scroll_offset` owns the clamp and the repaint; writing the
-        // editor's scroll handle directly would skip both.
-        self.update(cx, |state, cx| {
-            let current = state.scroll_handle().offset();
-            state.set_scroll_offset(axis.replace(current, offset), cx);
-        });
-    }
+// `set_scroll_offset` owns the clamp and the repaint; writing the editor's
+// scroll handle directly would skip both.
+macro_rules! impl_editor_thumb_target {
+    ($state:ty) => {
+        impl ThumbTarget for Entity<$state> {
+            fn scroll_to(&self, axis: Axis, offset: Pixels, cx: &mut App) {
+                self.update(cx, |state, cx| {
+                    let current = state.scroll_offset();
+                    state.set_scroll_offset(axis.replace(current, offset), cx);
+                });
+            }
+        }
+    };
 }
+impl_editor_thumb_target!(TextareaState);
+impl_editor_thumb_target!(EditorState);

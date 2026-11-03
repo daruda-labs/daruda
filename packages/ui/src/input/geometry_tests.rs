@@ -13,10 +13,25 @@ enum Kind {
     PaneSearch,
 }
 
+/// The painted text bounds and focus of a field, whichever kind it is.
+fn text_bounds(state: &FieldState, cx: &App) -> Option<Bounds<Pixels>> {
+    match state {
+        FieldState::Line(state) => state.read(cx).text_bounds(),
+        FieldState::Text(state) => state.read(cx).text_bounds(),
+    }
+}
+
+fn focus(state: &FieldState, window: &mut Window, cx: &mut App) {
+    match state {
+        FieldState::Line(state) => state.update(cx, |state, cx| state.focus(window, cx)),
+        FieldState::Text(state) => state.update(cx, |state, cx| state.focus(window, cx)),
+    }
+}
+
 struct Field {
     selector: &'static str,
     kind: Kind,
-    state: Entity<InputState>,
+    state: FieldState,
     height: f32,
     inset_y: f32,
 }
@@ -159,17 +174,25 @@ fn verify_geometry(cx: &mut TestAppContext, light: bool) {
             let fields = specs
                 .into_iter()
                 .map(|(selector, kind, value, height, inset_y, rows)| {
-                    let state = cx.new(|cx| {
-                        let mut state = InputState::new(window, cx)
-                            .placeholder("Placeholder")
-                            .masked(selector == "masked");
-                        if let Some((min, max)) = rows {
-                            state = state.auto_grow(min, max);
-                        }
-                        state.set_value(value, window, cx);
-                        state.set_disabled(selector == "disabled", cx);
-                        state
-                    });
+                    let disabled = selector == "disabled";
+                    let state = match rows {
+                        Some((min, max)) => FieldState::Text(cx.new(|cx| {
+                            let mut state = TextareaState::new(window, cx)
+                                .placeholder("Placeholder")
+                                .auto_grow(min, max);
+                            state.set_value(value, window, cx);
+                            state.set_disabled(disabled, cx);
+                            state
+                        })),
+                        None => FieldState::Line(cx.new(|cx| {
+                            let mut state = InputState::new(window, cx)
+                                .placeholder("Placeholder")
+                                .masked(selector == "masked");
+                            state.set_value(value, window, cx);
+                            state.set_disabled(disabled, cx);
+                            state
+                        })),
+                    };
                     Field {
                         selector,
                         kind,
@@ -230,10 +253,9 @@ fn verify_geometry(cx: &mut TestAppContext, light: bool) {
                     "{} outer height",
                     field.selector
                 );
-                let state = field.state.read(cx);
-                let mut text = state.last_bounds().unwrap();
+                let mut text = text_bounds(&field.state, cx).unwrap();
                 // Painted text bounds include the caret-following scroll offset.
-                text.origin -= state.scroll_handle().offset();
+                text.origin -= field.state.scroll_offset(cx);
                 let inset_x = if matches!(field.kind, Kind::PaneSearch) {
                     9.
                 } else {
@@ -256,7 +278,7 @@ fn verify_geometry(cx: &mut TestAppContext, light: bool) {
                     "{} bottom inset",
                     field.selector
                 );
-                assert_eq!(state.is_disabled(), field.selector == "disabled");
+                assert_eq!(field.state.is_disabled(cx), field.selector == "disabled");
             }
         })
         .unwrap();
@@ -278,7 +300,7 @@ fn verify_geometry(cx: &mut TestAppContext, light: bool) {
     window
         .update(&mut vcx, |_, window, cx| {
             let state = probe.read(cx).fields[0].state.clone();
-            state.update(cx, |state, cx| state.focus(window, cx))
+            focus(&state, window, cx)
         })
         .unwrap();
     vcx.run_until_parked();

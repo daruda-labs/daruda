@@ -67,7 +67,7 @@ use daruda_transcript::display_filter::DisplayFilter;
 use daruda_transcript::editor::state::{FilterEditorState, FoldEditorState};
 use daruda_transcript::fold_mode::FoldMode;
 use daruda_ui::select::{self, SelectOption, SelectState};
-use daruda_ui::{InputEvent, InputState};
+use daruda_ui::{InputEvent, InputState, TextareaState};
 
 fn settings_button(
     id: impl Into<gpui::ElementId>,

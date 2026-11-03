@@ -1,9 +1,7 @@
 //! Provider-native optional fields; unchanged values retain their original shape.
+use crate::ui::TextareaState;
 use crate::workspace::right_dock::form_layout;
-use crate::{
-    surface::strings,
-    ui::{InputState, theme},
-};
+use crate::{surface::strings, ui::theme};
 use gpui::{App, AppContext, Entity, IntoElement, SharedString, Window, div, prelude::*, px};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -17,7 +15,7 @@ const KEYS: [&str; 5] = [
 ];
 
 pub(super) struct CodexOptions {
-    pub inputs: Vec<Entity<InputState>>,
+    pub inputs: Vec<Entity<TextareaState>>,
     original: Vec<String>,
 }
 impl CodexOptions {
@@ -25,7 +23,7 @@ impl CodexOptions {
         Self {
             inputs: KEYS
                 .iter()
-                .map(|_| cx.new(|cx| InputState::new(window, cx).auto_grow(1, 4)))
+                .map(|_| cx.new(|cx| TextareaState::new(window, cx).auto_grow(1, 4)))
                 .collect(),
             original: vec![String::new(); KEYS.len()],
         }

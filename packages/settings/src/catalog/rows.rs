@@ -76,7 +76,7 @@ impl SettingsView {
             fold: CardFold::default(),
             preset,
             env_input: cx.new(|cx_state| {
-                InputState::new(window, cx_state)
+                TextareaState::new(window, cx_state)
                     .auto_grow(
                         theme::palette::SETTINGS_AGENT_ENV_ROWS_MIN,
                         theme::palette::SETTINGS_AGENT_ENV_ROWS_MAX,

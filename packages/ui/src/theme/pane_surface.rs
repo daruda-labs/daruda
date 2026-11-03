@@ -247,6 +247,12 @@ fn neutral_overlay_for(bg: gpui::Hsla) -> gpui::Hsla {
     }
 }
 
+/// The neutral overlay for `bg` (white over dark, black over light) at
+/// `alpha`: one step off the surface on any background.
+pub fn neutral_tint_over(bg: gpui::Hsla, alpha: f32) -> gpui::Hsla {
+    neutral_overlay_for(bg).opacity(alpha)
+}
+
 /// Background-derived elevation tint for the agent-chat tool cards. A
 /// translucent neutral overlay picked by the pane background's *lightness*
 /// (white over a dark background, black over a light one), so a tool card

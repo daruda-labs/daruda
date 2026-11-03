@@ -1,4 +1,4 @@
-use daruda_ui::input::InputState;
+use daruda_ui::input::{InputState, TextareaState};
 use daruda_ui::test_support::init_gpui_component;
 use gpui::TestAppContext;
 
@@ -26,14 +26,14 @@ fn single_line_set_value_strips_newlines(cx: &mut TestAppContext) {
 #[gpui::test]
 fn set_auto_grow_reclamps_the_shown_rows(cx: &mut TestAppContext) {
     init_gpui_component(cx);
-    let window = cx.add_window(|window, cx| InputState::new(window, cx).auto_grow(1, 2));
+    let window = cx.add_window(|window, cx| TextareaState::new(window, cx).auto_grow(1, 2));
     window
         .update(cx, |state, window, cx| {
             state.set_value("1\n2\n3\n4", window, cx);
             assert_eq!(state.display_rows(), 2);
-            state.set_auto_grow(1, 5);
+            state.set_auto_grow(1, 5, cx);
             assert_eq!(state.display_rows(), 4);
-            state.set_auto_grow(1, 3);
+            state.set_auto_grow(1, 3, cx);
             assert_eq!(state.display_rows(), 3);
         })
         .unwrap();
@@ -43,7 +43,7 @@ fn set_auto_grow_reclamps_the_shown_rows(cx: &mut TestAppContext) {
 #[gpui::test]
 fn multi_line_set_value_keeps_newlines(cx: &mut TestAppContext) {
     init_gpui_component(cx);
-    let window = cx.add_window(|window, cx| InputState::new(window, cx).multi_line(true));
+    let window = cx.add_window(TextareaState::new);
     window
         .update(cx, |state, window, cx| {
             state.set_value("first\nsecond", window, cx);
@@ -63,7 +63,7 @@ fn multi_line_set_value_keeps_newlines(cx: &mut TestAppContext) {
 fn korean_ime_compose_after_newline_preserves_syllable(cx: &mut TestAppContext) {
     use gpui::EntityInputHandler as _;
     init_gpui_component(cx);
-    let window = cx.add_window(|window, cx| InputState::new(window, cx).multi_line(true));
+    let window = cx.add_window(TextareaState::new);
     window
         .update(cx, |state, window, cx| {
             // Line 1 = "가", then a newline; compose on line 2 so the marked

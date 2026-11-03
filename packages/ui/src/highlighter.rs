@@ -107,9 +107,9 @@ mod tests {
             ),
         ] {
             let config = highlightable_config(name).unwrap();
-            assert_eq!(config.language, language);
+            assert_eq!(config.language, Some(language));
             tree_sitter_highlight::HighlightConfiguration::new(
-                config.language,
+                config.language.unwrap(),
                 name,
                 &config.highlights,
                 &config.injections,

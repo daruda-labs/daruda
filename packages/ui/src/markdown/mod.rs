@@ -1,4 +1,4 @@
-//! Render-once wrapper over `gpui_component::text::TextView` Markdown.
+//! Render-once wrapper over `gpui_base::TextView` Markdown.
 //!
 //! Builds the window-needing `TextView::markdown` inside render so callers can
 //! construct Markdown from cx-only snapshot paths. Selection is GPUI keyed
@@ -10,18 +10,19 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, App, ElementId, Hsla, IntoElement, ParentElement as _, Pixels, RenderOnce,
-    SharedString, Styled as _, Window, div, relative,
+    AnyElement, App, ElementId, HighlightStyle, Hsla, IntoElement, ParentElement as _, Pixels,
+    Refineable as _, RenderOnce, SharedString, StyleRefinement, Styled as _, Window, div, relative,
+    rems,
 };
+use gpui_base::TextView;
 use gpui_component::ActiveTheme as _;
-use gpui_component::text::{TextView, TextViewStyle};
 
 use crate::{icons, theme};
 
 /// Optional code-block override hook kept domain-free for this UI wrapper.
 type CodeBlockRender =
     Arc<dyn Fn(&str, &str, &mut Window, &mut App) -> Option<AnyElement> + Send + Sync>;
-type LinkClickHandler = Arc<dyn Fn(&str, &mut Window, &mut App) -> bool>;
+type LinkClickHandler = Arc<dyn Fn(&str, &mut Window, &mut App) -> bool + Send + Sync>;
 #[cfg(any(test, feature = "test-support"))]
 type DebugInlineBounds = Arc<dyn Fn(gpui::Bounds<Pixels>) + Send + Sync>;
 
@@ -119,13 +120,17 @@ impl Markdown {
     /// keeps TextView's default platform URL opener.
     pub fn link_click_handler<F>(mut self, f: F) -> Self
     where
-        F: Fn(&str, &mut Window, &mut App) -> bool + 'static,
+        F: Fn(&str, &mut Window, &mut App) -> bool + Send + Sync + 'static,
     {
         self.link_click_handler = Some(Arc::new(f));
         self
     }
+}
 
-    #[cfg(any(test, feature = "test-support"))]
+#[cfg(any(test, feature = "test-support"))]
+impl Markdown {
+    /// Observe the painted bounds of each paragraph's text (rendered
+    /// conformance tests).
     pub fn debug_inline_bounds<F>(mut self, observer: F) -> Self
     where
         F: Fn(gpui::Bounds<Pixels>) + Send + Sync + 'static,
@@ -137,83 +142,112 @@ impl Markdown {
 
 impl RenderOnce for Markdown {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        // TextView's plain (non-syntax) runs carry no color of their own, so
-        // they inherit the ambient text color. Seed it (caller override else
-        // theme foreground) — otherwise the body renders in gpui's default
-        // black, invisible on the dark canvas. Code blocks keep syntax colors.
+        // Plain runs inherit the body colour; seed it (caller override else
+        // theme foreground) so they never fall back to gpui's default black.
         let color = self.color.unwrap_or_else(|| cx.theme().foreground);
-        // Keep the markdown id to key each code block's copy button (below).
+        // Fills and lines lighten or darken from the surface the caller paints
+        // on, not the UI canvas: the agent-chat pane mirrors the terminal
+        // palette, independent of the UI preset (DESIGN.md §AgentChatPane).
+        let surface = self.surface.unwrap_or_else(|| cx.theme().background);
+        let line = theme::neutral_tint_over(surface, theme::MD_VIEW_STRUCTURAL_LINE_ALPHA);
+        let mut style = gpui_component::text::base_text_view_style(cx.theme())
+            .with_foreground(color)
+            // A blockquote is de-emphasised against the body colour, so it
+            // tracks the surface and any dimming the caller applied.
+            .with_muted_foreground(color.opacity(theme::MD_VIEW_MUTED_ALPHA))
+            .with_code_background(theme::neutral_tint_over(
+                surface,
+                theme::MD_VIEW_CODE_FILL_ALPHA,
+            ))
+            .with_border(line)
+            .with_inline_code(HighlightStyle {
+                background_color: Some(theme::neutral_tint_over(
+                    surface,
+                    theme::MD_VIEW_INLINE_CODE_TINT_ALPHA,
+                )),
+                ..Default::default()
+            })
+            .with_table_head(
+                StyleRefinement::default()
+                    .bg(theme::neutral_tint_over(
+                        surface,
+                        theme::MD_VIEW_TABLE_HEADER_FILL_ALPHA,
+                    ))
+                    .text_color(color),
+            );
+        // With a configured body size, the vertical rhythm follows it: the
+        // paragraph gap, the heading scale, and code rows on the prose pitch.
+        let line_height = self.line_height.unwrap_or(theme::MD_VIEW_LINE_HEIGHT);
+        if let Some(size) = self.text_size {
+            style = style.with_paragraph_gap(rems(
+                size * theme::MD_VIEW_PARAGRAPH_GAP / window.rem_size(),
+            ));
+            style = style.with_heading(move |level| {
+                let scale = theme::MD_VIEW_HEADING_SCALE[usize::from(level.clamp(1, 6)) - 1];
+                StyleRefinement::default()
+                    .text_size(size * scale)
+                    .line_height(relative(line_height))
+            });
+            let mut code_block = style.code_block().clone();
+            code_block.refine(
+                &StyleRefinement::default()
+                    .text_size(size)
+                    .line_height(relative(line_height)),
+            );
+            style = style.with_code_block(code_block);
+        }
+        if let Some(size) = self.heading_size {
+            style = style.with_heading(move |_| StyleRefinement::default().text_size(size));
+        }
         let base_id = self.id.clone();
-        let mut view = TextView::markdown(self.id, self.text, window, cx)
+        let mut view = TextView::markdown(self.id, self.text)
             .selectable(self.selectable)
+            .style(style)
             .text_color(color);
         if let Some(family) = self.font_family {
             view = view.font_family(family);
         }
-        // Without a width constraint TextView lays out at its intrinsic
-        // max-content width, overflowing the container (no wrap; content
-        // clipped off-screen). Fill + min_w_0 so it wraps to the container.
-        if self.full_width {
-            view = view.w_full().min_w_0();
-        }
-        // A blockquote is de-emphasised against the body, and the view would
-        // otherwise reach for the UI theme's muted tone — which says nothing
-        // about a caller painting on its own surface (the agent-chat pane
-        // mirrors the terminal palette). Derive it from the body colour so it
-        // tracks that surface, and any dimming the caller already applied.
-        view = view.muted_text_color(color.opacity(theme::MD_VIEW_MUTED_ALPHA));
-        if let Some(surface) = self.surface {
-            view = view.surface_color(surface);
-        }
-        // The paragraph body inherits the ambient text size, so set it to the
-        // caller's configured size, and rebase the view's vertical metrics on
-        // that size. `TextViewStyle`'s defaults are rem-anchored — a 14px
-        // heading base and a 1 rem paragraph gap — so at any configured size
-        // other than the 13px default they stop agreeing with the body: an
-        // `#####` heading renders *smaller* than the prose around it, and the
-        // gap between paragraphs stays 16px however large the text gets.
         if let Some(size) = self.text_size {
-            view = view.text_size(size).style(TextViewStyle {
-                line_height: relative(self.line_height.unwrap_or(theme::MD_VIEW_LINE_HEIGHT)),
-                paragraph_gap: (size * theme::MD_VIEW_PARAGRAPH_GAP).into(),
-                heading_base_font_size: size,
-                heading_font_size: self
-                    .heading_size
-                    .map(|size| Arc::new(move |_, _| size) as _),
-                ..TextViewStyle::default()
-            });
+            view = view.text_size(size).line_height(relative(
+                self.line_height.unwrap_or(theme::MD_VIEW_LINE_HEIGHT),
+            ));
         }
-        if self.text_size.is_none()
-            && let Some(size) = self.heading_size
-        {
-            view = view.style(TextViewStyle::default().heading_font_size(move |_, _| size));
-        }
-        // Adapt the domain-free `(lang, source)` hook to TextView's
-        // `CodeBlock`-shaped one: extract lang + raw source and forward.
         if let Some(cbr) = self.code_block_render {
             view = view.code_block_render(move |cb, window, cx| {
                 let lang = cb.lang();
-                let lang = lang.as_deref().unwrap_or("");
-                let source = cb.code();
-                cbr(lang, source.as_ref(), window, cx)
+                cbr(
+                    lang.as_deref().unwrap_or(""),
+                    cb.code().as_ref(),
+                    window,
+                    cx,
+                )
             });
-        }
-        if let Some(handler) = self.link_click_handler {
-            view = view.link_click_handler(move |url, window, cx| handler(url, window, cx));
         }
         #[cfg(any(test, feature = "test-support"))]
         if let Some(observer) = self.debug_inline_bounds {
             view = view.debug_inline_bounds(move |bounds| observer(bounds));
         }
-        // A hover-revealed copy button on every rendered code block, on for all
-        // markdown. Mermaid fences take the separate `code_block_render`
-        // replace-path above, which fully replaces the block's rendering (and
-        // supplies its own copy button), so they never reach this actions
-        // overlay and are naturally excluded. Key each button by the markdown
-        // id plus a content hash so its ✓ feedback state stays stable across
-        // renders even with multiple blocks of the same language. (Two
-        // byte-identical code blocks in one message hash alike and share one
-        // ✓ state — benign: they copy the same text.)
+        let handler = self.link_click_handler;
+        view = view.on_link_click(move |url, event, window, cx| {
+            // Only a primary click or keyboard activation navigates; a right
+            // press belongs to the context menu.
+            if let gpui::ClickEvent::Mouse(click) = event
+                && click.up.button != gpui::MouseButton::Left
+            {
+                return;
+            }
+            if handler
+                .as_ref()
+                .is_some_and(|handler| handler(url, window, cx))
+            {
+                return;
+            }
+            cx.open_url(url);
+        });
+        // A copy button on every rendered code block. Mermaid fences take the
+        // `code_block_render` replace-path above and supply their own. Key each
+        // button by the markdown id plus a content hash so its ✓ feedback state
+        // stays stable across renders.
         let copy = self.copy_tooltips;
         view = view.code_block_actions(move |cb, window, cx| {
             let mut hasher = DefaultHasher::new();
@@ -233,15 +267,16 @@ impl RenderOnce for Markdown {
         if !self.full_width {
             return view.into_any_element();
         }
-        // WORKAROUND: taffy 0.15.1 lays a flex-column child with a `min-width`
-        // out at that width under a min-content probe and reuses the height at
-        // an exact-fit width (`patches/README.md`, nested list gap) - GPUI pins
-        // taffy, so the block wrapper keeps `min_w_0` off the caller's column.
-        // Clipping x still zeroes its automatic minimum width in a flex row.
+        // Without a width constraint the view lays out at its intrinsic
+        // max-content width; fill the container so it wraps. A zero minimum
+        // width lets it shrink inside a caller's flex row. Not overflow
+        // clipping: that would make this block the content mask that
+        // window-wide selection measures drag auto-scroll against, so a drag
+        // near the block's own bottom edge would scroll the transcript.
         div()
             .w_full()
-            .overflow_x_hidden()
-            .child(view)
+            .min_w_0()
+            .child(view.w_full())
             .into_any_element()
     }
 }

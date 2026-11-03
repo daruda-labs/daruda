@@ -98,9 +98,11 @@ pub use form_helpers::{
 };
 pub use group_box::{GroupBox, GroupBoxVariants, group_box};
 pub use input::{
-    CompletionProvider, HistoryDir, InputEvent, InputGrowMode, InputPaste, InputState, Rope,
-    RopeExt, ScrollWheelBehavior, form_input, input, input_on, input_with_action,
-    input_with_action_grow, readonly_form_input, readonly_input, search_input, search_input_on,
+    CompletionProvider, EditorState, FieldState, InputEnter, InputEscape, InputEvent,
+    InputGrowMode, InputIndent, InputMoveDown, InputMoveUp, InputOutdent, InputPaste, InputState,
+    Rope, RopeExt, TextDecoration, TextState, TextareaState, cursor_display_row, form_input, input,
+    input_on, input_with_action, input_with_action_grow, readonly_form_input, readonly_input,
+    search_input, search_input_on,
 };
 pub use input_panel::{
     InputPanel, InputPanelEvent, InputPanelLayout, PanelAction, PanelActionVariant,
@@ -128,14 +130,12 @@ pub use tab_bar::{
 };
 
 pub use daruda_core::text::{CharType, char_cell_hit_x, logical_line_range, word_range};
+/// Enables window-wide text selection; mount as the root view's first child.
+pub use gpui_base::{TextSelection, TextSelectionLayer, take_right_clicked_link};
 pub use gpui_component::button::{
     ButtonCustomVariant, ButtonVariant, ButtonVariants, DropdownButton,
 };
 pub use gpui_component::scroll::ScrollableElement;
-pub use gpui_component::text::{
-    SelectMode, TextSelectionHandle, active_text_selection, select_mode_for_click_count,
-    take_right_clicked_link,
-};
 pub use gpui_component::{ActiveTheme, Disableable, Root, Selectable, Sizable, WindowExt};
 pub use gpui_component::{Icon, IconName, IconNamed};
 
@@ -198,30 +198,13 @@ mod word_range_tests {
 
 #[cfg(test)]
 mod text_view_select_mode_tests {
-    use super::{
-        SelectMode, char_cell_hit_x, logical_line_range, select_mode_for_click_count, word_range,
-    };
+    use super::{char_cell_hit_x, logical_line_range, word_range};
 
     fn str_char_at(s: &str, byte_offset: usize) -> Option<char> {
         if byte_offset >= s.len() || !s.is_char_boundary(byte_offset) {
             return None;
         }
         s[byte_offset..].chars().next()
-    }
-
-    #[test]
-    fn select_mode_cases() {
-        for (clicks, expected, expands) in [
-            (1, SelectMode::Character, false),
-            (2, SelectMode::Word, true),
-            (3, SelectMode::Line, true),
-            (4, SelectMode::All, true),
-            (10, SelectMode::All, true),
-        ] {
-            let mode = select_mode_for_click_count(clicks);
-            assert_eq!(mode, expected, "{clicks}");
-            assert_eq!(!matches!(mode, SelectMode::Character), expands, "{clicks}");
-        }
     }
 
     /// Word expansion: raw byte range is expanded to word boundaries.

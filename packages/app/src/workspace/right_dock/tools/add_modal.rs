@@ -17,7 +17,7 @@ use crate::agent::mcp::{
 use crate::surface::strings;
 use crate::ui::Disableable as _;
 use crate::ui::WindowExt as _;
-use crate::ui::{InputEvent, InputState, button, button_primary, checkbox};
+use crate::ui::{InputEvent, InputState, TextareaState, button, button_primary, checkbox};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 use daruda_config::env_lines::format_env_lines;
@@ -53,8 +53,8 @@ pub struct AddMcpServerModal {
     command_input: Entity<InputState>,
     args_input: Entity<InputState>,
     url_input: Entity<InputState>,
-    env_input: Entity<InputState>,
-    headers_input: Entity<InputState>,
+    env_input: Entity<TextareaState>,
+    headers_input: Entity<TextareaState>,
 
     scope: McpScope,
     scope_options: Vec<McpScope>,
@@ -69,7 +69,7 @@ pub struct AddMcpServerModal {
     header_rows: Entity<super::rows::Rows>,
 
     initial: AddMcpInitial,
-    paste_input: Entity<InputState>,
+    paste_input: Entity<TextareaState>,
     pasting: bool,
     candidates: Vec<McpServerDraft>,
     imported: Option<McpServerDraft>,
@@ -92,7 +92,7 @@ impl AddMcpServerModal {
         cx: &mut Context<Self>,
     ) -> Self {
         let paste_input = cx.new(|cx| {
-            InputState::new(window, cx)
+            TextareaState::new(window, cx)
                 .auto_grow(6, 12)
                 .placeholder(strings::mcp::quick_placeholder())
         });
@@ -111,12 +111,12 @@ impl AddMcpServerModal {
             InputState::new(window, cx_state).placeholder(strings::mcp::placeholder_url())
         });
         let env_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state)
+            TextareaState::new(window, cx_state)
                 .auto_grow(2, 6)
                 .placeholder(strings::mcp::placeholder_env())
         });
         let headers_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state)
+            TextareaState::new(window, cx_state)
                 .auto_grow(2, 6)
                 .placeholder(strings::mcp::placeholder_headers())
         });
@@ -498,36 +498,36 @@ impl AddMcpServerModal {
         values
     }
 
-    fn visible_inputs(&self) -> Vec<Entity<InputState>> {
+    fn visible_inputs(&self) -> Vec<crate::ui::FieldState> {
         if self.transport.is_remote() {
             vec![
-                self.name_input.clone(),
-                self.url_input.clone(),
-                self.headers_input.clone(),
-                self.env_input.clone(),
+                self.name_input.clone().into(),
+                self.url_input.clone().into(),
+                self.headers_input.clone().into(),
+                self.env_input.clone().into(),
             ]
         } else {
             vec![
-                self.name_input.clone(),
-                self.command_input.clone(),
-                self.args_input.clone(),
-                self.env_input.clone(),
+                self.name_input.clone().into(),
+                self.command_input.clone().into(),
+                self.args_input.clone().into(),
+                self.env_input.clone().into(),
             ]
         }
     }
 
-    fn inputs(&self) -> Vec<Entity<InputState>> {
-        let mut inputs = vec![
-            self.auth.input.clone(),
-            self.paste_input.clone(),
-            self.name_input.clone(),
-            self.command_input.clone(),
-            self.args_input.clone(),
-            self.url_input.clone(),
-            self.env_input.clone(),
-            self.headers_input.clone(),
+    fn inputs(&self) -> Vec<crate::ui::FieldState> {
+        let mut inputs: Vec<crate::ui::FieldState> = vec![
+            self.auth.input.clone().into(),
+            self.paste_input.clone().into(),
+            self.name_input.clone().into(),
+            self.command_input.clone().into(),
+            self.args_input.clone().into(),
+            self.url_input.clone().into(),
+            self.env_input.clone().into(),
+            self.headers_input.clone().into(),
         ];
-        inputs.extend(self.codex_options.inputs.clone());
+        inputs.extend(self.codex_options.inputs.iter().cloned().map(Into::into));
         inputs
     }
 
@@ -598,7 +598,7 @@ fn forward_input(
 /// inserts a newline because `multi_line(true)` is set; Escape is
 /// handled by Dialog's outer Cancel action.
 fn forward_multi_input(
-    state: &Entity<InputState>,
+    state: &Entity<TextareaState>,
     window: &mut Window,
     cx: &mut Context<AddMcpServerModal>,
 ) -> Subscription {
@@ -606,7 +606,7 @@ fn forward_multi_input(
         state,
         window,
         |this, _, ev: &InputEvent, window, cx| match ev {
-            InputEvent::PressEnter { secondary } if *secondary => this.submit(window, cx),
+            InputEvent::PressEnter { secondary, .. } if *secondary => this.submit(window, cx),
             InputEvent::Change => {
                 if this.pasting {
                     this.candidates.clear();

@@ -24,8 +24,8 @@ use std::borrow::Cow;
 
 use super::agent_chat_helpers::{
     DiffStat, TurnBoundary, build_diff_view_model, chat_item_mermaid_texts, create_diff_editor,
-    diff_build_fingerprint, diff_editor_key, diff_editor_language, diff_theme_fingerprint,
-    fold_context_at, mermaid_key, mermaid_sources, tool_fold_key,
+    diff_build_fingerprint, diff_editor_key, diff_theme_fingerprint, fold_context_at, mermaid_key,
+    mermaid_sources, tool_fold_key,
 };
 use super::output_editor::{
     create_output_editor, output_editor_key, output_editor_source, output_source_fingerprint,
@@ -262,8 +262,7 @@ impl AgentChatView {
 
         // Collect the pure work first; entity creation re-enters the window,
         // which can't happen while the immutable `items` borrow is live.
-        let mut pending: Vec<(String, u64, gpui::SharedString, DiffEditorModel, DiffStat)> =
-            Vec::new();
+        let mut pending: Vec<(String, u64, DiffEditorModel, DiffStat)> = Vec::new();
         let mut live: HashSet<String> = HashSet::new();
         let boundary = TurnBoundary::of(&self.items);
         for (ix, item) in self.items.iter().enumerate() {
@@ -290,9 +289,8 @@ impl AgentChatView {
                     // the body falls back to the "no changes" render.
                     continue;
                 };
-                let language = diff_editor_language(diff);
                 live.insert(key.clone());
-                pending.push((key, fingerprint, language, model, stat));
+                pending.push((key, fingerprint, model, stat));
             }
         }
         let stale = stale_keys(self.assets.diff_editors.keys(), &live, scope);
@@ -307,8 +305,8 @@ impl AgentChatView {
         }
 
         let pane_id = self.pane_id;
-        for (key, fingerprint, language, model, stat) in pending {
-            if let Some(editor) = create_diff_editor(cx, access, pane_id, &language, model) {
+        for (key, fingerprint, model, stat) in pending {
+            if let Some(editor) = create_diff_editor(cx, access, pane_id, model) {
                 // Cache the stat under the same key as the editor so the fold
                 // summary (`+N −M`) reads it back via `diff_editor_key`. Stored
                 // only when the editor builds — a no-change diff yields no

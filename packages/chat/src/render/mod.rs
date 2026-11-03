@@ -33,8 +33,8 @@ mod tool;
 
 use daruda_acp::ChatItem;
 use gpui::{
-    AnyElement, Entity, IntoElement, ListSizingBehavior, MouseButton, SharedString, Window, canvas,
-    div, list, prelude::*, px,
+    AnyElement, Entity, IntoElement, ListSizingBehavior, SharedString, Window, canvas, div, list,
+    prelude::*, px,
 };
 
 /// Read-only diff editor entities keyed by `"{tool_call_id}#{diff_index}"`
@@ -42,14 +42,14 @@ use gpui::{
 /// crate::workspace)` rather than `pub(super)`: `AgentChatView::assets`
 /// (`view/asset_cache.rs`) uses this as its field type too, so both the owning cache
 /// and its read-only render-side view share one definition.
-pub(super) type DiffEditors = std::collections::HashMap<String, Entity<daruda_ui::InputState>>;
+pub(super) type DiffEditors = std::collections::HashMap<String, Entity<daruda_ui::EditorState>>;
 
 /// Read-only editor entities for verbatim tool-output blocks keyed by
 /// `"{tool_call_id}#{block_index}"` (built in the ops layer; this view only
 /// embeds them). `pub(super)` rather than `pub(super)` for the
 /// same reason as [`DiffEditors`]: `AgentChatView::assets` uses it as a field
 /// type too.
-pub(super) type OutputEditors = std::collections::HashMap<String, Entity<daruda_ui::InputState>>;
+pub(super) type OutputEditors = std::collections::HashMap<String, Entity<daruda_ui::EditorState>>;
 
 /// Per-diff `+N −M` line counts keyed by `"{tool_call_id}#{diff_index}"`
 /// (built in the ops layer; this view only reads them for the collapsed
@@ -245,28 +245,6 @@ pub(super) fn render(view: &AgentChatView, cx: &mut Context<AgentChatView>) -> i
             .relative()
             .flex_1()
             .min_h(px(0.))
-            // Left mouse-down starts the autoscroll poll. Bubbles after the
-            // block's own selection start and never stops propagation, so it
-            // doesn't disturb normal click/scroll handling.
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _ev, window, cx| this.start_selection_autoscroll(window, cx)),
-            )
-            // Left mouse-up ends the drag on the always-painted container, so
-            // the poll stops on release even if the selected child block is no
-            // longer painted. Capture phase, not bubble: a floating descendant
-            // (the jump-to-bottom button, a diagram card's action row) stops
-            // propagation on its own click so it doesn't double-fire the row
-            // beneath, and a bubble listener here would never see that release
-            // — leaving the poll ticking until the next mouse move.
-            .capture_any_mouse_up(cx.listener(|this, ev: &gpui::MouseUpEvent, _window, _cx| {
-                if ev.button == MouseButton::Left {
-                    this.end_selection_drag();
-                }
-            }))
-            // Mouse-move catches an off-window release on re-entry (the button is
-            // no longer held); mirrors the terminal's implicit mouse-up.
-            .on_mouse_move(cx.listener(|this, ev, _window, cx| this.on_selection_drag_move(ev, cx)))
             .child(bounds_capture)
             .child(list_el)
             .children(daruda_ui::scrollbar::vertical_thumb_for_list(

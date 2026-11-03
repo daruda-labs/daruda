@@ -23,7 +23,7 @@ async fn modal_safety_skill_loading_blocks_save_and_preserves_source(cx: &mut Te
             });
             modal.update(cx, |modal, cx| {
                 assert!(!modal.body_loaded);
-                assert!(modal.body_editor.read(cx).is_disabled());
+                assert!(modal.body_editor.read(cx).presentation().is_disabled());
                 modal.submit(window, cx);
                 assert!(!modal.submitting);
             });

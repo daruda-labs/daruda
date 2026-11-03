@@ -157,7 +157,7 @@ pub(in crate::render) fn tool_kind_icon(kind: ToolKindView) -> SharedString {
         ToolKindView::Execute => IconName::SquareTerminal.path(),
         ToolKindView::Think => ICON_THINK.into(),
         ToolKindView::Fetch => IconName::Globe.path(),
-        ToolKindView::SwitchMode => IconName::Refresh.path(),
+        ToolKindView::SwitchMode => IconName::RefreshCw.path(),
         ToolKindView::Other => IconName::Settings2.path(),
     }
 }

@@ -514,48 +514,44 @@ fn switching_panes_keeps_each_panes_text_and_binding(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-async fn slash_completion_is_off_while_bound(cx: &mut TestAppContext) {
-    use crate::ui::{CompletionProvider as _, Rope};
-    use crate::workspace::main_area::bottom_dock::slash_command::SlashCommandProvider;
-
+fn slash_completion_is_off_while_bound(cx: &mut TestAppContext) {
     let (_dir, ws, mut vcx) = workspace(cx);
     let pane = add_pane(&ws, &mut vcx);
     let _probes = connect(&ws, &mut vcx, pane, &[1]);
-    let provider = SlashCommandProvider {
-        workspace: ws.downgrade(),
-    };
-    let completes = |vcx: &mut VisualTestContext| {
-        vcx.update(|window, cx| {
-            let input = ws.read(cx).input_dock.input.clone();
-            input.update(cx, |_, cx| {
-                let trigger = provider.is_completion_trigger(1, "/", cx);
-                let task = provider.completions(
-                    &Rope::from("/c"),
-                    2,
-                    lsp_types::CompletionContext {
-                        trigger_kind: lsp_types::CompletionTriggerKind::INVOKED,
-                        trigger_character: None,
-                    },
-                    window,
-                    cx,
-                );
-                (trigger, task)
-            })
-        })
-    };
-    let count = |response: lsp_types::CompletionResponse| match response {
-        lsp_types::CompletionResponse::Array(items) => items.len(),
-        lsp_types::CompletionResponse::List(list) => list.items.len(),
-    };
-
-    let (trigger, task) = completes(&mut vcx);
-    assert!(trigger);
-    assert_eq!(count(task.await.unwrap()), 1, "/clear before any question");
-
+    type_text(&ws, &mut vcx, "/c");
+    vcx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.input_dock
+                .input
+                .update(cx, |state, cx| state.move_cursor_to_end(cx));
+            ws.refresh_slash_menu(cx);
+            assert_eq!(
+                ws.input_dock
+                    .slash
+                    .as_ref()
+                    .expect("command menu")
+                    .matched
+                    .items
+                    .len(),
+                1
+            );
+        });
+    });
+    type_text(&ws, &mut vcx, "");
     ask(&ws, &mut vcx, pane, 1, path_question());
-    let (trigger, task) = completes(&mut vcx);
-    assert!(!trigger, "a bound composer opens no menu");
-    assert_eq!(count(task.await.unwrap()), 0);
+    type_text(&ws, &mut vcx, "/c");
+    vcx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.input_dock
+                .input
+                .update(cx, |state, cx| state.move_cursor_to_end(cx));
+            ws.refresh_slash_menu(cx);
+            assert!(
+                ws.input_dock.slash.is_none(),
+                "a bound composer opens no menu"
+            );
+        });
+    });
 }
 
 /// A bound composer's text is the answer however it starts: `/usr/bin` is

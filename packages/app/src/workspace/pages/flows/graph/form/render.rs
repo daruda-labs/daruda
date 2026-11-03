@@ -561,7 +561,7 @@ fn field_column(
 
 /// Shared 36px authoring geometry, including multi-line inputs.
 fn field<T: crate::ui::input::InputTabSpec>(
-    state: &gpui::Entity<crate::ui::InputState>,
+    state: &impl crate::ui::TextState,
     cx: &gpui::App,
     tab: T,
 ) -> impl gpui::IntoElement {

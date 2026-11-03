@@ -36,14 +36,11 @@ struct DialogHost {
 impl gpui::Render for DialogHost {
     fn render(
         &mut self,
-        window: &mut gpui::Window,
-        cx: &mut gpui::Context<Self>,
+        _window: &mut gpui::Window,
+        _cx: &mut gpui::Context<Self>,
     ) -> impl gpui::IntoElement {
         use gpui::{ParentElement as _, Styled as _};
-        gpui::div()
-            .size_full()
-            .child(self.view.clone())
-            .children(daruda_ui::Root::render_dialog_layer(window, cx))
+        gpui::div().size_full().child(self.view.clone())
     }
 }
 
@@ -238,25 +235,29 @@ fn agent_row_select_offers(
 }
 
 /// Test-only — write `value` into one catalog row's input.
-fn set_agent_row_input(
+fn set_agent_row_input<F: Into<daruda_ui::FieldState>>(
     wh: &WindowHandle<daruda_ui::Root>,
     win: &Entity<SettingsView>,
     cx: &mut TestAppContext,
     index: usize,
-    field: fn(&AgentCatalogRow) -> Entity<InputState>,
+    field: impl Fn(&AgentCatalogRow) -> F,
     value: &str,
 ) {
-    let state = win.read_with(cx, |w, _| field(w.agent_editable_row(index).unwrap()));
+    let state: daruda_ui::FieldState = win
+        .read_with(cx, |w, _| field(w.agent_editable_row(index).unwrap()))
+        .into();
     wh.update(cx, |_root, window, cx| {
-        state.update(cx, |i, cx_state| {
-            i.set_value(value.to_owned(), window, cx_state)
-        });
+        state.set_value(value.to_owned(), window, cx)
     })
     .expect("settings window should still be open during the test");
 }
 
 /// Emit the focus-loss the field sees when the user clicks away.
-fn blur(wh: &WindowHandle<daruda_ui::Root>, state: &Entity<InputState>, cx: &mut TestAppContext) {
+fn blur<S: gpui::EventEmitter<InputEvent>>(
+    wh: &WindowHandle<daruda_ui::Root>,
+    state: &Entity<S>,
+    cx: &mut TestAppContext,
+) {
     wh.update(cx, |_root, _window, cx| {
         state.update(cx, |_, cx_state| cx_state.emit(InputEvent::Blur));
     })

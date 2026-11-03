@@ -297,10 +297,13 @@ fn gauge_row(row: &WindowRow, cx: &App) -> AnyElement {
                 ))),
         )
         .child(
-            progress(row.utilization)
-                .bg(color)
-                .h(px(theme::GAUGE_BAR_HEIGHT))
-                .rounded(px(theme::GAUGE_BAR_RADIUS)),
+            progress(
+                gpui::ElementId::Name(format!("usage-chip-gauge-{}", row.label).into()),
+                row.utilization,
+            )
+            .color(color)
+            .h(px(theme::GAUGE_BAR_HEIGHT))
+            .rounded(px(theme::GAUGE_BAR_RADIUS)),
         )
         .children(caption.map(|caption| {
             div()

@@ -25,6 +25,7 @@ pub(in crate::workspace) use fields::*;
 use gpui::{App, AppContext as _, Context, Entity, Window};
 
 use crate::ui::InputState;
+use crate::ui::TextareaState;
 use daruda_flow::NodeId;
 use daruda_flow::parse::PermissionPolicyFile;
 
@@ -42,7 +43,7 @@ pub(in crate::workspace) struct AgentStates {
 pub(in crate::workspace) struct SourceStates {
     /// Which of the two: [`SOURCE_INLINE`] or [`SOURCE_FILE`].
     pub choice: Entity<crate::ui::select::SelectState>,
-    pub inline: Entity<InputState>,
+    pub inline: Entity<TextareaState>,
     pub file: Entity<InputState>,
 }
 
@@ -55,7 +56,7 @@ struct Body {
     kind: Entity<crate::ui::select::SelectState>,
     prompt: SourceStates,
     output: Entity<InputState>,
-    run: Entity<InputState>,
+    run: Entity<TextareaState>,
     /// One set of boxes for both policies — which one is written depends on the
     /// kind, and `read_fail` is told which by the caller.
     on_fail: FailStates,
@@ -74,7 +75,7 @@ pub(in crate::workspace) struct FailStates {
     /// A retry's hint — prose, or the file that holds it.
     pub hint: SourceStates,
     /// A repair's fix prompt.
-    pub fix: Entity<InputState>,
+    pub fix: Entity<TextareaState>,
     pub rerun: Entity<InputState>,
     pub max_attempts: Entity<InputState>,
     pub wait: Entity<InputState>,
@@ -344,7 +345,7 @@ pub(in crate::workspace) struct BodyStates<'a> {
     pub kind: KindChoice,
     pub prompt: &'a SourceStates,
     pub output: &'a Entity<InputState>,
-    pub run: &'a Entity<InputState>,
+    pub run: &'a Entity<TextareaState>,
     pub on_fail: &'a FailStates,
 }
 
@@ -597,7 +598,7 @@ fn multi_line<T: 'static>(
     value: &str,
     window: &mut Window,
     cx: &mut Context<T>,
-) -> Entity<InputState> {
+) -> Entity<TextareaState> {
     crate::ui::make_markdown_prose_state(
         value,
         "",
@@ -614,10 +615,10 @@ fn command_box<T: 'static>(
     value: &str,
     window: &mut Window,
     cx: &mut Context<T>,
-) -> Entity<InputState> {
+) -> Entity<TextareaState> {
     let value = value.to_string();
     cx.new(|cx| {
-        InputState::new(window, cx)
+        TextareaState::new(window, cx)
             .auto_grow(1, crate::ui::theme::palette::FLOW_INSPECTOR_RUN_MAX_ROWS)
             .default_value(value)
     })

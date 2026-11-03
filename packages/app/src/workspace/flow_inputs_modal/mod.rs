@@ -15,7 +15,7 @@ use gpui::{
 
 use crate::surface::strings as s;
 use crate::ui::select::{self, SelectOption, SelectState};
-use crate::ui::{InputState, WindowExt as _};
+use crate::ui::{InputState, TextareaState, WindowExt as _};
 use crate::workspace::Workspace;
 use crate::workspace::flow_request::FlowSelection;
 use daruda_store::project::LaneRef;
@@ -31,8 +31,10 @@ pub(in crate::workspace) struct PendingFlowRun {
 
 /// The control one input is answered with.
 enum Control {
-    /// A string or a number, typed.
+    /// A string or a number, typed on one line.
     Text(Entity<InputState>),
+    /// A string declared multiline: Enter inserts a newline.
+    Prose(Entity<TextareaState>),
     Toggle(bool),
     Choice(Entity<SelectState>),
 }
@@ -105,6 +107,7 @@ impl FlowInputsModal {
             .filter_map(|field| {
                 let value = match &field.control {
                     Control::Text(state) => InputValue::Text(state.read(cx).value().to_string()),
+                    Control::Prose(state) => InputValue::Text(state.read(cx).value().to_string()),
                     Control::Toggle(checked) => InputValue::Bool(*checked),
                     Control::Choice(state) => {
                         InputValue::Text(state.read(cx).selected_value()?.to_string())
@@ -174,15 +177,15 @@ fn control_for(
         InputType::String | InputType::Number => {
             let text = default.map(|value| value.as_text()).unwrap_or_default();
             let multiline = decl.multiline && decl.kind == InputType::String;
-            Control::Text(cx.new(|cx| {
-                let state = InputState::new(window, cx);
-                let state = if multiline {
-                    state.auto_grow(3, 8)
-                } else {
-                    state
-                };
-                state.default_value(text)
-            }))
+            if multiline {
+                Control::Prose(cx.new(|cx| {
+                    TextareaState::new(window, cx)
+                        .auto_grow(3, 8)
+                        .default_value(text)
+                }))
+            } else {
+                Control::Text(cx.new(|cx| InputState::new(window, cx).default_value(text)))
+            }
         }
     }
 }
@@ -203,6 +206,7 @@ impl Focusable for FlowInputsModal {
         // The first field, so typing starts there.
         match self.fields.first().map(|field| &field.control) {
             Some(Control::Text(state)) => state.focus_handle(cx),
+            Some(Control::Prose(state)) => state.focus_handle(cx),
             Some(Control::Choice(state)) => state.focus_handle(cx),
             _ => self.panel_focus_handle.clone(),
         }
