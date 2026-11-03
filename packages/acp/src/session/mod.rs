@@ -59,7 +59,8 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use agent_client_protocol::schema::ProtocolVersion;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::ConnectionTo;
+use agent_client_protocol::v1::schema::{
     AuthCapabilities, BooleanConfigOptionCapabilities, CancelNotification, ClientCapabilities,
     ClientSessionCapabilities, CreateElicitationRequest, ElicitationCapabilities,
     ElicitationFormCapabilities, InitializeRequest, LoadSessionRequest, McpServer,
@@ -69,8 +70,8 @@ use agent_client_protocol::schema::v1::{
     SetSessionModeRequest, StopReason,
 };
 #[cfg(test)]
-use agent_client_protocol::schema::v1::{ContentBlock, TextContent};
-use agent_client_protocol::{Agent, Client, ConnectTo, ConnectionTo, JsonRpcNotification};
+use agent_client_protocol::v1::schema::{ContentBlock, TextContent};
+use agent_client_protocol::{Agent, Client, ConnectTo, JsonRpcNotification};
 use futures::FutureExt;
 use futures::StreamExt;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
@@ -790,7 +791,7 @@ pub fn stdio_mcp_server(
     args: Vec<String>,
     env: Vec<(String, String)>,
 ) -> McpServer {
-    use agent_client_protocol::schema::v1::{EnvVariable, McpServerStdio};
+    use agent_client_protocol::v1::schema::{EnvVariable, McpServerStdio};
 
     McpServer::Stdio(
         McpServerStdio::new(name, command).args(args).env(

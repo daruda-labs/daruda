@@ -2,7 +2,7 @@
 
 use crate::connection::AdapterCommand;
 use agent_client_protocol::AcpAgentConfig;
-use agent_client_protocol::schema::v1::McpServer;
+use agent_client_protocol::v1::schema::McpServer;
 use std::path::PathBuf;
 
 /// `env(1)`, the only portable way to *remove* a variable from a spawned

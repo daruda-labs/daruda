@@ -202,7 +202,7 @@ async fn diff_editor_keeps_seeded_rows_and_paints_full_height(cx: &mut TestAppCo
 #[gpui::test]
 async fn streaming_write_diff_rebuilds_and_collapsed_header_keeps_height(cx: &mut TestAppContext) {
     use crate::fold::FoldKey;
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         Content, ContentBlock, Diff, SessionUpdate, TextContent, ToolCall, ToolCallContent,
         ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
     };
@@ -366,7 +366,7 @@ async fn streaming_write_diff_rebuilds_and_collapsed_header_keeps_height(cx: &mu
 /// it, decorations and all.
 #[gpui::test]
 async fn a_large_write_diff_renders_through_the_capped_embed(cx: &mut TestAppContext) {
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         Diff, SessionUpdate, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate,
         ToolCallUpdateFields, ToolKind,
     };
@@ -470,7 +470,7 @@ async fn a_large_write_diff_renders_through_the_capped_embed(cx: &mut TestAppCon
 /// memory-file `Edit` whose prose lines ran to several hundred characters.
 #[gpui::test]
 async fn long_diff_lines_wrap_to_the_embed_width(cx: &mut TestAppContext) {
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         Diff, SessionUpdate, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate,
         ToolCallUpdateFields, ToolKind,
     };

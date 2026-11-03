@@ -223,7 +223,7 @@ async fn a_phone_turn_relays_while_the_user_is_present(cx: &mut gpui::TestAppCon
 #[gpui::test]
 async fn a_permission_wait_keeps_the_phone_turn_open(cx: &mut gpui::TestAppContext) {
     use crate::platform::presence::AwaySignal;
-    use agent_client_protocol::schema::v1::RequestPermissionRequest;
+    use agent_client_protocol::v1::schema::RequestPermissionRequest;
     use daruda_acp::{PermissionOption, PermissionOptionKind, ToolCallUpdate};
     use std::time::{Duration, Instant};
 

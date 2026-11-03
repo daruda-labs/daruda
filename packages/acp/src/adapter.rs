@@ -10,7 +10,7 @@
 //!
 //! GPUI-free: a trait plus plain unit structs, unit-tested in isolation.
 
-use agent_client_protocol::schema::v1::Meta;
+use agent_client_protocol::v1::schema::Meta;
 use serde_json::Value;
 
 use crate::model::{CommandExit, RateLimitView, RateLimitWindow};

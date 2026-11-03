@@ -5,7 +5,7 @@ use super::*;
 /// settled state in `Connected`, and only then drain a queued prompt.
 #[test]
 fn initial_model_settles_before_mode_and_connected() {
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         InitializeResponse, NewSessionResponse, PromptResponse, SessionConfigOption,
         SessionConfigOptionCategory, SessionConfigSelectOption, SessionMode, SessionModeState,
         SetSessionConfigOptionResponse, SetSessionModeResponse,
@@ -13,7 +13,7 @@ fn initial_model_settles_before_mode_and_connected() {
 
     let requests = Arc::new(Mutex::new(Vec::<String>::new()));
     let agent = Agent
-        .builder()
+        .v1()
         .on_receive_request(
             async |_req: InitializeRequest, responder, _conn| {
                 responder.respond(InitializeResponse::new(ProtocolVersion::V1))
@@ -187,19 +187,19 @@ fn initial_model_settles_before_mode_and_connected() {
 /// it per launch); the host's requested mode still has to win.
 #[test]
 fn a_resumed_session_applies_the_requested_mode() {
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         InitializeResponse, LoadSessionResponse, SessionMode, SessionModeState,
         SetSessionModeResponse,
     };
 
     let requests = Arc::new(Mutex::new(Vec::<String>::new()));
     let agent = Agent
-        .builder()
+        .v1()
         .on_receive_request(
             async |_req: InitializeRequest, responder, _conn| {
                 responder.respond(
                     InitializeResponse::new(ProtocolVersion::V1).agent_capabilities(
-                        agent_client_protocol::schema::v1::AgentCapabilities::new()
+                        agent_client_protocol::v1::schema::AgentCapabilities::new()
                             .load_session(true),
                     ),
                 )
@@ -271,12 +271,12 @@ fn usage_update_agent(
     program: Option<&'static str>,
     meta: serde_json::Value,
 ) -> impl ConnectTo<Client> {
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         Implementation, InitializeResponse, NewSessionResponse, PromptResponse, UsageUpdate,
     };
     let meta = meta.as_object().cloned();
     Agent
-        .builder()
+        .v1()
         .on_receive_request(
             async move |_req: InitializeRequest, responder, _conn| {
                 let response = InitializeResponse::new(ProtocolVersion::V1);

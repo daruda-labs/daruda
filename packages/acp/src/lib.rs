@@ -35,15 +35,15 @@ pub use stop_reason::{EarlyStop, TurnStop};
 mod test_support;
 pub mod wire_log;
 
-pub use agent_client_protocol::schema::v1::SessionId;
+pub use agent_client_protocol::v1::schema::SessionId;
 // `AcpEvent::PermissionRequested` already hands a protocol
 // `RequestPermissionRequest` to its consumer; these are what reading its
 // `options` faithfully takes. The kind is re-exported rather than mapped to
 // `PermissionKindView` because that mapping renders an unrecognized kind as a
 // reject, which is right for a UI and wrong for anything selecting on it.
 pub use adapter::MessagePhase;
-pub use agent_client_protocol::schema::v1::McpServer;
-pub use agent_client_protocol::schema::v1::{
+pub use agent_client_protocol::v1::schema::McpServer;
+pub use agent_client_protocol::v1::schema::{
     ContentBlock, PermissionOption, PermissionOptionKind, SessionUpdate, ToolCall, ToolCallUpdate,
     ToolCallUpdateFields, ToolKind,
 };

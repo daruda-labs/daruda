@@ -26,9 +26,9 @@ impl NoticeSeverityView {
     }
 }
 
-impl From<agent_client_protocol::schema::v1::Notice> for SessionNoticeView {
-    fn from(notice: agent_client_protocol::schema::v1::Notice) -> Self {
-        use agent_client_protocol::schema::v1::NoticeSeverity;
+impl From<agent_client_protocol::v1::schema::Notice> for SessionNoticeView {
+    fn from(notice: agent_client_protocol::v1::schema::Notice) -> Self {
+        use agent_client_protocol::v1::schema::NoticeSeverity;
         let severity = match notice.severity {
             NoticeSeverity::Info => NoticeSeverityView::Info,
             NoticeSeverity::Warning => NoticeSeverityView::Warning,

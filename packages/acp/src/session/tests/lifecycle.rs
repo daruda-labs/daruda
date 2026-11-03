@@ -1,5 +1,5 @@
 use super::*;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     ContentChunk, InitializeResponse, NewSessionResponse, PromptResponse,
 };
 
@@ -28,7 +28,7 @@ async fn start_session() -> Session {
     let (prompt_tx, prompts) = unbounded();
     let (cancel_tx, cancellations) = unbounded();
     let agent = Agent
-        .builder()
+        .v1()
         .on_receive_request(
             async |_: InitializeRequest, responder, _| {
                 responder.respond(InitializeResponse::new(ProtocolVersion::V1))

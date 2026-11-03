@@ -1,5 +1,5 @@
 use super::*;
-use agent_client_protocol::schema::v1::{InitializeResponse, NewSessionResponse, PromptResponse};
+use agent_client_protocol::v1::schema::{InitializeResponse, NewSessionResponse, PromptResponse};
 
 #[test]
 fn notices_are_opt_in_without_enabling_other_presentation_contracts() {
@@ -20,7 +20,7 @@ fn notices_are_opt_in_without_enabling_other_presentation_contracts() {
 fn protocol_notices_preserve_delivery_order_without_ending_the_turn() {
     smol::block_on(async {
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async |request: InitializeRequest, responder, _| {
                     assert!(

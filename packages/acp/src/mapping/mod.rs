@@ -20,7 +20,7 @@ pub use tools::{kind_of, status_of};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     ContentBlock, ContentChunk, EmbeddedResourceResource, PermissionOption, PermissionOptionKind,
     RequestPermissionRequest, SessionUpdate, ToolCall, ToolCallContent, ToolCallStatus,
     ToolCallUpdate, ToolKind,

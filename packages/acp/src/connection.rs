@@ -13,12 +13,13 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use agent_client_protocol::schema::ProtocolVersion;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::ConnectionTo;
+use agent_client_protocol::v1::schema::{
     ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
     SessionNotification, TextContent,
 };
-use agent_client_protocol::{AcpAgent, Agent, ConnectionTo, LineDirection};
+use agent_client_protocol::{AcpAgent, Agent, LineDirection};
 use futures::channel::mpsc::UnboundedSender;
 
 /// npm package (with `@latest`) for the ACP Claude agent adapter, used by this
@@ -174,7 +175,7 @@ pub async fn run_one_shot(
     let perm_tx = events.clone();
 
     agent_client_protocol::Client
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
                 let _ = notif_tx.unbounded_send(SpikeEvent::Notification(format!(

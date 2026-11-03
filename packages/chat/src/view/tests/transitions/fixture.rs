@@ -1,6 +1,6 @@
 //! Drives production handlers and compares their retained list with a cold list.
 
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     SessionUpdate, ToolCall, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
 };
 use daruda_acp::{AcpEvent, ChatItem};

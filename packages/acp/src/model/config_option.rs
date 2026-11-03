@@ -109,9 +109,9 @@ impl ConfigOptionView {
     /// `session.configOptions.boolean` at `initialize`; without that opt-in the
     /// agent degrades the same option to a two-value select.
     pub fn from_protocol(
-        o: &agent_client_protocol::schema::v1::SessionConfigOption,
+        o: &agent_client_protocol::v1::schema::SessionConfigOption,
     ) -> Option<Self> {
-        use agent_client_protocol::schema::v1::{
+        use agent_client_protocol::v1::schema::{
             SessionConfigKind, SessionConfigOptionCategory, SessionConfigSelectOptions,
         };
         let kind = match &o.kind {
@@ -164,7 +164,7 @@ impl ConfigOptionView {
 }
 
 fn config_choice(
-    o: &agent_client_protocol::schema::v1::SessionConfigSelectOption,
+    o: &agent_client_protocol::v1::schema::SessionConfigSelectOption,
 ) -> ConfigChoiceView {
     ConfigChoiceView {
         value: o.value.to_string(),

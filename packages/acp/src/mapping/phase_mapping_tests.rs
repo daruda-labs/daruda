@@ -1,6 +1,6 @@
 use super::*;
 use crate::adapter::{CodexAdapter, MessagePhase};
-use agent_client_protocol::schema::v1::{ContentChunk, TextContent};
+use agent_client_protocol::v1::schema::{ContentChunk, TextContent};
 
 fn chunk(text: &str, id: &str, phase: &str) -> ContentChunk {
     let mut c =

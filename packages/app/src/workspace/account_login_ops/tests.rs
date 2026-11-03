@@ -480,7 +480,7 @@ mod billing {
     /// the billing kind, and the runnable command whose trailing flags
     /// select the flow.
     fn advertised_claude_logins() -> Vec<daruda_acp::LoginMethod> {
-        let response: agent_client_protocol::schema::v1::InitializeResponse =
+        let response: agent_client_protocol::v1::schema::InitializeResponse =
             serde_json::from_value(serde_json::json!({
                 "protocolVersion": 1,
                 "agentCapabilities": {},

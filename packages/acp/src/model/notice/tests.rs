@@ -1,5 +1,5 @@
 use super::*;
-use agent_client_protocol::schema::v1::Notice;
+use agent_client_protocol::v1::schema::Notice;
 
 #[test]
 fn wire_notice_preserves_plain_text_and_open_severity() {

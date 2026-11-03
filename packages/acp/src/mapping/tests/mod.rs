@@ -8,7 +8,7 @@ use super::content::*;
 use super::permissions::{RAW_INPUT_SUMMARY_MAX_CHARS, summarize_raw_input};
 use super::*;
 use crate::model::CommandExit;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     Content, ContentChunk, Diff, ImageContent, ResourceLink, Terminal, TextContent,
     ToolCallUpdateFields,
 };
@@ -57,7 +57,7 @@ const CAPTURED_BASH_TURN: [&str; 4] = [
 /// Build a `Meta` map from a JSON object literal — the schema type is
 /// `serde_json::Map<String, Value>`, not `Value`, so builders taking `Meta`
 /// need the unwrapped map.
-fn meta_map(v: serde_json::Value) -> agent_client_protocol::schema::v1::Meta {
+fn meta_map(v: serde_json::Value) -> agent_client_protocol::v1::schema::Meta {
     v.as_object()
         .expect("test fixture must be a JSON object")
         .clone()

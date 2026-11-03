@@ -8,7 +8,7 @@ mod questions;
 
 use super::*;
 use crate::model::ChatItem;
-use agent_client_protocol::schema::v1::{PermissionOptionId, SessionNotification};
+use agent_client_protocol::v1::schema::{PermissionOptionId, SessionNotification};
 
 /// Ceiling for each awaited event in the dispatch-concurrency test. Big
 /// enough that a loaded machine cannot fake a "blocked" verdict — the
@@ -45,12 +45,12 @@ async fn next_event_within(rx: &mut UnboundedReceiver<AcpEvent>) -> Option<AcpEv
 /// handler would block the agent's *own* dispatch loop — the very defect
 /// class the client side is being measured for.
 fn permission_then_update_agent() -> impl ConnectTo<Client> + 'static {
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         ContentChunk, InitializeResponse, NewSessionResponse, PermissionOption,
         PermissionOptionKind, PromptResponse, ToolCallUpdate, ToolCallUpdateFields,
     };
     Agent
-        .builder()
+        .v1()
         .on_receive_request(
             async |_req: InitializeRequest, responder, _conn| {
                 responder.respond(InitializeResponse::new(ProtocolVersion::V1))
@@ -136,11 +136,11 @@ fn native_subagent_replay(root: SessionId) -> [(SessionId, serde_json::Value); 3
 }
 
 fn native_subagent_agent() -> impl ConnectTo<Client> + 'static {
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         InitializeResponse, NewSessionResponse, PromptResponse,
     };
     Agent
-        .builder()
+        .v1()
         .on_receive_request(
             async |_req: InitializeRequest, responder, _conn| {
                 responder.respond(InitializeResponse::new(ProtocolVersion::V1))
@@ -180,14 +180,14 @@ fn native_subagent_agent() -> impl ConnectTo<Client> + 'static {
 /// `Connected`, so every notification here lands while the session is still
 /// resuming.
 fn native_subagent_resume_agent() -> impl ConnectTo<Client> + 'static {
-    use agent_client_protocol::schema::v1::{InitializeResponse, LoadSessionResponse};
+    use agent_client_protocol::v1::schema::{InitializeResponse, LoadSessionResponse};
     Agent
-        .builder()
+        .v1()
         .on_receive_request(
             async |_req: InitializeRequest, responder, _conn| {
                 responder.respond(
                     InitializeResponse::new(ProtocolVersion::V1).agent_capabilities(
-                        agent_client_protocol::schema::v1::AgentCapabilities::new()
+                        agent_client_protocol::v1::schema::AgentCapabilities::new()
                             .load_session(true),
                     ),
                 )
@@ -214,11 +214,10 @@ fn native_subagent_resume_agent() -> impl ConnectTo<Client> + 'static {
 /// That order is the point: only the typable one reaches the arm that
 /// emits, so the notice has to survive the one ahead of it.
 fn legacy_delegation_agent() -> impl ConnectTo<Client> + 'static {
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         InitializeResponse, NewSessionResponse, PromptResponse,
     };
-    Agent
-        .builder()
+    Agent.v1()
         .on_receive_request(
             async |_req: InitializeRequest, responder, _conn| {
                 responder.respond(InitializeResponse::new(ProtocolVersion::V1))
@@ -273,9 +272,9 @@ fn legacy_delegation_agent() -> impl ConnectTo<Client> + 'static {
 /// as wire JSON rather than rebuilt from typed constructors, so the test
 /// exercises the same deserialization the live adapter goes through.
 fn login_advertising_agent() -> impl ConnectTo<Client> + 'static {
-    use agent_client_protocol::schema::v1::{InitializeResponse, NewSessionResponse};
+    use agent_client_protocol::v1::schema::{InitializeResponse, NewSessionResponse};
     Agent
-        .builder()
+        .v1()
         .on_receive_request(
             async |_req: InitializeRequest, responder, _conn| {
                 let response: InitializeResponse = serde_json::from_value(serde_json::json!({
@@ -321,9 +320,9 @@ fn login_advertising_agent() -> impl ConnectTo<Client> + 'static {
 /// claude-agent-acp `initialize`. Which dialect a session speaks is decided
 /// by the program on the wire, so that program has to reach the host.
 fn self_identifying_agent() -> impl ConnectTo<Client> + 'static {
-    use agent_client_protocol::schema::v1::{InitializeResponse, NewSessionResponse};
+    use agent_client_protocol::v1::schema::{InitializeResponse, NewSessionResponse};
     Agent
-        .builder()
+        .v1()
         .on_receive_request(
             async |_req: InitializeRequest, responder, _conn| {
                 let response: InitializeResponse = serde_json::from_value(serde_json::json!({

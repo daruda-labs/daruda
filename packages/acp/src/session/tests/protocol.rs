@@ -96,7 +96,7 @@ fn transport_eof_during_initialize_or_prompt_terminates_without_turn_failed() {
             let result = with_connect_timeout("EOF regression", Duration::from_secs(2), async {
                 let resume =
                     (close_method == "session/load").then(|| SessionId::from("saved-session"));
-                run_connection(
+                let result = run_connection(
                     ClientCapabilitiesView::default(),
                     transport,
                     PathBuf::from("."),
@@ -108,20 +108,15 @@ fn transport_eof_during_initialize_or_prompt_terminates_without_turn_failed() {
                     event_tx,
                     Parks::default(),
                 )
-                .await
-                .map_err(|error| match error {
-                    AcpClientError::Protocol(AcpFailure::TransportClosed { .. }) => {
-                        agent_client_protocol::Error::internal_error().data(serde_json::json!({
-                            "reason": agent_client_protocol::INCOMING_TRANSPORT_CLOSED_REASON
-                        }))
-                    }
-                    other => panic!("unexpected error: {other}"),
-                })
+                .await;
+                assert!(matches!(
+                    result,
+                    Err(AcpClientError::Protocol(AcpFailure::TransportClosed { .. }))
+                ));
+                Ok(())
             })
             .await;
-            assert!(agent_client_protocol::is_incoming_transport_closed(
-                &result.unwrap_err()
-            ));
+            result.expect("incoming EOF terminates before the connection timeout");
             peer_task.await;
             while let Some(event) = events.next().await {
                 assert!(!matches!(
@@ -137,7 +132,7 @@ fn transport_eof_during_initialize_or_prompt_terminates_without_turn_failed() {
 /// pins that a requested server actually rides out on `session/new`.
 #[test]
 fn new_session_carries_the_requested_mcp_servers() {
-    use agent_client_protocol::schema::v1::{EnvVariable, McpServerStdio};
+    use agent_client_protocol::v1::schema::{EnvVariable, McpServerStdio};
 
     let server = McpServer::Stdio(
         McpServerStdio::new("daruda-abc", "/usr/local/bin/daruda")
@@ -155,7 +150,7 @@ fn new_session_carries_the_requested_mcp_servers() {
 /// A resume must carry the servers too — see [`build_load_session_request`].
 #[test]
 fn a_resumed_session_carries_the_same_mcp_servers() {
-    use agent_client_protocol::schema::v1::{EnvVariable, McpServerStdio};
+    use agent_client_protocol::v1::schema::{EnvVariable, McpServerStdio};
 
     let server = McpServer::Stdio(
         McpServerStdio::new("daruda-abc", "/usr/local/bin/daruda")
@@ -357,7 +352,7 @@ fn client_capabilities_claim_terminal_auth_without_claiming_terminal_methods() {
 
 #[test]
 fn session_capabilities_reads_advertised_flags() {
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         AgentCapabilities, SessionCapabilities, SessionCloseCapabilities, SessionResumeCapabilities,
     };
     // Advertise load (top-level bool) + resume + close; leave list/fork off.
@@ -377,7 +372,7 @@ fn session_capabilities_reads_advertised_flags() {
 
 #[test]
 fn usage_view_maps_tokens_and_cost() {
-    use agent_client_protocol::schema::v1::{Cost, UsageUpdate};
+    use agent_client_protocol::v1::schema::{Cost, UsageUpdate};
     let u = UsageUpdate::new(53_000, 200_000).cost(Cost::new(0.045, "USD"));
     let v = crate::model::UsageView::from(&u);
     assert_eq!(v.used, 53_000);
@@ -389,7 +384,7 @@ fn usage_view_maps_tokens_and_cost() {
 
 #[test]
 fn usage_view_without_cost_is_none() {
-    use agent_client_protocol::schema::v1::UsageUpdate;
+    use agent_client_protocol::v1::schema::UsageUpdate;
     let v = crate::model::UsageView::from(&UsageUpdate::new(10, 100));
     assert!(v.cost.is_none(), "absent cost must stay None");
 }
@@ -427,14 +422,14 @@ fn resolve_resume_fresh_session_is_silent() {
 
 #[test]
 fn session_capabilities_default_agent_advertises_nothing() {
-    use agent_client_protocol::schema::v1::AgentCapabilities;
+    use agent_client_protocol::v1::schema::AgentCapabilities;
     let v = session_capabilities_from_protocol(&AgentCapabilities::new());
     assert_eq!(v, SessionCapabilitiesView::default());
 }
 
 #[test]
 fn config_options_from_protocol_maps_select_options() {
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption,
     };
     let opts = vec![

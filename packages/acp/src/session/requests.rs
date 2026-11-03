@@ -72,7 +72,7 @@ pub(super) fn client_capabilities(presentation: ClientCapabilitiesView) -> Clien
     // Top-level `_meta`, NOT `auth._meta`: the agent reads
     // `clientCapabilities._meta["terminal-auth"]`. Nesting it under `auth`
     // alongside the sibling flag looks right and is silently ignored.
-    let mut meta = agent_client_protocol::schema::v1::Meta::new();
+    let mut meta = agent_client_protocol::v1::schema::Meta::new();
     meta.insert(
         TERMINAL_AUTH_META_KEY.to_owned(),
         serde_json::Value::Bool(true),
@@ -102,12 +102,12 @@ pub(super) fn client_capabilities(presentation: ClientCapabilitiesView) -> Clien
                 .compaction(
                     presentation
                         .compaction
-                        .then(agent_client_protocol::schema::v1::CompactionCapabilities::new),
+                        .then(agent_client_protocol::v1::schema::CompactionCapabilities::new),
                 )
                 .notices(
                     presentation
                         .notices
-                        .then(agent_client_protocol::schema::v1::NoticeCapabilities::new),
+                        .then(agent_client_protocol::v1::schema::NoticeCapabilities::new),
                 )
                 .config_options(
                     SessionConfigOptionsCapabilities::new()
@@ -140,7 +140,7 @@ pub(super) fn send_config_options_fold(
 /// (`session/new` response), the `set_config_option` reply, and the agent-pushed
 /// `ConfigOptionUpdate` notification.
 pub(super) fn config_options_from_protocol(
-    options: &[agent_client_protocol::schema::v1::SessionConfigOption],
+    options: &[agent_client_protocol::v1::schema::SessionConfigOption],
 ) -> Vec<ConfigOptionView> {
     options
         .iter()
@@ -154,7 +154,7 @@ pub(super) fn config_options_from_protocol(
 /// sub-capability. Called once at connect to gate host affordances (resume /
 /// list / close) without the host touching protocol types.
 pub(super) fn session_capabilities_from_protocol(
-    caps: &agent_client_protocol::schema::v1::AgentCapabilities,
+    caps: &agent_client_protocol::v1::schema::AgentCapabilities,
 ) -> SessionCapabilitiesView {
     let session = &caps.session_capabilities;
     SessionCapabilitiesView {

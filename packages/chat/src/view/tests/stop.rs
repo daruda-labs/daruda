@@ -5,7 +5,7 @@ use super::super::AgentChatView;
 use super::*;
 use crate::agent_chat_helpers::Rollup;
 use crate::rows::LiveSubagentUnits;
-use agent_client_protocol::schema::v1::{ContentBlock, ContentChunk, TextContent};
+use agent_client_protocol::v1::schema::{ContentBlock, ContentChunk, TextContent};
 use daruda_acp::{AcpEvent, PlanEntryView, PlanPriority, PlanStatus, SessionUpdate, ToolCall};
 
 /// Stop must preserve queued work and completion bookkeeping across the local

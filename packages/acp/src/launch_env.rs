@@ -58,8 +58,8 @@ mod tests {
     use crate::node::{NodeRuntime, node_platform};
     use agent_client_protocol::AcpAgent;
     use agent_client_protocol::AcpAgentConfig;
-    use agent_client_protocol::schema::v1::McpServer;
-    use agent_client_protocol::schema::v1::{EnvVariable, McpServerStdio};
+    use agent_client_protocol::v1::schema::McpServer;
+    use agent_client_protocol::v1::schema::{EnvVariable, McpServerStdio};
     use std::path::PathBuf;
     use std::str::FromStr;
 

@@ -19,7 +19,7 @@
 //! GATE: if `load` prints no replayed `[update]` lines, cross-restart resume
 //! does not work with this adapter and the restore design must be reconsidered.
 
-use agent_client_protocol::schema::v1::SessionId;
+use agent_client_protocol::v1::schema::SessionId;
 use daruda_acp::{AcpEvent, PermissionDecision, connect_session};
 use futures::StreamExt;
 

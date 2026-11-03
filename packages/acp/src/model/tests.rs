@@ -9,7 +9,7 @@ fn select_of(view: &ConfigOptionView) -> (&str, &[ConfigChoiceView]) {
         other => panic!("expected a select kind, got {other:?}"),
     }
 }
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     AvailableCommand, PlanEntry, PlanEntryPriority, PlanEntryStatus, SessionMode, SessionModeState,
     UnstructuredCommandInput,
 };
@@ -182,7 +182,7 @@ fn slash_command_from_no_input() {
 
 #[test]
 fn slash_command_from_unstructured_input() {
-    use agent_client_protocol::schema::v1::AvailableCommandInput;
+    use agent_client_protocol::v1::schema::AvailableCommandInput;
     let cmd = AvailableCommand::new("search", "Search the codebase").input(
         AvailableCommandInput::Unstructured(UnstructuredCommandInput::new("search query")),
     );
@@ -202,7 +202,7 @@ fn slash_command_free_text_preserves_name_description_and_hint() {
     // Verifies that a FreeText command round-trips all three fields
     // (name, description, hint) together — not covered by the NoInput
     // or unstructured-input tests which check fields in isolation.
-    use agent_client_protocol::schema::v1::AvailableCommandInput;
+    use agent_client_protocol::v1::schema::AvailableCommandInput;
     let cmd = AvailableCommand::new("explain", "Explain selected code").input(
         AvailableCommandInput::Unstructured(UnstructuredCommandInput::new("what to explain")),
     );
@@ -267,7 +267,7 @@ fn into_on_option_ref_matches_from() {
 
 #[test]
 fn config_option_select_maps_id_value_and_choices() {
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption,
     };
     let opt = SessionConfigOption::select(
@@ -302,7 +302,7 @@ fn config_option_boolean_kind_maps() {
     // Claude's "Fast mode" arrives as a native boolean once the host
     // advertises `session.configOptions.boolean` at `initialize`; without
     // that opt-in the same option degrades to a two-value select.
-    use agent_client_protocol::schema::v1::{SessionConfigOption, SessionConfigOptionCategory};
+    use agent_client_protocol::v1::schema::{SessionConfigOption, SessionConfigOptionCategory};
     let opt = SessionConfigOption::boolean("fast", "Fast mode", true)
         .category(SessionConfigOptionCategory::ModelConfig);
 
@@ -337,7 +337,7 @@ fn mode_state_ignores_a_boolean_mode_option() {
 
 #[test]
 fn config_option_thought_level_category_maps() {
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption,
     };
     let opt = SessionConfigOption::select(
@@ -353,7 +353,7 @@ fn config_option_thought_level_category_maps() {
 
 #[test]
 fn config_option_without_category_is_other() {
-    use agent_client_protocol::schema::v1::{SessionConfigOption, SessionConfigSelectOption};
+    use agent_client_protocol::v1::schema::{SessionConfigOption, SessionConfigSelectOption};
     let opt = SessionConfigOption::select(
         "agent",
         "Agent",
@@ -370,7 +370,7 @@ fn mode_and_model_options(
     current_mode: &'static str,
     mode_ids: &[&'static str],
 ) -> Vec<ConfigOptionView> {
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption,
     };
     let mode = SessionConfigOption::select(
@@ -433,7 +433,7 @@ fn mode_state_view_from_config_options_reflects_a_shrunken_mode_list() {
 
 #[test]
 fn mode_state_view_from_config_options_without_a_mode_option_is_none() {
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption,
     };
     let model = SessionConfigOption::select(
@@ -562,7 +562,7 @@ fn a_report_without_a_rate_limit_does_not_carry_the_previous_one() {
 
 #[test]
 fn the_protocol_usage_update_carries_no_rate_limit() {
-    use agent_client_protocol::schema::v1::UsageUpdate;
+    use agent_client_protocol::v1::schema::UsageUpdate;
     let update = UsageUpdate::new(5, 50);
     assert_eq!(UsageView::from(&update).rate_limit, None);
 }

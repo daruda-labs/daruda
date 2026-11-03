@@ -10,7 +10,7 @@
 //! Two protocol shapes carry authentication failures, and **their remedies are
 //! opposite**:
 //!
-//! - `-32000` ([`ErrorCode::AuthRequired`]) — the agent CLI is asking to be
+//! - `-32000` ([`ErrorCode::AUTH_REQUIRED`]) — the agent CLI is asking to be
 //!   logged in again. Re-login is exactly the fix.
 //! - `-32603` with `data.errorKind = "oauth_org_not_allowed"` — the
 //!   organization blocks subscription access. Re-login changes nothing; the
@@ -168,7 +168,7 @@ impl AcpFailure {
         if is_incoming_transport_closed(error) {
             return Self::TransportClosed { message };
         }
-        if matches!(error.code, ErrorCode::AuthRequired) {
+        if matches!(error.code, ErrorCode::AUTH_REQUIRED) {
             return Self::AuthRequired { message };
         }
         match error_kind(error) {
@@ -307,15 +307,39 @@ mod tests {
 
     #[test]
     fn transport_eof_uses_the_sdk_discriminator_not_english_copy() {
-        let error = AcpProtocolError::internal_error().data(serde_json::json!({
-            "reason": agent_client_protocol::INCOMING_TRANSPORT_CLOSED_REASON,
-            "method": "session/prompt"
-        }));
+        use agent_client_protocol::schema::ProtocolVersion;
+        use agent_client_protocol::v1::schema::InitializeRequest;
+        use agent_client_protocol::{Channel, Client};
+        use futures::StreamExt as _;
+
+        let (transport, mut peer) = Channel::duplex();
+        let error = smol::block_on(async {
+            let peer_task = smol::spawn(async move {
+                // Close only after the request reached the peer, so it is a
+                // real incoming EOF rather than a failed outgoing write.
+                assert!(peer.rx.next().await.is_some());
+                drop(peer);
+            });
+            let result = Client
+                .v1()
+                .connect_with(transport, async |cx| {
+                    cx.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                        .block_task()
+                        .await
+                })
+                .await;
+            peer_task.await;
+            result.unwrap_err()
+        });
         let failure = AcpFailure::classify(&error);
         assert!(matches!(failure, AcpFailure::TransportClosed { .. }));
         assert_eq!(failure.remedy(), Remedy::Retry);
         assert_eq!(failure.message(), error.message);
-        let same_text = AcpProtocolError::new(-32603, "Incoming transport closed");
+        let same_text =
+            AcpProtocolError::new(-32603, "Incoming transport closed").data(serde_json::json!({
+                "reason": agent_client_protocol::INCOMING_TRANSPORT_CLOSED_REASON,
+                "method": "session/prompt"
+            }));
         assert!(matches!(
             AcpFailure::classify(&same_text),
             AcpFailure::Unclassified { .. }

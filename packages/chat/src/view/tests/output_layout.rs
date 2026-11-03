@@ -242,7 +242,7 @@ fn render_shell_output_card_with(
     cx: &mut TestAppContext,
     printed: String,
 ) -> (gpui::AnyWindowHandle, Entity<crate::view::AgentChatView>) {
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         SessionUpdate, ToolCall, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
     };
 
@@ -294,7 +294,7 @@ fn update_shell_output(
     view: &Entity<crate::view::AgentChatView>,
     printed: String,
 ) {
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         Content, ContentBlock, SessionUpdate, TextContent, ToolCallContent, ToolCallStatus,
         ToolCallUpdate, ToolCallUpdateFields,
     };
@@ -424,7 +424,7 @@ fn push_filler_cards(
     view: &Entity<crate::view::AgentChatView>,
     count: usize,
 ) {
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         SessionUpdate, ToolCall, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
     };
 
@@ -699,7 +699,7 @@ fn render_read_output_card(
     path: &str,
     body: String,
 ) -> (gpui::AnyWindowHandle, Entity<crate::view::AgentChatView>) {
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         Content, ContentBlock, SessionUpdate, TextContent, ToolCall, ToolCallContent,
         ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
     };

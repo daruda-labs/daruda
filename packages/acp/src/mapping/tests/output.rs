@@ -203,7 +203,7 @@ fn raw_output_array_of_unrecognized_objects_falls_back_to_pretty_json_raw_text()
 
 #[test]
 fn split_content_maps_image_content_block() {
-    use agent_client_protocol::schema::v1::{Content, ImageContent};
+    use agent_client_protocol::v1::schema::{Content, ImageContent};
     let content = vec![ToolCallContent::Content(Content::new(ContentBlock::Image(
         ImageContent::new("b64data", "image/png"),
     )))];
@@ -219,7 +219,7 @@ fn split_content_maps_image_content_block() {
 
 #[test]
 fn split_content_maps_audio_content_block_to_media() {
-    use agent_client_protocol::schema::v1::{AudioContent, Content};
+    use agent_client_protocol::v1::schema::{AudioContent, Content};
     let data = "b64audio";
     let content = vec![ToolCallContent::Content(Content::new(ContentBlock::Audio(
         AudioContent::new(data, "audio/wav"),
@@ -236,7 +236,7 @@ fn split_content_maps_audio_content_block_to_media() {
 
 #[test]
 fn split_content_maps_embedded_blob_resource_to_media() {
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         BlobResourceContents, Content, EmbeddedResource, EmbeddedResourceResource,
     };
     let blob = "b64blob";
@@ -260,7 +260,7 @@ fn split_content_maps_embedded_blob_resource_to_media() {
 
 #[test]
 fn split_content_maps_embedded_text_resource_to_bounded_text() {
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         Content, EmbeddedResource, EmbeddedResourceResource, TextResourceContents,
     };
     let content = vec![ToolCallContent::Content(Content::new(
@@ -283,7 +283,7 @@ fn split_content_maps_embedded_text_resource_to_bounded_text() {
 
 #[test]
 fn split_content_drops_whitespace_only_text_resource() {
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         Content, EmbeddedResource, EmbeddedResourceResource, TextResourceContents,
     };
     let content = vec![ToolCallContent::Content(Content::new(
@@ -303,7 +303,7 @@ fn split_content_drops_whitespace_only_text_resource() {
 
 #[test]
 fn image_content_block_over_cap_falls_back_to_media() {
-    use agent_client_protocol::schema::v1::{Content, ImageContent};
+    use agent_client_protocol::v1::schema::{Content, ImageContent};
     let data = "A".repeat(MAX_TOOL_OUTPUT_IMAGE_BYTES + 1);
     let content = vec![ToolCallContent::Content(Content::new(ContentBlock::Image(
         ImageContent::new(data.clone(), "image/png"),
@@ -321,7 +321,7 @@ fn image_content_block_over_cap_falls_back_to_media() {
 
 #[test]
 fn image_content_block_under_cap_stays_image() {
-    use agent_client_protocol::schema::v1::{Content, ImageContent};
+    use agent_client_protocol::v1::schema::{Content, ImageContent};
     let data = "A".repeat(1024);
     let content = vec![ToolCallContent::Content(Content::new(ContentBlock::Image(
         ImageContent::new(data.clone(), "image/png"),

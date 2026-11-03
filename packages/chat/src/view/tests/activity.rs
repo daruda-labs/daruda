@@ -252,7 +252,7 @@ fn activity_state_maps_permission_turn_and_background_subagent(cx: &mut gpui::Te
 /// long-running call's later progress updates don't reset its age.
 #[gpui::test]
 fn a_tool_calls_age_runs_from_its_first_update(cx: &mut gpui::TestAppContext) {
-    use agent_client_protocol::schema::v1::{SessionUpdate, ToolCall, ToolCallUpdate};
+    use agent_client_protocol::v1::schema::{SessionUpdate, ToolCall, ToolCallUpdate};
     use daruda_acp::AcpEvent;
 
     let window = make_test_view(cx);
@@ -357,7 +357,7 @@ fn a_settle_edge_keeps_the_clock_of_a_call_that_is_still_running(cx: &mut gpui::
 /// to coalesce.
 #[gpui::test]
 fn a_replay_stamps_neither_clock(cx: &mut gpui::TestAppContext) {
-    use agent_client_protocol::schema::v1::{SessionUpdate, ToolCallUpdate};
+    use agent_client_protocol::v1::schema::{SessionUpdate, ToolCallUpdate};
     use daruda_acp::{AcpEvent, ToolStatusView};
 
     let window = make_test_view(cx);

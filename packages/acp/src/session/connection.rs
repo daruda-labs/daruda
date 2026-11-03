@@ -58,7 +58,7 @@ pub(super) async fn with_connect_timeout<T>(
 ///
 /// Generic over the transport (production passes the subprocess-spawning
 /// [`AcpAgent`]) so tests can wire an in-process fake agent — an SDK
-/// `Agent.builder()` implements `ConnectTo<Client>` too — and drive this exact
+/// `Agent.v1()` implements `ConnectTo<Client>` too — and drive this exact
 /// code path deterministically, dispatch semantics included.
 // Internal connection state threaded through one call — bundling wraps callers more than it saves.
 #[allow(clippy::too_many_arguments)]
@@ -90,7 +90,7 @@ pub(super) async fn run_connection(
     let notif_router = router.clone();
 
     agent_client_protocol::Client
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |notification: CompatSessionNotification, _cx| {
                 // Routing happens before anything is typed: a native subagent's

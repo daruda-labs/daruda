@@ -38,28 +38,28 @@ fn apply_update_with_routes_parent_id_through_adapter() {
     impl AcpAdapter for StubAdapter {
         fn rate_limit(
             &self,
-            _meta: &Option<agent_client_protocol::schema::v1::Meta>,
+            _meta: &Option<agent_client_protocol::v1::schema::Meta>,
         ) -> Option<crate::model::RateLimitView> {
             None
         }
 
         fn message_phase(
             &self,
-            _meta: &Option<agent_client_protocol::schema::v1::Meta>,
+            _meta: &Option<agent_client_protocol::v1::schema::Meta>,
         ) -> crate::adapter::MessagePhase {
             crate::adapter::MessagePhase::Answer
         }
 
         fn parent_tool_id(
             &self,
-            _meta: &Option<agent_client_protocol::schema::v1::Meta>,
+            _meta: &Option<agent_client_protocol::v1::schema::Meta>,
         ) -> Option<String> {
             Some("stub-parent".to_owned())
         }
 
         fn tool_name(
             &self,
-            _meta: &Option<agent_client_protocol::schema::v1::Meta>,
+            _meta: &Option<agent_client_protocol::v1::schema::Meta>,
         ) -> Option<String> {
             Some("stub-tool".to_owned())
         }
@@ -67,14 +67,14 @@ fn apply_update_with_routes_parent_id_through_adapter() {
         fn command_exit(
             &self,
             _raw_output: &Option<serde_json::Value>,
-            _meta: &Option<agent_client_protocol::schema::v1::Meta>,
+            _meta: &Option<agent_client_protocol::v1::schema::Meta>,
         ) -> Option<crate::model::CommandExit> {
             None
         }
 
         fn sideband_output(
             &self,
-            _meta: &Option<agent_client_protocol::schema::v1::Meta>,
+            _meta: &Option<agent_client_protocol::v1::schema::Meta>,
         ) -> Option<String> {
             None
         }

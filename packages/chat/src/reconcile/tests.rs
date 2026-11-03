@@ -315,7 +315,7 @@ fn turn_settle_revisits_a_resource_link_that_arrived_live(cx: &mut TestAppContex
 /// what settles it, so the ack owes the revisit.
 #[gpui::test]
 fn a_cancel_ack_revisits_a_resource_link_that_landed_after_the_stop(cx: &mut TestAppContext) {
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         Content, ContentBlock, ResourceLink, SessionUpdate, ToolCall as WireToolCall,
         ToolCallContent,
     };

@@ -64,7 +64,7 @@ gpui-kit-assets = { path = "vendor/gpui-kit/crates/assets" }
 gpui-base = { path = "vendor/gpui-kit/crates/base" }
 
 # Shared registry dependencies, including the vendored widget packages.
-agent-client-protocol = "3.6"
+agent-client-protocol = "5"
 anyhow = "1"
 base64 = "0.23"
 chrono = { version = "0.4.38", default-features = false }

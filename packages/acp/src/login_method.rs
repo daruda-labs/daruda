@@ -27,7 +27,7 @@
 //! matching is a compile error here rather than an empty list at runtime (the
 //! `auth_methods` field skips what it cannot parse, silently).
 
-use agent_client_protocol::schema::v1::AuthMethod;
+use agent_client_protocol::v1::schema::AuthMethod;
 
 /// How a login method bills, which decides how prominently a host may offer it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -156,7 +156,7 @@ fn parse_terminal_command(method: &AuthMethod) -> Option<TerminalCommand> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::schema::v1::{AuthMethod, InitializeResponse};
+    use agent_client_protocol::v1::schema::{AuthMethod, InitializeResponse};
 
     /// Deserialize an `initialize` response exactly as the wire delivers it.
     fn advertised(auth_methods: serde_json::Value) -> Vec<AuthMethod> {

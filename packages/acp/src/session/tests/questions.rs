@@ -8,13 +8,13 @@ use crate::question::{QuestionAnswer, QuestionValue};
 /// the client's response as message text and ends the turn — so a test reads
 /// what the agent received from the event stream.
 fn asking_agent() -> impl ConnectTo<Client> + 'static {
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         ContentChunk, ElicitationFormMode, ElicitationPropertySchema, ElicitationSchema,
         ElicitationSessionScope, EnumOption, InitializeResponse, NewSessionResponse,
         PromptResponse, StringPropertySchema,
     };
     Agent
-        .builder()
+        .v1()
         .on_receive_request(
             async |_req: InitializeRequest, responder, _conn| {
                 responder.respond(InitializeResponse::new(ProtocolVersion::V1))
@@ -43,7 +43,7 @@ fn asking_agent() -> impl ConnectTo<Client> + 'static {
                         ElicitationPropertySchema::String(select),
                     );
                     let scope = ElicitationSessionScope::new(session_id.clone()).tool_call_id(
-                        agent_client_protocol::schema::v1::ToolCallId::new("toolu_1"),
+                        agent_client_protocol::v1::schema::ToolCallId::new("toolu_1"),
                     );
                     let request = CreateElicitationRequest::new(
                         ElicitationFormMode::new(scope, schema),
@@ -196,13 +196,13 @@ fn form_elicitation_is_claimed_only_for_a_host_that_renders_questions() {
 /// the host goes nowhere.
 #[test]
 fn a_withdrawn_question_is_reported_and_unparked() {
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         ElicitationFormMode, ElicitationPropertySchema, ElicitationSchema, ElicitationSessionScope,
         InitializeResponse, NewSessionResponse, PromptResponse, StringPropertySchema,
     };
     let (code_tx, code_rx) = std::sync::mpsc::channel::<i32>();
     let agent = Agent
-        .builder()
+        .v1()
         .on_receive_request(
             async |_req: InitializeRequest, responder, _conn| {
                 responder.respond(InitializeResponse::new(ProtocolVersion::V1))

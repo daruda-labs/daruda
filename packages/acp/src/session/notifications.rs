@@ -23,7 +23,7 @@ pub(super) struct CompatSessionNotification {
     pub(super) update: serde_json::Value,
     #[serde(default, rename = "_meta")]
     #[allow(dead_code, reason = "Part of the wire shape; nothing reads it yet.")]
-    pub(super) meta: Option<agent_client_protocol::schema::v1::Meta>,
+    pub(super) meta: Option<agent_client_protocol::v1::schema::Meta>,
 }
 
 /// Fold one standard `session/update` into the host's event stream.

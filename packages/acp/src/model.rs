@@ -394,9 +394,9 @@ pub enum PlanPriority {
     Low,
 }
 
-impl From<&agent_client_protocol::schema::v1::PlanEntry> for PlanEntryView {
-    fn from(e: &agent_client_protocol::schema::v1::PlanEntry) -> Self {
-        use agent_client_protocol::schema::v1::{PlanEntryPriority, PlanEntryStatus};
+impl From<&agent_client_protocol::v1::schema::PlanEntry> for PlanEntryView {
+    fn from(e: &agent_client_protocol::v1::schema::PlanEntry) -> Self {
+        use agent_client_protocol::v1::schema::{PlanEntryPriority, PlanEntryStatus};
         let priority = match &e.priority {
             PlanEntryPriority::High => PlanPriority::High,
             PlanEntryPriority::Medium => PlanPriority::Medium,
@@ -486,8 +486,8 @@ pub struct TurnUsageView {
     pub cached_write_tokens: Option<u64>,
 }
 
-impl From<&agent_client_protocol::schema::v1::Usage> for TurnUsageView {
-    fn from(u: &agent_client_protocol::schema::v1::Usage) -> Self {
+impl From<&agent_client_protocol::v1::schema::Usage> for TurnUsageView {
+    fn from(u: &agent_client_protocol::v1::schema::Usage) -> Self {
         Self {
             input_tokens: u.input_tokens,
             output_tokens: u.output_tokens,
@@ -573,8 +573,8 @@ impl UsageView {
     }
 }
 
-impl From<&agent_client_protocol::schema::v1::UsageUpdate> for UsageView {
-    fn from(u: &agent_client_protocol::schema::v1::UsageUpdate) -> Self {
+impl From<&agent_client_protocol::v1::schema::UsageUpdate> for UsageView {
+    fn from(u: &agent_client_protocol::v1::schema::UsageUpdate) -> Self {
         Self {
             used: u.used,
             size: u.size,
@@ -607,9 +607,9 @@ pub enum SlashCommandInput {
     FreeText { hint: String },
 }
 
-impl From<&agent_client_protocol::schema::v1::AvailableCommand> for SlashCommand {
-    fn from(c: &agent_client_protocol::schema::v1::AvailableCommand) -> Self {
-        use agent_client_protocol::schema::v1::AvailableCommandInput;
+impl From<&agent_client_protocol::v1::schema::AvailableCommand> for SlashCommand {
+    fn from(c: &agent_client_protocol::v1::schema::AvailableCommand) -> Self {
+        use agent_client_protocol::v1::schema::AvailableCommandInput;
         let input = match &c.input {
             None => SlashCommandInput::NoInput,
             Some(AvailableCommandInput::Unstructured(u)) => SlashCommandInput::FreeText {
@@ -628,8 +628,8 @@ impl From<&agent_client_protocol::schema::v1::AvailableCommand> for SlashCommand
     }
 }
 
-impl From<&agent_client_protocol::schema::v1::SessionModeState> for ModeStateView {
-    fn from(s: &agent_client_protocol::schema::v1::SessionModeState) -> Self {
+impl From<&agent_client_protocol::v1::schema::SessionModeState> for ModeStateView {
+    fn from(s: &agent_client_protocol::v1::schema::SessionModeState) -> Self {
         ModeStateView {
             available: s
                 .available_modes

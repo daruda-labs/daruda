@@ -1,6 +1,7 @@
 //! ID-addressed upserts. Receive order fixes placement, independent of status.
 
-use agent_client_protocol::schema::{MaybeUndefined, v1::CompactionStatus};
+use agent_client_protocol::schema::MaybeUndefined;
+use agent_client_protocol::v1::schema::CompactionStatus;
 
 use super::content::output_block_of;
 use super::*;

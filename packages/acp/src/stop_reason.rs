@@ -54,7 +54,7 @@ mod tests {
     /// here instead of turning every early stop into `Unrecognized`.
     #[test]
     fn reported_texts_are_the_protocol_debug_names() {
-        use agent_client_protocol::schema::v1::StopReason;
+        use agent_client_protocol::v1::schema::StopReason;
         for (reason, expected) in [
             (StopReason::EndTurn, TurnStop::EndTurn),
             (StopReason::Cancelled, TurnStop::Cancelled),

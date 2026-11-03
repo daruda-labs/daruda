@@ -1,7 +1,7 @@
 //! Prompt attachments retain path references or content snapshots with their queued turn.
 
 use crate::SessionCapabilitiesView;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     ContentBlock, EmbeddedResource, EmbeddedResourceResource, ImageContent, ResourceLink,
     TextContent, TextResourceContents,
 };
