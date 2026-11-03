@@ -177,8 +177,9 @@ skips packages named `gpui-*`, so the crates declare no Rust floor.
 
 `scripts/ci-cargo.sh test` runs `-p gpui-base -p gpui-component`, so the
 daruda-authored patch tests and the upstream suites run in CI.
-Keep `gpui-base`'s Linux-only `gpui_platform` dev-dependency: its native
-shaping tests call `current_platform(true)` for the headless text system.
+Keep `gpui-base`'s Linux/Windows `gpui_platform` dev-dependency: its native
+shaping tests borrow the platform text system without opening a window
+(Linux headless; Windows non-headless because headless uses no-op fonts).
 `scripts/lint-direct-gpui-component.sh` forbids `gpui_component` and
 `gpui_base` outside the app facade and `daruda_ui`, and
 `scripts/lint-raw-mouse-button.sh` scans `vendor/gpui-kit`.

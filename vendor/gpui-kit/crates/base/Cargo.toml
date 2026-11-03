@@ -73,6 +73,6 @@ dead_code = "allow"
 "gpui" = { workspace = true, features = ["test-support"] }
 "indoc" = { workspace = true }
 
-[target.'cfg(target_os = "linux")'.dev-dependencies]
-# Native shaping tests use the pinned platform's headless text system.
+[target.'cfg(any(target_os = "linux", target_os = "windows"))'.dev-dependencies]
+# Native shaping tests borrow the pinned platform's text system without a window.
 "gpui_platform" = { workspace = true }
