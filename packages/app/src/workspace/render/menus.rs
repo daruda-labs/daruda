@@ -60,15 +60,15 @@ pub(super) fn build_new_tab_menu(
     let menu = {
         let ws = ws.clone();
         menu.item(
-            PopupMenuItem::new(crate::surface::strings::common::new_terminal()).on_click(
-                move |_, window, app| {
+            PopupMenuItem::new(crate::surface::strings::common::new_terminal())
+                .icon(crate::ui::IconName::SquareTerminal)
+                .on_click(move |_, window, app| {
                     if let Some(w) = ws.upgrade() {
                         w.update(app, |this, cx| {
                             this.mutate_durable_in(window, cx, |ws, w, cx| ws.add_tab(w, cx));
                         });
                     }
-                },
-            ),
+                }),
         )
     }
     .separator();
