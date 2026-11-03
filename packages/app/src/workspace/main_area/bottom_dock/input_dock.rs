@@ -71,10 +71,16 @@ impl InputDock {
         let ws_for_accept = workspace.clone();
         let ws_for_provider = workspace.clone();
         let ws_for_history = workspace.clone();
+        let ws_for_text = workspace.clone();
         let terminal_input = cx.new(|cx_state| {
             let max_rows = usize::from(config.agent.input_max_rows);
             let mut state = crate::ui::InputState::new(window, cx_state)
                 .auto_grow(1, max_rows)
+                .on_empty_text_input(move |text, _, app| {
+                    ws_for_text.upgrade().is_some_and(|ws| {
+                        ws.update(app, |ws, cx| ws.question_text_shortcut(text, cx))
+                    })
+                })
                 // While an agent chat pane is focused and the user hasn't opted
                 // into modifier-to-send, plain Enter submits and Shift+Enter
                 // inserts a newline (Zed's agent-panel default). Evaluated live

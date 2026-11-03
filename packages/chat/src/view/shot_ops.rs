@@ -81,6 +81,17 @@ impl AgentChatView {
         cx.notify();
     }
 
+    /// Expand a seeded question through the same operation as its disclosure button.
+    pub fn expand_question_message_for_shot(&mut self, id: u64, cx: &mut Context<Self>) {
+        if self
+            .questions
+            .get(id)
+            .is_some_and(|question| !question.message_expanded)
+        {
+            self.toggle_question_message(id, cx);
+        }
+    }
+
     /// Cancel every open question as a Stop does, leaving their records.
     pub fn cancel_questions_for_shot(&mut self, cx: &mut Context<Self>) {
         self.cancel_pending_questions(cx);

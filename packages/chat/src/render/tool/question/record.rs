@@ -7,7 +7,7 @@ use daruda_acp::{QuestionField, QuestionFieldKind, QuestionValue, ToolCallItem};
 use daruda_ui::theme::{self, PaneSurfaceTokens};
 use gpui::{AnyElement, Context, Div, FontWeight, IntoElement, SharedString, div, prelude::*, px};
 
-use super::{GLYPH_QUESTION, GLYPH_WRITE, choice_glyph, field_heading};
+use super::{GLYPH_WRITE, choice_glyph, field_heading};
 use crate::fold::FoldKey;
 use crate::render::fold_header::{FoldHeader, FoldRow};
 use crate::strings as s;
@@ -44,7 +44,7 @@ pub(in crate::render) fn question_record(
             .flex_none()
             .text_color(surface.foreground_muted)
             .text_size(font)
-            .child(GLYPH_QUESTION)
+            .child(daruda_ui::icons::icon(daruda_ui::icons::SESSION))
             .into_any_element(),
     );
     let surface = *surface;

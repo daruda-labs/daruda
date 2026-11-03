@@ -11,12 +11,12 @@ use gpui::{Div, SharedString, div, prelude::*, px};
 use crate::strings as s;
 
 mod card;
+mod message;
 mod record;
 
 pub(in crate::render) use card::{question_card, question_form};
 pub(in crate::render) use record::question_record;
 
-const GLYPH_QUESTION: &str = "?";
 pub(super) const GLYPH_HIGHLIGHT: &str = "▸";
 const GLYPH_RADIO_OFF: &str = "○";
 const GLYPH_RADIO_ON: &str = "◉";
@@ -81,7 +81,13 @@ pub(super) fn row_frame(
                 .text_color(surface.foreground_subtle)
                 .child(SharedString::from(number.to_string()))
         }))
-        .child(div().flex_none().child(glyph))
+        .child(div().flex_none().child(daruda_ui::icons::icon(match glyph {
+            GLYPH_RADIO_OFF => daruda_ui::icons::RADIO_OFF,
+            GLYPH_RADIO_ON => daruda_ui::icons::RADIO_ON,
+            GLYPH_CHECK_OFF => daruda_ui::icons::CHECKBOX_OFF,
+            GLYPH_CHECK_ON => daruda_ui::icons::CHECKBOX_ON,
+            _ => daruda_ui::icons::EDIT,
+        })))
 }
 
 pub(super) fn choice_glyph(multi: bool, picked: bool) -> &'static str {
@@ -95,3 +101,20 @@ pub(super) fn choice_glyph(multi: bool, picked: bool) -> &'static str {
 
 #[cfg(test)]
 mod tests;
+
+/// Interactive questions follow workspace chrome rather than terminal colors.
+pub(in crate::render) fn interaction_surface(cx: &gpui::App) -> PaneSurfaceTokens {
+    let t = theme::current(cx);
+    PaneSurfaceTokens {
+        background: t.button_widget_bg,
+        tint: t.button_widget_bg,
+        foreground: t.text_primary,
+        foreground_muted: t.text_body,
+        foreground_subtle: t.text_muted,
+        hover_tint: t.button_widget_bg,
+        active_tint: t.button_widget_bg.blend(t.link_color.opacity(0.12)),
+        border_tint: t.border,
+        control_border: t.link_color,
+        syntax_is_light: !t.is_dark(),
+    }
+}

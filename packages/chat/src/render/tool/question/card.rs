@@ -3,12 +3,12 @@
 
 use daruda_acp::{QuestionField, QuestionFieldKind, ToolCallItem};
 use daruda_ui::theme::{self, PaneSurfaceTokens};
-use daruda_ui::{Disableable as _, Selectable as _, button_chip_on_surface};
+use daruda_ui::{ButtonVariants as _, Disableable as _, icons};
 use gpui::{
     AnyElement, Context, Div, FontWeight, IntoElement, SharedString, Stateful, div, prelude::*, px,
 };
 
-use super::{GLYPH_HIGHLIGHT, GLYPH_QUESTION, GLYPH_WRITE, choice_glyph, field_heading, row_frame};
+use super::{GLYPH_HIGHLIGHT, GLYPH_WRITE, choice_glyph, field_heading, row_frame};
 use crate::strings as s;
 use crate::view::AgentChatView;
 use crate::view::questions::{OpenQuestion, QuestionCountdown, QuestionHighlight, primary_fields};
@@ -53,21 +53,16 @@ pub(in crate::render) fn question_form(
         .min_w_0()
         .flex()
         .flex_col()
-        .gap(px(theme::GAP_SM))
-        .px(px(theme::PAD_STANDARD))
-        .py(px(theme::PAD_XS))
-        .rounded(px(theme::RADIUS_SM))
+        .gap(px(theme::GAP_LG))
+        .p(px(theme::PAD_XL))
+        .rounded(px(theme::RADIUS_MD))
         .border_1()
         .border_color(surface.border_tint)
         .bg(surface.tint)
         .text_size(px(theme::agent_chat_font_size(cx)))
         .text_color(surface.foreground)
         .child(card_header(open, agent, surface))
-        .child(
-            div()
-                .whitespace_normal()
-                .child(SharedString::from(open.request.message.clone())),
-        )
+        .child(super::message::render(open, surface, cx))
         .children(
             primary_fields(&open.request)
                 .enumerate()
@@ -110,12 +105,13 @@ fn card_header(open: &OpenQuestion, agent: &str, surface: &PaneSurfaceTokens) ->
     div()
         .flex()
         .items_center()
+        .text_size(px(theme::FONT_SIZE_SM))
         .gap(px(theme::GAP_SM))
         .child(
             div()
                 .flex_none()
                 .text_color(surface.foreground_muted)
-                .child(GLYPH_QUESTION),
+                .child(icons::icon(icons::SESSION)),
         )
         .child(
             div()
@@ -255,10 +251,17 @@ fn option_row(selector: String, row: OptionRow<'_>, surface: &PaneSurfaceTokens)
     let filled = row.picked || row.highlighted;
     let hover = surface.hover_tint;
     let debug = selector.clone();
-    row_frame(Some(row.number), row.highlighted, row.glyph, surface)
+    row_frame(None, row.highlighted, row.glyph, surface)
         .id(SharedString::from(selector))
         .debug_selector(move || debug.clone())
         .cursor_pointer()
+        .py(px(theme::PAD_SM))
+        .border_l_2()
+        .border_color(if row.picked {
+            surface.control_border
+        } else {
+            surface.border_tint.opacity(0.0)
+        })
         .when(filled, |el| el.bg(surface.active_tint))
         .when(!filled, |el| el.hover(move |style| style.bg(hover)))
         .child(
@@ -266,8 +269,8 @@ fn option_row(selector: String, row: OptionRow<'_>, surface: &PaneSurfaceTokens)
                 .flex_1()
                 .min_w_0()
                 .flex()
-                .flex_wrap()
-                .gap(px(theme::GAP_LG))
+                .flex_col()
+                .gap(px(theme::GAP_XS))
                 .child(
                     div()
                         .whitespace_normal()
@@ -281,6 +284,17 @@ fn option_row(selector: String, row: OptionRow<'_>, surface: &PaneSurfaceTokens)
                         .child(SharedString::from(description.to_owned()))
                 })),
         )
+        .child(
+            div()
+                .flex_none()
+                .px(px(theme::PAD_XS))
+                .border_1()
+                .border_color(surface.border_tint)
+                .rounded(px(theme::RADIUS_XS))
+                .text_size(px(theme::FONT_SIZE_XS))
+                .text_color(surface.foreground_subtle)
+                .child(SharedString::from(row.number.to_string())),
+        )
 }
 
 /// The row that answers in the composer: with a `target`, a click binds the
@@ -288,13 +302,16 @@ fn option_row(selector: String, row: OptionRow<'_>, surface: &PaneSurfaceTokens)
 /// What was committed shows in its place.
 fn write_row(
     target: Option<WriteTarget>,
-    number: usize,
+    _number: usize,
     typed: Option<String>,
     highlighted: bool,
     surface: &PaneSurfaceTokens,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
-    let frame = row_frame(Some(number), highlighted, GLYPH_WRITE, surface)
+    let frame = row_frame(None, highlighted, GLYPH_WRITE, surface)
+        .border_t_1()
+        .border_color(surface.border_tint)
+        .pt(px(theme::PAD_STANDARD))
         .when(highlighted, |el| el.bg(surface.active_tint));
     let row = write_row_content(frame, typed, surface);
     let Some(WriteTarget { question, field }) = target else {
@@ -359,6 +376,9 @@ fn actions(
         .flex_wrap()
         .items_center()
         .justify_end()
+        .border_t_1()
+        .border_color(surface.border_tint)
+        .pt(px(theme::PAD_STANDARD))
         .gap(px(theme::GAP_SM))
         .when(offers_send && ready && unanswered > 0, |row| {
             row.child(
@@ -370,12 +390,11 @@ fn actions(
             )
         })
         .child(
-            button_chip_on_surface(
+            daruda_ui::button(
                 SharedString::from(skip.clone()),
                 SharedString::from(s::agent_chat::question_skip()),
-                surface,
-                cx,
             )
+            .ghost()
             .debug_selector(move || skip.clone())
             .on_click(cx.listener(move |view, _, _, cx| view.skip_question(id, cx))),
         )
@@ -398,16 +417,13 @@ fn actions(
                             .when(!lit, |el| el.invisible())
                             .child(GLYPH_HIGHLIGHT),
                     )
-                    // The selected fill is the emphasis: accent has no
-                    // verified contrast on a terminal-mirrored surface.
+                    // The primary action uses the workspace interaction palette.
                     .child(
-                        button_chip_on_surface(
+                        daruda_ui::button(
                             SharedString::from(submit.clone()),
                             SharedString::from(s::agent_chat::question_submit()),
-                            surface,
-                            cx,
                         )
-                        .selected(true)
+                        .primary()
                         .disabled(!ready)
                         .debug_selector(move || submit.clone())
                         .on_click(

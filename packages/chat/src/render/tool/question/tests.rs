@@ -129,6 +129,7 @@ fn open(request: QuestionRequest) -> OpenQuestion {
         draft: crate::view::questions::QuestionDraft::seeded(&request),
         request,
         focus: Default::default(),
+        message_expanded: false,
         composer: crate::view::questions::ComposerBinding::Bound {
             draft_became_answer: false,
         },

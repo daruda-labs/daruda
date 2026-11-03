@@ -4,7 +4,7 @@
 //! the host card strip's reason: the turn cannot go on until it is answered,
 //! so it must not scroll out of reach.
 
-use daruda_ui::theme::{self, PaneSurfaceTokens};
+use daruda_ui::theme;
 use gpui::{AnyElement, Context, div, prelude::*, px};
 
 use super::tool::question_form;
@@ -22,7 +22,7 @@ pub(super) fn question_panel(
         .questions()
         .open()
         .find(|q| view.question_row(q.tool_call_id()).is_none())?;
-    let surface = PaneSurfaceTokens::agent_chat(cx).dimmed(view.dim_amount);
+    let surface = super::tool::interaction_surface(cx).dimmed(view.dim_amount);
     let max_height =
         theme::agent_chat_font_size(cx) * theme::agent_chat_line_height(cx) * MAX_VISIBLE_TEXT_ROWS;
     let may_write = view.questions().first().map(|q| q.id) == Some(question.id);

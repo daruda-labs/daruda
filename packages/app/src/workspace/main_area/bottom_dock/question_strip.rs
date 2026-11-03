@@ -1,4 +1,4 @@
-//! Bottom-dock question strip: one line between the queued-prompt strip and
+//! Bottom-dock question strip: a compact band between the queued-prompt strip and
 //! the composer while the focused agent pane has a question open. Bound, it
 //! names the question the composer's Enter answers, or says why Enter took
 //! no text; released, it offers to
@@ -48,7 +48,11 @@ pub(super) fn render(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> Optio
     let (message, warn) = if strip.pending_prompt.is_some() {
         action(
             "question-skip-and-send",
-            s::bottom_dock::question_skip_and_send(),
+            if strip.narrow {
+                s::bottom_dock::question_skip_and_send_short()
+            } else {
+                s::bottom_dock::question_skip_and_send()
+            },
             cx,
             Action::SkipAndSend,
         );
@@ -62,7 +66,11 @@ pub(super) fn render(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> Optio
     } else if strip.composer.bound {
         action(
             "question-release",
-            s::bottom_dock::question_release(),
+            if strip.narrow {
+                s::bottom_dock::question_release_short()
+            } else {
+                s::bottom_dock::question_release()
+            },
             cx,
             Action::Release,
         );
@@ -152,29 +160,53 @@ pub(super) fn render(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> Optio
             .relative()
             .debug_selector(|| "question-strip".into())
             .flex_shrink_0()
-            .h(px(theme::AGENT_QUESTION_STRIP_H))
+            .h(px(if strip.narrow {
+                theme::AGENT_QUESTION_STRIP_NARROW_H
+            } else {
+                theme::AGENT_QUESTION_STRIP_H
+            }))
             .flex()
             .flex_row()
             .items_center()
             .gap(px(theme::AGENT_QUEUE_STRIP_GAP))
+            .when(strip.narrow, |row| row.flex_col().items_stretch().gap_0())
             .px(px(theme::PANEL_BODY_PAD_X))
             .border_b_1()
             .border_color(if warn { warn_text } else { border })
             .bg(if warn { warn_bg } else { tint })
             .text_size(px(theme::AGENT_QUEUE_STRIP_FONT_SIZE))
-            .children(glyph)
             .child(
                 div()
+                    .flex()
+                    .items_center()
                     .flex_1()
                     .min_w_0()
-                    .truncate()
-                    .text_color(message_color)
-                    .child(SharedString::from(message)),
+                    .h(px(theme::AGENT_QUESTION_STRIP_H))
+                    .gap(px(theme::AGENT_QUEUE_STRIP_GAP))
+                    .when(strip.narrow, |row| row.flex_none().w_full())
+                    .children(glyph)
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_color(message_color)
+                            .child(SharedString::from(message)),
+                    )
+                    .children(waiting_after)
+                    .children(time_left)
+                    .children(esc_hint),
             )
-            .children(waiting_after)
-            .children(time_left)
-            .children(esc_hint)
-            .children(actions)
+            .child(
+                div()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .justify_end()
+                    .h(px(theme::AGENT_QUESTION_STRIP_H))
+                    .gap(px(theme::AGENT_QUEUE_STRIP_GAP))
+                    .children(actions),
+            )
             .child(width_capture)
             .into_any_element(),
     )

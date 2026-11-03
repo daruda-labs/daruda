@@ -993,3 +993,221 @@ fn an_attachment_only_enter_is_held_back_behind_a_released_question(cx: &mut Tes
         Some("")
     );
 }
+
+/// Removing attachments reconciles the warning without a composer text change.
+#[gpui::test]
+fn removing_the_last_attachment_clears_the_blocked_prompt(cx: &mut TestAppContext) {
+    check_attachment_removal_warning(cx, "");
+}
+
+/// A text prompt remains blocked after its last attachment is removed.
+#[gpui::test]
+fn removing_attachments_keeps_a_text_prompt_blocked(cx: &mut TestAppContext) {
+    check_attachment_removal_warning(cx, "next prompt");
+}
+
+fn check_attachment_removal_warning(cx: &mut TestAppContext, text: &str) {
+    let (_dir, ws, mut vcx) = workspace(cx);
+    let pane = add_pane(&ws, &mut vcx);
+    let mut probes = connect(&ws, &mut vcx, pane, &[1]);
+    ask(&ws, &mut vcx, pane, 1, path_question());
+    vcx.update(|_, cx| ws.update(cx, |ws, cx| ws.release_question_for_prompt(pane, cx)));
+    let view = vcx.update(|_, cx| ws.read(cx).agent_chat_view(pane).expect("chat").clone());
+    vcx.update(|_, cx| {
+        view.update(cx, |v, cx| {
+            v.add_attachments(
+                (0..2)
+                    .map(|n| daruda_acp::PromptAttachment {
+                        name: format!("notes-{n}"),
+                        content: daruda_acp::AttachmentContent::ResourceLink {
+                            uri: format!("urn:test:notes-{n}"),
+                        },
+                    })
+                    .collect(),
+                cx,
+            )
+            .expect("attached");
+        });
+    });
+    type_text(&ws, &mut vcx, text);
+    press_enter_key(&mut vcx);
+    assert!(
+        strip(&ws, &mut vcx)
+            .expect("strip")
+            .pending_prompt
+            .is_some()
+    );
+    vcx.update(|_, cx| ws.update(cx, |ws, cx| ws.remove_composer_attachment(pane, 0, cx)));
+    assert!(
+        strip(&ws, &mut vcx)
+            .expect("strip")
+            .pending_prompt
+            .is_some()
+    );
+    vcx.update(|_, cx| ws.update(cx, |ws, cx| ws.remove_composer_attachment(pane, 0, cx)));
+    assert_eq!(
+        strip(&ws, &mut vcx)
+            .expect("strip")
+            .pending_prompt
+            .is_some(),
+        !text.is_empty()
+    );
+    assert_eq!(composer_text(&ws, &mut vcx), text);
+    assert!(queued(&ws, &mut vcx, pane).is_empty());
+    assert_eq!(probes[0].answer(), None);
+}
+
+/// The card's send takes the text typed in the bound composer with it:
+/// a pick moved focus to the reason, typed but not yet entered.
+#[gpui::test]
+fn typing_on_highlighted_send_commits_to_the_last_field(cx: &mut TestAppContext) {
+    let (_dir, ws, mut vcx) = workspace(cx);
+    let pane = add_pane(&ws, &mut vcx);
+    let mut probes = connect(&ws, &mut vcx, pane, &[1]);
+    ask(&ws, &mut vcx, pane, 1, color_then_reason());
+    let view = vcx.update(|_, cx| ws.read(cx).agent_chat_view(pane).expect("chat").clone());
+    vcx.update(|_, cx| view.update(cx, |v, cx| v.pick_question_option(1, 0, 0, cx)));
+    vcx.run_until_parked();
+    vcx.update(|_, cx| {
+        view.update(cx, |v, cx| {
+            v.move_question_row(1, true, cx);
+            v.move_question_row(1, true, cx);
+            assert!(v.question_composer().expect("open").send_highlighted);
+        })
+    });
+    vcx.run_until_parked();
+    type_text(&ws, &mut vcx, "because X");
+
+    vcx.update(|_, cx| view.update(cx, |v, cx| v.submit_question_from_card(1, cx)));
+    vcx.run_until_parked();
+
+    assert_eq!(
+        probes[0].answer(),
+        Some(QuestionAnswer::Submit(BTreeMap::from([
+            ("color".to_owned(), QuestionValue::Text("red".into())),
+            ("why".to_owned(), QuestionValue::Text("because X".into())),
+        ])))
+    );
+    assert_eq!(composer_text(&ws, &mut vcx), "", "the text went with it");
+}
+
+/// Narrow-strip space is reserved above the composer, matching its two rows.
+#[gpui::test]
+fn a_narrow_question_strip_reserves_its_second_row(cx: &mut TestAppContext) {
+    let (_dir, ws, mut vcx) = workspace(cx);
+    let pane = add_pane(&ws, &mut vcx);
+    let _probes = connect(&ws, &mut vcx, pane, &[1]);
+    ask(&ws, &mut vcx, pane, 1, path_question());
+    vcx.update(|_, cx| {
+        let dock = ws.read(cx).docks.bottom.clone();
+        dock.update(cx, |dock, _| dock.size = 0.0);
+        ws.update(cx, |ws, cx| {
+            ws.set_question_strip_width(1000.0, cx);
+            let wide = ws.bottom_dock_display_size(cx);
+            ws.set_question_strip_width(280.0, cx);
+            assert!(ws.question_strip_snapshot(cx).expect("strip").narrow);
+            assert_eq!(
+                ws.bottom_dock_display_size(cx) - wide,
+                crate::ui::theme::AGENT_QUESTION_STRIP_NARROW_H
+                    - crate::ui::theme::AGENT_QUESTION_STRIP_H
+            );
+        });
+    });
+}
+
+/// The card's rendered write action reaches the host and the real composer.
+#[gpui::test]
+fn clicking_the_card_write_row_binds_and_submits_from_the_composer(cx: &mut TestAppContext) {
+    let (_dir, ws, mut vcx) = workspace(cx);
+    let pane = add_pane(&ws, &mut vcx);
+    let mut probes = connect(&ws, &mut vcx, pane, &[1]);
+    show_question_tab(&ws, &mut vcx);
+    ask(&ws, &mut vcx, pane, 1, path_question());
+    let release = vcx
+        .debug_bounds("question-release")
+        .expect("release action");
+    vcx.simulate_click(release.center(), gpui::Modifiers::default());
+    vcx.run_until_parked();
+    assert!(!summary(&ws, &mut vcx, pane).expect("open").bound);
+    let write = vcx
+        .debug_bounds("agent-chat-question-1-0-write")
+        .expect("write row");
+    vcx.simulate_click(write.center(), gpui::Modifiers::default());
+    vcx.run_until_parked();
+    assert!(summary(&ws, &mut vcx, pane).expect("open").bound);
+    type_text(&ws, &mut vcx, "src/");
+    press_enter_key(&mut vcx);
+    assert_eq!(
+        probes[0].answer(),
+        Some(QuestionAnswer::Submit(BTreeMap::from([(
+            "path".to_owned(),
+            QuestionValue::Text("src/".into())
+        )])))
+    );
+}
+
+/// The strip's rendered reveal action scrolls an off-screen question into view.
+#[gpui::test]
+fn clicking_the_strip_show_action_reveals_the_question_card(cx: &mut TestAppContext) {
+    use daruda_acp::{ChatItem, ToolCallItem, ToolKindView, ToolStatusView};
+    let (_dir, ws, mut vcx) = workspace(cx);
+    let pane = add_pane(&ws, &mut vcx);
+    let _probes = connect(&ws, &mut vcx, pane, &[1]);
+    show_question_tab(&ws, &mut vcx);
+    let view = vcx.update(|_, cx| ws.read(cx).agent_chat_view(pane).expect("chat").clone());
+    vcx.update(|_, cx| {
+        view.update(cx, |v, cx| {
+            v.seed_items_for_test(
+                [
+                    ChatItem::UserText("Start".into()),
+                    ChatItem::ToolCall(ToolCallItem {
+                        id: "question-tool".into(),
+                        title: "Question".into(),
+                        kind: ToolKindView::Other,
+                        tool_name: None,
+                        status: ToolStatusView::InProgress,
+                        diffs: Vec::new(),
+                        output: Vec::new(),
+                        raw_input: None,
+                        locations: Vec::new(),
+                        parent_tool_id: None,
+                        exit: None,
+                    }),
+                ],
+                cx,
+            );
+            v.seed_items_for_test(
+                (0..40).map(|i| ChatItem::UserText(format!("Later prompt {i}"))),
+                cx,
+            );
+        })
+    });
+    let mut request = path_question();
+    request.tool_call_id = Some("question-tool".into());
+    ask(&ws, &mut vcx, pane, 1, request);
+    vcx.update(|_, cx| view.update(cx, |v, cx| v.scroll_to_bottom(cx)));
+    vcx.run_until_parked();
+    assert!(
+        vcx.debug_bounds("agent-chat-question-card-question-tool")
+            .is_none()
+    );
+    let show = vcx.debug_bounds("question-show").expect("show action");
+    vcx.simulate_click(show.center(), gpui::Modifiers::default());
+    vcx.run_until_parked();
+    assert!(
+        vcx.debug_bounds("agent-chat-question-card-question-tool")
+            .is_some()
+    );
+}
+
+fn show_question_tab(ws: &Entity<Workspace>, vcx: &mut VisualTestContext) {
+    vcx.update(|_, cx| {
+        ws.update(cx, |ws, cx| {
+            let runtime = ws.active_runtime_mut();
+            runtime.active_tab_index = runtime.tabs.len() - 1;
+            ws.main_area.pending_resize = true;
+            cx.notify();
+        })
+    });
+    vcx.run_until_parked();
+}

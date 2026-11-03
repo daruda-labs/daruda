@@ -115,6 +115,7 @@ impl QuestionDraft {
     /// The person answered primary field `primary_key`, or accepted what it
     /// holds, without changing it.
     pub(crate) fn confirm(&mut self, primary_key: &str) {
+        self.touched = true;
         self.confirmed.insert(primary_key.to_owned());
     }
 

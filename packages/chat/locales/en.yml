@@ -193,6 +193,8 @@ agent_chat:
   permission_cancelled: "Cancelled."
   # Header of a question the agent asked mid-turn; `agent` is its name.
   question_asked_by: "%{agent} asks"
+  question_message_more: "Show full question"
+  question_message_less: "Show less"
   question_waiting: "Waiting for your answer"
   # How long an untouched question has before it is declined, e.g. "4:12 left".
   question_time_left: "%{time} left"

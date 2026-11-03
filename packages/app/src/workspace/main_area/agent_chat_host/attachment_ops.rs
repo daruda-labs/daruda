@@ -18,6 +18,7 @@ enum Source {
 
 impl Workspace {
     fn composer_attachments_changed(&mut self, cx: &mut Context<Self>) {
+        self.sync_question_marks(cx);
         self.main_area.pending_resize = true;
         cx.notify();
     }

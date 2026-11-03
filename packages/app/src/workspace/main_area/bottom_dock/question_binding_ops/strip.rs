@@ -31,11 +31,16 @@ impl Workspace {
             time_left: composer
                 .deadline
                 .map(|deadline| QuestionCountdown::until(deadline, std::time::Instant::now())),
-            narrow: marks
-                .strip_width
-                .is_some_and(|w| w <= crate::ui::theme::agent_chat_compact_options_w(cx)),
+            narrow: self.question_strip_is_narrow(cx),
             composer,
         })
+    }
+
+    pub(in crate::workspace) fn question_strip_is_narrow(&self, cx: &App) -> bool {
+        self.input_dock
+            .question
+            .strip_width
+            .is_some_and(|width| width <= crate::ui::theme::agent_chat_compact_options_w(cx))
     }
 
     /// The strip's painted width, layout geometry from its `canvas`. The

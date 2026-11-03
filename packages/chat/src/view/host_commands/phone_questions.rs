@@ -29,6 +29,8 @@ pub struct PhoneQuestion {
     pub options: Vec<String>,
     /// Indices into `options` already chosen.
     pub picked: Vec<usize>,
+    /// Current free-text answer, including a schema default the phone must review.
+    pub answer_text: Option<Box<str>>,
     /// Several choices toggle, then a send button ends the field.
     pub multi: bool,
     /// A text reply to the card answers this field.
@@ -281,6 +283,10 @@ fn phone_question(
         message: question.request.message.clone(),
         options,
         picked,
+        answer_text: question
+            .text_key(target)
+            .and_then(|key| draft.text(key))
+            .map(Box::<str>::from),
         multi: matches!(target.kind, QuestionFieldKind::MultiSelect(_)),
         takes_text: question.text_key(target).is_some(),
         optional: !target.required,

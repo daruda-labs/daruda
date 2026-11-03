@@ -371,3 +371,57 @@ fn a_defaulted_field_is_shown_before_the_phone_sends(cx: &mut gpui::TestAppConte
     ]);
     assert_eq!(answer.answer(), Some(QuestionAnswer::Submit(expected)));
 }
+
+/// A text default is shown and explicitly confirmed rather than sent unseen.
+#[gpui::test]
+fn phone_text_defaults_are_visible_before_confirmation(cx: &mut gpui::TestAppContext) {
+    let mut text = field("path", QuestionFieldKind::Text, None);
+    text.default = Some(QuestionValue::Text("src/".into()));
+    let request = QuestionRequest {
+        fields: vec![text],
+        ..form()
+    };
+    let (view, mut answer, _) = asked(cx, request);
+    view.update(cx, |view, cx| {
+        let cards = view.take_questions_untold_to_phone();
+        assert_eq!(cards[0].answer_text.as_deref(), Some("src/"));
+        assert_eq!(answer.answer(), None);
+        assert_eq!(
+            view.answer_question_from_phone(1, 0, PhoneReply::Send, cx),
+            PhoneAnswerResult::Submitted
+        );
+    });
+    assert_eq!(
+        answer.answer(),
+        Some(QuestionAnswer::Submit(BTreeMap::from([(
+            "path".to_owned(),
+            QuestionValue::Text("src/".into())
+        )])))
+    );
+}
+
+/// Accepting a displayed default is interaction even when its value is unchanged.
+#[gpui::test]
+fn confirming_a_phone_default_stops_the_form_timeout(cx: &mut gpui::TestAppContext) {
+    let mut text = field("path", QuestionFieldKind::Text, None);
+    text.default = Some(QuestionValue::Text("src/".into()));
+    let request = QuestionRequest {
+        fields: vec![text, field("reason", QuestionFieldKind::Text, None)],
+        ..form()
+    };
+    let (view, mut answer, _) = asked(cx, request);
+    view.update(cx, |view, cx| {
+        view.set_question_timeout(Some(std::time::Duration::from_secs(60)), cx);
+        let cards = view.take_questions_untold_to_phone();
+        assert!(cards[0].time_left.is_some());
+        let PhoneAnswerResult::Next(next) =
+            view.answer_question_from_phone(1, 0, PhoneReply::Send, cx)
+        else {
+            panic!("the next field still needs an answer");
+        };
+        assert_eq!(next.field, 1);
+        assert!(next.time_left.is_none(), "confirmation must stop expiry");
+        assert!(view.has_pending_question());
+    });
+    assert_eq!(answer.answer(), None);
+}

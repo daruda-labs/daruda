@@ -5,9 +5,9 @@
 //! [`daruda_core::shell::quote`] using the focused pane's shell flavour before
 //! insertion.
 
-use crate::ui::Disableable as _;
 use crate::ui::ScrollableElement as _;
 use crate::ui::theme;
+use crate::ui::{ButtonVariants as _, Disableable as _};
 use gpui::{AnyElement, ClickEvent, Context, ExternalPaths, IntoElement, div, prelude::*, px};
 
 use crate::workspace::layout::Dock;
@@ -52,6 +52,7 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
                 crate::surface::strings::common::btn_submit()
             },
         )
+        .when(answering, |button| button.ghost())
         .h(px(theme::BUTTON_HEIGHT))
         .rounded(px(theme::RADIUS_MD))
         .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {

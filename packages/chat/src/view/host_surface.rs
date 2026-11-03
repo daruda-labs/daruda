@@ -45,7 +45,7 @@ pub struct QuestionComposer {
 }
 
 /// `request` in one line: its first field's title, or its message when that
-/// field has none, cut to [`QUESTION_SUMMARY_MAX_CHARS`].
+/// field has none, cut to `QUESTION_SUMMARY_MAX_CHARS`.
 pub fn question_summary(request: &daruda_acp::QuestionRequest) -> String {
     let text = field_header(request, primary_fields(request).next());
     let (prefix, cut) = daruda_core::text::char_prefix(text, QUESTION_SUMMARY_MAX_CHARS);

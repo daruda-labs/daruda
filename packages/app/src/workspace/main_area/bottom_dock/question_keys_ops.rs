@@ -19,6 +19,33 @@ pub(in crate::workspace) enum QuestionKey {
 }
 
 impl Workspace {
+    /// IME-first printable input reaches this hook inside InputState's update.
+    /// Read only the chat state; the input itself cannot be re-entered here.
+    pub(in crate::workspace) fn question_text_shortcut(
+        &mut self,
+        text: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some((pane, question)) = self.focused_question(cx).filter(|(_, q)| q.bound) else {
+            return false;
+        };
+        let Some(view) = self.agent_chat_view(pane).cloned() else {
+            return false;
+        };
+        if let Some(index) = crate::surface::keybindings::SHORTCUT_QUESTION_PICK
+            .iter()
+            .position(|key| *key == text)
+        {
+            view.update(cx, |v, cx| {
+                v.choose_question_number(question.question_id, index + 1, cx)
+            })
+        } else if text == " " {
+            view.update(cx, |v, cx| v.toggle_question_row(question.question_id, cx))
+        } else {
+            false
+        }
+    }
+
     /// A question key from the composer's answer context. That context was
     /// set at the last paint, so the state is checked again here; a key the
     /// question does not take propagates, to be typed or to indent.
@@ -98,9 +125,8 @@ impl Workspace {
             _ if self.history_navigate_possible(dir, cx) => {
                 self.do_history_navigate(dir, window, cx)
             }
-            // WORKAROUND: the hook already consumed the key on a stale empty
-            // mark (IME marked text emits no `Change`), and replaying cursor
-            // movement would re-enter the same hook - the key is dropped.
+            // Focus or text may change before the deferred movement runs;
+            // do not apply the old gesture to the new composer state.
             _ => {}
         }
     }

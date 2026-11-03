@@ -118,6 +118,8 @@ const NAME_AGENT_CHAT_PLAN_STOPPED: &str = "agent-chat-plan-stopped";
 /// CLI tokens for an agent question on its tool row: waiting, a form
 /// mid-answer, settled records, and pinned through a fold and a filter.
 const NAME_AGENT_CHAT_QUESTION: &str = "agent-chat-question";
+const NAME_AGENT_CHAT_QUESTION_LONG: &str = "agent-chat-question-long";
+const NAME_AGENT_CHAT_QUESTION_LONG_EXPANDED: &str = "agent-chat-question-long-expanded";
 const NAME_AGENT_CHAT_QUESTION_FORM: &str = "agent-chat-question-form";
 const NAME_AGENT_CHAT_QUESTION_ANSWERED: &str = "agent-chat-question-answered";
 const NAME_AGENT_CHAT_QUESTION_FOLDED: &str = "agent-chat-question-folded";
@@ -358,6 +360,16 @@ impl ScreenshotScenario {
             NAME_AGENT_CHAT_RUNNING_TOOL => Some(Self::AgentChatRunningTool),
             NAME_AGENT_CHAT_PLAN_STOPPED => Some(Self::AgentChatPlanStopped),
             NAME_AGENT_CHAT_QUESTION => Some(Self::AgentChatQuestion(QuestionShot::Single)),
+            NAME_AGENT_CHAT_QUESTION_LONG => {
+                Some(Self::AgentChatQuestion(QuestionShot::LongMessage {
+                    expanded: false,
+                }))
+            }
+            NAME_AGENT_CHAT_QUESTION_LONG_EXPANDED => {
+                Some(Self::AgentChatQuestion(QuestionShot::LongMessage {
+                    expanded: true,
+                }))
+            }
             NAME_AGENT_CHAT_QUESTION_FORM => Some(Self::AgentChatQuestion(QuestionShot::Form)),
             NAME_AGENT_CHAT_QUESTION_ANSWERED => {
                 Some(Self::AgentChatQuestion(QuestionShot::Answered))

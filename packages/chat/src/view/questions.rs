@@ -42,6 +42,7 @@ pub(crate) struct OpenQuestion {
     pub(crate) request: QuestionRequest,
     pub(crate) draft: QuestionDraft,
     pub(crate) focus: QuestionFocus,
+    pub(crate) message_expanded: bool,
     pub(crate) composer: ComposerBinding,
     /// The field the card's write row asked the composer for, applied by the
     /// host's next bind once it has committed the text bound so far.
@@ -161,6 +162,7 @@ impl Questions {
             draft: QuestionDraft::seeded(&request),
             request,
             focus: QuestionFocus::default(),
+            message_expanded: false,
             composer,
             requested_field: None,
             told_to_phone: false,

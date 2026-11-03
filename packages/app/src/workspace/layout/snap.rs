@@ -262,8 +262,8 @@ pub(in crate::workspace) struct QuestionStripSnapshot {
     /// The last Enter was refused because the bound field cannot take the
     /// composer's text; the strip says why instead of the bound message.
     pub text_not_taken: bool,
-    /// The strip is no wider than the narrow breakpoint: it drops the
-    /// question's header and keeps its position and buttons.
+    /// Narrow strips drop the question header and put the message and
+    /// actions on separate rows, retaining the position and buttons.
     pub narrow: bool,
     /// The composer holds nothing, IME marked text included: the digit and
     /// Space keys then answer rather than type.

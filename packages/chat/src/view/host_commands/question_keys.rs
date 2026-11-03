@@ -134,7 +134,14 @@ impl AgentChatView {
                 return false;
             };
             question.focus.highlight = Some(QuestionHighlight::Row(row));
+            let field = question.focus.field;
             view.choose_row(id, row, false, cx);
+            if let Some(question) = view.questions.oldest_mut(id)
+                && question.focus.field == field
+                && !question.offers_send()
+            {
+                question.focus.highlight = Some(QuestionHighlight::Row(row));
+            }
             true
         })
     }
@@ -285,6 +292,7 @@ mod tests {
             draft: QuestionDraft::seeded(&request),
             request,
             focus: QuestionFocus::default(),
+            message_expanded: false,
             composer: ComposerBinding::Released,
             requested_field: None,
             told_to_phone: false,

@@ -90,6 +90,7 @@ fn digit_in_an_empty_bound_composer_picks_without_sending(cx: &mut TestAppContex
     ask(&ws, &mut vcx, pane, 1, color_question());
 
     keys(&mut vcx, "2");
+    assert_eq!(focus(&ws, &mut vcx, pane), Some((0, Some(1))));
 
     assert_eq!(probes[0].answer(), None, "a digit alone sends nothing");
     assert_eq!(composer_text(&ws, &mut vcx), "", "the digit is not typed");
@@ -399,4 +400,162 @@ fn the_answer_placeholder_names_the_modifier_send(cx: &mut TestAppContext) {
         placeholder(&mut vcx, true),
         s::question_placeholder_modifier()
     );
+}
+
+/// macOS IMEs can deliver digits directly as text, bypassing keybindings.
+#[gpui::test]
+fn ime_first_digit_picks_without_inserting_or_sending(cx: &mut TestAppContext) {
+    let (_dir, ws, mut vcx) = keyed_workspace(cx);
+    let pane = add_pane(&ws, &mut vcx);
+    let mut probes = connect(&ws, &mut vcx, pane, &[1]);
+    ask(&ws, &mut vcx, pane, 1, color_question());
+    commit_text(&ws, &mut vcx, "2");
+    assert_eq!(composer_text(&ws, &mut vcx), "");
+    assert_eq!(probes[0].answer(), None);
+    keys(&mut vcx, "enter");
+    assert_eq!(probes[0].answer(), color_answer("blue"));
+}
+
+fn commit_text(ws: &Entity<Workspace>, vcx: &mut VisualTestContext, text: &str) {
+    use gpui::EntityInputHandler as _;
+    vcx.update(|window, cx| {
+        let input = ws.read(cx).input_dock.input.clone();
+        input.update(cx, |state, cx| {
+            state.replace_text_in_range(None, text, window, cx)
+        });
+    });
+    vcx.run_until_parked();
+}
+
+/// IME-first Space toggles a multi-select, while longer commits stay text.
+#[gpui::test]
+fn ime_first_space_toggles_and_multi_character_commits_stay_text(cx: &mut TestAppContext) {
+    let (_dir, ws, mut vcx) = keyed_workspace(cx);
+    let pane = add_pane(&ws, &mut vcx);
+    let mut probes = connect(&ws, &mut vcx, pane, &[1]);
+    let mut request = color_question();
+    let QuestionFieldKind::SingleSelect(options) = request.fields[0].kind.clone() else {
+        panic!("select")
+    };
+    request.fields[0].kind = QuestionFieldKind::MultiSelect(options);
+    ask(&ws, &mut vcx, pane, 1, request);
+    keys(&mut vcx, "down");
+    commit_text(&ws, &mut vcx, " ");
+    assert_eq!(composer_text(&ws, &mut vcx), "");
+    assert_eq!(probes[0].answer(), None);
+    commit_text(&ws, &mut vcx, "12");
+    assert_eq!(composer_text(&ws, &mut vcx), "12");
+    type_text(&ws, &mut vcx, "");
+    keys(&mut vcx, "enter");
+    vcx.update(|_, cx| {
+        let view = ws.read(cx).agent_chat_view(pane).expect("chat").clone();
+        view.update(cx, |v, cx| v.submit_question_from_card(1, cx));
+    });
+    vcx.run_until_parked();
+    assert_eq!(
+        probes[0].answer(),
+        Some(QuestionAnswer::Submit(BTreeMap::from([(
+            "color".to_owned(),
+            QuestionValue::Choices(vec!["red".into()])
+        )])))
+    );
+}
+
+/// A composition must not be replaced with history or interpreted as a pick.
+#[gpui::test]
+fn marked_text_bypasses_question_shortcuts_and_history(cx: &mut TestAppContext) {
+    use gpui::EntityInputHandler as _;
+    let (_dir, ws, mut vcx) = keyed_workspace(cx);
+    let pane = add_pane(&ws, &mut vcx);
+    let mut probes = connect(&ws, &mut vcx, pane, &[1]);
+    ask(&ws, &mut vcx, pane, 1, color_question());
+    vcx.update(|window, cx| {
+        ws.update(cx, |ws, _| {
+            let lane = ws.active_ref();
+            ws.lane_scoped_mut(lane).input_history.push("old prompt");
+        });
+        let input = ws.read(cx).input_dock.input.clone();
+        input.update(cx, |state, cx| {
+            state.replace_and_mark_text_in_range(None, "ㄱ", None, window, cx)
+        });
+    });
+    keys(&mut vcx, "up");
+    assert_eq!(composer_text(&ws, &mut vcx), "ㄱ");
+    assert_eq!(focus(&ws, &mut vcx, pane), Some((0, None)));
+    commit_text(&ws, &mut vcx, "1");
+    assert_eq!(composer_text(&ws, &mut vcx), "1");
+    assert_eq!(probes[0].answer(), None);
+}
+
+/// Native text commits retain normal typing on released and text-only fields.
+#[gpui::test]
+fn ime_first_digits_fall_through_outside_choice_fields(cx: &mut TestAppContext) {
+    let (_dir, ws, mut vcx) = keyed_workspace(cx);
+    let pane = add_pane(&ws, &mut vcx);
+    let mut probes = connect(&ws, &mut vcx, pane, &[1]);
+    ask(&ws, &mut vcx, pane, 1, color_then_reason());
+    keys(&mut vcx, "tab");
+    commit_text(&ws, &mut vcx, "2");
+    assert_eq!(composer_text(&ws, &mut vcx), "2");
+    type_text(&ws, &mut vcx, "");
+    keys(&mut vcx, "escape");
+    commit_text(&ws, &mut vcx, "1");
+    assert_eq!(composer_text(&ws, &mut vcx), "1");
+    assert_eq!(probes[0].answer(), None);
+}
+
+/// Programmatic draft restoration and explicit replacements are always text.
+#[gpui::test]
+fn restored_digits_and_explicit_replacements_do_not_pick(cx: &mut TestAppContext) {
+    use gpui::EntityInputHandler as _;
+    let (_dir, ws, mut vcx) = keyed_workspace(cx);
+    let pane = add_pane(&ws, &mut vcx);
+    let mut probes = connect(&ws, &mut vcx, pane, &[1]);
+    ask(&ws, &mut vcx, pane, 1, color_question());
+    type_text(&ws, &mut vcx, "2");
+    assert_eq!(composer_text(&ws, &mut vcx), "2");
+    type_text(&ws, &mut vcx, "");
+    vcx.update(|window, cx| {
+        let input = ws.read(cx).input_dock.input.clone();
+        input.update(cx, |state, cx| {
+            state.replace_text_in_range(Some(0..0), "1", window, cx)
+        });
+    });
+    vcx.run_until_parked();
+    assert_eq!(composer_text(&ws, &mut vcx), "1");
+    assert_eq!(probes[0].answer(), None);
+}
+
+/// IMEs can finalize marked text with unmarkText rather than a replacement.
+#[gpui::test]
+fn unmarking_composition_updates_the_question_composer_state(cx: &mut TestAppContext) {
+    use gpui::EntityInputHandler as _;
+    use std::{cell::Cell, rc::Rc};
+    let (_dir, ws, mut vcx) = keyed_workspace(cx);
+    let pane = add_pane(&ws, &mut vcx);
+    let mut probes = connect(&ws, &mut vcx, pane, &[1]);
+    ask(&ws, &mut vcx, pane, 1, color_question());
+    keys(&mut vcx, "down");
+    let changes = Rc::new(Cell::new(0));
+    let observed = changes.clone();
+    vcx.update(|window, cx| {
+        let input = ws.read(cx).input_dock.input.clone();
+        cx.subscribe(&input, move |_, event: &crate::ui::InputEvent, _| {
+            if matches!(event, crate::ui::InputEvent::Change) {
+                observed.set(observed.get() + 1);
+            }
+        })
+        .detach();
+        input.update(cx, |state, cx| {
+            state.replace_and_mark_text_in_range(None, "가나", None, window, cx);
+            state.unmark_text(window, cx);
+            state.unmark_text(window, cx);
+        });
+    });
+    vcx.run_until_parked();
+    assert_eq!(changes.get(), 1, "unmarking twice commits only once");
+    assert_eq!(composer_text(&ws, &mut vcx), "가나");
+    vcx.update(|_, cx| assert!(!ws.read(cx).question_arrows_take(cx)));
+    assert_eq!(focus(&ws, &mut vcx, pane), Some((0, None)));
+    assert_eq!(probes[0].answer(), None);
 }

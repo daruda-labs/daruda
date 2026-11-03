@@ -363,6 +363,19 @@ impl AgentChatView {
         cx.notify();
     }
 
+    /// Expand only the message, leaving the form and its keyboard focus intact.
+    pub(crate) fn toggle_question_message(&mut self, id: u64, cx: &mut Context<Self>) {
+        self.announcing_question_composer(cx, |view, cx| {
+            let Some(question) = view.questions.get_mut(id) else {
+                return;
+            };
+            question.message_expanded = !question.message_expanded;
+            question.stop_countdown();
+            view.remeasure_question(id, "question-message-toggled");
+            cx.notify();
+        });
+    }
+
     /// Remeasure the row that shows open question `id`, if it has one; one
     /// without a row is shown outside the list.
     pub(in crate::view) fn remeasure_question(&mut self, id: u64, reason: &str) {

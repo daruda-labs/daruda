@@ -1583,3 +1583,58 @@ fn navigating_or_binding_stops_the_countdown(cx: &mut gpui::TestAppContext) {
             .unwrap();
     }
 }
+
+/// Late desktop and phone replies cannot settle the next question after withdrawal.
+#[gpui::test]
+fn late_replies_after_withdrawal_leave_the_next_question_open(cx: &mut gpui::TestAppContext) {
+    use crate::view::{PhoneAnswerResult, PhoneReply};
+
+    let (window, mut answers) = asked(
+        cx,
+        vec![
+            (1, color_question("toolu_1")),
+            (2, color_question("toolu_2")),
+        ],
+    );
+    window
+        .update(cx, |view, _window, cx| {
+            view.apply_event(AcpEvent::QuestionWithdrawn { id: 1 }, "", false, cx);
+            view.pick_question_option(1, 0, 0, cx);
+            view.submit_question_from_card(1, cx);
+            assert_eq!(
+                view.answer_question_from_phone(1, 0, PhoneReply::Option(0), cx),
+                PhoneAnswerResult::AlreadySettled
+            );
+            assert_eq!(outcome(view, "toolu_1"), Some(QuestionOutcome::Withdrawn));
+            assert_eq!(
+                view.question_composer().expect("next question").question_id,
+                2
+            );
+            assert_eq!(outcome(view, "toolu_2"), None);
+        })
+        .unwrap();
+    assert_eq!(answered(&mut answers[0]), None);
+    assert_eq!(answered(&mut answers[1]), None);
+}
+
+/// Message disclosure changes layout, not answers or keyboard focus.
+#[gpui::test]
+fn expanding_a_question_message_preserves_the_form_and_stops_expiry(cx: &mut gpui::TestAppContext) {
+    let (window, mut answers) = asked(cx, vec![(1, color_question("toolu_1"))]);
+    window
+        .update(cx, |view, _window, cx| {
+            view.set_question_timeout(Some(std::time::Duration::from_secs(60)), cx);
+            let focus = view.questions().first().expect("open").focus;
+            assert!(view.question_composer().expect("open").deadline.is_some());
+            view.toggle_question_message(1, cx);
+            let question = view.questions().first().expect("open");
+            assert!(question.message_expanded);
+            assert_eq!(question.focus, focus);
+            assert!(question.draft.answer(&question.request).is_none());
+            assert!(view.question_composer().expect("open").deadline.is_none());
+            view.toggle_question_message(1, cx);
+            assert!(!view.questions().first().expect("open").message_expanded);
+        })
+        .unwrap();
+    assert_eq!(answered(&mut answers[0]), None);
+}

@@ -29,6 +29,9 @@ fn question_wait_text(question: &PhoneQuestion) -> String {
     if question.header != question.message {
         lines.push(question.header.clone());
     }
+    if let Some(text) = &question.answer_text {
+        lines.push(s::notification::telegram_question_current_text(text));
+    }
     if question.takes_text {
         lines.push(s::notification::telegram_question_reply_hint());
     }
@@ -44,7 +47,8 @@ fn question_wait_text(question: &PhoneQuestion) -> String {
 fn question_rows(question: &PhoneQuestion) -> Vec<Vec<(String, QuestionButton)>> {
     let choices = question.options.iter().enumerate().map(|(ix, label)| {
         let label = match (question.multi, question.picked.contains(&ix)) {
-            (false, _) => label.clone(),
+            (false, false) => label.clone(),
+            (false, true) => s::notification::telegram_question_picked(label),
             (true, true) => s::notification::telegram_question_picked(label),
             (true, false) => s::notification::telegram_question_unpicked(label),
         };
@@ -52,7 +56,7 @@ fn question_rows(question: &PhoneQuestion) -> Vec<Vec<(String, QuestionButton)>>
     });
     let mut rows: Vec<Vec<_>> = choices.map(|choice| vec![choice]).collect();
     let mut last = Vec::new();
-    if question.multi {
+    if question.multi || question.answer_text.is_some() {
         last.push((
             s::notification::telegram_question_send(),
             QuestionButton::Send,
@@ -173,6 +177,7 @@ mod tests {
             message: "Before I ship".into(),
             options: options.iter().map(|o| (*o).to_owned()).collect(),
             picked: vec![1],
+            answer_text: None,
             multi,
             takes_text,
             optional: false,
@@ -197,7 +202,7 @@ mod tests {
                 vec![QuestionButton::Skip],
             ]
         );
-        assert_eq!(rows[1][0].0, "b", "a single select is not marked");
+        assert_eq!(rows[1][0].0, s::notification::telegram_question_picked("b"));
     }
 
     #[test]
@@ -226,6 +231,24 @@ mod tests {
                 "Which?",
                 s::notification::telegram_question_reply_hint().as_str(),
             ]
+        );
+    }
+
+    #[test]
+    fn current_text_is_visible_and_can_be_confirmed_without_retyping() {
+        let question = PhoneQuestion {
+            answer_text: Some("src/".into()),
+            ..card(&[], false, true)
+        };
+        assert!(
+            question_wait_text(&question)
+                .contains(&s::notification::telegram_question_current_text("src/"))
+        );
+        assert!(
+            question_rows(&question)
+                .iter()
+                .flatten()
+                .any(|(_, button)| *button == QuestionButton::Send)
         );
     }
 

@@ -117,6 +117,15 @@ pub fn shot_question() -> QuestionRequest {
     }
 }
 
+/// A long request message for collapsed and expanded disclosure captures.
+pub fn shot_question_long() -> QuestionRequest {
+    let message = "Before changing the release pipeline, review the tradeoffs carefully.\nThe selected checks will run for every pull request, including documentation-only updates.\nUnit tests catch behavior changes; Clippy checks source quality; screenshot tests verify visual layout.\nChoose the checks that should block merging, then decide whether the proposed pull request should stay a draft.\nThe form remains available while you read this explanation.";
+    QuestionRequest {
+        message: message.into(),
+        ..shot_question_form()
+    }
+}
+
 /// A form of several fields, which waits for Send: a required multi-select
 /// and a yes/no.
 pub fn shot_question_form() -> QuestionRequest {

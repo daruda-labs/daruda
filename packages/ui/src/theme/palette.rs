@@ -696,6 +696,8 @@ pub const AGENT_QUEUE_STRIP_ROW_PAD_Y: f32 = PAD_XS;
 /// The one-line question strip above the composer: a compact action row
 /// inside the strip's vertical padding. The bottom dock reserves exactly this.
 pub const AGENT_QUESTION_STRIP_H: f32 = BUTTON_COMPACT_HEIGHT + 2.0 * PAD_SM;
+/// Narrow strips separate the message and actions into two equal rows.
+pub const AGENT_QUESTION_STRIP_NARROW_H: f32 = 2.0 * AGENT_QUESTION_STRIP_H;
 pub const AGENT_BANNER_ICON: Hsla = hsla(210.0, 1.0, 0.68, 1.0);
 pub const AGENT_BANNER_BG: Hsla = with_alpha(AGENT_BANNER_ICON, 0.08);
 pub const AGENT_BANNER_BORDER: Hsla = with_alpha(AGENT_BANNER_ICON, 0.20);

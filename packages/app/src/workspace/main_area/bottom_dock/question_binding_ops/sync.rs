@@ -34,16 +34,22 @@ impl Workspace {
         }
         self.follow_bound_field(focused, window, cx);
         self.sync_composer_hints(cx);
-        // Read once, after the steps above that may move the question.
+        // Snapshot after the steps above that may move the question.
         let question = self.focused_question(cx);
         self.note_answer_text(question.as_ref(), cx);
-        if self.drop_stale_question_marks(question.as_ref(), cx) {
-            cx.notify();
-        }
+        self.sync_question_marks(cx);
         let placeholder = QuestionPlaceholder::of(question.as_ref().map(|(_, q)| q));
         if placeholder != self.input_dock.question.placeholder {
             self.input_dock.question.placeholder = placeholder;
             self.apply_input_placeholder(window, cx);
+        }
+    }
+
+    /// Reconcile transient warnings after either text or attachments change.
+    pub(in crate::workspace) fn sync_question_marks(&mut self, cx: &mut Context<Self>) {
+        let question = self.focused_question(cx);
+        if self.drop_stale_question_marks(question.as_ref(), cx) {
+            cx.notify();
         }
     }
 

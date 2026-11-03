@@ -39,6 +39,7 @@ use daruda_transcript::tool_category::{ToolCategory, is_mcp_tool_name};
 use daruda_ui::CachedImage;
 use daruda_ui::theme;
 use daruda_ui::{Icon, IconName, IconNamed as _, Sizable as _};
+pub(super) use question::interaction_surface;
 
 mod labels;
 pub(super) mod output;
@@ -130,7 +131,7 @@ pub(super) fn tool_card(
     // A question is the body of the call that asked it: its open form, or
     // once settled the record in the call's place.
     if let Some(open) = questions.open_for_tool(&tc.id) {
-        let surface = theme::PaneSurfaceTokens::agent_chat(cx).dimmed(dim);
+        let surface = question::interaction_surface(cx).dimmed(dim);
         let may_write = questions.first().map(|q| q.id) == Some(open.id);
         return question_card(tc, open, may_write, agent_name, &surface, cx);
     }

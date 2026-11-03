@@ -843,7 +843,7 @@ bottom_dock:
   # Composer placeholder while it answers an agent's question.
   question_placeholder: "Answer in your own words · ↑↓ options · Enter to send · Esc to leave"
   # Composer placeholder while it answers a question and modifier-to-send is on.
-  question_placeholder_modifier: "Answer in your own words · ↑↓ options · ⌘↵ to send · Esc to leave"
+  question_placeholder_modifier: "Answer in your own words · ↑↓ options · %{shortcut} to send · Esc to leave"
   # Composer placeholder while typed text becomes a note on the picked option.
   question_placeholder_note: "Add a note to your choice…"
   # Composer submit button while it answers a question (instead of Stop).
@@ -856,6 +856,8 @@ bottom_dock:
   question_waiting_after: "+%{count} waiting"
   question_note_hint: "your text becomes a note"
   question_draft_hint: "your draft became the answer"
+  question_release_short: "Prompt"
+  question_skip_and_send_short: "Skip and send"
   question_release: "Use for prompt"
   # Scrolls the transcript to the question card.
   question_show: "↑ Question"
@@ -1609,7 +1611,8 @@ notification:
   # Under a question card whose field takes free text.
   telegram_question_reply_hint: "Reply to this message to answer in your own words."
   # Under a question card while the answer timeout runs; `time` is e.g. "4:12".
-  telegram_question_time_left: "⏳ %{time} left, then it is skipped."
+  telegram_question_current_text: "Current text: %{text}"
+  telegram_question_time_left: "⏳ At sending: %{time} left. It is skipped on expiry unless you start answering."
   # A choice button on a multi-select question card, chosen or not.
   telegram_question_picked: "☑ %{label}"
   telegram_question_unpicked: "☐ %{label}"
@@ -1633,7 +1636,7 @@ notification:
   telegram_question_expired: "Expired"
   # Feedback when a phone answer reached a question already answered,
   # skipped or closed in the app.
-  telegram_question_stale: "Already answered or closed in the app"
+  telegram_question_stale: "This question card is no longer active."
   # Feedback when a text reply reached a question that takes a button.
   telegram_question_text_not_taken: "This question takes a button — tap one on the card."
 

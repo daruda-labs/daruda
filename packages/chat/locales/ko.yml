@@ -101,6 +101,8 @@ agent_chat:
   permission_resolved_prefix: "선택됨:"
   permission_cancelled: "취소됨."
   question_asked_by: "%{agent}의 질문"
+  question_message_more: "질문 전문 보기"
+  question_message_less: "간략히 보기"
   question_waiting: "답 기다리는 중"
   question_time_left: "%{time} 남음"
   question_position: "%{n}/%{total}"

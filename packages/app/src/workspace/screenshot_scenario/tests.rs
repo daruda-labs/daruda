@@ -220,6 +220,14 @@ fn every_question_shot_is_addressable() {
     for (name, shot) in [
         ("agent-chat-question", QuestionShot::Single),
         ("agent-chat-question-form", QuestionShot::Form),
+        (
+            "agent-chat-question-long",
+            QuestionShot::LongMessage { expanded: false },
+        ),
+        (
+            "agent-chat-question-long-expanded",
+            QuestionShot::LongMessage { expanded: true },
+        ),
         ("agent-chat-question-answered", QuestionShot::Answered),
         ("agent-chat-question-folded", QuestionShot::Folded),
         ("agent-chat-question-composer", QuestionShot::Composer),

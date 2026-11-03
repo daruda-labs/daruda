@@ -118,7 +118,8 @@ impl Workspace {
     /// clipped, and once the draft shrinks the dock returns to the saved size.
     pub(in crate::workspace) fn bottom_dock_display_size(&self, cx: &gpui::App) -> f32 {
         use crate::ui::theme::{
-            AGENT_QUESTION_STRIP_H, AGENT_QUEUE_STRIP_OUTER_MAX_H, BUTTON_HEIGHT, GAP_SM,
+            AGENT_QUESTION_STRIP_H, AGENT_QUESTION_STRIP_NARROW_H, AGENT_QUEUE_STRIP_OUTER_MAX_H,
+            BUTTON_HEIGHT, GAP_SM,
         };
 
         let dock = self.docks.bottom.read(cx);
@@ -135,7 +136,11 @@ impl Workspace {
                 floor += AGENT_QUEUE_STRIP_OUTER_MAX_H;
             }
             if view.question_composer().is_some() {
-                floor += AGENT_QUESTION_STRIP_H;
+                floor += if self.question_strip_is_narrow(cx) {
+                    AGENT_QUESTION_STRIP_NARROW_H
+                } else {
+                    AGENT_QUESTION_STRIP_H
+                };
             }
         }
         dock.size.max(floor.min(dock.max_size))

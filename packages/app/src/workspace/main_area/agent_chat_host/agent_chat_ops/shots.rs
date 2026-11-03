@@ -33,6 +33,8 @@ pub(crate) enum QuestionShot {
     /// The two-field form mid-answer: a pick in the first field, the
     /// keyboard on the second with one row highlighted.
     Form,
+    /// A long message, with its disclosure closed or opened.
+    LongMessage { expanded: bool },
     /// Three settled records (answered, skipped, cancelled by a Stop),
     /// with the answered one opened to its frozen form.
     Answered,
@@ -396,6 +398,17 @@ impl Workspace {
                         cx,
                     );
                     v.seed_questions_for_shot(vec![seed::shot_question_form()], true, cx);
+                }
+                QuestionShot::LongMessage { expanded } => {
+                    v.seed_working_transcript(
+                        seed::pending_question_transcript(seed::QUESTION_FORM_TOOL_ID),
+                        window,
+                        cx,
+                    );
+                    v.seed_questions_for_shot(vec![seed::shot_question_long()], true, cx);
+                    if expanded {
+                        v.expand_question_message_for_shot(0, cx);
+                    }
                 }
                 QuestionShot::Single => {
                     v.seed_working_transcript(

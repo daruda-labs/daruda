@@ -964,23 +964,27 @@ Please answer the following questions.
 ┃ ▸ 1 ○ Yes                         # highlighted: ▸ + fill
                                    [Skip] [Send answer]
 
-fill:      pane-tint            edge: pane-border-tint (decorative)
+fill:      workspace button surface; edge: workspace border
 rail:      pane-control-edge on the focused field, pane-border-tint otherwise
 selected:  pane-active-tint — the fill is secondary; the glyph carries it
-chips:     button_chip_on_surface; Send is the selected chip, never accent
+actions:   ghost Skip and primary Send on the workspace interaction surface
 ```
 
 - **Selection never rides on colour alone.** Single ○/◉, multiple ☐/☑, the
   keyboard highlight ▸, free text ✎, and a number on every option. Options are
   list rows, not chips: chips are view settings, and these are answers.
-- **No accent anywhere on the card.** Accent has no verified contrast on a
-  terminal-mirrored surface; Send's emphasis is the selected-chip fill, and a
-  disabled Send drops its edge.
+- **Question interaction uses workspace chrome colors.** The opaque card
+  follows the app theme independently of the terminal. Selection has a rail
+  and glyph; Send uses the standard primary action. Card padding uses PAD_XL,
+  row padding PAD_SM, and the footer is separated by a hairline.
 - **The agent's words are verbatim.** Message, titles and option labels pass
   through; only the host's own words (header, status, Skip, Send) are i18n.
 - **A question is its own row, never a tool group's member.** It sits at the
   run's item level like a permission prompt, so no group bar stands between
   the agent's prose and what it asked.
+- **Long message bodies fold independently.** A three-line preview offers
+  Show full question / Show less; fields and actions stay visible. Reading
+  the expanded message stops the untouched-question timeout.
 - **A waiting card has no chevron and is never hidden.** Like a permission
   prompt it stays on screen through response folds and the display filter.
 - **An opt-in answer timeout counts down in the header.** With
@@ -1049,7 +1053,7 @@ padding:    sm (8px)
   collapses it.
 - Selector chips (mode, model, effort): ghost buttons, 28px high, 6px side
   padding so neighbouring labels do not read as far apart.
-- Question strip: one line between the queued-prompt strip and the composer
+- Question strip: one line at full width between the queued-prompt strip and the composer
   while the focused agent pane has a question open. Bound: `↳ Answering
   question 1/2 “header”` with [Use for prompt] [↑ Question], the answer
   placeholder, and the submit button reading "Answer" instead of Stop.
@@ -1057,7 +1061,9 @@ padding:    sm (8px)
   reason in warning tones; the text stays until the composer empties.
   Bound keys: over an empty composer ↑↓ move the card's ▸, Enter or a digit
   chooses that row, Space toggles a multi-select option; Tab / Shift+Tab
-  move between fields. Past the last field's rows, ↓ or Tab lights the
+  move between fields. A numbered lone single-select keeps its chosen row
+  highlighted; moving to another field clears the highlight. Past the last
+  field's rows, ↓ or Tab lights the
   card's Send (▸ + active fill around it). With text (IME composition
   included) they type, and typing puts the highlight out.
   When the answer timeout runs, the bound line ends with `· 4:12 left`,
@@ -1067,7 +1073,8 @@ padding:    sm (8px)
   Released: "A question is waiting" with [✎ Answer]. A prompt held back
   behind the question turns it into a warning (banner-warning tones) with
   [Skip and send this] [Keep queued]. Ghost compact buttons; the text
-  truncates first.
+  truncates first. Narrow strips put the message and actions on separate rows,
+  using shorter action labels and reserving both rows above the composer.
 - Submit button: `background accent, text accent-fg, radius md, height 28px, padding 0 md`
 - Secondary action buttons: `background surface-2, text body, radius md, height 28px`
 

@@ -24,3 +24,33 @@ pub(crate) fn bottom_input_placeholder_for_context(
         (None, true) => s::bottom_dock::input_agent_modifier_placeholder(),
     }
 }
+
+/// Resolve the shared submit chord with the host platform's modifier names.
+pub(crate) fn question_placeholder_modifier() -> String {
+    question_placeholder_modifier_for(cfg!(target_os = "macos"))
+}
+
+fn question_placeholder_modifier_for(mac: bool) -> String {
+    let shortcut = crate::surface::shortcut_display::display_for(
+        crate::surface::keybindings::SHORTCUT_COMPOSER_SUBMIT,
+        mac,
+    );
+    rust_i18n::t!(
+        "bottom_dock.question_placeholder_modifier",
+        shortcut = shortcut
+    )
+    .into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::question_placeholder_modifier_for;
+
+    #[test]
+    fn question_submit_hint_uses_the_platform_modifier() {
+        assert!(question_placeholder_modifier_for(true).contains("⌘⏎"));
+        let other = question_placeholder_modifier_for(false);
+        assert!(other.contains("Ctrl+Enter"));
+        assert!(!other.contains('⌘'));
+    }
+}
