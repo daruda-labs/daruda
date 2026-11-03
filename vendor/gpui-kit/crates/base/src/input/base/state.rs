@@ -2530,7 +2530,10 @@ impl<M: InputModeKind> InputBaseState<M> {
         }
 
         if self.ime_marked_range.is_some() {
+            // daruda patch: cancelling composition must not propagate Escape
+            // to host actions such as stopping the running agent.
             self.unmark_text(window, cx);
+            return;
         }
 
         // Android delivers its back button as escape, and back leaves a field's

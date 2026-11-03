@@ -863,3 +863,11 @@ emits one `Change` event when a marked range existed, keeping host text snapshot
 current even when the IME does not send a replacement callback. Regression coverage lives in
 `workspace/tests/agent_chat/questions/keys.rs`, including native-style text
 commits, marked-text preservation, Space toggling and fallback typing.
+
+### Composer Escape precedence
+
+The composer handles Escape in the bubble phase so input-owned cancellation
+(multiple cursors, inline completion, touch selection) runs first. In
+`base/src/input/base/state.rs`, Escape returns after unmarking composition,
+preventing that same gesture from reaching host stop actions. Preserve this
+`daruda patch:` branch when re-vendoring. Composer Enter skips marked text.

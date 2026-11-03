@@ -559,3 +559,31 @@ fn unmarking_composition_updates_the_question_composer_state(cx: &mut TestAppCon
     assert_eq!(focus(&ws, &mut vcx, pane), Some((0, None)));
     assert_eq!(probes[0].answer(), None);
 }
+
+#[gpui::test]
+fn composition_enter_does_not_submit_and_escape_keeps_answer_mode(cx: &mut TestAppContext) {
+    use gpui::EntityInputHandler as _;
+    let (_dir, ws, mut vcx) = keyed_workspace(cx);
+    let pane = add_pane(&ws, &mut vcx);
+    let mut probes = connect(&ws, &mut vcx, pane, &[1]);
+    ask(&ws, &mut vcx, pane, 1, color_question());
+    vcx.update(|window, cx| {
+        let input = ws.read(cx).input_dock.input.clone();
+        input.update(cx, |state, cx| {
+            state.replace_and_mark_text_in_range(None, "가", None, window, cx)
+        });
+        ws.update(cx, |ws, cx| {
+            assert!(!ws.composer_enter(
+                &crate::ui::InputEnter {
+                    secondary: false,
+                    shift: false
+                },
+                window,
+                cx
+            ));
+        });
+    });
+    keys(&mut vcx, "escape");
+    vcx.update(|_, cx| assert!(ws.read(cx).focused_question_bound(cx)));
+    assert_eq!(probes[0].answer(), None);
+}

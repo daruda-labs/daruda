@@ -258,7 +258,7 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
             ws.clone(),
             |ws, action: &crate::ui::InputEnter, window, cx| ws.composer_enter(action, window, cx),
         ))
-        .capture_action(composer_key(
+        .on_action(composer_key(
             ws.clone(),
             |ws, _: &crate::ui::InputEscape, _, cx| ws.composer_escape(cx),
         ))

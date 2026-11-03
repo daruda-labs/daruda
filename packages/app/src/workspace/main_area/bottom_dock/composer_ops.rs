@@ -52,6 +52,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        if self.input_dock.input.read(cx).has_marked_text() {
+            return false;
+        }
         if self.input_dock.slash.is_some() && !action.secondary && !action.shift {
             self.accept_slash_item(None, window, cx);
             return true;
