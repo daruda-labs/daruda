@@ -338,7 +338,7 @@ pub const SCROLL_BTN_ICON: Hsla = hsla(0.0, 0.0, 0.57, 1.0);
 pub const SCROLL_BTN_ICON_SIZE: f32 = 16.0;
 
 /// Asset path for the down-chevron icon. Resolved at runtime through
-/// `DarudaAssets` → `gpui_component_assets`; not a crate dependency.
+/// `DarudaAssets` → `gpui_kit_assets`; not a crate dependency.
 pub const SCROLL_BTN_ICON_PATH: &str = "icons/chevron-down.svg";
 
 // ============================================================================

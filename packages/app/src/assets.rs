@@ -280,12 +280,12 @@ impl AssetSource for DarudaAssets {
             "icons/archive.svg" => icon!("archive.svg"),
 
             // Fallback: gpui_component's vendored icons (e.g. icons/check.svg).
-            _ => gpui_component_assets::Assets.load(path),
+            _ => gpui_kit_assets::Assets.load(path),
         }
     }
 
     fn list(&self, path: &str) -> anyhow::Result<Vec<SharedString>> {
-        gpui_component_assets::Assets.list(path)
+        gpui_kit_assets::Assets.list(path)
     }
 }
 

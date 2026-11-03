@@ -67,16 +67,16 @@ dead_code = "allow"
 "tree-sitter-zig" = ["tree-sitter", "dep:tree-sitter-zig"]
 
 [dependencies]
-"unicode-width" = { version = "0.2" }
+"unicode-width" = { workspace = true }
 "unicode-segmentation" = { workspace = true }
 "similar" = { workspace = true, features = ["unicode"] }
 "regex" = { workspace = true }
 "anyhow" = { workspace = true }
 "gpui" = { workspace = true }
 "gpui_macros" = { workspace = true }
-"gpui-base" = { path = "../base" }
+"gpui-base" = { workspace = true }
 "gpui-component-macros" = { path = "../component-macros" }
-"gpui-kit-assets" = { path = "../assets" }
+"gpui-kit-assets" = { workspace = true }
 "notify" = { workspace = true, default-features = true }
 "ropey" = { workspace = true, features = ["metric_chars", "metric_lines_lf", "metric_utf16"] }
 "rust-i18n" = { workspace = true }
@@ -88,18 +88,18 @@ dead_code = "allow"
 "sum_tree" = { workspace = true }
 "tracing" = { workspace = true }
 "log" = { workspace = true }
-"markdown" = { version = "1.0.0", features = ["serde"] }
+"markdown" = { workspace = true, features = ["serde"] }
 "enum-iterator" = { workspace = true }
-"itertools" = { version = "0.13.0" }
+"itertools" = { workspace = true }
 "once_cell" = { version = "1.19.0" }
 "paste" = { version = "1" }
 "uuid" = { workspace = true }
-"num-traits" = { version = "0.2" }
+"num-traits" = { workspace = true }
 "chrono" = { workspace = true, default-features = true }
 "lsp-types" = { workspace = true, features = ["proposed"] }
 "syntect" = { version = "5.3.0", default-features = false, features = ["parsing", "default-syntaxes", "regex-fancy"], optional = true }
 "two-face" = { version = "0.4.5", default-features = false, features = ["syntect-fancy"], optional = true }
-"instant" = { version = "0.1", features = ["wasm-bindgen"] }
+"instant" = { workspace = true, features = ["wasm-bindgen"] }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 "smol" = { workspace = true }
@@ -143,9 +143,9 @@ dead_code = "allow"
 [target.'cfg(target_os = "macos")'.dependencies]
 "core-text" = { version = "=21.0.0" }
 "raw-window-handle" = { workspace = true }
-"objc2" = { version = "0.6" }
-"objc2-app-kit" = { version = "0.3", features = ["NSMenu", "NSMenuItem", "NSView", "NSWindow", "NSResponder", "NSEvent", "NSImage"] }
-"objc2-foundation" = { version = "0.3", features = ["NSData", "NSString", "NSGeometry"] }
+"objc2" = { workspace = true }
+"objc2-app-kit" = { workspace = true, default-features = true, features = ["NSMenu", "NSMenuItem", "NSView", "NSWindow", "NSResponder", "NSEvent", "NSImage"] }
+"objc2-foundation" = { workspace = true, default-features = true, features = ["NSData", "NSString", "NSGeometry"] }
 "block2" = { version = "0.6", optional = true }
 "objc2-av-foundation" = { version = "0.3", default-features = false, features = ["std", "AVCaptureDevice", "AVMediaFormat"], optional = true }
 "objc2-avf-audio" = { version = "0.3", default-features = false, features = ["std", "AVAudioBuffer", "AVAudioFormat", "AVAudioTypes"], optional = true }
@@ -154,9 +154,9 @@ dead_code = "allow"
 [target.'cfg(target_os = "windows")'.dependencies]
 "raw-window-handle" = { workspace = true }
 "resvg" = { version = "0.45.1" }
-"windows" = { features = ["Wdk", "Wdk_System", "Wdk_System_SystemServices", "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Graphics_GdiPlus", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"], version = "0.58.0" }
+"windows" = { features = ["Wdk", "Wdk_System", "Wdk_System_SystemServices", "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Graphics_GdiPlus", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"], workspace = true }
 
 [dev-dependencies]
 "gpui" = { workspace = true, features = ["test-support"] }
-"indoc" = "2"
-"gpui-base" = { path = "../base", features = ["test-support"] }
+"indoc" = { workspace = true }
+"gpui-base" = { workspace = true, features = ["test-support"] }
