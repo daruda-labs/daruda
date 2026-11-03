@@ -13,7 +13,7 @@ pub(super) use super::transcript_structure::{is_active, response_run};
 mod diff;
 pub(crate) use diff::{
     DiffStat, build_diff_view_model, create_diff_editor, diff_build_fingerprint, diff_editor_key,
-    diff_editor_language, diff_theme_fingerprint,
+    diff_theme_fingerprint,
 };
 mod fold_context;
 use super::view::AgentChatView;

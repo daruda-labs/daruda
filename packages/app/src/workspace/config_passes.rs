@@ -170,7 +170,7 @@ impl Workspace {
         let new_max_rows = self.input_dock.max_rows(config.agent.input_max_rows);
         self.input_dock
             .input
-            .update(cx, |s, _cx| s.set_auto_grow(1, new_max_rows));
+            .update(cx, |s, cx| s.set_auto_grow(1, new_max_rows, cx));
     }
 
     /// Resync the dock height after an auto-grow cap change (idempotent via

@@ -366,6 +366,17 @@ impl Workspace {
             agent_config_options,
             queued_prompts,
             composer_expand: self.composer_expand(cx),
+            slash_menu: self.input_dock.slash.as_ref().map(|menu| {
+                crate::workspace::layout::SlashMenuView {
+                    items: menu
+                        .matched
+                        .items
+                        .iter()
+                        .map(|item| (item.name.clone().into(), item.description.clone().into()))
+                        .collect(),
+                    selected: menu.selected,
+                }
+            }),
             shell,
             workspace: Handle(self.docks.bottom.read(cx).workspace.clone()),
         }

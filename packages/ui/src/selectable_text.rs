@@ -1,4 +1,4 @@
-//! Wrapper over `gpui_component::text::TextView::plain` — the raw string
+//! Wrapper over `gpui_base::SelectableText` — the raw string
 //! rendered verbatim (no Markdown interpretation), drag-selectable + copyable.
 //!
 //! This is the plain-text counterpart to [`crate::markdown()`]: same keyed
@@ -8,18 +8,18 @@
 //! a selectable primitive for non-markdown text.
 //!
 //! Shape: a `RenderOnce` storing only `(id, text)` so callers construct it on a
-//! cx-only snapshot render path; `TextView::plain` (which needs `&mut Window`
-//! for its keyed state) is built inside `render`.
+//! cx-only snapshot render path; the selectable element is built inside
+//! `render`.
 //!
 //! `id` must be stable per logical block across renders, or the keyed state
 //! (and the live selection) resets. Callers key by a stable per-block id
 //! (e.g. tool-call id + block index).
 
 use gpui::{
-    ElementId, Hsla, IntoElement, Pixels, RenderOnce, SharedString, Styled as _, Window, relative,
+    ElementId, Hsla, IntoElement, ParentElement as _, Pixels, RenderOnce, SharedString,
+    Styled as _, Window, div, relative,
 };
 use gpui_component::ActiveTheme as _;
-use gpui_component::text::TextView;
 
 #[derive(IntoElement)]
 pub struct SelectableText {
@@ -71,30 +71,31 @@ impl SelectableText {
 }
 
 impl RenderOnce for SelectableText {
-    fn render(self, window: &mut Window, cx: &mut gpui::App) -> impl IntoElement {
+    fn render(self, _window: &mut Window, cx: &mut gpui::App) -> impl IntoElement {
         // Plain runs carry no color of their own, so they inherit the ambient
         // text color; seed it (caller override else theme foreground) or the
         // body renders in gpui's default black, invisible on the dark canvas.
         let color = self.color.unwrap_or_else(|| cx.theme().foreground);
-        let mut view = TextView::plain(self.id, self.text, window, cx)
-            .selectable(self.selectable)
-            .text_color(color);
+        let mut frame = div().text_color(color);
         if let Some(family) = self.font_family {
-            view = view.font_family(family);
+            frame = frame.font_family(family);
         }
-        // Without a width constraint TextView lays out at its intrinsic
-        // max-content width, overflowing the container. Fill + min_w_0 so it
-        // wraps to the container.
+        // Fill the container so the text wraps to it instead of laying out at
+        // its intrinsic max-content width.
         if self.full_width {
-            view = view.w_full().min_w_0();
+            frame = frame.w_full();
         }
         if let Some(size) = self.text_size {
-            view = view.text_size(size);
+            frame = frame.text_size(size);
         }
         if let Some(line_height) = self.line_height {
-            view = view.line_height(relative(line_height));
+            frame = frame.line_height(relative(line_height));
         }
-        view
+        if self.selectable {
+            frame.child(gpui_base::SelectableText::new(self.id, self.text))
+        } else {
+            frame.child(self.text)
+        }
     }
 }
 

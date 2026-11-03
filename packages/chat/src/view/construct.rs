@@ -125,8 +125,6 @@ impl AgentChatView {
             plan_scroll: ScrollHandle::new(),
             list_bounds: None,
             pane_width: None,
-            autoscroll_task: None,
-            selection_drag_active: false,
             dim_amount: 0.0,
             _theme_observer: theme_observer,
             #[cfg(any(test, feature = "test-support"))]

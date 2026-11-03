@@ -16,7 +16,7 @@ use crate::agent::skills::{
 use crate::surface::strings;
 use crate::ui::Disableable as _;
 use crate::ui::WindowExt as _;
-use crate::ui::{InputEvent, InputState, button, button_primary, checkbox};
+use crate::ui::{InputEvent, InputState, TextareaState, button, button_primary, checkbox};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 use crate::workspace::right_dock::skills::modal_shared::field_label;
@@ -40,7 +40,7 @@ pub struct CreateSkillModal {
 
     name_input: Entity<InputState>,
     invocation_input: Entity<InputState>,
-    paste_input: Entity<InputState>,
+    paste_input: Entity<TextareaState>,
     pasting: bool,
     advanced: bool,
     imported: Option<crate::agent::skills::import::ImportedSkill>,
@@ -50,7 +50,7 @@ pub struct CreateSkillModal {
     allowed_tools_input: Entity<InputState>,
     paths_input: Entity<InputState>,
     model_input: Entity<InputState>,
-    body_editor: Entity<InputState>,
+    body_editor: Entity<TextareaState>,
 
     scope: SkillScope,
     scope_options: Vec<SkillScope>,
@@ -83,7 +83,7 @@ impl CreateSkillModal {
         cx: &mut Context<Self>,
     ) -> Self {
         let paste_input = cx.new(|cx| {
-            InputState::new(window, cx)
+            TextareaState::new(window, cx)
                 .auto_grow(6, 12)
                 .placeholder(strings::skills::quick_placeholder())
         });
@@ -112,7 +112,7 @@ impl CreateSkillModal {
             InputState::new(window, cx_state).placeholder(strings::skills::placeholder_optional())
         });
         let body_editor = cx.new(|cx_state| {
-            InputState::new(window, cx_state)
+            TextareaState::new(window, cx_state)
                 .auto_grow(8, 12)
                 .placeholder(strings::skills::placeholder_body())
         });
@@ -424,18 +424,18 @@ impl CreateSkillModal {
         ]
     }
 
-    fn inputs(&self) -> Vec<Entity<InputState>> {
+    fn inputs(&self) -> Vec<crate::ui::FieldState> {
         vec![
-            self.name_input.clone(),
-            self.description_input.clone(),
-            self.when_to_use_input.clone(),
-            self.argument_hint_input.clone(),
-            self.allowed_tools_input.clone(),
-            self.paths_input.clone(),
-            self.model_input.clone(),
-            self.body_editor.clone(),
-            self.paste_input.clone(),
-            self.invocation_input.clone(),
+            self.name_input.clone().into(),
+            self.description_input.clone().into(),
+            self.when_to_use_input.clone().into(),
+            self.argument_hint_input.clone().into(),
+            self.allowed_tools_input.clone().into(),
+            self.paths_input.clone().into(),
+            self.model_input.clone().into(),
+            self.body_editor.clone().into(),
+            self.paste_input.clone().into(),
+            self.invocation_input.clone().into(),
         ]
     }
 
@@ -504,7 +504,7 @@ fn forward_input(
 /// clears the banner. Plain Enter inserts a newline so markdown
 /// authoring stays natural; Escape dismisses through Dialog.
 fn forward_body_editor(
-    state: &Entity<InputState>,
+    state: &Entity<TextareaState>,
     window: &mut Window,
     cx: &mut Context<CreateSkillModal>,
 ) -> Subscription {
@@ -512,7 +512,7 @@ fn forward_body_editor(
         state,
         window,
         |this, _, ev: &InputEvent, window, cx| match ev {
-            InputEvent::PressEnter { secondary } if *secondary => this.submit(window, cx),
+            InputEvent::PressEnter { secondary, .. } if *secondary => this.submit(window, cx),
             InputEvent::Change => this.clear_error(cx),
             _ => {}
         },

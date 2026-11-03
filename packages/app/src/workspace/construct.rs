@@ -237,9 +237,7 @@ impl Workspace {
             // repaints whenever any window mutates it (single, symmetric
             // cross-window propagation path — see `accounts_global`).
             right_views: right_dock::context::RightDockViews::new(window, cx),
-            input_dock: main_area::bottom_dock::input_dock::InputDock::new(
-                &ws_weak, config, window, cx,
-            ),
+            input_dock: main_area::bottom_dock::input_dock::InputDock::new(config, window, cx),
             persistence_suspended: false,
             pending_lane_creates: HashSet::new(),
             // The shared root in production; under the test's own data

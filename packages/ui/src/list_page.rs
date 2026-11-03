@@ -169,8 +169,8 @@ mod tests {
             .update(&mut vcx, |_, _, cx| {
                 let probe = probe.read(cx);
                 let input = probe.input.read(cx);
-                let mut text = input.last_bounds().unwrap();
-                text.origin -= input.scroll_handle().offset();
+                let mut text = input.text_bounds().unwrap();
+                text.origin -= input.scroll_offset();
                 assert!(
                     text.right() <= clear.left(),
                     "search text overlaps the clear action: {text:?}, {clear:?}"

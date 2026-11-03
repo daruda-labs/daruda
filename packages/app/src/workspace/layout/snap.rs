@@ -276,6 +276,14 @@ pub(in crate::workspace) struct CliSnapshot {
 /// so the 250 ms status pulse (which leaves this snapshot identical)
 /// doesn't repaint the dock. Fields that must stay out of that diff carry a
 /// [`diff_policy`](super::diff_policy) marker, same as the other two docks.
+/// The slash-command list as the composer draws it: `(name, description)`
+/// rows and the highlighted one.
+#[derive(Clone, Debug, PartialEq)]
+pub(in crate::workspace) struct SlashMenuView {
+    pub items: Vec<(gpui::SharedString, gpui::SharedString)>,
+    pub selected: usize,
+}
+
 #[derive(PartialEq)]
 pub(in crate::workspace) struct BottomDockSnapshot {
     pub agent_cli_snapshot: Option<CliSnapshot>,
@@ -291,7 +299,7 @@ pub(in crate::workspace) struct BottomDockSnapshot {
     /// suffix to pick the active row-preset label and the menu
     /// checkmark without re-reading the dock entity during render.
     pub bottom_dock_size: f32,
-    pub terminal_input: gpui::Entity<crate::ui::InputState>,
+    pub terminal_input: gpui::Entity<crate::ui::TextareaState>,
     /// Set when the focused pane is an Agent chat pane with a turn in
     /// flight. Carries that pane's id so the bottom-input submit button
     /// renders "Stop" and routes its click to `cancel_agent_turn(pane)`
@@ -326,6 +334,8 @@ pub(in crate::workspace) struct BottomDockSnapshot {
     /// strip is then not rendered.
     pub queued_prompts: Option<QueuedPromptsSnapshot>,
     pub composer_expand: ComposerExpand,
+    /// The slash-command list open over the composer.
+    pub slash_menu: Option<SlashMenuView>,
     /// Shell flavour of the focused pane's PTY. Drives drag-and-drop path
     /// quoting in the terminal input — Posix backslash/single-quote rules,
     /// fish, PowerShell, and cmd.exe all differ.

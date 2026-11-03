@@ -34,7 +34,7 @@ impl Workspace {
         let max_rows = self.input_dock.max_rows(self.mirrors.agent.input_max_rows);
         self.input_dock
             .input
-            .update(cx, |state, _| state.set_auto_grow(1, max_rows));
+            .update(cx, |state, cx| state.set_auto_grow(1, max_rows, cx));
         self.adapt_dock_to_input_lines(window, cx);
         cx.notify();
     }
@@ -59,7 +59,7 @@ impl Workspace {
         }
         let state = self.input_dock.input.read(cx);
         let overflowing = state
-            .last_bounds()
+            .text_bounds()
             .is_some_and(|b| state.scroll_size().height > b.size.height + gpui::px(0.5));
         if overflowing {
             ComposerExpand::Expand
@@ -72,9 +72,9 @@ impl Workspace {
     /// Appends `\r` so the shell receives the command as if Enter was
     /// pressed, then clears the input field.
     ///
-    /// `gpui_component::Input`'s multi-line `enter` action inserts a
-    /// `\n` into the textarea *before* it emits the `PressEnter`
-    /// event (see `gpui_component/src/input/state.rs::enter`), so the
+    /// The multi-line `enter` action inserts a `\n` into the textarea
+    /// *before* it emits the `PressEnter` event (see
+    /// `vendor/gpui-kit/crates/base/src/input/base/state.rs::enter`), so the
     /// raw `state.value()` always has at least one trailing newline
     /// when Cmd+Enter triggers this path. Trimming trailing `\r`/`\n`
     /// before the embedded-newline → `\r` conversion is what keeps
@@ -146,21 +146,20 @@ impl Workspace {
     }
 
     /// Returns `true` when history navigation in `dir` is possible for the
-    /// currently active lane. Called from the `on_history_navigate` hook to
-    /// decide whether to consume ↑/↓ before deferring `do_history_navigate`.
-    /// Reading the lane's history is safe here (hook fires inside
-    /// `terminal_input`'s update; `self` is `Workspace`, a different entity).
+    /// currently active lane. `composer_move` asks it before consuming ↑/↓.
     pub(in crate::workspace) fn history_navigate_possible(
         &self,
-        dir: crate::ui::HistoryDir,
+        dir: crate::workspace::main_area::bottom_dock::composer_ops::HistoryDir,
         cx: &App,
     ) -> bool {
         // ↑ is also consumed to edit the most-recent queued prompt when the
         // focused pane is an agent chat with a non-empty queue — even if this
         // lane has no input history yet. The empty-composer gate is applied in
-        // the deferred `do_history_navigate` (the composer can't be read here
-        // without re-entering `terminal_input` mid-update, pitfall #5).
-        if matches!(dir, crate::ui::HistoryDir::Up) && self.focused_agent_last_queued(cx).is_some()
+        // `do_history_navigate`.
+        if matches!(
+            dir,
+            crate::workspace::main_area::bottom_dock::composer_ops::HistoryDir::Up
+        ) && self.focused_agent_last_queued(cx).is_some()
         {
             return true;
         }
@@ -170,8 +169,12 @@ impl Workspace {
         };
         let buf = &state.input_history;
         match dir {
-            crate::ui::HistoryDir::Up => buf.has_entries(),
-            crate::ui::HistoryDir::Down => buf.is_navigating(),
+            crate::workspace::main_area::bottom_dock::composer_ops::HistoryDir::Up => {
+                buf.has_entries()
+            }
+            crate::workspace::main_area::bottom_dock::composer_ops::HistoryDir::Down => {
+                buf.is_navigating()
+            }
         }
     }
 
@@ -194,12 +197,10 @@ impl Workspace {
 
     /// Execute a history navigation step for the active lane. Reads the
     /// current `terminal_input` text, calls `prev` or `next` on the lane's
-    /// `HistoryBuffer`, and calls `set_value` with the result. Called from a
-    /// `window.defer` inside `on_history_navigate` so it runs after
-    /// `terminal_input`'s current update has finished (re-entry guard).
+    /// `HistoryBuffer`, and calls `set_value` with the result.
     pub(in crate::workspace) fn do_history_navigate(
         &mut self,
-        dir: crate::ui::HistoryDir,
+        dir: crate::workspace::main_area::bottom_dock::composer_ops::HistoryDir,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -209,8 +210,10 @@ impl Workspace {
         // editing instead of recalling input history. A non-empty composer,
         // an empty queue, or a non-agent pane all fall through to the normal
         // per-lane history recall below.
-        if matches!(dir, crate::ui::HistoryDir::Up)
-            && current.is_empty()
+        if matches!(
+            dir,
+            crate::workspace::main_area::bottom_dock::composer_ops::HistoryDir::Up
+        ) && current.is_empty()
             && let Some((pane_id, id)) = self.focused_agent_last_queued(cx)
         {
             self.begin_edit_queued_prompt(pane_id, id, window, cx);
@@ -219,8 +222,12 @@ impl Workspace {
         let lane_ref = self.active_ref();
         let buf = &mut self.lane_scoped_mut(lane_ref).input_history;
         let new_text = match dir {
-            crate::ui::HistoryDir::Up => buf.prev(&current).map(str::to_owned),
-            crate::ui::HistoryDir::Down => buf.forward().map(str::to_owned),
+            crate::workspace::main_area::bottom_dock::composer_ops::HistoryDir::Up => {
+                buf.prev(&current).map(str::to_owned)
+            }
+            crate::workspace::main_area::bottom_dock::composer_ops::HistoryDir::Down => {
+                buf.forward().map(str::to_owned)
+            }
         };
         let Some(new_text) = new_text else {
             return;

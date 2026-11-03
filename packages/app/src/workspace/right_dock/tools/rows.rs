@@ -2,11 +2,14 @@
 use crate::ui::{Disableable as _, Selectable as _};
 use crate::{
     surface::strings,
-    ui::{InputEvent, InputState, theme},
+    ui::{FieldState, InputEvent, InputState, TextareaState, theme},
 };
 use gpui::{
     App, Context, Entity, Focusable, IntoElement, Render, Subscription, Window, div, prelude::*, px,
 };
+
+/// Rows a multi-line value grows to before it scrolls.
+const MULTILINE_VALUE_MAX_ROWS: usize = 6;
 
 #[derive(Clone, Copy)]
 pub(super) enum Kind {
@@ -16,12 +19,17 @@ pub(super) enum Kind {
 struct Row {
     id: usize,
     key: Entity<InputState>,
-    value: Option<Entity<InputState>>,
+    /// A seeded value with a line break gets a multi-line field, since a
+    /// one-line field drops line breaks and saving would rewrite the value.
+    value: Option<FieldState>,
+    /// Masking flattens text to one line, so a multi-line value is shown
+    /// through this disabled one-line stand-in until it is revealed.
+    masked_proxy: Option<Entity<InputState>>,
     masked: bool,
     _subscriptions: Vec<Subscription>,
 }
 pub(super) struct Rows {
-    source: Entity<InputState>,
+    source: crate::ui::FieldState,
     kind: Kind,
     rows: Vec<Row>,
     next_id: usize,
@@ -31,27 +39,22 @@ pub(super) struct Rows {
 }
 impl Rows {
     pub fn new(
-        source: Entity<InputState>,
+        source: impl Into<crate::ui::FieldState>,
         kind: Kind,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let subscription = cx.subscribe_in(&source, window, |this, _, event, window, cx| {
-            if matches!(event, InputEvent::Change)
-                && this.source.read(cx).value().as_str() != this.serialized
-            {
-                this.load(window, cx);
-            }
-        });
-        let disabled_subscription = cx.observe(&source, |this, _, cx| {
-            let disabled = this.source.read(cx).is_disabled();
-            for row in &this.rows {
-                row.key.update(cx, |i, cx| i.set_disabled(disabled, cx));
-                if let Some(value) = &row.value {
-                    value.update(cx, |i, cx| i.set_disabled(disabled, cx));
-                }
-            }
-        });
+        let source = source.into();
+        let (subscription, disabled_subscription) = match &source {
+            crate::ui::FieldState::Line(state) => (
+                Self::watch_source(state, window, cx),
+                cx.observe(state, |this, _, cx| this.sync_disabled(cx)),
+            ),
+            crate::ui::FieldState::Text(state) => (
+                Self::watch_source(state, window, cx),
+                cx.observe(state, |this, _, cx| this.sync_disabled(cx)),
+            ),
+        };
         let mut this = Self {
             source,
             kind,
@@ -64,8 +67,32 @@ impl Rows {
         this.load(window, cx);
         this
     }
+    fn watch_source<S: gpui::EventEmitter<InputEvent> + 'static>(
+        state: &Entity<S>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Subscription {
+        cx.subscribe_in(state, window, |this, _, event: &InputEvent, window, cx| {
+            if matches!(event, InputEvent::Change)
+                && this.source.value(cx).as_str() != this.serialized
+            {
+                this.load(window, cx);
+            }
+        })
+    }
+
+    fn sync_disabled(&mut self, cx: &mut Context<Self>) {
+        let disabled = self.source.is_disabled(cx);
+        for row in &self.rows {
+            row.key.update(cx, |i, cx| i.set_disabled(disabled, cx));
+            if let Some(value) = &row.value {
+                value.set_disabled(disabled, cx);
+            }
+        }
+    }
+
     fn load(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let text = self.source.read(cx).value().to_string();
+        let text = self.source.value(cx).to_string();
         self.serialized = text.clone();
         self.rows.clear();
         let values: Vec<(String, Option<String>)> = match self.kind {
@@ -103,18 +130,40 @@ impl Rows {
                 input
             }
         });
-        let value = value.map(|value| {
-            cx.new(|cx| {
-                InputState::new(window, cx)
-                    .default_value(value)
-                    .placeholder(strings::mcp::field_value())
-                    .masked(true)
-            })
+        let masked_proxy = value
+            .filter(|value| value.contains(['\n', '\r']))
+            .map(|value| {
+                cx.new(|cx| {
+                    let mut proxy = InputState::new(window, cx)
+                        .default_value(value)
+                        .masked(true);
+                    proxy.set_disabled(true, cx);
+                    proxy
+                })
+            });
+        let value = value.map(|value| -> FieldState {
+            if masked_proxy.is_some() {
+                cx.new(|cx| {
+                    TextareaState::new(window, cx)
+                        .auto_grow(1, MULTILINE_VALUE_MAX_ROWS)
+                        .default_value(value)
+                        .placeholder(strings::mcp::field_value())
+                })
+                .into()
+            } else {
+                cx.new(|cx| {
+                    InputState::new(window, cx)
+                        .default_value(value)
+                        .placeholder(strings::mcp::field_value())
+                        .masked(true)
+                })
+                .into()
+            }
         });
-        let subscriptions = std::iter::once(&input)
-            .chain(value.iter())
-            .map(|input| {
-                cx.subscribe_in(input, window, |this, _, event, window, cx| {
+        let subscriptions = std::iter::once(FieldState::from(input.clone()))
+            .chain(value.iter().cloned())
+            .map(|field| {
+                field.subscribe_in(window, cx, |this, event, window, cx| {
                     if matches!(event, InputEvent::Change) {
                         this.sync(window, cx);
                     }
@@ -125,6 +174,7 @@ impl Rows {
             id: self.next_id,
             key: input,
             value,
+            masked_proxy,
             masked: true,
             _subscriptions: subscriptions,
         });
@@ -146,15 +196,13 @@ impl Rows {
                     format!(
                         "{}={}",
                         r.key.read(cx).value(),
-                        r.value.as_ref().unwrap().read(cx).value()
+                        r.value.as_ref().unwrap().value(cx)
                     )
                 })
                 .collect::<Vec<_>>()
                 .join("\n"),
         };
-        self.source.update(cx, |input, cx| {
-            input.set_value(self.serialized.clone(), window, cx)
-        });
+        self.source.set_value(self.serialized.clone(), window, cx);
         cx.notify();
     }
     pub fn seed_pairs(
@@ -167,7 +215,7 @@ impl Rows {
         for (key, value) in pairs {
             self.push(key, Some(value), window, cx);
         }
-        self.serialized = self.source.read(cx).value().to_string();
+        self.serialized = self.source.value(cx).to_string();
         cx.notify();
     }
     pub fn pairs(
@@ -178,7 +226,7 @@ impl Rows {
         let mut result = std::collections::BTreeMap::new();
         for (index, row) in self.rows.iter().enumerate() {
             let key = row.key.read(cx).value().trim().to_string();
-            let value = row.value.as_ref().unwrap().read(cx).value().to_string();
+            let value = row.value.as_ref().unwrap().value(cx).to_string();
             if super::modal_shared::parse_pairs(&format!("{key}="), headers).is_err()
                 || key.is_empty()
                 || (headers && value.contains(['\n', '\r']))
@@ -205,7 +253,7 @@ impl Rows {
             };
             if headers
                 && let Some(value) = &row.value
-                && value.read(cx).value().contains(['\n', '\r'])
+                && value.value(cx).contains(['\n', '\r'])
             {
                 return Some(value.focus_handle(cx));
             }
@@ -221,7 +269,7 @@ impl Rows {
 }
 impl Render for Rows {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let disabled = self.source.read(cx).is_disabled();
+        let disabled = self.source.is_disabled(cx);
         let mut body = div().flex().flex_col().gap(px(theme::GAP_LG));
         for row in &self.rows {
             let id = row.id;
@@ -237,11 +285,15 @@ impl Render for Rows {
                         .child(crate::ui::form_input(&row.key, cx, 8)),
                 );
             if let Some(value) = &row.value {
+                let shown = match &row.masked_proxy {
+                    Some(proxy) if row.masked => FieldState::from(proxy.clone()),
+                    _ => value.clone(),
+                };
                 line = line.child(
                     div()
                         .flex_1()
                         .min_w_0()
-                        .child(crate::ui::form_input(value, cx, 8)),
+                        .child(crate::ui::form_input(&shown, cx, 8)),
                 );
                 line = line.child(
                     crate::ui::button_icon(("reveal-row", id), crate::ui::icons::VISIBILITY, cx)
@@ -253,7 +305,7 @@ impl Render for Rows {
                         .on_click(cx.listener(move |this, _, window, cx| {
                             if let Some(row) = this.rows.iter_mut().find(|row| row.id == id) {
                                 row.masked = !row.masked;
-                                if let Some(value) = &row.value {
+                                if let Some(FieldState::Line(value)) = &row.value {
                                     value.update(cx, |input, cx| {
                                         input.set_masked(row.masked, window, cx)
                                     });
@@ -270,7 +322,7 @@ impl Render for Rows {
                     .tab_stop(true)
                     .tab_index(8)
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        if this.source.read(cx).is_disabled() {
+                        if this.source.is_disabled(cx) {
                             return;
                         }
                         let position = this.rows.iter().position(|r| r.id == id).unwrap_or(0);
@@ -297,7 +349,7 @@ impl Render for Rows {
             .tab_stop(true)
             .tab_index(8)
             .on_click(cx.listener(|this, _, window, cx| {
-                if this.source.read(cx).is_disabled() {
+                if this.source.is_disabled(cx) {
                     return;
                 }
                 this.push(

@@ -248,6 +248,7 @@ pub fn editor_syntax_colors_of(palette: SyntaxPalette, is_light: bool) -> Syntax
         link_uri: b(Constant),
         string: b(String),
         text_literal: b(String),
+        text_code_span: b(String),
         string_escape: b(StringSpecial),
         string_regex: b(StringSpecial),
         string_special: b(StringSpecial),

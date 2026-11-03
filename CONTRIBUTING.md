@@ -42,8 +42,8 @@ Rust uses edition 2024. The minimum version is declared once in
 `rust-toolchain.toml` pins the same version for local work and CI, because
 Clippy lints differ between releases; a toolchain that ignores this file, such
 as a Homebrew `rust`, can pass code that CI rejects.
-The vendored `gpui_component*` manifests are excluded from the floor check and
-declare no Rust version; `ferrum_flow` declares the floor to enable
+The vendored gpui-kit manifests (`gpui-*` packages) are excluded from the floor
+check and declare no Rust version; `ferrum_flow` declares the floor to enable
 `clippy::incompatible_msrv`.
 
 Zig can be bootstrapped with `scripts/bootstrap-zig.sh` on macOS/Linux or
@@ -457,10 +457,10 @@ local checks above, including relevant checks not yet wired into CI.
 
 [scripts/ci-cargo.sh](scripts/ci-cargo.sh) owns the shared package coverage
 for `clippy`, `app-features`, `test`, and `doc`; extra Cargo options follow
-the gate name. Update coverage there. The `test` gate includes
-`gpui_component`'s daruda-authored patch tests. The doc-link gate covers its
-explicit crate subset, not every workspace crate; Clippy does not validate
-intra-doc links. All app features are off by default, so the `app-features`
+the gate name. Update coverage there. The `test` gate includes the
+`gpui-base` and `gpui-component` suites with their daruda-authored patch
+tests. The doc-link gate covers its explicit crate subset, not every workspace
+crate; Clippy does not validate intra-doc links. All app features are off by default, so the `app-features`
 gate checks feature-only code on every OS.
 
 [setup-build](.github/actions/setup-build/action.yml) owns the shared
@@ -473,7 +473,7 @@ builds, startup, platform adapters, and packaging.
 CI reads the Rust floor through [rust-version.sh](scripts/rust-version.sh),
 using Cargo metadata. The reader rejects differing first-party and
 `ferrum_flow` declarations and a `rust-toolchain.toml` channel that differs
-from the floor; vendored `gpui_component*` crates are excluded. Its
+from the floor; vendored gpui-kit crates (`gpui-*` packages) are excluded. Its
 self-test runs in the Lint job.
 
 For dependency and native-packaging changes, macOS CI also verifies a signed
@@ -843,7 +843,7 @@ daruda/
 │   ├── block/                  # patched block crate
 │   ├── ghostty/                # Ghostty v1.4.0 submodule
 │   ├── zed/                    # patched GPUI; regenerate with tools/vendor_gpui
-│   ├── gpui-component/         # vendored gpui-component crates
+│   ├── gpui-kit/               # vendored gpui-component 0.8.1 crates
 │   └── ferrum-flow/            # vendored node-graph canvas
 └── scripts/
 ```
@@ -870,8 +870,9 @@ A few rules that often come up in review:
 
 - No inline magic numbers or colors outside the theme/surface layers.
 - No re-entrant entity reads inside GPUI render/update paths.
-- App code routes through `crate::ui::*`; do not import `gpui_component` or
-  `daruda_ui` directly outside the facade at `packages/app/src/ui/`.
+- App code routes through `crate::ui::*`; do not import `gpui_component`,
+  `gpui_base`, or `daruda_ui` directly outside the facade at
+  `packages/app/src/ui/`.
 - Blocking subprocess calls must run on the background executor.
 - User-facing actions need the action type, registered handler, shortcut
   constant, and command palette entry.

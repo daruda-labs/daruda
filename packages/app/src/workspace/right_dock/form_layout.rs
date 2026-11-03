@@ -133,7 +133,7 @@ mod tests {
 
     struct Probe {
         single: Entity<crate::ui::InputState>,
-        multi: Entity<crate::ui::InputState>,
+        multi: Entity<crate::ui::TextareaState>,
         choice: Choice<bool>,
     }
 
@@ -176,7 +176,7 @@ mod tests {
         let window = cx.add_window(|window, cx| Probe {
             single: cx.new(|cx| crate::ui::InputState::new(window, cx).default_value("Name")),
             multi: cx.new(|cx| {
-                crate::ui::InputState::new(window, cx)
+                crate::ui::TextareaState::new(window, cx)
                     .auto_grow(2, 4)
                     .default_value("First\nSecond")
             }),
@@ -205,8 +205,11 @@ mod tests {
         );
         window
             .update(&mut vcx, |probe, _, cx| {
-                for (state, outer) in [(&probe.single, single), (&probe.multi, multi)] {
-                    let text = state.read(cx).last_bounds().unwrap();
+                let texts = [
+                    (probe.single.read(cx).text_bounds().unwrap(), single),
+                    (probe.multi.read(cx).text_bounds().unwrap(), multi),
+                ];
+                for (text, outer) in texts {
                     assert_eq!(text.left() - outer.left(), px(10.));
                     assert_eq!(text.top() - outer.top(), px(8.));
                     assert_eq!(outer.bottom() - text.bottom(), px(8.));

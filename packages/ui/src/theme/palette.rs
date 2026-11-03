@@ -274,6 +274,8 @@ pub const COMPOSER_CHIP_PAD_X: f32 = PAD_SM;
 pub const INPUT_OVERFLOW_FADE_H: f32 = COMPOSER_TEXT_PAD_Y + INPUT_LINE_HEIGHT;
 pub const INPUT_PANEL_MIN_H: f32 = 48.0;
 pub const INPUT_PANEL_FLOATING_BAR_H: f32 = 32.0;
+/// The slash-command list over the composer scrolls past this height.
+pub const COMPOSER_SLASH_MENU_MAX_H: f32 = 240.0;
 pub const BUTTON_WIDGET_HEIGHT: f32 = 32.0;
 pub const BUTTON_WIDGET_TILE_WIDTH: f32 = 96.0;
 pub const BUTTON_WIDGET_ICON_SIZE: f32 = 32.0;
@@ -619,6 +621,18 @@ pub const MD_INLINE_IMAGE_HEIGHT: f32 = FILE_VIEWER_FONT_SIZE * 1.3;
 pub const MD_VIEW_LINE_HEIGHT: f32 = 1.6;
 pub const MD_VIEW_PARAGRAPH_GAP: f32 = 1.25;
 pub const MD_VIEW_MUTED_ALPHA: f32 = AGENT_CHAT_FG_MUTED_ALPHA;
+/// Tints the markdown view derives from the surface it paints on: white over a
+/// dark surface, black over a light one. Inline code is a tint rather than the
+/// scarce `accent` signal colour; one structural-line alpha covers the
+/// code-block border, table lines and the `<hr>` rule so they read as one system.
+pub const MD_VIEW_INLINE_CODE_TINT_ALPHA: f32 = 0.08;
+pub const MD_VIEW_CODE_FILL_ALPHA: f32 = 0.05;
+pub const MD_VIEW_STRUCTURAL_LINE_ALPHA: f32 = 0.28;
+pub const MD_VIEW_TABLE_HEADER_FILL_ALPHA: f32 = 0.05;
+/// Heading sizes `#` .. `######` as multiples of the body size. No level
+/// drops below the body: an `#####` smaller than the prose around it reads as
+/// a footnote, not a heading.
+pub const MD_VIEW_HEADING_SCALE: [f32; 6] = [2., 1.5, 1.25, 1.125, 1., 1.];
 pub const MERMAID_LIGHTBOX_VIEWPORT_FRACTION: f32 = 0.9;
 
 // ── Agent chat pane ─────────────────────────────────────────────────────────
@@ -712,7 +726,9 @@ pub const AGENT_BANNER_MARGIN_Y: f32 = PAD_SM;
 pub const TRANSCRIPT_EDITOR_RULES_PANEL_W: f32 = 454.0;
 pub const TRANSCRIPT_EDITOR_RULES_PANEL_MAX_H: f32 = 640.0;
 pub const TRANSCRIPT_EDITOR_MIN_PANEL_H: f32 = 320.0;
-pub const TRANSCRIPT_EDITOR_PANEL_BORDER: f32 = 1.0;
+/// The popover's own border around the panel. The popover draws its edge as
+/// a ring inside its shadow, which takes no layout width.
+pub const TRANSCRIPT_EDITOR_PANEL_BORDER: f32 = 0.0;
 pub const TRANSCRIPT_EDITOR_TRIGGER_GAP: f32 = 4.0;
 pub const TRANSCRIPT_EDITOR_WINDOW_MARGIN: f32 = 12.0;
 pub const TRANSCRIPT_EDITOR_HEADER_PAD_TOP: f32 = 14.0;

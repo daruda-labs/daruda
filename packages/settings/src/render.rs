@@ -474,6 +474,6 @@ fn settings_scrollbar(id: &'static str, scroll_handle: &gpui::ScrollHandle) -> i
         .child(
             daruda_ui::scrollbar::Scrollbar::vertical(scroll_handle)
                 .id(id)
-                .scrollbar_show(daruda_ui::scrollbar::ScrollbarShow::Always),
+                .mode(daruda_ui::scrollbar::ScrollbarMode::Always),
         )
 }

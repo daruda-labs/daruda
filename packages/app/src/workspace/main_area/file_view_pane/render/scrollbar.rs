@@ -12,7 +12,7 @@ use gpui::App;
 /// `body_top` offsets the thumb within the `.relative()` file-viewer container.
 /// `viewport_h` and `content_h` are supplied by the caller rather than read
 /// off `scroll_handle.bounds()` here: for the Raw/Diff editor mode the
-/// "scroll handle" is `gpui_component::input::InputState`'s own internal
+/// "scroll handle" is `crate::ui::EditorState`'s own internal
 /// one, whose `.bounds()` this vendored fork's text element never populates
 /// (it never calls `div().track_scroll(&handle)` — see `InputState::scroll_size`'s
 /// doc comment) and would silently draw no thumb. `content_h`:

@@ -26,13 +26,13 @@ impl SettingsView {
 
     /// [`Self::subscribe_agent_input`] for a row's multi-line field. Plain
     /// Enter inserts a newline and *still* emits `PressEnter` (see `enter` in
-    /// the vendored `vendor/gpui-component/gpui_component/src/input/state.rs`), so submitting
+    /// the vendored `vendor/gpui-kit/base/src/input/base/state.rs`), so submitting
     /// on it would rewrite `config.toml` on every line break and pop the
     /// validation banner on a line the user has not finished. Only the
     /// secondary form (Cmd/Ctrl+Enter) submits — the same split the MCP env /
     /// headers boxes make.
     pub(crate) fn subscribe_agent_multi_input(
-        state: &Entity<InputState>,
+        state: &Entity<TextareaState>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Subscription {
@@ -40,7 +40,10 @@ impl SettingsView {
             state,
             window,
             |this, _, ev: &InputEvent, _window, cx| match ev {
-                InputEvent::PressEnter { secondary: true } | InputEvent::Blur => {
+                InputEvent::PressEnter {
+                    secondary: true, ..
+                }
+                | InputEvent::Blur => {
                     this.persist_agent_catalog(cx);
                 }
                 InputEvent::Change => {
@@ -49,7 +52,10 @@ impl SettingsView {
                         cx.notify();
                     }
                 }
-                InputEvent::PressEnter { secondary: false } | InputEvent::Focus => {}
+                InputEvent::PressEnter {
+                    secondary: false, ..
+                }
+                | InputEvent::Focus => {}
             },
         )
     }

@@ -24,7 +24,7 @@ use crate::workspace::main_area::file_view_pane::{
 pub(super) fn render_file_viewer_body(
     fv: &PaneFileView,
     images: &MdImages,
-    editor_state: &gpui::Entity<gpui_component::input::InputState>,
+    editor_state: &gpui::Entity<crate::ui::EditorState>,
     scroll_handle: &gpui::ScrollHandle,
     top_offset: gpui::Pixels,
     bottom_offset: gpui::Pixels,

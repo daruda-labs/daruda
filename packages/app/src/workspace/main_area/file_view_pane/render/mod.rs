@@ -58,10 +58,10 @@ pub(in crate::workspace) fn render_pane_file_viewer(
         let editor = editor_state.read(cx);
         // `editor_scroll.bounds()`/`.max_offset()` never populate for this
         // vendored editor (see `InputState::scroll_size` doc comment) — the
-        // real viewport/content geometry lives in `last_bounds()` /
+        // real viewport/content geometry lives in `text_bounds()` /
         // `scroll_size()` instead.
-        let offset_y = editor.scroll_handle().offset().y;
-        let viewport_h = editor.last_bounds().map_or(px(0.), |b| b.size.height);
+        let offset_y = editor.scroll_offset().y;
+        let viewport_h = editor.text_bounds().map_or(px(0.), |b| b.size.height);
         let content_h = editor.scroll_size().height;
         let editor = editor_state.clone();
         file_viewer_scrollbar(editor, offset_y, toolbar_h, viewport_h, content_h, cx)

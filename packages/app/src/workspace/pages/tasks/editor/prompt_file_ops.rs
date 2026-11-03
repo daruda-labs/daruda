@@ -222,7 +222,7 @@ impl Workspace {
     fn reload_prompt_from_disk(
         &mut self,
         editor_id: TaskEditorId,
-        prompt_entity: gpui::Entity<gpui_component::input::InputState>,
+        prompt_entity: gpui::Entity<crate::ui::TextareaState>,
         content: String,
         window: &mut Window,
         cx: &mut Context<Self>,

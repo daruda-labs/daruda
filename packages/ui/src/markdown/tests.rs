@@ -8,8 +8,8 @@ use gpui::{
     prelude::FluentBuilder as _, px, size,
 };
 
-use std::cell::Cell;
-use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::test_support::init_gpui_component;
 
@@ -541,6 +541,7 @@ impl Render for SelectionProbe {
         div()
             .relative()
             .size_full()
+            .child(crate::TextSelectionLayer)
             .child(super::markdown(
                 "probe",
                 SharedString::from(PROBE_TEXT),
@@ -562,10 +563,8 @@ impl Render for SelectionProbe {
     }
 }
 
-/// Press (no release) over the prose and report whether a text block took
-/// the grab. Mouse-down only on purpose: a click that never drags selects
-/// nothing, and the release deregisters the empty selection — so the press
-/// is the only moment the grab is observable.
+/// Press over the prose and drag along it (no release), then report whether
+/// the window's text selection took the grab.
 fn press_grabs_the_prose(cx: &mut TestAppContext, occluded: bool) -> bool {
     init_gpui_component(cx);
     let bounds = Bounds::new(point(px(0.), px(0.)), size(px(600.), px(400.)));
@@ -592,9 +591,14 @@ fn press_grabs_the_prose(cx: &mut TestAppContext, occluded: bool) -> bool {
         click_count: 1,
         first_mouse: false,
     });
+    vcx.simulate_event(gpui::MouseMoveEvent {
+        position: point(px(200.), px(10.)),
+        modifiers: Modifiers::default(),
+        pressed_button: Some(MouseButton::Left),
+    });
     vcx.run_until_parked();
 
-    vcx.update(|_window, cx| crate::active_text_selection(cx).is_some())
+    vcx.update(crate::TextSelection::has_selection)
 }
 
 /// The control for the pair below: with nothing over it, a press on
@@ -626,7 +630,7 @@ fn a_press_inside_an_occluding_panel_does_not_grab_the_prose_under_it(cx: &mut T
 /// each other.
 struct LinkProbe {
     occluded: bool,
-    opened: Rc<Cell<bool>>,
+    opened: Arc<AtomicBool>,
 }
 
 /// Height the link block is confined to, so the space under it is genuinely
@@ -650,7 +654,7 @@ impl Render for LinkProbe {
                     .link_click_handler({
                         let opened = self.opened.clone();
                         move |_url, _window, _cx| {
-                            opened.set(true);
+                            opened.store(true, Ordering::SeqCst);
                             true
                         }
                     }),
@@ -677,9 +681,9 @@ fn with_link_probe<R>(
     cx: &mut TestAppContext,
     occluded: bool,
     drive: impl FnOnce(&mut VisualTestContext) -> R,
-) -> (R, Rc<Cell<bool>>) {
+) -> (R, Arc<AtomicBool>) {
     init_gpui_component(cx);
-    let opened = Rc::new(Cell::new(false));
+    let opened = Arc::new(AtomicBool::new(false));
     let bounds = Bounds::new(point(px(0.), px(0.)), size(px(600.), px(400.)));
     let opts = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -739,7 +743,7 @@ fn click_opens_the_link(cx: &mut TestAppContext, occluded: bool, button: MouseBu
         press(vcx, on_link(), button);
         release(vcx, on_link(), button);
     });
-    opened.get()
+    opened.load(Ordering::SeqCst)
 }
 
 /// Press somewhere that is not the link, drag onto it, release. Reports
@@ -754,7 +758,7 @@ fn drag_onto_link_opens_it(cx: &mut TestAppContext, from: gpui::Point<gpui::Pixe
         });
         release(vcx, on_link(), MouseButton::Left);
     });
-    opened.get()
+    opened.load(Ordering::SeqCst)
 }
 
 /// Drive the probe and hand back whatever the driver read.

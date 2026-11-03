@@ -5,11 +5,11 @@
 
 use std::rc::Rc;
 
-use gpui::{App, ClickEvent, Context, ParentElement as _, SharedString, WeakEntity, Window};
+use gpui::{App, ClickEvent, Context, SharedString, WeakEntity, Window};
 
 pub use gpui_component::WindowExt;
 pub use gpui_component::button::ButtonVariant;
-pub use gpui_component::dialog::{Dialog, DialogButtonProps};
+pub use gpui_component::dialog::{AlertDialog, Dialog, DialogButtonProps};
 
 /// The same client-decoration insets that the dialog uses for its bounds.
 pub use gpui_component::window_paddings;
@@ -31,11 +31,13 @@ pub fn open_confirm_dialog<F>(
     let body: SharedString = body.into();
     let ok_label: SharedString = ok_label.into();
     let on_ok = Rc::new(on_ok);
-    window.open_dialog(cx, move |dialog, _window, _cx| {
+    // Only an `AlertDialog` builds its OK / Cancel footer from `button_props`;
+    // a plain `Dialog` renders no buttons of its own.
+    window.open_alert_dialog(cx, move |dialog, _window, _cx| {
         let on_ok = on_ok.clone();
         dialog
             .title(title.clone())
-            .child(body.clone())
+            .description(body.clone())
             .confirm()
             .button_props(
                 DialogButtonProps::default()

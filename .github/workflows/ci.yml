@@ -55,7 +55,7 @@ jobs:
         uses: actions/checkout@v7
         # No submodules: the ghostty tree is only wanted by a build script,
         # and the scans below never leave `packages/`, the vendored
-        # `vendor/gpui-component/` and `vendor/ferrum-flow/`, and `scripts/`.
+        # `vendor/gpui-kit/` and `vendor/ferrum-flow/`, and `scripts/`.
 
       - name: Verify dependency maintenance scripts and Rust floor
         id: rust
@@ -87,7 +87,7 @@ jobs:
       - name: Lint — reentrant reads
         run: ./scripts/lint-reentrant-reads.sh
 
-      - name: Lint — gpui_component direct import
+      - name: Lint — gpui_component / gpui_base direct import
         run: ./scripts/lint-direct-gpui-component.sh
 
       - name: Lint — text input factories

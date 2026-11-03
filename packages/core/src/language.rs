@@ -19,6 +19,7 @@
 /// that registry and fails when a language it can colour has no extension
 /// here, so a grammar added upstream cannot land unreachable.
 pub const EXTENSION_LANGUAGES: &[(&str, &str)] = &[
+    ("astro", "astro"),
     ("bash", "bash"),
     ("c", "c"),
     ("cc", "cpp"),
@@ -49,6 +50,9 @@ pub const EXTENSION_LANGUAGES: &[(&str, &str)] = &[
     ("jsonc", "json"),
     // No JSX grammar of its own — the JavaScript grammar parses JSX.
     ("jsx", "javascript"),
+    ("kt", "kotlin"),
+    ("kts", "kotlin"),
+    ("lua", "lua"),
     ("markdown", "markdown"),
     ("md", "markdown"),
     ("mdx", "markdown"),
@@ -56,6 +60,7 @@ pub const EXTENSION_LANGUAGES: &[(&str, &str)] = &[
     ("mk", "make"),
     ("mts", "typescript"),
     ("patch", "diff"),
+    ("php", "php"),
     ("proto", "proto"),
     ("py", "python"),
     ("pyi", "python"),
@@ -68,6 +73,7 @@ pub const EXTENSION_LANGUAGES: &[(&str, &str)] = &[
     ("scss", "css"),
     ("sh", "bash"),
     ("sql", "sql"),
+    ("svelte", "svelte"),
     ("swift", "swift"),
     ("toml", "toml"),
     ("ts", "typescript"),

@@ -21,7 +21,7 @@ use crate::agent::mcp::{McpScope, McpServerDraft, McpTransport, validate_command
 use crate::surface::strings;
 use crate::ui::Disableable as _;
 use crate::ui::WindowExt as _;
-use crate::ui::{InputEvent, InputState, button, button_primary, checkbox};
+use crate::ui::{InputEvent, InputState, TextareaState, button, button_primary, checkbox};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 use daruda_config::env_lines::format_env_lines;
@@ -92,8 +92,8 @@ pub struct EditMcpServerModal {
     command_input: Entity<InputState>,
     args_input: Entity<InputState>,
     url_input: Entity<InputState>,
-    env_input: Entity<InputState>,
-    headers_input: Entity<InputState>,
+    env_input: Entity<TextareaState>,
+    headers_input: Entity<TextareaState>,
 
     initial: EditMcpInitial,
     advanced: bool,
@@ -140,12 +140,12 @@ impl EditMcpServerModal {
         let url_input =
             cx.new(|cx_state| InputState::new(window, cx_state).default_value(initial.url.clone()));
         let env_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state)
+            TextareaState::new(window, cx_state)
                 .auto_grow(2, 6)
                 .default_value(initial.env_text.clone())
         });
         let headers_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state)
+            TextareaState::new(window, cx_state)
                 .auto_grow(2, 6)
                 .default_value(initial.headers_text.clone())
         });
@@ -449,32 +449,32 @@ impl EditMcpServerModal {
         values
     }
 
-    fn visible_inputs(&self) -> Vec<Entity<InputState>> {
+    fn visible_inputs(&self) -> Vec<crate::ui::FieldState> {
         if self.transport.is_remote() {
             vec![
-                self.url_input.clone(),
-                self.headers_input.clone(),
-                self.env_input.clone(),
+                self.url_input.clone().into(),
+                self.headers_input.clone().into(),
+                self.env_input.clone().into(),
             ]
         } else {
             vec![
-                self.command_input.clone(),
-                self.args_input.clone(),
-                self.env_input.clone(),
+                self.command_input.clone().into(),
+                self.args_input.clone().into(),
+                self.env_input.clone().into(),
             ]
         }
     }
 
-    fn inputs(&self) -> Vec<Entity<InputState>> {
-        let mut inputs = vec![
-            self.auth.input.clone(),
-            self.command_input.clone(),
-            self.args_input.clone(),
-            self.url_input.clone(),
-            self.env_input.clone(),
-            self.headers_input.clone(),
+    fn inputs(&self) -> Vec<crate::ui::FieldState> {
+        let mut inputs: Vec<crate::ui::FieldState> = vec![
+            self.auth.input.clone().into(),
+            self.command_input.clone().into(),
+            self.args_input.clone().into(),
+            self.url_input.clone().into(),
+            self.env_input.clone().into(),
+            self.headers_input.clone().into(),
         ];
-        inputs.extend(self.codex_options.inputs.clone());
+        inputs.extend(self.codex_options.inputs.iter().cloned().map(Into::into));
         inputs
     }
 
@@ -538,7 +538,7 @@ fn forward_input(
 /// the banner. Plain Enter is a newline; Escape is delivered through
 /// Dialog's outer Cancel action.
 fn forward_multi_input(
-    state: &Entity<InputState>,
+    state: &Entity<TextareaState>,
     window: &mut Window,
     cx: &mut Context<EditMcpServerModal>,
 ) -> Subscription {
@@ -546,7 +546,7 @@ fn forward_multi_input(
         state,
         window,
         |this, _, ev: &InputEvent, window, cx| match ev {
-            InputEvent::PressEnter { secondary } if *secondary => this.submit(window, cx),
+            InputEvent::PressEnter { secondary, .. } if *secondary => this.submit(window, cx),
             InputEvent::Change => this.clear_error(cx),
             _ => {}
         },

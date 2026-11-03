@@ -589,20 +589,10 @@ pub struct AgentChatView {
     /// thumb overlay. Runtime-only; never serialized.
     pub(super) plan_scroll: ScrollHandle,
     /// Window-space bounds of the scrolling list viewport, captured each
-    /// paint. Read by the drag-selection autoscroll poll to detect the cursor
-    /// leaving the viewport. `None` until the first paint.
+    /// paint. `None` until the first paint.
     pub(super) list_bounds: Option<Bounds<Pixels>>,
     /// Width of the pane root, captured each paint.
     pub(super) pane_width: Option<Pixels>,
-    /// Drag-selection autoscroll poll task (mirrors
-    /// `TerminalView::autoscroll_task`). Replace-and-cancel on each new drag;
-    /// `None` when idle.
-    pub(super) autoscroll_task: Option<Task<()>>,
-    /// Drag-selection-in-progress signal, set on mouse-down and cleared via
-    /// `end_selection_drag`. Independent of the selected block's paint
-    /// lifetime, so the autoscroll poll still stops on mouse-release even if
-    /// the block unmounts mid-drag in the virtualized list.
-    pub(super) selection_drag_active: bool,
     /// Inactive-pane dim amount in `[0.0, 1.0]`: `0.0` = focused / full color,
     /// `> 0.0` = unfocused split leaf (see [`Self::dim`]). Single write site:
     /// `Workspace::refresh_pane_dimming` (MVU one-way flow).

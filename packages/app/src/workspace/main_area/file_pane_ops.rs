@@ -248,10 +248,9 @@ impl Workspace {
         let focus_handle = cx.focus_handle();
         let language = crate::ui::highlighter::language_for_extension(path.extension_str());
         let editor_state = cx.new(|cx_state| {
-            gpui_component::input::InputState::new(window, cx_state)
-                .multi_line(true)
+            crate::ui::EditorState::new(window, cx_state)
                 .soft_wrap(false)
-                .code_editor(language)
+                .language(language)
         });
         Pane {
             id: pane_id,

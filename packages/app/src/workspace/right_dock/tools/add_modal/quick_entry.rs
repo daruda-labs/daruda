@@ -75,6 +75,10 @@ impl AddMcpServerModal {
                 super::super::modal_shared::join_args(&draft.args),
             ),
             (&self.url_input, draft.url.clone().unwrap_or_default()),
+        ] {
+            input.update(cx, |input, cx| input.set_value(value, window, cx));
+        }
+        for (input, value) in [
             (&self.env_input, format_env_lines(&draft.env)),
             (&self.headers_input, format_env_lines(&draft.headers)),
         ] {

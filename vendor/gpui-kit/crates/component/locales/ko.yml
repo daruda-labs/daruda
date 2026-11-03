@@ -1,0 +1,276 @@
+# Korean translations for the vendored widgets — daruda-authored, not upstream.
+#
+# Kept in its own file rather than as `ko:` rows inside `ui.yml` so that
+# re-vendoring stays the pure file copy `patches/README.md` describes: upstream
+# owns `ui.yml`, daruda owns this one, and neither overwrites the other.
+# `rust_i18n::i18n!("locales", …)` in `src/lib.rs` globs the whole directory
+# (rust-i18n-support `load_locales`), so no vendored source needed a change.
+#
+# Wording follows `packages/app/locales/ko.yml` where the two overlap — "복사",
+# "붙여넣기", "모두 선택", "취소", "확인" are the app's own terms for the same
+# actions, and a user meets both in one window.
+#
+# NOTE: cargo does not treat this file as a build input. Editing it alone
+# leaves a stale binary; touch a `.rs` under this crate (or `cargo clean -p
+# gpui-component`) to force the macro to re-read it.
+_version: 2
+Attachment:
+  Remove:
+    ko: "제거"
+  Retry:
+    ko: "다시 시도"
+Calendar:
+  week.0:
+    ko: "일"
+  week.1:
+    ko: "월"
+  week.2:
+    ko: "화"
+  week.3:
+    ko: "수"
+  week.4:
+    ko: "목"
+  week.5:
+    ko: "금"
+  week.6:
+    ko: "토"
+  month.January:
+    ko: "1월"
+  month.February:
+    ko: "2월"
+  month.March:
+    ko: "3월"
+  month.April:
+    ko: "4월"
+  month.May:
+    ko: "5월"
+  month.June:
+    ko: "6월"
+  month.July:
+    ko: "7월"
+  month.August:
+    ko: "8월"
+  month.September:
+    ko: "9월"
+  month.October:
+    ko: "10월"
+  month.November:
+    ko: "11월"
+  month.December:
+    ko: "12월"
+DatePicker:
+  placeholder:
+    ko: "날짜 선택"
+  time:
+    ko: "시간"
+Select:
+  placeholder:
+    ko: "선택하세요"
+ComboBox:
+  placeholder:
+    ko: "선택하세요"
+  search_placeholder:
+    ko: "검색…"
+  empty:
+    ko: "결과 없음"
+DropdownButton:
+  more_options:
+    ko: "추가 옵션"
+Dock:
+  Unnamed:
+    ko: "이름 없음"
+  Close:
+    ko: "닫기"
+  Zoom In:
+    ko: "확대"
+  Zoom Out:
+    ko: "축소"
+  Collapse:
+    ko: "접기"
+  Expand:
+    ko: "펼치기"
+  Unavailable Panel:
+    ko: "이 버전에서는 사용할 수 없는 패널입니다."
+ColorPicker:
+  Palette:
+    ko: "팔레트"
+  HSLA:
+    ko: "HSLA"
+  Hue:
+    ko: "색조"
+  Saturation:
+    ko: "채도"
+  Lightness:
+    ko: "명도"
+  Alpha:
+    ko: "알파"
+Dialog:
+  ok:
+    ko: "확인"
+  cancel:
+    ko: "취소"
+Command:
+  placeholder:
+    ko: "명령 입력 또는 검색…"
+  empty:
+    ko: "결과가 없습니다."
+List:
+  search_placeholder:
+    ko: "검색…"
+Input:
+  Decrement:
+    ko: "감소"
+  Increment:
+    ko: "증가"
+  Replace:
+    ko: "바꾸기"
+  Replace All:
+    ko: "모두 바꾸기"
+  Clear:
+    ko: "지우기"
+  Cut:
+    ko: "잘라내기"
+  Copy:
+    ko: "복사"
+  Paste:
+    ko: "붙여넣기"
+  Select All:
+    ko: "모두 선택"
+  Go to Definition:
+    ko: "정의로 이동"
+  Show Code Actions:
+    ko: "코드 작업 표시"
+  Show Password:
+    ko: "비밀번호 표시"
+  Hide Password:
+    ko: "비밀번호 숨기기"
+Settings:
+  search_placeholder:
+    ko: "검색…"
+  Reset All:
+    ko: "모두 초기화"
+Pagination:
+  previous:
+    ko: "이전"
+  next:
+    ko: "다음"
+Carousel:
+  label:
+    ko: "캐러셀"
+  previous:
+    ko: "이전 슬라이드"
+  next:
+    ko: "다음 슬라이드"
+  slide:
+    ko: "슬라이드 %{current}/%{total}"
+  pagination:
+    ko: "캐러셀 페이지"
+  go_to_slide:
+    ko: "슬라이드 %{current}(으)로 이동"
+Table:
+  SortBy:
+    ko: "%{column} 기준 정렬"
+Chart:
+  open:
+    ko: "시가"
+  high:
+    ko: "고가"
+  low:
+    ko: "저가"
+  close:
+    ko: "종가"
+Questionnaire:
+  progress:
+    ko: "질문 %{current}/%{total}"
+  previous:
+    ko: "이전"
+  next:
+    ko: "다음"
+  skip:
+    ko: "건너뛰기"
+  submit:
+    ko: "제출"
+  error.required:
+    ko: "계속하려면 답을 선택하세요."
+  error.optional:
+    ko: "답을 선택하거나 이 질문을 건너뛰세요."
+Speech:
+  Start:
+    ko: "받아쓰기"
+  Stop:
+    ko: "받아쓰기 중지"
+  Unavailable:
+    ko: "받아쓰기를 사용할 수 없음"
+Diff:
+  BinaryChanges:
+    ko: "바이너리 파일이 변경됨"
+  NoTextChanges:
+    ko: "이 패치에 텍스트 변경 없음"
+  NoChanges:
+    ko: "변경 사항 없음"
+  EmptyFile:
+    ko: "빈 파일"
+  AddedFile:
+    ko: "추가된 파일"
+  DeletedFile:
+    ko: "삭제된 파일"
+  RenamedFile:
+    ko: "이름 변경됨"
+  CopiedFile:
+    ko: "복사됨"
+  HiddenLines:
+    ko: "패치에 없는 %{count}줄"
+  ExpandAbove:
+    ko: "위로 %{count}줄 보기"
+  ExpandBelow:
+    ko: "아래로 %{count}줄 보기"
+  CollapseFile:
+    ko: "%{name} 접기"
+  ExpandFile:
+    ko: "%{name} 펼치기"
+  AddAnnotation:
+    ko: "%{line}행에 주석 추가"
+  ConflictedFile:
+    ko: "충돌"
+  CurrentChange:
+    ko: "현재 변경"
+  IncomingChange:
+    ko: "들어오는 변경"
+  BaseChange:
+    ko: "공통 조상"
+  AcceptCurrent:
+    ko: "현재 변경 수락"
+  AcceptIncoming:
+    ko: "들어오는 변경 수락"
+  AcceptBoth:
+    ko: "둘 다 수락"
+  AcceptedCurrent:
+    ko: "현재 변경을 수락함"
+  AcceptedIncoming:
+    ko: "들어오는 변경을 수락함"
+  AcceptedBoth:
+    ko: "두 변경을 모두 수락함"
+  UndoResolution:
+    ko: "실행 취소"
+  Original:
+    ko: "원본"
+  Modified:
+    ko: "수정본"
+  ExpandLines:
+    ko: "변경 없는 %{count}줄 펼치기"
+  SourceLine:
+    ko: "%{side} %{line}행"
+  AddedLine:
+    ko: "%{side} %{line}행, 추가됨"
+  RemovedLine:
+    ko: "%{side} %{line}행, 삭제됨"
+  UnchangedLines:
+    ko: "변경 없는 %{count}줄"
+  SelectLine:
+    ko: "%{side} %{line}행 선택"
+  NoNewline:
+    ko: "파일 끝에 줄바꿈 없음"
+  Viewer:
+    ko: "%{name} 차이"
+  ViewerFiles:
+    ko: "파일 %{count}개 차이"

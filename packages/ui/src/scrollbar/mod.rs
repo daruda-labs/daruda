@@ -28,7 +28,7 @@ use geometry::{scroll_at_bottom, thumb_geometry};
 /// regions that want its own chrome and gutter — e.g. the status-bar Ports
 /// dropdown. Re-exported here so call sites stay on `crate::ui::*` (shape C
 /// wrapper).
-pub use gpui_component::scroll::{Scrollbar, ScrollbarShow};
+pub use gpui_component::scroll::{Scrollbar, ScrollbarMode};
 
 /// Build the thumb overlay for a vertically-scrolling region, or `None`
 /// when the content fits the viewport (or bounds are not yet measured).

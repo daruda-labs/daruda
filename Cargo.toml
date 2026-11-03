@@ -5,9 +5,10 @@ members = [
     "tools/*",
     # Vendored third-party packages, one directory per upstream.
     "vendor/ferrum-flow/ferrum_flow",
-    "vendor/gpui-component/gpui_component",
-    "vendor/gpui-component/gpui_component_assets",
-    "vendor/gpui-component/gpui_component_macros",
+    "vendor/gpui-kit/crates/base",
+    "vendor/gpui-kit/crates/component",
+    "vendor/gpui-kit/crates/assets",
+    "vendor/gpui-kit/crates/component-macros",
 ]
 exclude = ["vendor/zed"]
 
@@ -58,9 +59,9 @@ strings_gen = { path = "tools/strings_gen" }
 test_process = { path = "tools/test_process" }
 
 ferrum_flow = { path = "vendor/ferrum-flow/ferrum_flow" }
-gpui_component = { path = "vendor/gpui-component/gpui_component", features = ["tree-sitter-languages"] }
-gpui_component_macros = { path = "vendor/gpui-component/gpui_component_macros" }
-gpui_component_assets = { path = "vendor/gpui-component/gpui_component_assets" }
+gpui_component = { package = "gpui-component", path = "vendor/gpui-kit/crates/component", features = ["tree-sitter-languages"] }
+gpui_component_assets = { package = "gpui-kit-assets", path = "vendor/gpui-kit/crates/assets" }
+gpui_base = { package = "gpui-base", path = "vendor/gpui-kit/crates/base" }
 
 # Shared registry dependencies, including the vendored widget packages.
 agent-client-protocol = "3.6"

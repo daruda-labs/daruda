@@ -109,7 +109,7 @@ pub(crate) struct AgentCatalogRow {
     /// [`daruda_config::AgentDefinition::env`] states an empty field means
     /// depends on the preset behind the row, so read it through
     /// [`AgentCatalogRow::stated_env`] rather than off the text.
-    pub(crate) env_input: Entity<InputState>,
+    pub(crate) env_input: Entity<TextareaState>,
 }
 
 /// The localized message for an [`agent_row_transport_error`] on agent row

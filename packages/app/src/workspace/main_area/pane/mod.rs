@@ -141,7 +141,7 @@ pub(in crate::workspace) struct FileContent {
     /// Tab title — file basename. Set at construction.
     pub(in crate::workspace) cached_title: SharedString,
     /// Code-editor state for raw file editing.
-    pub(in crate::workspace) editor_state: Entity<gpui_component::input::InputState>,
+    pub(in crate::workspace) editor_state: Entity<crate::ui::EditorState>,
     /// Text that was last saved to disk — for dirty comparison.
     pub(in crate::workspace) saved_text: String,
     /// GPU images for the Markdown preview, indexed by the slot the load's

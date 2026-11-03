@@ -1,21 +1,16 @@
-//! Tests for the `gpui_component::Root` modal Tab containment patch.
+//! Tests for modal Tab containment.
 //!
-//! `vendor/gpui-component/gpui_component/src/root.rs` is patched so the global Tab
-//! action checks `active_dialogs.last()` and wraps focus back inside
-//! the topmost dialog whenever `window.focus_next` / `focus_prev`
-//! escapes the dialog subtree. A second `focus_within` check parks
-//! focus on the dialog handle itself when the dialog has zero inner
-//! tab stops (e.g. a confirm / alert dialog) so Tab doesn't oscillate
-//! between the dialog chrome and the next global stop.
+//! The vendored `Root` implements it: its Tab / Shift+Tab actions
+//! (`advance_focus` in `vendor/gpui-kit/crates/base/src/root.rs`) keep focus
+//! inside the active focus trap a dialog installs
+//! (`vendor/gpui-kit/crates/base/src/dialog.rs`), and park focus on the
+//! trap's own handle when no stop inside it is reachable, so Tab does not
+//! oscillate between the dialog chrome and the next global stop.
 //!
-//! `Root::active_dialogs` is `pub(crate)` upstream, so a tight
-//! end-to-end assertion ("focus is on or inside the topmost dialog
-//! after Tab") would require a vendor patch widening that visibility.
-//! For now these tests catch the loudest regression class — a panic
-//! or borrow-conflict inside the patched `on_action_tab` /
-//! `on_action_tab_prev` path — and pin the symmetric shape of the
-//! Tab / Shift+Tab branches so a refactor that drops one of them
-//! is visible.
+//! These tests catch the loudest regression class — a panic, a borrow
+//! conflict, or an endless walk on the Tab paths with a zero-stop dialog
+//! open — and drive both directions so a change that breaks one of them is
+//! visible.
 
 use gpui::{AppContext as _, TestAppContext};
 

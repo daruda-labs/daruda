@@ -1,7 +1,5 @@
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use gpui::{App, Context, Entity, FocusHandle, Pixels, Point, SharedString, Window};
-
-use daruda_chat::view::AgentChatView;
+use gpui::{App, Context, FocusHandle, Pixels, Point, SharedString, Window};
 
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
@@ -57,7 +55,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<PaneMenuContext> {
-        let snapshot = self.pane_menu_kind_and_selection(pane_id, cx)?;
+        let snapshot = self.pane_menu_kind_and_selection(pane_id, window, cx)?;
         let role = self.pane_role(pane_id);
         let lane = if self.active_lane_is_inaccessible() {
             LaneAccess::Inaccessible
@@ -154,6 +152,7 @@ impl Workspace {
     fn pane_menu_kind_and_selection(
         &mut self,
         pane_id: PaneId,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<PaneMenuSnapshot> {
         let pane = self
@@ -180,7 +179,7 @@ impl Workspace {
             }
             PaneContent::AgentChat(content) => {
                 let view = content.view.clone();
-                let selection = Self::agent_chat_selection(&view, cx);
+                let selection = Self::agent_chat_selection(window, cx);
                 let busy = view.read(cx).is_busy();
                 Some(PaneMenuSnapshot {
                     selection,
@@ -194,20 +193,13 @@ impl Workspace {
         }
     }
 
-    /// Selection text owned by *this* pane.
+    /// The window's selected text, offered by an agent chat's menu.
     ///
-    /// `active_text_selection` is a single global slot, so with two agent
-    /// chats open it can hold a selection made in the other one. Gate it on
-    /// the selected block sitting inside this pane's list viewport —
-    /// otherwise a right-click here would offer to send text from there.
-    fn agent_chat_selection(view: &Entity<AgentChatView>, cx: &App) -> Option<SharedString> {
-        let handle = crate::ui::active_text_selection(cx)?;
-        let pane_bounds = view.read(cx).list_bounds()?;
-        if !pane_bounds.intersects(&handle.block_bounds(cx)) {
-            return None;
-        }
-        handle
-            .selection_text(cx)
+    /// Text selection is window-wide, so with two agent chats open it can hold
+    /// a selection made in the other one; per-pane selection scopes would
+    /// confine it.
+    fn agent_chat_selection(window: &mut Window, cx: &mut App) -> Option<SharedString> {
+        Some(crate::ui::TextSelection::selected_text(window, cx))
             .map(|text| text.trim().to_string())
             .filter(|text| !text.is_empty())
             .map(SharedString::from)

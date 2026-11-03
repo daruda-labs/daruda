@@ -57,6 +57,7 @@ fn gauge_card(
 ) -> AnyElement {
     let t = theme::current(cx);
     let label: SharedString = label.into();
+    let bar_id = gpui::ElementId::Name(format!("usage-gauge-{label}").into());
 
     // Border-only card (no fill), `theme.radius` corners.
     let card = group_box().outline();
@@ -71,7 +72,7 @@ fn gauge_card(
                 t.text_muted,
                 t.text_subtle,
             ))
-            .child(gauge_bar(0.0, t.gauge_track_bg))
+            .child(gauge_bar(bar_id, 0.0, t.gauge_track_bg))
             .into_any_element();
     };
 
@@ -90,7 +91,7 @@ fn gauge_card(
             t.text_subtle,
             t.text_muted,
         ))
-        .child(gauge_bar(pct, color));
+        .child(gauge_bar(bar_id, pct, color));
     if let Some(reset) = reset_text {
         card = card.child(
             div()
@@ -147,9 +148,9 @@ pub(super) fn gauge_value_text(pct: Option<f32>, stale: bool) -> String {
 /// Filled bar via `gpui_component::Progress`. `color` is the fill; the
 /// widget renders the track as that color at 20% opacity. The widget
 /// clamps `pct` to `0..=100`.
-fn gauge_bar(pct: f32, color: Hsla) -> impl IntoElement {
-    crate::ui::progress(pct)
-        .bg(color)
+fn gauge_bar(id: gpui::ElementId, pct: f32, color: Hsla) -> impl IntoElement {
+    crate::ui::progress(id, pct)
+        .color(color)
         .h(px(theme::GAUGE_BAR_HEIGHT))
         .rounded(px(theme::GAUGE_BAR_RADIUS))
 }

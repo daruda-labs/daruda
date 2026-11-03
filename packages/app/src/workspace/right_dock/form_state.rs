@@ -1,7 +1,7 @@
 //! Shared draft comparison and leave-confirmation for right-dock forms.
 
 use crate::surface::strings;
-use gpui::{App, Context, Entity, Window};
+use gpui::{App, Context, Window};
 
 #[derive(Default)]
 pub(super) struct FormState {
@@ -94,15 +94,15 @@ pub(super) fn ask_to_leave<E: 'static>(
     .detach();
 }
 
-pub(super) fn freeze_inputs(inputs: &[Entity<crate::ui::InputState>], frozen: bool, cx: &mut App) {
+pub(super) fn freeze_inputs(inputs: &[crate::ui::FieldState], frozen: bool, cx: &mut App) {
     for input in inputs {
-        input.update(cx, |input, cx| input.set_disabled(frozen, cx));
+        input.set_disabled(frozen, cx);
     }
 }
 
 /// A field keeps its validation identity when optional controls alter tab order.
 pub(super) fn ordered_field_input(
-    input: &Entity<crate::ui::InputState>,
+    input: &impl crate::ui::TextState,
     cx: &App,
     index: isize,
     tab: isize,

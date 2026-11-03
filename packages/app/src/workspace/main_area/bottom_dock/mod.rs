@@ -8,6 +8,7 @@
 //!     button at the end of the sequence. Click handlers on widgets
 //!     call back into `Workspace::run_widget`.
 
+pub(in crate::workspace) mod composer_ops;
 mod config_chip;
 pub(in crate::workspace) mod input_dock;
 pub(super) mod macro_edit_modal;

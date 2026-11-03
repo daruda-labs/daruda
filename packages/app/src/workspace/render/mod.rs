@@ -215,15 +215,8 @@ impl Workspace {
                     ))
                 },
             )
-            // gpui_component overlay layers. The window root is
-            // `gpui_component::Root`, but `Root::render` only
-            // renders the inner view — Dialog/Sheet/Notification layers
-            // must be rendered by the inner view explicitly. Without
-            // these, `window.open_dialog(...)` registers a dialog into
-            // `Root.active_dialogs` but nothing ever paints it.
-            .children(gpui_component::Root::render_sheet_layer(window, cx))
-            .children(gpui_component::Root::render_dialog_layer(window, cx))
-            .children(gpui_component::Root::render_notification_layer(window, cx))
+        // Dialog, sheet and notification layers are mounted by the window
+        // root's `WindowState` plugin, after this view.
     }
 
     /// The root both frames share. It answers what survives Settings: the

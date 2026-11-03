@@ -27,7 +27,6 @@ pub(crate) const PROMPT_PREVIEW_LINES: usize = 6;
 pub(crate) const PROMPT_PREVIEW_CHARS: usize = 240;
 
 pub mod agent_chat_helpers;
-pub(crate) mod autoscroll_ops;
 /// Which rows a pane has folded, and the mode those defaults come from.
 pub mod fold;
 pub(crate) mod host_cards;

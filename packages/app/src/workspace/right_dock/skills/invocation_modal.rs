@@ -23,7 +23,7 @@ use crate::agent::skills::SkillScope;
 use crate::surface::strings;
 use crate::ui::Disableable as _;
 use crate::ui::WindowExt as _;
-use crate::ui::{InputEvent, InputState, button, button_primary, form_input};
+use crate::ui::{InputEvent, TextareaState, button, button_primary, form_input};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_input_ops::{PaneTextInput, PaneTextIntent};
@@ -67,7 +67,7 @@ pub struct SkillInvocationLabel {
 pub struct SkillInvocationModal {
     panel_focus_handle: FocusHandle,
     label: SkillInvocationLabel,
-    input: Entity<InputState>,
+    input: Entity<TextareaState>,
     workspace: WeakEntity<Workspace>,
     submitting: bool,
     _input_subs: Vec<Subscription>,
@@ -89,14 +89,11 @@ impl SkillInvocationModal {
         // `PressEnter { secondary: true }` — plain Enter inserts a
         // newline so users can compose multi-line prompts. Escape is
         // delivered by Dialog's outer Cancel action.
-        let input = cx.new(|cx_state| {
-            InputState::new(window, cx_state)
-                .multi_line(true)
-                .placeholder(placeholder)
-        });
+        let input =
+            cx.new(|cx_state| TextareaState::new(window, cx_state).placeholder(placeholder));
         let subs = vec![
             cx.subscribe_in(&input, window, |this, _, ev: &InputEvent, window, cx| {
-                if let InputEvent::PressEnter { secondary } = ev
+                if let InputEvent::PressEnter { secondary, .. } = ev
                     && *secondary
                 {
                     this.submit(window, cx);

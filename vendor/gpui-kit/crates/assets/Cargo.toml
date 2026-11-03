@@ -1,0 +1,30 @@
+[package]
+name = "gpui-kit-assets"
+version = "0.8.1"
+license = "Apache-2.0"
+publish = false
+edition = "2024"
+autoexamples = false
+autobenches = false
+autotests = false
+description = "Vendored gpui-kit-assets v0.8.1 (longbridge/gpui-kit, Apache-2.0). Routed through daruda workspace gpui."
+links = "gpui-kit-default-icons"
+
+[lints.clippy]
+all = "allow"
+
+[lints.rust]
+unused = "allow"
+dead_code = "allow"
+
+[features]
+# The upstream GPUI Fast backend is not vendored; declared so its cfg gates compile out.
+"gpui-fast" = []
+
+[dependencies]
+"anyhow" = { workspace = true }
+"gpui" = { workspace = true }
+"log" = { workspace = true }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+"rust-embed" = { workspace = true, features = ["interpolate-folder-path", "include-exclude"] }
