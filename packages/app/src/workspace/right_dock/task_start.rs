@@ -328,9 +328,9 @@ impl Workspace {
         }
         let reveal = reveal_for(started_by);
         let route = match &task.spec.flow {
-            Some(flow) => {
-                StartRoute::Flow(self.prepare_task_flow_start(&task, flow, reveal, started_by, cx)?)
-            }
+            Some(flow) => StartRoute::Flow(Box::new(
+                self.prepare_task_flow_start(&task, flow, reveal, started_by, cx)?,
+            )),
             // An existing lane needs no git repo, lock or checkout.
             None => match &task.spec.run_in {
                 TaskRunIn::ExistingLane { path } => {
@@ -441,7 +441,7 @@ impl Workspace {
             }
             StartRoute::New(start) => self.create_task_worktree(start, exec, answer, window, cx),
             StartRoute::Flow(start) => {
-                self.continue_task_flow_start(start, exec, answer, window, cx)
+                self.continue_task_flow_start(*start, exec, answer, window, cx)
             }
         }
     }
@@ -768,7 +768,9 @@ fn reveal_for(started_by: StartedBy) -> LaneReveal {
 enum StartRoute {
     Existing(super::task_existing_lane_ops::ExistingLaneStart),
     New(WorktreeStart),
-    Flow(super::task_flow_start::TaskFlowStart),
+    /// Boxed because a flow start carries a whole worktree start plus its
+    /// inputs, about twice the other routes once Windows paths widen it.
+    Flow(Box<super::task_flow_start::TaskFlowStart>),
 }
 
 impl StartRoute {
