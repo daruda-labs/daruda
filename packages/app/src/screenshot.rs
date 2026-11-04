@@ -481,9 +481,9 @@ fn resize_target(win_size: Size<Pixels>, cx: &mut App) {
         handle,
         cx,
         "screenshot_resize",
-        move |window, _| {
+        move |window, cx| {
             window.resize(win_size);
-            window.refresh();
+            draw_now(window, cx);
         },
     );
 }
@@ -499,12 +499,16 @@ fn force_repaint(cx: &mut App) {
     let Some(handle) = capture_target(cx) else {
         return;
     };
-    crate::windows::try_update_workspace_window(
-        handle,
-        cx,
-        "screenshot_force_repaint",
-        move |window, _| window.refresh(),
-    );
+    crate::windows::try_update_workspace_window(handle, cx, "screenshot_force_repaint", draw_now);
+}
+
+/// Draw the window's next frame now, rather than when its display link next
+/// ticks. macOS stops a window's display link while another window covers
+/// it, so a capture launched behind a terminal would otherwise read the
+/// frame its window first opened with, before any scenario or theme.
+fn draw_now(window: &mut gpui::Window, cx: &mut App) {
+    window.refresh();
+    window.draw(cx).clear(cx);
 }
 
 /// Drive `scenario` into view on the workspace window. Logs and skips when no
@@ -547,9 +551,14 @@ fn capture_window_on(window: AnyWindowHandle, path: &Path, cx: &mut App) -> Resu
             crate::platform::capture_windows::capture(window)
         })
         .context("capture window is gone")??;
+    // The frame is drawn here, not read from the last one the window
+    // painted: a covered window paints nothing between captures.
     #[cfg(not(windows))]
     let image = cx
-        .update_window(window, |_, window, _| window.render_to_image())
+        .update_window(window, |_, window, cx| {
+            draw_now(window, cx);
+            window.render_to_image()
+        })
         .context("capture window is gone")??;
     image.save(path).context("write screenshot png")?;
     Ok(())
