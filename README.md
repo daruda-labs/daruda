@@ -1,5 +1,10 @@
 # daruda
 
+> [!IMPORTANT]
+> daruda has moved to **[daruda-ai/daruda](https://github.com/daruda-ai/daruda)**.
+> This repository is archived. Installed apps update through it once more and
+> then follow the new repository.
+
 > **Keep the vibe. Try every idea.**
 
 **daruda is an Agentic Development Environment (ADE) for running multiple AI
