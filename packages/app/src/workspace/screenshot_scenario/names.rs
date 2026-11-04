@@ -247,6 +247,7 @@ impl ScreenshotScenario {
             "task-editor-saving" => Some(Self::TaskEditor(TaskEditorShot::Saving)),
             "task-editor-running" => Some(Self::TaskEditor(TaskEditorShot::Running)),
             "task-editor-disk-copy" => Some(Self::TaskEditor(TaskEditorShot::DiskCopy)),
+            "task-editor-flow" => Some(Self::TaskEditor(TaskEditorShot::Flow)),
             NAME_ORCHESTRATOR_CHIP => Some(Self::OrchestratorChip),
             NAME_ORCHESTRATOR_TAB => Some(Self::OrchestratorTab),
             NAME_ORCHESTRATOR_APPROVAL => Some(Self::OrchestratorApproval),

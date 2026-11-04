@@ -93,6 +93,7 @@ mod status_bar_ops;
 pub(in crate::workspace) mod sync;
 mod tab_indicator;
 pub(in crate::workspace) mod task_draft;
+pub(in crate::workspace) mod task_flow;
 #[cfg(test)]
 mod tests;
 mod toast_layer;

@@ -74,6 +74,7 @@ fn edit(title: &str) -> TaskEdit {
         branch: None,
         run_in: None,
         project: None,
+        flow: None,
     }
 }
 

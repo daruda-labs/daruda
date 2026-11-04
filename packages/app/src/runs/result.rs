@@ -164,14 +164,20 @@ pub(super) fn task_snapshot(record: &TaskRecord, exec: &ExecutionRef) -> Option<
 }
 
 fn task_pointers(execution: Option<&TaskExecution>) -> Pointers {
+    let run_dir = execution.and_then(super::flow_tasks::task_run_dir);
     Pointers {
         chat: execution.and_then(|run| run.session_id.clone()),
         transcript: execution.and_then(|run| match &run.source {
             daruda_store::tasks::TaskExecutionSource::ClaudeCli {
                 transcript_path, ..
             } => transcript_path.clone(),
-            daruda_store::tasks::TaskExecutionSource::AgentChat => None,
+            daruda_store::tasks::TaskExecutionSource::AgentChat
+            | daruda_store::tasks::TaskExecutionSource::Flow { .. } => None,
         }),
+        report: run_dir
+            .as_ref()
+            .map(|dir| dir.join(daruda_flow::record::RUN_REPORT_FILE)),
+        run_dir,
         ..Default::default()
     }
 }

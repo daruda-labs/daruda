@@ -262,10 +262,12 @@ impl RunsHost {
         let (answer, answered) = smol::channel::bounded(1);
         cx.spawn(async move |cx| {
             let result = commit.await;
-            if result.is_ok()
-                && let Some(effects) = effects
-            {
-                cx.update(|cx| effects.stop_execution(&exec, cx));
+            if result.is_ok() {
+                // A flow run belongs to the process, not to a window's pane.
+                cx.update(|cx| Self::stop_task_flow(&exec, cx));
+                if let Some(effects) = effects {
+                    cx.update(|cx| effects.stop_execution(&exec, cx));
+                }
             }
             // SILENT-OK: the command's caller stopped listening.
             let _ = answer.try_send(result);

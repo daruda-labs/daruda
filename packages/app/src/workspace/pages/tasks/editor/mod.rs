@@ -1,6 +1,7 @@
 //! Prompt-first task form with contextual execution controls.
 
 mod editor_ops;
+pub(in crate::workspace) mod flow_choice;
 mod prompt_file_ops;
 mod prompt_watcher;
 pub(in crate::workspace) mod run_in_ops;
@@ -23,6 +24,7 @@ use crate::ui::{self, ButtonVariants as _, Disableable as _, theme};
 use crate::ui::{button, checkbox};
 #[cfg(feature = "screenshot")]
 pub(crate) use editor_ops::TaskEditorShot;
+use flow_choice::{RunAs, Runner};
 use run_in_ops::task_running_in;
 use state::{BranchValidation, RunInChoice, TaskEditContent};
 use subtasks::subtasks_section;
@@ -70,6 +72,11 @@ fn render(
         task.execution
             .as_ref()
             .is_some_and(TaskExecution::chat_available)
+    });
+    let has_flow_run = task.is_some_and(|task| {
+        task.execution
+            .as_ref()
+            .is_some_and(|run| run.source.flow_run_id().is_some())
     });
     let subtasks = task
         .map(|task| task.subtasks.clone())
@@ -203,6 +210,21 @@ fn render(
                                 .on_click(cx.listener(
                                     move |this, _, window, cx| {
                                         this.open_editor_task_chat(editor_id, window, cx)
+                                    },
+                                )),
+                            )
+                        })
+                        .when(has_flow_run, |row| {
+                            row.child(
+                                ui::button_icon(
+                                    ("task-edit-flow-run", editor_id.0 as usize),
+                                    ui::icons::FLOWS,
+                                    cx,
+                                )
+                                .tooltip(strings::task::action_open_flow_run())
+                                .on_click(cx.listener(
+                                    move |this, _, window, cx| {
+                                        this.open_editor_task_flow_run(editor_id, window, cx)
                                     },
                                 )),
                             )
@@ -536,45 +558,57 @@ fn settings(
             )),
         RunInChoice::ExistingLane => section,
     };
+    let as_agent = te.run_as == RunAs::Agent;
+    let surface_radio = |id: &'static str, label: String, tab: isize, surface| {
+        ui::radio((id, editor_id.0 as usize), label, tab)
+            .disabled(!editable)
+            .checked(as_agent && te.agent_surface == surface)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.set_task_runner(editor_id, Runner::Agent(surface), cx)
+            }))
+    };
     section = section.child(field(
         strings::task::edit_surface_label(),
         div()
             .flex()
             .flex_wrap()
             .gap(px(theme::GAP_LG))
+            .child(surface_radio(
+                "task-edit-surface-terminal",
+                strings::task::edit_surface_terminal(),
+                5,
+                TaskAgentSurface::Terminal,
+            ))
+            .child(surface_radio(
+                "task-edit-surface-chat",
+                strings::task::edit_surface_agent_chat(),
+                6,
+                TaskAgentSurface::AgentChat,
+            ))
             .child(
                 ui::radio(
-                    ("task-edit-surface-terminal", editor_id.0 as usize),
-                    strings::task::edit_surface_terminal(),
-                    5,
+                    ("task-edit-surface-flow", editor_id.0 as usize),
+                    strings::task::edit_surface_flow(),
+                    7,
                 )
                 .disabled(!editable)
-                .checked(te.agent_surface == TaskAgentSurface::Terminal)
+                .checked(!as_agent)
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.set_task_surface(editor_id, TaskAgentSurface::Terminal, cx)
-                })),
-            )
-            .child(
-                ui::radio(
-                    ("task-edit-surface-chat", editor_id.0 as usize),
-                    strings::task::edit_surface_agent_chat(),
-                    6,
-                )
-                .disabled(!editable)
-                .checked(te.agent_surface == TaskAgentSurface::AgentChat)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.set_task_surface(editor_id, TaskAgentSurface::AgentChat, cx)
+                    this.set_task_runner(editor_id, Runner::Flow, cx)
                 })),
             )
             .into_any_element(),
         cx,
     ));
+    if !as_agent {
+        return flow_fields(section, te, editable, cx);
+    }
     if te.agent_surface == TaskAgentSurface::Terminal {
         section = section.child(
             checkbox(
                 ("task-edit-auto", editor_id.0 as usize),
                 strings::task::edit_auto_execute_label(),
-                7,
+                8,
             )
             .checked(te.auto_execute)
             .disabled(!editable)
@@ -582,6 +616,44 @@ fn settings(
                 this.set_task_auto_execute(editor_id, *enabled, cx)
             })),
         );
+    }
+    section
+}
+
+/// The flow the task runs as, and — when it declares them — its profile and
+/// the input the prompt fills.
+fn flow_fields(
+    mut section: gpui::Div,
+    te: &TaskEditContent,
+    editable: bool,
+    cx: &mut Context<Workspace>,
+) -> gpui::Div {
+    let choice = &te.flow_choice;
+    section = section.child(field(
+        strings::task::edit_flow_label(),
+        ui::select::select(&choice.flow, cx, 8)
+            .disabled(!editable)
+            .placeholder(strings::task::edit_flow_placeholder())
+            .into_any_element(),
+        cx,
+    ));
+    if choice.has_profiles {
+        section = section.child(field(
+            strings::task::edit_flow_profile_label(),
+            ui::select::select(&choice.profile, cx, 9)
+                .disabled(!editable)
+                .into_any_element(),
+            cx,
+        ));
+    }
+    if choice.has_inputs {
+        section = section.child(field(
+            strings::task::edit_flow_input_label(),
+            ui::select::select(&choice.input, cx, 10)
+                .disabled(!editable)
+                .into_any_element(),
+            cx,
+        ));
     }
     section
 }
@@ -611,9 +683,9 @@ fn run_in(
             ui::radio((id, editor_id.0 as usize), label, 3)
                 .disabled(!editable)
                 .checked(te.run_in == choice)
-                .on_click(
-                    cx.listener(move |this, _, _, cx| this.set_task_run_in(editor_id, choice, cx)),
-                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.choose_task_run_in(editor_id, choice, window, cx)
+                }))
         }),
     );
     let mut column = div().flex().flex_col().gap(px(theme::GAP_SM)).child(radios);

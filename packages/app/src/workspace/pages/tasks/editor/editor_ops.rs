@@ -2,7 +2,7 @@
 
 use super::TaskEditorId;
 use crate::workspace::Workspace;
-use daruda_store::tasks::{SubTask, TaskAgentSurface};
+use daruda_store::tasks::SubTask;
 use futures::FutureExt as _;
 use gpui::{Context, Focusable as _, Window};
 
@@ -19,6 +19,8 @@ pub(crate) enum TaskEditorShot {
     /// A conflict's disk version shown beside the prompt.
     DiskCopy,
     Saving,
+    /// Set to run as a flow that declares profiles and inputs.
+    Flow,
 }
 
 impl Workspace {
@@ -57,7 +59,7 @@ impl Workspace {
             None,
             chrono::Utc::now(),
         );
-        spec.agent_surface = TaskAgentSurface::AgentChat;
+        spec.agent_surface = daruda_store::tasks::TaskAgentSurface::AgentChat;
         let mut subtasks = vec![
             SubTask::new("Compare Orca and Superset task flows".into()),
             SubTask::new("Verify narrow panes and keyboard navigation".into()),
@@ -114,7 +116,47 @@ impl Workspace {
         if shot == TaskEditorShot::Saving {
             self.set_task_editor_pending_save(editor_id, Some("saving-preview".into()), cx);
         }
+        if shot == TaskEditorShot::Flow {
+            self.seed_task_editor_flow_for_shot(editor_id, window, cx);
+        }
         cx.notify();
+    }
+
+    /// A flow in the person's own flows — inside the capture's data
+    /// directory, so no repository is written to — picked in the editor.
+    #[cfg(feature = "screenshot")]
+    fn seed_task_editor_flow_for_shot(
+        &mut self,
+        editor_id: TaskEditorId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let dir = crate::workspace::flow_paths::global_flows_dir(&self.data_dir);
+        let written = std::fs::create_dir_all(&dir).and_then(|()| {
+            std::fs::write(
+                dir.join("pr-review.yaml"),
+                "version: 1\nprofiles:\n  thorough: {}\n  quick: {}\ninputs:\n  pr:\n    type: number\n    required: true\n  focus:\n    type: choice\n    choices: [correctness, clarity]\n    default: correctness\nnodes:\n  - id: check\n    kind: command\n    run: \"exit 0\"\n",
+            )
+        });
+        if written.is_err() {
+            return;
+        }
+        if let Some(te) = self.task_editor_mut(editor_id) {
+            te.settings_open = true;
+            te.run_as = super::flow_choice::RunAs::Flow;
+            te.draft_subtasks.clear();
+        }
+        let Some(flow) = self
+            .task_editor(editor_id)
+            .map(|te| te.flow_choice.flow.clone())
+        else {
+            return;
+        };
+        self.refill_task_flow_choices(editor_id, window, cx);
+        flow.update(cx, |s, cx| {
+            s.set_selected_value(&"pr-review.yaml".into(), window, cx)
+        });
+        self.on_task_edit_flow_changed(editor_id, window, cx);
     }
 
     /// Add a checklist item to the local draft or its persisted task.
@@ -348,18 +390,6 @@ impl Workspace {
     ) {
         if let Some(te) = self.task_editor_mut(editor_id) {
             te.preview_prompt = index == 1;
-        }
-        cx.notify();
-    }
-
-    pub(super) fn set_task_surface(
-        &mut self,
-        editor_id: TaskEditorId,
-        surface: TaskAgentSurface,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(te) = self.task_editor_mut(editor_id) {
-            te.agent_surface = surface;
         }
         cx.notify();
     }

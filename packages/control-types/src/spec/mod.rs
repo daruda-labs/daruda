@@ -214,6 +214,9 @@ pub struct NewTask {
     pub notes: Option<String>,
     /// `None` is the default a task the desktop form creates gets.
     pub surface: Option<daruda_store::tasks::TaskAgentSurface>,
+    /// Runs as this flow, the prompt filling one of its inputs, instead of
+    /// on `surface`.
+    pub flow: Option<daruda_store::tasks::TaskFlow>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

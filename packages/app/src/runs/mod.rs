@@ -12,6 +12,7 @@ mod cli_result;
 mod continuation;
 mod delivery;
 mod effects;
+mod flow_tasks;
 mod flows;
 mod inbox;
 mod intent;
@@ -30,6 +31,7 @@ pub(crate) use cli::hook_end_reason as cli_hook_end_reason;
 pub(crate) use cli::resume::CliResumeLease;
 pub(crate) use delivery::{DeliveryFailure, RunPane, TerminalDispatchError};
 pub(crate) use effects::RunsEffects;
+pub(crate) use flow_tasks::{REPO_DIR, runs_dir, task_run_dir};
 pub(crate) use flows::{
     AlreadyRunning, AnswerRefused, FlowAskOutcome, FlowChange, FlowChanged, FlowEnded, FlowRun,
     FlowSource, FlowStart, Lull, NodeRunState, ParkedAsk, RunColouring, RunView,

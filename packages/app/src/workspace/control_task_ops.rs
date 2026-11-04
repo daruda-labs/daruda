@@ -74,14 +74,51 @@ impl Workspace {
             branch: request.branch.unwrap_or_default(),
             location,
             agent_surface: request.surface.unwrap_or_default(),
+            flow: request.flow.clone(),
             auto_execute: true,
         };
         self.task_spec_from(uuid, draft).map_err(|e| match e {
+            DraftError::Flow(problem) => flow_problem_answer(request.flow.as_ref(), problem),
             DraftError::TitleEmpty => ControlError::TaskTitleEmpty,
             DraftError::ProjectNotOpen | DraftError::LaneNotInProject => ControlError::TargetGone,
             DraftError::BranchInvalid => ControlError::LaneNameInvalid,
             DraftError::BranchTaken => ControlError::TaskBranchTaken,
         })
+    }
+
+    /// How the approval for a new task names the flow it would run as.
+    pub(crate) fn control_new_task_flow_approval(
+        &self,
+        project: ProjectId,
+        worktree: Option<LaneRef>,
+        flow: &daruda_store::tasks::TaskFlow,
+    ) -> String {
+        let run_in = match worktree.and_then(|lane| self.lane_for(lane)) {
+            Some(lane) => daruda_store::tasks::TaskRunIn::ExistingLane {
+                path: lane.path.clone(),
+            },
+            None => daruda_store::tasks::TaskRunIn::NewWorktree,
+        };
+        match self.project_for(project) {
+            Some(p) => self.task_flow_approval(p.uuid, &run_in, None, flow),
+            None => crate::surface::strings::control::approval_task_as_flow_unresolved(&flow.name),
+        }
+    }
+
+    /// How the approval to start `task` names the flow it runs as, if it
+    /// runs as one.
+    pub(crate) fn control_task_flow_approval(
+        &self,
+        task: &daruda_store::tasks::TaskRecord,
+    ) -> Option<String> {
+        let spec = &task.spec;
+        let flow = spec.flow.as_ref()?;
+        Some(self.task_flow_approval(
+            spec.project,
+            &spec.run_in,
+            spec.base_worktree_path.as_deref(),
+            flow,
+        ))
     }
 
     /// Add a Backlog task to `project`, saved like one the form creates.
@@ -163,8 +200,7 @@ impl Workspace {
         let lane = self
             .lane_ref_at(&started.worktree)
             .ok_or(ControlError::TargetGone)?;
-        let chat = (started.surface == daruda_store::tasks::TaskAgentSurface::AgentChat)
-            .then_some(started.pane);
+        let chat = started.chat();
         Ok((started.exec, lane, chat))
     }
 
@@ -216,5 +252,39 @@ fn control_start_error(e: TaskStartError) -> ControlError {
         | TaskStartError::FinalizeFailed { detail }
         | TaskStartError::PromptUndelivered { detail } => ControlError::TaskStartFailed { detail },
         TaskStartError::NotRecorded { detail } => ControlError::TaskNotRecorded { detail },
+        TaskStartError::FlowMissing => ControlError::TaskStartFailed {
+            detail: crate::workspace::task_flow::TaskFlowProblem::NotFound.to_string(),
+        },
+        TaskStartError::FlowRefused { detail, .. } => ControlError::TaskStartFailed { detail },
+    }
+}
+
+/// A new task's flow refused, in the answers `daruda_flow_run` gives for the
+/// same problems, so a caller reads them the same way.
+fn flow_problem_answer(
+    flow: Option<&daruda_store::tasks::TaskFlow>,
+    problem: crate::workspace::task_flow::TaskFlowProblem,
+) -> ControlError {
+    use crate::workspace::task_flow::TaskFlowProblem as P;
+    let name = flow.map(|flow| flow.name.clone()).unwrap_or_default();
+    let input = || flow.and_then(|flow| flow.input.clone()).unwrap_or_default();
+    let refused = |input: String, problem| ControlError::FlowInputsRefused {
+        name: name.clone(),
+        problems: vec![crate::control::result::FlowInputProblem { input, problem }],
+    };
+    use crate::control::result::FlowInputProblemKind as K;
+    match problem {
+        P::NotFound => ControlError::FlowNotFound { name },
+        P::NeedsProfile => ControlError::FlowNeedsInteraction { name },
+        P::UnknownProfile => ControlError::FlowUnknownProfile {
+            profile: flow
+                .and_then(|flow| flow.profile.clone())
+                .unwrap_or_default(),
+            name,
+        },
+        P::InputNotDeclared => refused(input(), K::NotDeclared),
+        P::InputAmbiguous | P::OtherInputsRequired => ControlError::TaskStartFailed {
+            detail: problem.to_string(),
+        },
     }
 }

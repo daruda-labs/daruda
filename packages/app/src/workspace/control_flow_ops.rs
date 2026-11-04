@@ -96,17 +96,17 @@ impl Workspace {
                 })?;
         let label = flow_label(&found.path);
         let profiles = declared_profiles(&found.path);
-        match profile {
-            None if !profiles.is_empty() => {
+        match crate::workspace::flow_declared::profile_refusal(&profiles, profile) {
+            Some(crate::workspace::flow_declared::ProfileRefusal::Needed) => {
                 return Err(ControlError::FlowNeedsInteraction { name: label });
             }
-            Some(profile) if !profiles.iter().any(|p| p == profile) => {
+            Some(crate::workspace::flow_declared::ProfileRefusal::Unknown) => {
                 return Err(ControlError::FlowUnknownProfile {
                     name: label,
-                    profile: profile.to_string(),
+                    profile: profile.unwrap_or_default().to_string(),
                 });
             }
-            _ => {}
+            None => {}
         }
         // The engine takes the on-disk lock only once the run has started, so
         // a lane another process holds is refused here, where it is still an
@@ -217,7 +217,7 @@ impl Workspace {
             Err(other) => {
                 return Ok(vec![FlowIssue {
                     node: None,
-                    message: submit_problem(other),
+                    message: submit_problem(&other),
                 }]);
             }
         };
@@ -288,11 +288,10 @@ impl Workspace {
     /// type `.yaml`.
     fn resolve_flow_name_in(&self, lane: LaneRef, name: &str) -> Option<FoundFlow> {
         let sources = self.flow_sources_for(lane)?;
-        sources.list_flows().into_iter().find(|found| {
-            let file = found.path.file_name().map(|n| n.to_string_lossy());
-            let stem = found.path.file_stem().map(|n| n.to_string_lossy());
-            file.as_deref() == Some(name) || stem.as_deref() == Some(name)
-        })
+        sources
+            .list_flows()
+            .into_iter()
+            .find(|found| crate::workspace::flow_paths::names_flow(&found.path, name))
     }
 }
 
@@ -352,7 +351,7 @@ fn refusal_answer(
         FlowStartRefused::AlreadyRunning => return ControlError::FlowLocked { name, held_by },
         FlowStartRefused::Submit(error) => error,
     };
-    match classify_refusal(error) {
+    match classify_refusal(&error) {
         SubmitRefusal::Load(_) | SubmitRefusal::Invalid(_) => ControlError::FlowRefused { name },
         SubmitRefusal::Locked => ControlError::FlowLocked { name, held_by },
         SubmitRefusal::NotStarted(reason) => ControlError::FlowNotStarted { name, reason },
@@ -363,25 +362,31 @@ fn refusal_answer(
 /// start and a check alike: the file's own problem, a held worktree, or a
 /// reason outside the file.
 enum SubmitRefusal {
-    Load(daruda_flow::FlowError),
+    Load(String),
     Invalid(usize),
     Locked,
     NotStarted(FlowNotStartedReason),
 }
 
-fn classify_refusal(error: FlowSubmitError) -> SubmitRefusal {
+fn classify_refusal(error: &FlowSubmitError) -> SubmitRefusal {
     let reason = match error {
-        FlowSubmitError::Load(error) => return SubmitRefusal::Load(error),
+        FlowSubmitError::Load(error) => return SubmitRefusal::Load(error.to_string()),
         FlowSubmitError::Invalid(issues) => return SubmitRefusal::Invalid(issues.len()),
         FlowSubmitError::LockHeld { .. } => return SubmitRefusal::Locked,
         FlowSubmitError::NoLane => FlowNotStartedReason::NoLane,
         FlowSubmitError::LaneUnresolvable { .. } => FlowNotStartedReason::LaneUnresolvable,
-        FlowSubmitError::RemoteLane { agent } => FlowNotStartedReason::RemoteLane { agent },
+        FlowSubmitError::RemoteLane { agent } => FlowNotStartedReason::RemoteLane {
+            agent: agent.clone(),
+        },
         FlowSubmitError::AgentLaunchRefused { agent, .. } => {
-            FlowNotStartedReason::AgentLaunchRefused { agent }
+            FlowNotStartedReason::AgentLaunchRefused {
+                agent: agent.clone(),
+            }
         }
         FlowSubmitError::UnusableSessionHost { agent, .. } => {
-            FlowNotStartedReason::SessionHostUnusable { agent }
+            FlowNotStartedReason::SessionHostUnusable {
+                agent: agent.clone(),
+            }
         }
         FlowSubmitError::Read { .. } => FlowNotStartedReason::ReadFailed,
         FlowSubmitError::Resume(_) => FlowNotStartedReason::ResumeRefused,
@@ -395,9 +400,9 @@ const DRAFT_FLOW_FILE: &str = "draft.yaml";
 
 /// A check's refusal that is not a list of issues, in the fixed English an
 /// MCP answer carries. Paths stay in the desktop's log.
-fn submit_problem(error: FlowSubmitError) -> String {
+pub(in crate::workspace) fn submit_problem(error: &FlowSubmitError) -> String {
     match classify_refusal(error) {
-        SubmitRefusal::Load(error) => error.to_string(),
+        SubmitRefusal::Load(error) => error,
         SubmitRefusal::Invalid(count) => format!("the flow has {count} validation problem(s)"),
         SubmitRefusal::Locked => "worktree is locked by another run".into(),
         SubmitRefusal::NotStarted(reason) => reason.to_string(),

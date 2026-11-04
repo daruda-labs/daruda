@@ -381,6 +381,15 @@ task:
   error_start_agent_missing: "agent unavailable"
   error_start_connect_failed: "agent could not connect"
   error_start_account_unavailable: "account unavailable"
+  error_start_flow_missing: "flow not found"
+  error_start_flow_refused: "flow could not start"
+  # Why a task's flow cannot run as the task describes it.
+  flow_needs_profile: "The flow declares profiles; choose one for the task."
+  flow_unknown_profile: "The flow does not declare the task's profile."
+  flow_input_not_declared: "The flow does not declare the input the task's prompt fills."
+  flow_input_ambiguous: "The flow has no single input for the task's prompt; choose which one it fills."
+  flow_other_inputs_required: "The flow requires other inputs, which a task cannot give."
+  error_flow_lane_busy: "A flow is already running in this worktree."
   # Why a prompt never reached its agent, shown after the Not delivered label.
   undelivered_queue_full: "the chat queue was full"
   undelivered_connect_failed: "the agent could not connect"
@@ -468,6 +477,18 @@ task:
   edit_surface_terminal: "Terminal (CLI)"
   # Option label — run the task on an in-app Agent chat (ACP) session.
   edit_surface_agent_chat: "Agent Chat"
+  # The task runs as a flow; its prompt becomes one of the flow's inputs.
+  edit_surface_flow: "Flow"
+  edit_flow_label: "Flow"
+  edit_flow_placeholder: "Choose a flow"
+  edit_flow_profile_label: "Profile"
+  edit_flow_input_label: "Prompt fills input"
+  # The input picker's first choice: the flow's one required input.
+  edit_flow_input_auto: "Automatic"
+  # Tooltip: show the flow run a task started, on the Flows page.
+  action_open_flow_run: "Open flow run"
+  # What a task row says it runs on, for a task that runs as a flow.
+  agent_flow: "Flow · %{name}"
   edit_title_placeholder: "Task title"
   edit_branch_placeholder: "branch-name"
   edit_prompt_placeholder: "Describe the task…"
@@ -2379,6 +2400,8 @@ control:
   # The follow-up when a started task runs in a terminal: there is no chat
   # for the phone to talk to.
   task_started_terminal: "%{title} is running in a terminal in daruda."
+  # `flow` is one of the approval_task_as_flow phrases.
+  task_started_flow: "%{title} is running %{flow} in daruda."
   # The follow-up when a start failed after it was accepted.
   task_start_failed: "%{title} did not start: %{reason}"
   approval_lane_create: "daruda wants to create the worktree %{name}. Allow?"
@@ -2439,7 +2462,17 @@ control:
   approval_task_in_worktree: "in the worktree %{lane}"
   approval_task_as_chat: "as an agent chat"
   approval_task_as_terminal: "in a Claude terminal"
+  # A task that runs as a flow: the flow, and the permission modes its
+  # agents run under (`bypassPermissions` approves every tool by itself).
+  # `modes` is approval_flow_modes or approval_flow_no_agents.
+  approval_task_as_flow: "as the flow %{flow} (%{modes})"
+  approval_task_as_flow_profile: "as the flow %{flow} with the profile %{profile} (%{modes})"
+  approval_task_as_flow_unresolved: "as the flow %{flow}, which daruda cannot find there"
+  approval_flow_modes: "permission mode: %{modes}"
+  approval_flow_no_agents: "commands only, no agents"
   approval_task_start: "daruda wants to start the task %{title}. Allow?"
+  # `flow` is one of the approval_task_as_flow phrases.
+  approval_task_start_flow: "daruda wants to start the task %{title} %{flow}. Allow?"
   approval_task_open: "daruda wants to open the chat of the task %{title}. Allow?"
   task_created: "Task added."
   task_started: "Task started."

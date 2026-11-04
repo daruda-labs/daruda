@@ -60,9 +60,12 @@ pub(super) async fn pump(
     run_dir: PathBuf,
     events: smol::channel::Receiver<RunNotice>,
     asks: smol::channel::Receiver<PendingAsk>,
+    overage: daruda_flow::runner::OverageStop,
     cx: &mut AsyncApp,
 ) {
     let mut asks = Some(asks);
+    // Whether this episode recorded its start; a task's settle depends on it.
+    let mut saw_start = false;
     loop {
         let next = match &asks {
             Some(open) => {
@@ -114,21 +117,34 @@ pub(super) async fn pump(
         } else {
             None
         };
-        let ended = matches!(event, FlowEvent::RunEnded { .. });
         let held = cx.update(|cx| {
             RunsHost::apply_flow_event(worktree.as_path(), &run_dir, &event, from_log, cx);
+            if matches!(event, FlowEvent::RunStarted { .. }) {
+                saw_start = true;
+                RunsHost::flow_task_started(&run_dir, cx);
+            }
             held_end(&run_dir, &event, cx)
         });
         // Released whatever the read found: an unreadable report still ends
         // the run, with its process facts and no text.
+        let mut report = None;
         if let Some((snapshot, held)) = held {
             let enriched = cx
                 .background_executor()
                 .spawn(async move { crate::runs::result_io::enrich(snapshot) })
                 .await;
+            if let crate::runs::result::RunState::Ended { text, .. } = &enriched.state {
+                report.clone_from(text);
+            }
             cx.update(|cx| RunsHost::release_run_end(held, enriched, cx));
         }
-        if ended {
+        if let FlowEvent::RunEnded { end } = &event {
+            // After the end is released, so a task's result and the run's
+            // own read the same report.
+            let tripped = overage.tripped().is_some();
+            cx.update(|cx| {
+                RunsHost::flow_task_ended(&run_dir, end, tripped, saw_start, report, cx)
+            });
             break;
         }
     }

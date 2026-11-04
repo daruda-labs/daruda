@@ -171,6 +171,23 @@ pub enum TaskRunIn {
     ExistingLane { path: PathBuf },
 }
 
+/// A task that runs as a flow rather than as one agent. Its prompt becomes
+/// the value of one of the flow's declared inputs.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskFlow {
+    /// The flow's file name, as the flows panel and `daruda_flow_list` show
+    /// it (`review.yaml`). Resolved at Start against the lane the run
+    /// branches from, so a repository copy shadows the person's own.
+    pub name: String,
+    /// Required when the file declares profiles.
+    #[serde(default)]
+    pub profile: Option<String>,
+    /// The input the task's prompt fills. `None` names the flow's only
+    /// required input, or none at all when the flow declares no inputs.
+    #[serde(default)]
+    pub input: Option<String>,
+}
+
 fn legacy_agent_surface() -> TaskAgentSurface {
     TaskAgentSurface::Terminal
 }
@@ -215,11 +232,12 @@ impl TaskExecution {
 
     /// Whether "Open Agent Chat" has something to open. An Agent Chat run owns
     /// a pane from the start; a CLI run has nothing to load until its exact
-    /// session is known.
+    /// session is known; a flow run has many sessions and no one chat.
     pub fn chat_available(&self) -> bool {
         match self.source {
             super::TaskExecutionSource::AgentChat => true,
             super::TaskExecutionSource::ClaudeCli { .. } => self.session_id.is_some(),
+            super::TaskExecutionSource::Flow { .. } => false,
         }
     }
 }

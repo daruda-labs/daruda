@@ -169,6 +169,22 @@ fn task_title(task: &str, cx: &App) -> String {
         .unwrap_or_default()
 }
 
+/// How an approval names the flow a Backlog `task` runs as, if it runs as
+/// one: in the window that holds its project, where Start will find it.
+pub(crate) fn task_flow_summary(task: &str, cx: &mut App) -> Option<String> {
+    let record = cx.global::<GlobalTasks>().get(task)?.clone();
+    let name = record.spec.flow.as_ref()?.name.clone();
+    let found = super::in_task_window(task, cx, |ws, _, _| {
+        Ok(ws.control_task_flow_approval(&record))
+    });
+    Some(
+        found
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| s::control::approval_task_as_flow_unresolved(&name)),
+    )
+}
+
 /// One line naming what the user is being asked to allow. Built here rather
 /// than on `GatedCommand`, which is the contract every adapter shares and
 /// deliberately carries no rendered sentences.
@@ -192,30 +208,44 @@ fn approval_summary(cmd: &GatedCommand, cx: &mut App) -> Result<String, ControlE
             project,
             task,
         } => {
-            let (name, location) = in_project_window(*workspace, *project, cx, |ws, _, _| {
-                let location = match task.worktree {
-                    Some(lane) => {
-                        s::control::approval_task_in_worktree(ws.control_lane_name(lane.lane_ref()))
-                    }
-                    None => match task
-                        .branch
-                        .as_deref()
-                        .map(str::trim)
-                        .filter(|b| !b.is_empty())
-                    {
-                        Some(branch) => s::control::approval_task_in_new_branch(branch),
-                        None => s::control::approval_task_in_new_worktree(),
-                    },
-                };
-                Ok((ws.control_project_name(*project), location))
-            })?;
-            let surface = match task.surface.unwrap_or_default() {
-                TaskAgentSurface::AgentChat => s::control::approval_task_as_chat(),
-                TaskAgentSurface::Terminal => s::control::approval_task_as_terminal(),
+            let (name, location, flow) =
+                in_project_window(*workspace, *project, cx, |ws, _, _| {
+                    // The flow is named as Start will find it; one that will not
+                    // resolve is refused by the create itself, after approval.
+                    let flow = task.flow.as_ref().map(|flow| {
+                        ws.control_new_task_flow_approval(
+                            *project,
+                            task.worktree.map(|lane| lane.lane_ref()),
+                            flow,
+                        )
+                    });
+                    let location = match task.worktree {
+                        Some(lane) => s::control::approval_task_in_worktree(
+                            ws.control_lane_name(lane.lane_ref()),
+                        ),
+                        None => match task
+                            .branch
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|b| !b.is_empty())
+                        {
+                            Some(branch) => s::control::approval_task_in_new_branch(branch),
+                            None => s::control::approval_task_in_new_worktree(),
+                        },
+                    };
+                    Ok((ws.control_project_name(*project), location, flow))
+                })?;
+            let surface = match (flow, task.surface.unwrap_or_default()) {
+                (Some(flow), _) => flow,
+                (None, TaskAgentSurface::AgentChat) => s::control::approval_task_as_chat(),
+                (None, TaskAgentSurface::Terminal) => s::control::approval_task_as_terminal(),
             };
             s::control::approval_task_create(task.title.trim(), &name, &location, &surface)
         }
-        GatedCommand::TaskStart { task } => s::control::approval_task_start(task_title(task, cx)),
+        GatedCommand::TaskStart { task } => match task_flow_summary(task, cx) {
+            Some(flow) => s::control::approval_task_start_flow(task_title(task, cx), &flow),
+            None => s::control::approval_task_start(task_title(task, cx)),
+        },
         GatedCommand::TaskOpen { task } => s::control::approval_task_open(task_title(task, cx)),
     })
 }

@@ -11,7 +11,7 @@ use daruda_store::project::{LaneKind, LaneRef};
 use daruda_store::tasks::{ExecutionRef, TaskAgentSurface, TaskRecord};
 use gpui::{Context, Window};
 
-use super::task_start::{TaskStartError, TaskStarted};
+use super::task_start::{StartedOn, TaskStartError, TaskStarted};
 use crate::lane::availability::LaneAvailability;
 use crate::runs::GlobalTasks;
 use crate::workspace::Workspace;
@@ -25,6 +25,20 @@ pub(super) struct ExistingLaneStart {
     root: std::path::PathBuf,
     branch: String,
     reveal: LaneReveal,
+}
+
+impl ExistingLaneStart {
+    pub(super) fn lane(&self) -> LaneRef {
+        self.lane
+    }
+
+    pub(super) fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub(super) fn reveal(&self) -> LaneReveal {
+        self.reveal
+    }
 }
 
 /// What the prompt header names for a lane: its branch, else its label
@@ -158,8 +172,7 @@ impl Workspace {
             TaskStarted {
                 exec: exec.clone(),
                 worktree: root,
-                pane,
-                surface,
+                on: StartedOn::Pane { pane, surface },
             },
             dispatched,
         ))

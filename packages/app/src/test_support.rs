@@ -230,5 +230,6 @@ pub(crate) fn new_task(
         branch: None,
         notes: None,
         surface: None,
+        flow: None,
     }
 }

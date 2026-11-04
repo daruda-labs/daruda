@@ -228,14 +228,7 @@ impl Workspace {
         if self.project_for(project_id).is_none() {
             return Err(crate::surface::strings::create_lane::err_no_active_project());
         }
-        let CreateWorktreePlan {
-            branch,
-            new_path,
-            repo_root,
-            base_ref,
-            description,
-            session_host,
-        } = plan;
+        let new_path = &plan.new_path;
         // The initial pane mirrors the requested surface: a terminal
         // (default) or an in-app Agent chat rooted at the new checkout.
         // The agent-chat pane parks Idle until it is connected below.
@@ -278,7 +271,46 @@ impl Workspace {
             last_focused_pane: pane_id,
             user_label: None,
         };
+        let runtime = LaneRuntime {
+            preview_tab_id: None,
+            tabs: vec![tab],
+            panes: vec![pane],
+            active_tab_index: 0,
+            tab_history: Vec::new(),
+            focused_pane_id: pane_id,
+        };
+        self.register_created_lane(plan, project_id, Some(runtime), reveal, window, cx);
+        // Focusing the pane is what connects an Agent chat's session; one
+        // left behind connects here.
+        if reveal == super::LaneReveal::Background && surface == TaskAgentSurface::AgentChat {
+            self.maybe_connect_agent_chat(pane_id, cx);
+        }
+        // Return the spawned pane's id so task-driven callers (start_task)
+        // write into that PTY directly rather than relying on
+        // `focused_pane_id`, which races with activate_lane's focus state.
+        Ok(pane_id)
+    }
 
+    /// Register the worktree `git worktree add` just made as a lane of
+    /// `project_id`, with `runtime` as what it has open — `None` for a lane
+    /// that opens nothing, as a flow task's does: the run is what works there.
+    pub(in crate::workspace) fn register_created_lane(
+        &mut self,
+        plan: CreateWorktreePlan,
+        project_id: ProjectId,
+        runtime: Option<LaneRuntime>,
+        reveal: super::LaneReveal,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> LaneRef {
+        let CreateWorktreePlan {
+            branch,
+            new_path,
+            repo_root,
+            base_ref,
+            description,
+            session_host,
+        } = plan;
         let new_id = self.allocate_lane_id(project_id);
         let new_ref = LaneRef {
             project: project_id,
@@ -308,23 +340,12 @@ impl Workspace {
         if let Some(project) = self.project_for_mut(project_id) {
             project.lanes.push(wt);
         }
-
-        let runtime = LaneRuntime {
-            preview_tab_id: None,
-            tabs: vec![tab],
-            panes: vec![pane],
-            active_tab_index: 0,
-            tab_history: Vec::new(),
-            focused_pane_id: pane_id,
-        };
-        self.main_area.runtimes.insert(new_ref, runtime);
+        self.main_area
+            .runtimes
+            .insert(new_ref, runtime.unwrap_or_default());
         match reveal {
-            // Focusing the pane is what connects an Agent chat's session.
             super::LaneReveal::Foreground => self.activate_lane(new_ref, window, cx),
             super::LaneReveal::Background => {
-                if surface == TaskAgentSurface::AgentChat {
-                    self.maybe_connect_agent_chat(pane_id, cx);
-                }
                 self.mutate_durable(cx, |_, _| {});
                 cx.notify();
             }
@@ -334,10 +355,7 @@ impl Workspace {
         self.refresh_skills_watcher(cx);
         self.refresh_mcp_watcher(window, cx);
         self.respawn_flow_watcher(cx);
-        // Return the spawned pane's id so task-driven callers (start_task)
-        // write into that PTY directly rather than relying on
-        // `focused_pane_id`, which races with activate_lane's focus state.
-        Ok(pane_id)
+        new_ref
     }
 
     /// Monotonic lane id allocator scoped to `project_id`. Walks both the

@@ -423,6 +423,35 @@ fn task_create_reads_its_optional_fields() {
 }
 
 #[test]
+fn task_create_reads_the_flow_a_task_runs_as() {
+    let mut args = serde_json::json!({
+        "workspace": workspace_json(),
+        "project": 1,
+        "title": "t",
+        "prompt": "1234",
+        "flow": { "name": "review", "input": "pr" },
+    });
+    let Command::Gated(GatedCommand::TaskCreate { task, .. }) =
+        to_command(ToolId::TaskCreate, &args).unwrap()
+    else {
+        panic!("create");
+    };
+    assert_eq!(
+        task.flow,
+        Some(daruda_store::tasks::TaskFlow {
+            name: "review".into(),
+            profile: None,
+            input: Some("pr".into()),
+        })
+    );
+    args["flow"] = serde_json::json!({ "input": "pr" });
+    assert_eq!(
+        to_command(ToolId::TaskCreate, &args),
+        Err(ConvertError::BadArgument { name: "flow" })
+    );
+}
+
+#[test]
 fn flow_run_passes_an_optional_profile_through() {
     let worktree = serde_json::json!({"workspace": workspace_json(), "project": 1, "worktree": 2});
     for profile in [None, Some("cheap")] {

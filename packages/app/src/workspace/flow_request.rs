@@ -98,6 +98,9 @@ pub(in crate::workspace) struct FlowSelection {
     /// given them: a desktop start then asks the person first, when the
     /// flow declares any.
     pub inputs: Option<daruda_flow::input::InputValues>,
+    /// The run's id, chosen ahead by a caller that recorded it before the run
+    /// started — a task finds its run by it. `None` takes a fresh one.
+    pub run_id: Option<String>,
 }
 
 /// The flow a request is assembled from: a saved file, or text that would
@@ -447,7 +450,12 @@ impl Workspace {
             pinned,
             inputs: selection.inputs.clone().unwrap_or_default(),
             loaded,
-            run_dir: super::flow_paths::runs_dir(&cwd).join(self.next_run_id(cx)),
+            run_dir: super::flow_paths::runs_dir(&cwd).join(
+                selection
+                    .run_id
+                    .clone()
+                    .unwrap_or_else(|| self.next_run_id(cx)),
+            ),
             lock_dir: self.lock_root.clone(),
             flow_dir: flow_path
                 .parent()
@@ -589,7 +597,7 @@ impl Workspace {
         self.mirrors.flow_config.clone()
     }
 
-    fn next_run_id(&mut self, cx: &mut Context<Self>) -> String {
+    pub(in crate::workspace) fn next_run_id(&mut self, cx: &mut Context<Self>) -> String {
         let counter = crate::runs::RunsHost::next_flow_run_id(cx);
         run_id(
             std::time::SystemTime::now()

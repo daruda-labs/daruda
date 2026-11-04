@@ -42,6 +42,10 @@ pub(in crate::workspace) struct TaskEditContent {
     /// chat (ACP). Flipped in-place by the form's surface selector, the
     /// same plain-data pattern as `auto_execute`.
     pub(in crate::workspace::pages::tasks) agent_surface: TaskAgentSurface,
+    /// Whether the task runs on `agent_surface` or as the flow `flow_choice`
+    /// picks.
+    pub(in crate::workspace::pages::tasks) run_as: super::flow_choice::RunAs,
+    pub(in crate::workspace) flow_choice: super::flow_choice::FlowChoice,
     pub(in crate::workspace::pages::tasks) focus_handle: FocusHandle,
     pub(in crate::workspace::pages::tasks) cached_title: SharedString,
     /// Baseline snapshot for dirty comparison. Reset to
@@ -132,6 +136,8 @@ pub(in crate::workspace) struct TaskEditValues {
     pub(in crate::workspace::pages::tasks) notes: String,
     pub(in crate::workspace::pages::tasks) auto_execute: bool,
     pub(in crate::workspace::pages::tasks) agent_surface: TaskAgentSurface,
+    pub(in crate::workspace::pages::tasks) run_as: super::flow_choice::RunAs,
+    pub(in crate::workspace::pages::tasks) flow: super::flow_choice::FlowChoiceValues,
     /// Empty string ↔ `Task::base_worktree_path == None`; non-empty ↔
     /// `Some(PathBuf::from(s))`. Plain `String` (not `Option<String>`)
     /// keeps the dirty-comparison `==` path trivial — the user-facing
@@ -188,6 +194,8 @@ impl TaskEditValues {
             notes,
             auto_execute,
             agent_surface,
+            run_as,
+            flow,
             base_value,
             run_in,
             lane_value,
@@ -200,6 +208,9 @@ impl TaskEditValues {
             || !eq_ignoring_crlf(notes, &other.notes)
             || *auto_execute != other.auto_execute
             || *agent_surface != other.agent_surface
+            || *run_as != other.run_as
+            // The flow pickers only count while the task runs as a flow.
+            || (*run_as == super::flow_choice::RunAs::Flow && *flow != other.flow)
             || *base_value != other.base_value
             || *run_in != other.run_in
             || *lane_value != other.lane_value
@@ -228,6 +239,8 @@ impl TaskEditContent {
             notes: self.notes_state.read(cx).text().to_string(),
             auto_execute: self.auto_execute,
             agent_surface: self.agent_surface,
+            run_as: self.run_as,
+            flow: self.flow_choice.values(cx),
             base_value: self
                 .base_select
                 .read(cx)
@@ -276,7 +289,10 @@ impl TaskEditContent {
                 RunInChoice::NewWorktree => !self.branch_validation.is_invalid(),
                 RunInChoice::ExistingLane => !self.lane_value(cx).is_empty(),
             };
-        !self.title_input.read(cx).value().trim().is_empty() && located
+        // A task set to run as a flow needs one picked.
+        let runner = self.run_as == super::flow_choice::RunAs::Agent
+            || !self.flow_choice.values(cx).flow.is_empty();
+        !self.title_input.read(cx).value().trim().is_empty() && located && runner
     }
 }
 

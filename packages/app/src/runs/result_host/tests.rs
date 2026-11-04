@@ -42,6 +42,7 @@ fn exact_results_survive_history_eviction_and_latest_resolves_after_reopen(
                         branch: None,
                         run_in: None,
                         project: None,
+                        flow: None,
                     },
                 },
                 cx,

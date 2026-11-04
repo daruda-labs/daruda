@@ -1698,3 +1698,195 @@ fn restoring_the_editor_writes_no_state(cx: &mut TestAppContext) {
         "the restore saved the workspace"
     );
 }
+
+/// A project whose lane holds the flow `review.yaml`, with `inputs` declared.
+fn workspace_with_a_review_flow(
+    cx: &mut TestAppContext,
+    inputs: &str,
+) -> (
+    tempfile::TempDir,
+    gpui::WindowHandle<crate::ui::Root>,
+    gpui::Entity<crate::workspace::Workspace>,
+) {
+    let (root, window, ws) = build_workspace_with_project(cx);
+    let flows = crate::workspace::flow_paths::flows_dir(root.path());
+    std::fs::create_dir_all(&flows).unwrap();
+    std::fs::write(
+        flows.join("review.yaml"),
+        format!("version: 1\ninputs:\n{inputs}nodes:\n  - id: c\n    kind: command\n    run: \"exit 0\"\n"),
+    )
+    .unwrap();
+    (root, window, ws)
+}
+
+/// Run as a flow: the picked flow is saved with the task, its input offered
+/// from the flow's own declarations, and reopening shows it unchanged.
+#[gpui::test]
+fn task_editor_saves_a_task_that_runs_as_a_flow(cx: &mut TestAppContext) {
+    use super::flow_choice::{RunAs, Runner};
+    let (_root, window, ws) = workspace_with_a_review_flow(cx, "  pr: { required: true }\n");
+    cx.update_window(window.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_task_editor(None, window, cx);
+            let editor = ws.task_detail_id().unwrap();
+            let title = ws.task_editor(editor).unwrap().title_input.clone();
+            title.update(cx, |s, cx| s.set_value("Review", window, cx));
+            ws.set_task_run_in(editor, RunInChoice::ExistingLane, cx);
+            ws.set_task_runner(editor, Runner::Flow, cx);
+            assert!(
+                !ws.task_editor(editor).unwrap().can_save(cx),
+                "a flow must be picked"
+            );
+            let flow = ws.task_editor(editor).unwrap().flow_choice.flow.clone();
+            flow.update(cx, |s, cx| {
+                s.set_selected_value(&"review.yaml".into(), window, cx)
+            });
+            ws.on_task_edit_flow_changed(editor, window, cx);
+            let te = ws.task_editor(editor).unwrap();
+            assert!(te.flow_choice.has_inputs);
+            assert!(!te.flow_choice.has_profiles);
+            let id = ws.commit_task_form(editor, cx).unwrap();
+            let task = cx.global::<GlobalTasks>().get(&id).unwrap();
+            assert_eq!(
+                task.spec.flow,
+                Some(daruda_store::tasks::TaskFlow {
+                    name: "review.yaml".into(),
+                    profile: None,
+                    input: None,
+                })
+            );
+            assert!(!ws.task_editor(editor).unwrap().is_dirty(cx));
+
+            // Editing something else keeps the flow.
+            ws.open_task_editor(Some(id.clone()), window, cx);
+            let editor = ws.task_detail_id().unwrap();
+            let te = ws.task_editor(editor).unwrap();
+            assert_eq!(te.run_as, RunAs::Flow);
+            assert!(!te.is_dirty(cx), "the saved flow reads back as saved");
+            let title = te.title_input.clone();
+            title.update(cx, |s, cx| s.set_value("Review again", window, cx));
+            ws.commit_task_form(editor, cx).unwrap();
+            let task = cx.global::<GlobalTasks>().get(&id).unwrap();
+            assert_eq!(task.spec.title, "Review again");
+            assert!(task.spec.flow.is_some());
+        });
+    })
+    .unwrap();
+}
+
+/// A flow the prompt cannot run — two inputs a task has values for only one
+/// of — refuses the save rather than a later Start.
+#[gpui::test]
+fn task_editor_refuses_a_flow_the_prompt_cannot_run(cx: &mut TestAppContext) {
+    use super::flow_choice::Runner;
+    let (_root, window, ws) =
+        workspace_with_a_review_flow(cx, "  pr: { required: true }\n  base: { required: true }\n");
+    cx.update_window(window.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_task_editor(None, window, cx);
+            let editor = ws.task_detail_id().unwrap();
+            let title = ws.task_editor(editor).unwrap().title_input.clone();
+            title.update(cx, |s, cx| s.set_value("Review", window, cx));
+            ws.set_task_run_in(editor, RunInChoice::ExistingLane, cx);
+            ws.set_task_runner(editor, Runner::Flow, cx);
+            let flow = ws.task_editor(editor).unwrap().flow_choice.flow.clone();
+            flow.update(cx, |s, cx| {
+                s.set_selected_value(&"review.yaml".into(), window, cx)
+            });
+            ws.on_task_edit_flow_changed(editor, window, cx);
+            assert!(ws.commit_task_form(editor, cx).is_none());
+            assert!(records(cx).is_empty());
+        });
+    })
+    .unwrap();
+}
+
+/// The flows offered follow where the task runs: a flow only an existing
+/// worktree has is offered once that worktree is picked, and a task saved
+/// under a flow's stem opens with it picked.
+#[gpui::test]
+fn task_editor_offers_the_flows_of_where_the_task_runs(cx: &mut TestAppContext) {
+    use super::flow_choice::{RunAs, Runner};
+    let (_root, window, ws) = workspace_with_a_review_flow(cx, "  pr: { required: true }\n");
+    let other = tempfile::tempdir().unwrap();
+    let flows = crate::workspace::flow_paths::flows_dir(other.path());
+    std::fs::create_dir_all(&flows).unwrap();
+    std::fs::write(
+        flows.join("branch-only.yaml"),
+        "version: 1\nnodes:\n  - id: c\n    kind: command\n    run: \"exit 0\"\n",
+    )
+    .unwrap();
+    cx.update_window(window.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let project = ws.active.project;
+            let id = ws.alloc_id();
+            ws.project_for_mut(project).unwrap().lanes.push(
+                crate::lane::Lane::default_for_project(id, other.path().to_path_buf()),
+            );
+            ws.open_task_editor(None, window, cx);
+            let editor = ws.task_detail_id().unwrap();
+            // A value the picker does not offer cannot be picked.
+            let offers =
+                |ws: &mut crate::workspace::Workspace,
+                 window: &mut gpui::Window,
+                 cx: &mut gpui::Context<crate::workspace::Workspace>| {
+                    let flow = ws.task_editor(editor).unwrap().flow_choice.flow.clone();
+                    flow.update(cx, |s, cx| {
+                        s.set_selected_value(&"branch-only.yaml".into(), window, cx);
+                        s.selected_value().is_some()
+                    })
+                };
+            assert!(!offers(ws, window, cx));
+            ws.choose_task_run_in(editor, RunInChoice::ExistingLane, window, cx);
+            let lane = ws.task_editor(editor).unwrap().lane_select.clone();
+            lane.update(cx, |s, cx| {
+                s.set_selected_value(
+                    &other.path().to_string_lossy().to_string().into(),
+                    window,
+                    cx,
+                )
+            });
+            ws.on_task_edit_place_changed(editor, window, cx);
+            assert!(offers(ws, window, cx));
+
+            // Switching to Flow and back changes nothing to save.
+            let title = ws.task_editor(editor).unwrap().title_input.clone();
+            title.update(cx, |s, cx| s.set_value("t", window, cx));
+            let id = ws.commit_task_form(editor, cx).unwrap();
+            ws.set_task_runner(editor, Runner::Flow, cx);
+            let flow = ws.task_editor(editor).unwrap().flow_choice.flow.clone();
+            flow.update(cx, |s, cx| {
+                s.set_selected_value(&"branch-only.yaml".into(), window, cx)
+            });
+            ws.set_task_runner(
+                editor,
+                Runner::Agent(daruda_store::tasks::TaskAgentSurface::AgentChat),
+                cx,
+            );
+            assert!(!ws.task_editor(editor).unwrap().is_dirty(cx));
+            let _ = id;
+        });
+    })
+    .unwrap();
+
+    // A stem opens picked.
+    cx.update_window(window.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let lane = ws.active_lane().unwrap().path.clone();
+            let mut spec = new_spec(ws.projects[0].uuid, "stem".into(), "1".into(), None);
+            spec.run_in = TaskRunIn::ExistingLane { path: lane };
+            spec.flow = Some(daruda_store::tasks::TaskFlow {
+                name: "review".into(),
+                profile: None,
+                input: None,
+            });
+            let id = add(spec, cx);
+            ws.open_task_editor(Some(id), window, cx);
+            let te = ws.task_editor(ws.task_detail_id().unwrap()).unwrap();
+            assert_eq!(te.run_as, RunAs::Flow);
+            assert_eq!(te.flow_choice.values(cx).flow, "review.yaml");
+            assert!(te.can_save(cx));
+        });
+    })
+    .unwrap();
+}

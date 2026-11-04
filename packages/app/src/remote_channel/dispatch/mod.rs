@@ -574,6 +574,7 @@ mod tests {
                         branch: Some("main".into()),
                         run_in: None,
                         project: None,
+                        flow: None,
                     },
                     at: chrono::Utc::now(),
                 }],

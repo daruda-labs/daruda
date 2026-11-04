@@ -88,6 +88,12 @@ impl Workspace {
             .ok()
             .map(str::to_owned);
 
+        // `None` runs the task on its agent surface.
+        let flow = match values.run_as {
+            super::flow_choice::RunAs::Flow => values.flow.task_flow(),
+            super::flow_choice::RunAs::Agent => None,
+        };
+
         let mut commits = Vec::new();
         let task_id = match &form.task_id {
             Some(id) => {
@@ -103,7 +109,23 @@ impl Workspace {
                             },
                             TaskRunIn::ExistingLane { path } => DraftLocation::ExistingLane(path),
                         };
-                        match self.task_placement(project, location, &values.branch) {
+                        let placed = self
+                            .task_placement(project, location, &values.branch)
+                            .and_then(|placed| {
+                                // The flow is checked where the task will run,
+                                // as a new task's is.
+                                if let Some(flow) = &flow {
+                                    self.resolve_task_flow(
+                                        project,
+                                        &placed.run_in,
+                                        placed.base.as_deref(),
+                                        flow,
+                                    )
+                                    .map_err(DraftError::Flow)?;
+                                }
+                                Ok(placed)
+                            });
+                        match placed {
                             Ok(placed) => (placed.base, placed.branch, Some(placed.run_in)),
                             Err(refused) => {
                                 self.report_task_draft_refusal(
@@ -125,6 +147,7 @@ impl Workspace {
                     branch,
                     run_in,
                     project: form.project.filter(|_| form.editable),
+                    flow: flow.clone(),
                 };
                 commits.push(self.update_task(id, edit, cx));
                 id.clone()
@@ -144,6 +167,7 @@ impl Workspace {
                     branch: values.branch.clone(),
                     location,
                     agent_surface: values.agent_surface,
+                    flow,
                     auto_execute: values.auto_execute,
                 };
                 let spec = match self.task_spec_from(project, draft) {
@@ -256,6 +280,7 @@ impl Workspace {
             DraftError::TitleEmpty => return,
             DraftError::ProjectNotOpen => crate::surface::strings::task::save_project_gone(),
             DraftError::LaneNotInProject => crate::surface::strings::task::save_lane_gone(),
+            DraftError::Flow(problem) => crate::workspace::task_flow::problem_text(problem),
         };
         self.report_error(
             ErrorReport::new(crate::surface::strings::task::save_refused_title())

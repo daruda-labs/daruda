@@ -252,6 +252,15 @@ fn updated_label(seconds: u64) -> String {
 }
 
 fn agent_label(task: &TaskRecord, agents: &[daruda_config::AgentDefinition]) -> String {
+    // A flow runs many agents; the flow is what the task runs on.
+    let flow = match task.execution.as_ref().map(|run| &run.source) {
+        Some(daruda_store::tasks::TaskExecutionSource::Flow { flow, .. }) => Some(flow.as_str()),
+        Some(_) => None,
+        None => task.spec.flow.as_ref().map(|flow| flow.name.as_str()),
+    };
+    if let Some(flow) = flow {
+        return strings::task::agent_flow(flow);
+    }
     if let Some(run) = &task.execution {
         return agents
             .iter()

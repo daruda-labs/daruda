@@ -21,12 +21,9 @@ use std::path::{Path, PathBuf};
 
 use crate::surface::strings as s;
 
-/// Per-repository daruda directory, checked in with the repo.
-const REPO_DIR: &str = ".daruda";
+use crate::runs::REPO_DIR;
 /// Flow definitions the user authors and commits.
 const FLOWS_DIR: &str = "flows";
-/// One directory per run. `.gitignore`d by the engine on first run.
-const RUNS_DIR: &str = "flow-runs";
 /// The leaf every run lock hangs under. Named here because a test builds
 /// its own root from it (`Workspace::lock_root`) and the shared production
 /// root ends in the same word.
@@ -51,6 +48,14 @@ pub(in crate::workspace) fn flow_label(path: &Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string())
+}
+
+/// Whether `path` is the flow `name` names: its file name, or its stem — how
+/// a control caller or a task may name it.
+pub(in crate::workspace) fn names_flow(path: &Path, name: &str) -> bool {
+    let file = path.file_name().map(|n| n.to_string_lossy());
+    let stem = path.file_stem().map(|n| n.to_string_lossy());
+    file.as_deref() == Some(name) || stem.as_deref() == Some(name)
 }
 
 /// Read once while discovering or opening a file, never while rendering a row.
@@ -140,9 +145,7 @@ pub(in crate::workspace) struct FoundFlow {
     pub name: String,
 }
 
-pub(in crate::workspace) fn runs_dir(lane_cwd: &Path) -> PathBuf {
-    lane_cwd.join(REPO_DIR).join(RUNS_DIR)
-}
+pub(in crate::workspace) use crate::runs::runs_dir;
 
 /// Where one lane's lock lives under `lock_root`. `None` when the lane's
 /// path cannot be resolved — two spellings of one tree must not become two

@@ -62,7 +62,7 @@ async fn closing_the_asks_channel_emits_question_withdrawal_after_the_mutation(
         );
         let worktree = tree(dir.path());
         let pumped = run_dir.clone();
-        cx.spawn(async move |cx| pump(worktree, pumped, events, asks, cx).await)
+        cx.spawn(async move |cx| pump(worktree, pumped, events, asks, Default::default(), cx).await)
     });
     drop(asks_tx);
     cx.run_until_parked();
@@ -279,8 +279,10 @@ async fn an_unreadable_report_still_releases_the_end(cx: &mut gpui::TestAppConte
         let wait = RunsHost::open_run_wait(Some(vec![key.clone()]), cx).expect("a waiter");
         let worktree = tree(dir.path());
         let pumped = run_dir.clone();
-        cx.spawn(async move |cx| pump(worktree, pumped, events, asks, cx).await)
-            .detach();
+        cx.spawn(async move |cx| {
+            pump(worktree, pumped, events, asks, Default::default(), cx).await
+        })
+        .detach();
         wait
     });
     events_tx
@@ -300,4 +302,127 @@ async fn an_unreadable_report_still_releases_the_end(cx: &mut gpui::TestAppConte
         "released with the process's facts: {:?}",
         end.state
     );
+}
+
+/// A task's flow run moves the task: the run's recorded start makes it
+/// running, and its end settles it, through the run's one pump.
+#[gpui::test]
+async fn a_tasks_flow_run_starts_and_settles_the_task(cx: &mut gpui::TestAppContext) {
+    use crate::runs::seed::{self, SeedEnd, SeedRun};
+    use daruda_store::tasks::{TaskExecutionSource, TaskStore};
+    cx.executor().allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let lane = dir.path().join("lane");
+    std::fs::create_dir_all(&lane).unwrap();
+    let run_id = "0000000000000001-00000001-0001";
+    let run_dir = crate::runs::runs_dir(&lane).join(run_id);
+    let run = SeedRun {
+        source: TaskExecutionSource::Flow {
+            run_id: run_id.into(),
+            flow: "review.yaml".into(),
+        },
+        ..SeedRun::chat(&lane)
+    };
+    let store = TaskStore::in_directory(
+        dir.path().join("tasks"),
+        None,
+        "test",
+        crate::runs::no_hook(),
+    )
+    .unwrap();
+    let (events_tx, events) = smol::channel::unbounded();
+    let (_asks_tx, asks) = smol::channel::unbounded();
+    let (id, pumped) = cx.update(|cx| {
+        RunsHost::install(RunsHost::open(Ok(store)), cx);
+        RunsHost::inline_commits_for_test(cx);
+        let id = seed::task(
+            seed::spec(Default::default(), "flow"),
+            Some((&run, SeedEnd::Dispatching)),
+            cx,
+        );
+        let worktree = tree(&lane);
+        let pumped = run_dir.clone();
+        let pump = cx.spawn(async move |cx| {
+            pump(worktree, pumped, events, asks, Default::default(), cx).await
+        });
+        (id, pump)
+    });
+    let lifecycle = |cx: &mut gpui::TestAppContext| {
+        cx.update(|cx| {
+            cx.global::<crate::runs::GlobalTasks>()
+                .get(&id)
+                .unwrap()
+                .lifecycle
+                .kind()
+        })
+    };
+    events_tx
+        .try_send(RunNotice::Recorded(daruda_flow::event::Sequenced {
+            seq: 1,
+            event: daruda_flow::event::FlowEvent::RunStarted {
+                run_dir: run_dir.clone(),
+                nodes: Vec::new(),
+            },
+        }))
+        .unwrap();
+    cx.run_until_parked();
+    assert_eq!(lifecycle(cx), daruda_store::tasks::LifecycleKind::Running);
+    events_tx
+        .try_send(RunNotice::Unrecorded(RunEnd::Done))
+        .unwrap();
+    pumped.await;
+    cx.run_until_parked();
+    assert_eq!(lifecycle(cx), daruda_store::tasks::LifecycleKind::Done);
+}
+
+/// A run that ends at once still settles its task: the `Dispatched` its
+/// start proposed need not have reached the book when the end arrives.
+#[gpui::test]
+async fn a_flow_run_that_ends_at_once_still_settles_its_task(cx: &mut gpui::TestAppContext) {
+    use crate::runs::seed::{self, SeedEnd, SeedRun};
+    use daruda_store::tasks::{TaskExecutionSource, TaskStore};
+    cx.executor().allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let lane = dir.path().join("lane");
+    let run_id = "0000000000000001-00000001-0002";
+    let run_dir = crate::runs::runs_dir(&lane).join(run_id);
+    let run = SeedRun {
+        source: TaskExecutionSource::Flow {
+            run_id: run_id.into(),
+            flow: "review.yaml".into(),
+        },
+        ..SeedRun::chat(&lane)
+    };
+    let store = TaskStore::in_directory(
+        dir.path().join("tasks"),
+        None,
+        "test",
+        crate::runs::no_hook(),
+    )
+    .unwrap();
+    let id = cx.update(|cx| {
+        // Proposals queue as live ones do; only the seed blocks.
+        RunsHost::install(RunsHost::open(Ok(store)), cx);
+        let id = seed::task(
+            seed::spec(Default::default(), "flow"),
+            Some((&run, SeedEnd::Dispatching)),
+            cx,
+        );
+        // The start and the end in one turn: the book still reads
+        // Dispatching when the end is folded.
+        RunsHost::flow_task_started(&run_dir, cx);
+        RunsHost::flow_task_ended(&run_dir, &RunEnd::Done, false, true, None, cx);
+        id
+    });
+    let barrier = cx.update(|cx| RunsHost::barrier(cx));
+    barrier.await;
+    cx.run_until_parked();
+    let kind = cx.update(|cx| {
+        cx.global::<crate::runs::GlobalTasks>()
+            .get(&id)
+            .unwrap()
+            .lifecycle
+            .kind()
+    });
+    assert_eq!(kind, daruda_store::tasks::LifecycleKind::Done);
 }

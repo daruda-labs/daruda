@@ -458,7 +458,7 @@ fn apply_todo_write_merges_auto_items_and_keeps_boundaries(cx: &mut TestAppConte
     );
 }
 
-fn git_repo(dir: &std::path::Path) {
+pub(in crate::workspace::tests) fn git_repo(dir: &std::path::Path) {
     for args in [
         &["init", "-q", "-b", "main"][..],
         &["config", "user.email", "daruda@test"],
@@ -617,9 +617,10 @@ fn start_new_worktree_task(
     Some(ws.read_with(cx, |ws, cx| {
         let lane = ws.lane_ref_at(&started.worktree).expect("lane registered");
         let rt = ws.main_area.runtimes.get(&lane).expect("lane runtime");
-        assert!(rt.panes.iter().any(|p| p.id == started.pane));
+        let pane = started.chat().expect("an Agent chat run");
+        assert!(rt.panes.iter().any(|p| p.id == pane));
         assert_eq!(
-            ws.agent_chat_view(started.pane).unwrap().read(cx).status(),
+            ws.agent_chat_view(pane).unwrap().read(cx).status(),
             &daruda_chat::view::AgentSessionStatus::Connected,
         );
         let active = ws.active_runtime();

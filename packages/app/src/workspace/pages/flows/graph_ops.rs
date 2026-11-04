@@ -108,6 +108,7 @@ impl Workspace {
             until,
             pinned,
             inputs: None,
+            run_id: None,
         };
         // A refusal has already said so on screen — this caller is the graph's
         // ▶, and the person pressing it is looking at that toast.

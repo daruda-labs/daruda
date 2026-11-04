@@ -563,7 +563,9 @@ fn transcript_fills_whichever_of_hook_and_binding_arrives_first(cx: &mut TestApp
                 TaskExecutionSource::ClaudeCli {
                     transcript_path, ..
                 } => transcript_path,
-                TaskExecutionSource::AgentChat => panic!("CLI run"),
+                TaskExecutionSource::AgentChat | TaskExecutionSource::Flow { .. } => {
+                    panic!("CLI run")
+                }
             };
             let cwd = std::env::temp_dir();
 

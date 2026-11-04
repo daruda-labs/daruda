@@ -109,6 +109,7 @@ impl RunsHost {
                 }
             });
         }
+        let pump_overage = overage.clone();
         let run = FlowRun {
             snapshot,
             pointers,
@@ -128,7 +129,7 @@ impl RunsHost {
         })?;
         Self::tell_windows(tree.clone(), FlowChanged::Repainted, cx);
         let run_id = crate::runs::result::flow_run_id(&run_dir);
-        cx.spawn(async move |cx| pump(tree, run_dir, events, asks, cx).await)
+        cx.spawn(async move |cx| pump(tree, run_dir, events, asks, pump_overage, cx).await)
             .detach();
         Ok(run_id)
     }

@@ -87,6 +87,8 @@ fn start_failure_text(failure: StartFailure) -> String {
         StartFailure::AgentMissing => t::error_start_agent_missing(),
         StartFailure::ConnectUnavailable => t::error_start_connect_failed(),
         StartFailure::AccountUnavailable => t::error_start_account_unavailable(),
+        StartFailure::FlowMissing => t::error_start_flow_missing(),
+        StartFailure::FlowRefused => t::error_start_flow_refused(),
     }
 }
 

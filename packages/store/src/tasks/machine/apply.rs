@@ -331,6 +331,7 @@ fn edit_spec(record: &mut TaskRecord, edit: &TaskEdit) {
         if let Some(project) = edit.project {
             spec.project = project;
         }
+        spec.flow.clone_from(&edit.flow);
     }
 }
 

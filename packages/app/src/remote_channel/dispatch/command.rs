@@ -123,6 +123,9 @@ fn render_reply(
 /// git and the agent are up, the outcome follows as its own message — a
 /// chat announced as the new target, or a notice.
 fn start_task(task: String, cx: &mut App) -> ControlOutcome {
+    // A phone start asks no approval, so the notice says what a desktop
+    // approval would have: the flow, and how freely its agents act.
+    let flow = crate::control::exec::task_flow_summary(&task, cx);
     let pending = crate::control::exec::begin_task_start(
         task,
         crate::control::exec::CommandOrigin::Phone,
@@ -143,7 +146,10 @@ fn start_task(task: String, cx: &mut App) -> ControlOutcome {
             // A chat was announced as the phone's new target on the way.
             Ok(ControlResult::TaskStarted { chat: Some(_), .. }) => {}
             Ok(_) => crate::remote_channel::send_notice_everywhere(
-                crate::surface::strings::control::task_started_terminal(&title),
+                match &flow {
+                    Some(flow) => crate::surface::strings::control::task_started_flow(&title, flow),
+                    None => crate::surface::strings::control::task_started_terminal(&title),
+                },
                 cx,
             ),
             Err(e) => crate::remote_channel::send_notice_everywhere(

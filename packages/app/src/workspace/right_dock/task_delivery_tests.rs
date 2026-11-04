@@ -283,6 +283,7 @@ fn running_chat_uses_its_frozen_surface_after_the_task_is_edited(cx: &mut TestAp
                     branch: None,
                     run_in: None,
                     project: None,
+                    flow: None,
                 };
                 seed::commit_now(
                     vec![TaskEvent::Edited {

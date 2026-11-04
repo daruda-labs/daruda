@@ -104,6 +104,7 @@ pub(crate) fn run(id: &str, run: &SeedRun, end: SeedEnd) -> Vec<TaskEvent> {
                 transcript_path: None,
                 process: CliProcessState::Discovering,
             },
+            flow @ TaskExecutionSource::Flow { .. } => flow.clone(),
         },
         at: at(0),
     }];

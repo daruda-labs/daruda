@@ -50,8 +50,8 @@ cd "$ROOT"
 #     hook script by design (Claude Code's settings.json only supports
 #     one registration; the script self-resolves whichever daruda binary
 #     is on PATH at hook-fire time regardless of profile).
-#   - tasks/prompt_file.rs, workspace/flow_paths.rs: the per-repo
-#     `.daruda/` directory that holds task prompts and flow definitions.
+#   - tasks/prompt_file.rs, runs/flow_tasks.rs: the per-repo `.daruda/`
+#     directory that holds task prompts, flow definitions and flow runs.
 #     Committed with the repo and shared by every profile that opens it,
 #     for the same reason as the `task-*.md` files above.
 WHITELIST=(
@@ -60,7 +60,7 @@ WHITELIST=(
     "packages/app/src/workspace/pages/tasks/editor/task_edit_ops.rs"
     "packages/agent/src/hooks/installer.rs"
     "packages/store/src/tasks/prompt_file.rs"
-    "packages/app/src/workspace/flow_paths.rs"
+    "packages/app/src/runs/flow_tasks.rs"
 )
 
 is_whitelisted() {

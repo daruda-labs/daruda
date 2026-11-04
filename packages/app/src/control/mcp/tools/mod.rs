@@ -358,7 +358,28 @@ fn task_create_properties() -> serde_json::Value {
             "type": "string",
             "enum": ["agent_chat", "terminal"],
             "description": "Run the task as an agent chat (the default) or in a Claude \
-                            terminal.",
+                            terminal. Ignored with `flow`.",
+        },
+        "flow": {
+            "type": "object",
+            "description": "Run the task as this flow instead of one agent: its prompt \
+                            becomes the value of one of the flow's inputs. Take `name` and \
+                            the input and profile names from daruda_flow_list. With no \
+                            `worktree`, the run gets a new worktree of its own.",
+            "properties": {
+                "name": { "type": "string", "description": "The flow's `name`." },
+                "profile": {
+                    "type": "string",
+                    "description": "Required when the flow declares profiles.",
+                },
+                "input": {
+                    "type": "string",
+                    "description": "The input the prompt fills. Omit when the flow has \
+                                    exactly one required input, or none.",
+                },
+            },
+            "required": ["name"],
+            "additionalProperties": false,
         },
     })
 }

@@ -88,6 +88,11 @@ pub enum StartFailure {
     AgentMissing,
     ConnectUnavailable,
     AccountUnavailable,
+    /// The task's flow is not one the lane can run by that name.
+    FlowMissing,
+    /// The flow was refused before it started: its file, profile, inputs or
+    /// the lane's lock.
+    FlowRefused,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

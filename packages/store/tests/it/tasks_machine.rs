@@ -53,6 +53,7 @@ fn spec() -> TaskSpec {
         run_in: TaskRunIn::NewWorktree,
         agent_type: AgentType::Claude,
         agent_surface: TaskAgentSurface::Terminal,
+        flow: None,
         auto_execute: true,
         created_at: at(0),
     }
@@ -173,6 +174,7 @@ fn edit() -> TaskEdit {
             path: PathBuf::from("/repo/lane"),
         }),
         project: Some(ProjectUuid(uuid::Uuid::from_u128(2))),
+        flow: None,
     }
 }
 
@@ -1318,8 +1320,110 @@ fn an_undelivered_reason_round_trips_through_the_task_log() {
 }
 
 #[test]
-fn cli_session_end_records_require_schema_seven() {
-    assert_eq!(TaskMachine::SCHEMA, 7);
+fn flow_task_records_require_schema_eight() {
+    assert_eq!(TaskMachine::SCHEMA, 8);
+}
+
+/// A flow run records no pane, account or agent: `LanePrepared` carries
+/// only where it runs, and the source names the run it started.
+#[test]
+fn a_flow_run_is_prepared_without_a_pane_and_offers_no_chat() {
+    let flow = TaskExecutionSource::Flow {
+        run_id: "0000018f-1-1".into(),
+        flow: "review.yaml".into(),
+    };
+    let mut book = TasksBook::default();
+    let events = [
+        TaskEvent::Created { spec: spec() },
+        TaskEvent::DispatchRequested {
+            id: ID.into(),
+            execution_id: RUN.into(),
+            source: flow.clone(),
+            started_by: None,
+            at: at(1),
+        },
+        TaskEvent::LanePrepared {
+            terminal_id: None,
+            exec: exec(),
+            worktree: worktree(),
+            agent_id: String::new(),
+            account_id: None,
+            cwd: worktree(),
+            at: at(2),
+        },
+        TaskEvent::Dispatched {
+            exec: exec(),
+            session_id: None,
+            at: at(3),
+        },
+    ];
+    for event in &events {
+        TaskMachine::check(&book, event).unwrap();
+        TaskMachine::apply(&mut book, event);
+    }
+    let record = task(&book);
+    let run = record.execution.as_ref().unwrap();
+    assert_eq!(run.source, flow);
+    assert_eq!(run.source.flow_run_id(), Some("0000018f-1-1"));
+    assert!(!run.chat_available());
+    assert_eq!(record.lifecycle.kind(), LifecycleKind::Running);
+    // A flow run has no CLI process to report on.
+    let observed = TaskEvent::CliProcessObserved {
+        exec: exec(),
+        process: CliProcessState::Unknown,
+        at: at(4),
+    };
+    assert!(TaskMachine::check(&book, &observed).is_err());
+    let settled = TaskEvent::Settled {
+        result: Some("report".into()),
+        exec: exec(),
+        outcome: SettleOutcome::Completed {
+            end_reason: SessionEndReason::Stop,
+        },
+        at: at(5),
+    };
+    TaskMachine::check(&book, &settled).unwrap();
+    TaskMachine::apply(&mut book, &settled);
+    assert!(
+        !task(&book).is_continuable(),
+        "a flow has no one conversation"
+    );
+}
+
+/// The flow a task runs as is a launch field: it changes in Backlog only.
+#[test]
+fn a_tasks_flow_is_edited_only_before_it_starts() {
+    let flow = daruda_store::tasks::TaskFlow {
+        name: "review.yaml".into(),
+        profile: Some("cheap".into()),
+        input: None,
+    };
+    let mut book = TasksBook::default();
+    TaskMachine::apply(&mut book, &TaskEvent::Created { spec: spec() });
+    let edited = TaskEvent::Edited {
+        id: ID.into(),
+        edit: TaskEdit {
+            flow: Some(flow.clone()),
+            ..edit()
+        },
+        at: at(1),
+    };
+    TaskMachine::apply(&mut book, &edited);
+    assert_eq!(task(&book).spec.flow, Some(flow.clone()));
+    TaskMachine::apply(&mut book, &sample(EventKind::DispatchRequested));
+    TaskMachine::apply(
+        &mut book,
+        &TaskEvent::Edited {
+            id: ID.into(),
+            edit: edit(),
+            at: at(2),
+        },
+    );
+    assert_eq!(
+        task(&book).spec.flow,
+        Some(flow),
+        "a started task keeps its flow"
+    );
 }
 
 fn continued(prior: &str, run: &str, seconds: i64) -> TaskEvent {
@@ -1583,7 +1687,7 @@ fn provenance_survives_log_reopening_and_an_old_machine_refuses_it() {
             RunLog::<OldTaskMachine, _>::open(FileBackend::new(dir.path()), "old"),
             Err(OpenError::TooNew {
                 what: Versioned::Schema,
-                found: 7,
+                found: TaskMachine::SCHEMA,
                 supported: 2
             })
         ));
@@ -1811,7 +1915,7 @@ fn terminal_identity_replays_and_schema_five_preparation_remains_readable() {
         RunLog::<SchemaFive, _>::open(FileBackend::new(directory.path()), "old"),
         Err(OpenError::TooNew {
             what: Versioned::Schema,
-            found: 7,
+            found: TaskMachine::SCHEMA,
             supported: 5
         })
     ));
@@ -1935,7 +2039,7 @@ fn a_late_cli_goodbye_is_retained_in_history_after_reopening_the_task() {
 }
 
 #[test]
-fn schema_six_runs_default_the_end_reason_and_refuse_schema_seven_logs() {
+fn schema_six_runs_default_the_end_reason_and_refuse_newer_logs() {
     use daruda_runlog::{FileBackend, OpenError, RunLog, Versioned};
     struct SchemaSix;
     impl daruda_runlog::Machine for SchemaSix {
@@ -1976,7 +2080,7 @@ fn schema_six_runs_default_the_end_reason_and_refuse_schema_seven_logs() {
         RunLog::<SchemaSix, _>::open(FileBackend::new(directory.path()), "old"),
         Err(OpenError::TooNew {
             what: Versioned::Schema,
-            found: 7,
+            found: TaskMachine::SCHEMA,
             supported: 6
         })
     ));

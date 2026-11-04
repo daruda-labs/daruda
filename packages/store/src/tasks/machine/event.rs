@@ -11,7 +11,7 @@ use crate::accounts::AccountId;
 use crate::project::ProjectUuid;
 use crate::tasks::{
     CliProcessState, ExecutionRef, SessionEndReason, SubTask, TaskAgentSurface,
-    TaskExecutionSource, TaskId, TaskRunIn,
+    TaskExecutionSource, TaskFlow, TaskId, TaskRunIn,
 };
 
 /// The surface that requested an execution, independent of its agent transport.
@@ -193,6 +193,10 @@ pub struct TaskEdit {
     pub branch: Option<String>,
     pub run_in: Option<TaskRunIn>,
     pub project: Option<ProjectUuid>,
+    /// Applies only in Backlog, like the other launch fields; `None` runs
+    /// the task on `agent_surface`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow: Option<TaskFlow>,
 }
 
 /// One `TodoWrite` entry. `id` is used only if the entry becomes a new row.

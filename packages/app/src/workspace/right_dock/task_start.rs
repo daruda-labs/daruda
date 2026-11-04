@@ -59,21 +59,54 @@ pub(crate) enum TaskStartError {
     NotRecorded {
         detail: String,
     },
+    /// The task's flow is not one its lane can run by that name.
+    FlowMissing,
+    /// The task's flow could not run as the task describes it, or refused
+    /// to start. `shown` says why to the person; `detail` says it in the
+    /// fixed English a control answer carries.
+    FlowRefused {
+        shown: String,
+        detail: String,
+    },
 }
 
-/// Where an accepted start handed the task's prompt to a pane.
+/// Where an accepted start handed the task's prompt over.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TaskStarted {
     /// Identity captured by the start, even if the task has since run again.
     pub(crate) exec: ExecutionRef,
     pub(crate) worktree: PathBuf,
-    pub(crate) pane: PaneId,
-    pub(crate) surface: TaskAgentSurface,
+    pub(crate) on: StartedOn,
+}
+
+/// What a started run is driven by.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum StartedOn {
+    /// A terminal or Agent chat pane holds the prompt.
+    Pane {
+        pane: PaneId,
+        surface: TaskAgentSurface,
+    },
+    /// A flow run took the prompt as an input; it has no one pane.
+    Flow,
+}
+
+impl TaskStarted {
+    /// The Agent chat a started run talks in, if it has one.
+    pub(crate) fn chat(&self) -> Option<PaneId> {
+        match self.on {
+            StartedOn::Pane {
+                pane,
+                surface: TaskAgentSurface::AgentChat,
+            } => Some(pane),
+            StartedOn::Pane { .. } | StartedOn::Flow => None,
+        }
+    }
 }
 
 pub(crate) type TaskStartOutcome = Result<TaskStarted, TaskStartError>;
 
-type Answer = smol::channel::Sender<TaskStartOutcome>;
+pub(super) type Answer = smol::channel::Sender<TaskStartOutcome>;
 
 impl TaskStartError {
     /// The cause the task log records for a start that failed after it was
@@ -91,6 +124,8 @@ impl TaskStartError {
             Self::FinalizeFailed { .. } => StartFailure::FinalizeFailed,
             Self::PromptUndelivered { .. } => StartFailure::PromptUndelivered,
             Self::WindowClosed => StartFailure::WindowClosed,
+            Self::FlowMissing => StartFailure::FlowMissing,
+            Self::FlowRefused { .. } => StartFailure::FlowRefused,
         })
     }
 
@@ -145,6 +180,21 @@ impl TaskStartError {
                             daruda_store::observability::system_info::redact_home(path),
                         )
                         .dedup("task.start.lane_missing")
+                        .build(),
+                );
+            }
+            Self::FlowMissing => (
+                crate::surface::strings::task::error_start_flow_missing(),
+                ErrorSeverity::Warning,
+                "tasks.start.flow_missing",
+            ),
+            Self::FlowRefused { shown, .. } => {
+                return Some(
+                    ErrorReport::new(crate::surface::strings::task::error_start_flow_refused())
+                        .severity(ErrorSeverity::Warning)
+                        .message(shown.clone())
+                        .at(file!(), line!())
+                        .dedup("tasks.start.flow_refused")
                         .build(),
                 );
             }
@@ -237,7 +287,7 @@ impl Workspace {
 
     /// The one place a start's outcome is delivered: the failure recorded
     /// for a run that was requested, the toast, then the answer.
-    fn finish_task_start(
+    pub(super) fn finish_task_start(
         &mut self,
         outcome: TaskStartOutcome,
         exec: Option<&ExecutionRef>,
@@ -277,21 +327,32 @@ impl Workspace {
             return Err(TaskStartError::NotBacklog);
         }
         let reveal = reveal_for(started_by);
-        // An existing lane needs no git repo, lock or checkout.
-        let route = match &task.spec.run_in {
-            TaskRunIn::ExistingLane { path } => {
-                StartRoute::Existing(self.prepare_existing_lane_start(path, reveal)?)
+        let route = match &task.spec.flow {
+            Some(flow) => {
+                StartRoute::Flow(self.prepare_task_flow_start(&task, flow, reveal, started_by, cx)?)
             }
-            TaskRunIn::NewWorktree => StartRoute::New(self.prepare_worktree_start(&task, reveal)?),
+            // An existing lane needs no git repo, lock or checkout.
+            None => match &task.spec.run_in {
+                TaskRunIn::ExistingLane { path } => {
+                    StartRoute::Existing(self.prepare_existing_lane_start(path, reveal)?)
+                }
+                TaskRunIn::NewWorktree => {
+                    StartRoute::New(self.prepare_worktree_start(&task, reveal)?)
+                }
+            },
         };
         let exec = ExecutionRef {
             task_id: task.id().to_owned(),
             execution_id: uuid::Uuid::new_v4().to_string(),
         };
+        let source = match &route {
+            StartRoute::Flow(start) => start.source(),
+            StartRoute::Existing(_) | StartRoute::New(_) => source_for(task.spec.agent_surface),
+        };
         let requested = RunsHost::task(
             crate::runs::TaskIntent::Start {
                 exec: exec.clone(),
-                source: source_for(task.spec.agent_surface),
+                source,
                 started_by,
             },
             cx,
@@ -301,8 +362,8 @@ impl Workspace {
             let continued = ws.update_in(cx, |ws, window, cx| match recorded {
                 Ok(_) => ws.continue_task_start(route, exec.clone(), answer.clone(), window, cx),
                 Err(e) => {
-                    if let StartRoute::New(plan) = &route {
-                        ws.release_repo_lock(&plan.plan.repo_root);
+                    if let Some(repo_root) = route.repo_lock() {
+                        ws.release_repo_lock(repo_root);
                     }
                     let refused = match e {
                         TaskCommitError::Rejected(_) => TaskStartError::NotBacklog,
@@ -323,7 +384,7 @@ impl Workspace {
 
     /// Everything a new worktree needs, checked before the start is
     /// recorded; holds the repository's lock from here on.
-    fn prepare_worktree_start(
+    pub(super) fn prepare_worktree_start(
         &mut self,
         task: &TaskRecord,
         reveal: LaneReveal,
@@ -379,6 +440,9 @@ impl Workspace {
                 self.answer_when_dispatched(started, exec, answer, cx);
             }
             StartRoute::New(start) => self.create_task_worktree(start, exec, answer, window, cx),
+            StartRoute::Flow(start) => {
+                self.continue_task_flow_start(start, exec, answer, window, cx)
+            }
         }
     }
 
@@ -453,8 +517,7 @@ impl Workspace {
                                     TaskStarted {
                                         exec: exec.clone(),
                                         worktree: plan.new_path.clone(),
-                                        pane,
-                                        surface,
+                                        on: StartedOn::Pane { pane, surface },
                                     },
                                     dispatched,
                                 ))
@@ -480,7 +543,7 @@ impl Workspace {
 
     /// Answer after the preparation and delivery result is projected. Chat
     /// queueing leaves the task Dispatching until its PromptSent arrives.
-    fn answer_when_dispatched(
+    pub(super) fn answer_when_dispatched(
         &mut self,
         started: Result<(TaskStarted, gpui::Task<Result<u64, TaskStartError>>), TaskStartError>,
         exec: ExecutionRef,
@@ -684,11 +747,11 @@ impl Workspace {
 }
 
 /// A new worktree's start, checked and holding the repository's lock.
-struct WorktreeStart {
-    plan: CreateWorktreePlan,
-    project_id: daruda_store::project::ProjectId,
-    surface: TaskAgentSurface,
-    reveal: LaneReveal,
+pub(super) struct WorktreeStart {
+    pub(super) plan: CreateWorktreePlan,
+    pub(super) project_id: daruda_store::project::ProjectId,
+    pub(super) surface: TaskAgentSurface,
+    pub(super) reveal: LaneReveal,
 }
 
 /// Only a start made at this window brings its lane forward. One the phone
@@ -705,6 +768,18 @@ fn reveal_for(started_by: StartedBy) -> LaneReveal {
 enum StartRoute {
     Existing(super::task_existing_lane_ops::ExistingLaneStart),
     New(WorktreeStart),
+    Flow(super::task_flow_start::TaskFlowStart),
+}
+
+impl StartRoute {
+    /// The repository whose lock the start holds until its worktree exists.
+    fn repo_lock(&self) -> Option<&Path> {
+        match self {
+            Self::New(start) => Some(&start.plan.repo_root),
+            Self::Flow(start) => start.repo_lock(),
+            Self::Existing(_) => None,
+        }
+    }
 }
 
 /// What the pane a run uses is, as `LanePrepared` records it.
@@ -726,13 +801,13 @@ fn source_for(surface: TaskAgentSurface) -> TaskExecutionSource {
 }
 
 /// Record why a requested start did not dispatch.
-fn fail_start(exec: &ExecutionRef, e: &TaskStartError, cx: &mut App) {
+pub(super) fn fail_start(exec: &ExecutionRef, e: &TaskStartError, cx: &mut App) {
     let Some(cause) = e.failure() else { return };
     RunsHost::delivery_failed(exec.clone(), crate::runs::DeliveryFailure::Start(cause), cx);
 }
 
 /// The window closed under a recorded start: record it, then answer.
-fn abandon_start(exec: &ExecutionRef, answer: &Answer, cx: &gpui::AsyncApp) {
+pub(super) fn abandon_start(exec: &ExecutionRef, answer: &Answer, cx: &gpui::AsyncApp) {
     cx.update(|cx| abandon_start_now(exec, answer, cx));
 }
 

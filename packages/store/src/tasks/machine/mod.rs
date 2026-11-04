@@ -30,7 +30,7 @@ impl daruda_runlog::Machine for TaskMachine {
     // Bump with any change to how `TaskEvent` or `TasksBook` serializes, so an older
     // build refuses the log as too new. Schema versions are monotonic, including
     // versions used only by local builds; never reuse them.
-    const SCHEMA: u32 = 7;
+    const SCHEMA: u32 = 8;
 
     fn check(state: &TasksBook, event: &TaskEvent) -> Result<(), TaskRejected> {
         check::check(state, event)

@@ -212,6 +212,7 @@ async fn a_pinned_node_reaches_the_run_as_a_file_to_copy(cx: &mut TestAppContext
         until: None,
         pinned: vec!["design".into()],
         inputs: None,
+        run_id: None,
     };
     assert_eq!(
         ws.read_with(&vcx, |ws, _| ws.overlays.flow_picker.focused_pick()),
@@ -291,6 +292,7 @@ async fn a_pin_with_no_finished_output_is_reported_and_not_sent(cx: &mut TestApp
                     until: None,
                     pinned: vec!["build".into()],
                     inputs: None,
+                    run_id: None,
                 },
                 cx,
             )
@@ -355,6 +357,7 @@ async fn running_as_far_as_a_node_needs_exactly_one_selected(cx: &mut TestAppCon
                 until: Some("design".into()),
                 pinned: Vec::new(),
                 inputs: None,
+                run_id: None,
             },
             profile: None,
         }),

@@ -156,6 +156,7 @@ fn review_regression_execution_description_is_frozen_at_dispatch() {
             branch: None,
             run_in: None,
             project: None,
+            flow: None,
         },
     };
     TaskMachine::apply(&mut book, &edit("during run"));

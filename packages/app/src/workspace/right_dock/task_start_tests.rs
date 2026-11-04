@@ -304,8 +304,10 @@ fn an_existing_lane_start_answers_with_where_it_runs(cx: &mut TestAppContext) {
         Ok(Ok(TaskStarted {
             exec,
             worktree: lane,
-            pane,
-            surface: TaskAgentSurface::Terminal,
+            on: super::StartedOn::Pane {
+                pane,
+                surface: TaskAgentSurface::Terminal,
+            },
         }))
     );
 }

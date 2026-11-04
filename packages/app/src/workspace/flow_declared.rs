@@ -50,6 +50,37 @@ pub(in crate::workspace) fn declared_inputs(path: &Path) -> Vec<InputDecl> {
     declared(path, |declared| declared.inputs.clone())
 }
 
+/// Both of what `path` declares, from one read, so a check of one against
+/// the other cannot straddle a change to the file.
+pub(in crate::workspace) fn declared_flow(path: &Path) -> (Vec<String>, Vec<InputDecl>) {
+    declared(path, |declared| {
+        (declared.profiles.clone(), declared.inputs.clone())
+    })
+}
+
+/// Why a start's profile does not fit what the flow declares.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::workspace) enum ProfileRefusal {
+    /// The flow declares profiles and the start names none.
+    Needed,
+    /// The start names a profile the flow does not declare.
+    Unknown,
+}
+
+/// Whether `profile` fits a flow declaring `profiles`. A flow that declares
+/// some runs only with one of them named: a name it does not declare is
+/// refused rather than run under the defaults.
+pub(in crate::workspace) fn profile_refusal(
+    profiles: &[String],
+    profile: Option<&str>,
+) -> Option<ProfileRefusal> {
+    match profile {
+        None if !profiles.is_empty() => Some(ProfileRefusal::Needed),
+        Some(profile) if !profiles.iter().any(|p| p == profile) => Some(ProfileRefusal::Unknown),
+        _ => None,
+    }
+}
+
 /// `pick` applied to what `path` declares, read again only when the file
 /// changed. Picked under the lock so a caller copies just what it uses.
 fn declared<T>(path: &Path, pick: impl FnOnce(&Declared) -> T) -> T {

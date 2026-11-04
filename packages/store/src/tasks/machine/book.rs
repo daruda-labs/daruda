@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use super::{Lifecycle, StartedBy};
 use crate::project::ProjectUuid;
 use crate::tasks::{
-    AgentType, ExecutionRef, SubTask, TaskAgentSurface, TaskExecution, TaskId, TaskRunIn,
+    AgentType, ExecutionRef, SubTask, TaskAgentSurface, TaskExecution, TaskFlow, TaskId, TaskRunIn,
 };
 
 /// What a task is, independent of any run. Mirrors the legacy `Task` fields.
@@ -25,6 +25,9 @@ pub struct TaskSpec {
     pub run_in: TaskRunIn,
     pub agent_type: AgentType,
     pub agent_surface: TaskAgentSurface,
+    /// Runs as this flow instead of on `agent_surface`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow: Option<TaskFlow>,
     pub auto_execute: bool,
     pub created_at: DateTime<Utc>,
 }
@@ -51,6 +54,7 @@ impl TaskSpec {
             run_in: TaskRunIn::default(),
             agent_type: AgentType::default(),
             agent_surface: TaskAgentSurface::default(),
+            flow: None,
             auto_execute: true,
             created_at,
         }

@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use chrono::Utc;
 use daruda_store::project::{LaneKind, ProjectUuid};
-use daruda_store::tasks::{TaskAgentSurface, TaskRunIn, TaskSpec};
+use daruda_store::tasks::{TaskAgentSurface, TaskFlow, TaskRunIn, TaskSpec};
 
 use crate::workspace::Workspace;
 
@@ -22,6 +22,8 @@ pub(in crate::workspace) struct TaskDraft {
     pub branch: String,
     pub location: DraftLocation,
     pub agent_surface: TaskAgentSurface,
+    /// Runs as this flow instead of on `agent_surface`.
+    pub flow: Option<TaskFlow>,
     pub auto_execute: bool,
 }
 
@@ -46,6 +48,8 @@ pub(in crate::workspace) struct TaskPlacement {
 /// Why a draft cannot become a task.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::workspace) enum DraftError {
+    /// The task's flow cannot run as the task describes it.
+    Flow(crate::workspace::task_flow::TaskFlowProblem),
     TitleEmpty,
     /// The project is not open in this window.
     ProjectNotOpen,
@@ -76,6 +80,10 @@ impl Workspace {
             return Err(DraftError::TitleEmpty);
         }
         let placement = self.task_placement(project, draft.location, &draft.branch)?;
+        if let Some(flow) = &draft.flow {
+            self.resolve_task_flow(project, &placement.run_in, placement.base.as_deref(), flow)
+                .map_err(DraftError::Flow)?;
+        }
         let mut spec = TaskSpec::new(
             project,
             title.to_owned(),
@@ -89,6 +97,7 @@ impl Workspace {
         spec.run_in = placement.run_in;
         spec.notes = draft.notes;
         spec.agent_surface = draft.agent_surface;
+        spec.flow = draft.flow;
         spec.auto_execute = draft.auto_execute;
         Ok(spec)
     }
@@ -172,6 +181,7 @@ mod tests {
             branch: branch.into(),
             location,
             agent_surface: TaskAgentSurface::Terminal,
+            flow: None,
             auto_execute: false,
         }
     }

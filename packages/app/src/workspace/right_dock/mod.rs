@@ -28,6 +28,7 @@ pub(in crate::workspace) mod task_chat_ops;
 pub(in crate::workspace) mod task_cli_ops;
 pub(in crate::workspace) mod task_commit_ops;
 pub(in crate::workspace) mod task_existing_lane_ops;
+mod task_flow_start;
 mod task_hook_ops;
 pub(in crate::workspace) mod task_ops;
 pub(in crate::workspace) mod task_picker_modal;

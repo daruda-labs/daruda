@@ -95,6 +95,7 @@ fn migrate_task(task: &Task) -> TaskRecord {
             run_in: task.run_in.clone(),
             agent_type: task.agent_type,
             agent_surface: task.agent_surface,
+            flow: None,
             auto_execute: task.auto_execute,
             created_at: task.created_at,
         },

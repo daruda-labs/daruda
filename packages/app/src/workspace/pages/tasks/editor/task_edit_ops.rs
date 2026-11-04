@@ -309,11 +309,33 @@ impl Workspace {
         let base_sub = cx.subscribe_in(
             &base_select,
             window,
-            move |_this, _state, ev: &crate::ui::select::ConfirmEvent, _window, cx| {
+            move |this, _state, ev: &crate::ui::select::ConfirmEvent, window, cx| {
                 if matches!(ev, crate::ui::select::SelectEvent::Confirm(_)) {
-                    cx.notify();
+                    this.on_task_edit_place_changed(editor_id, window, cx);
                 }
             },
+        );
+
+        let initial_flow = initial.as_ref().and_then(|t| t.spec.flow.as_ref());
+        let run_as = if initial_flow.is_some() {
+            super::flow_choice::RunAs::Flow
+        } else {
+            super::flow_choice::RunAs::Agent
+        };
+        let flow_run_in = initial
+            .as_ref()
+            .map(|t| t.spec.run_in.clone())
+            .unwrap_or_default();
+        let flow_base = initial
+            .as_ref()
+            .and_then(|t| t.spec.base_worktree_path.clone());
+        let (flow_choice, flow_subs) = self.build_flow_choice(
+            editor_id,
+            project,
+            (&flow_run_in, flow_base.as_deref()),
+            initial_flow,
+            window,
+            cx,
         );
 
         let focus_handle = cx.focus_handle();
@@ -339,9 +361,9 @@ impl Workspace {
         let lane_sub = cx.subscribe_in(
             &lane_select,
             window,
-            move |_this, _state, ev: &crate::ui::select::ConfirmEvent, _window, cx| {
+            move |this, _state, ev: &crate::ui::select::ConfirmEvent, window, cx| {
                 if matches!(ev, crate::ui::select::SelectEvent::Confirm(_)) {
-                    cx.notify();
+                    this.on_task_edit_place_changed(editor_id, window, cx);
                 }
             },
         );
@@ -365,6 +387,8 @@ impl Workspace {
             notes_state,
             auto_execute,
             agent_surface,
+            run_as,
+            flow_choice,
             focus_handle,
             cached_title,
             // Replaced below by what the built form actually shows.
@@ -392,6 +416,7 @@ impl Workspace {
             disk_copy: None,
             body_scroll_handle: gpui::ScrollHandle::new(),
         };
+        content._subscriptions.extend(flow_subs);
         // The baseline is what the form shows: a base or lane no longer
         // registered is not selected, and must not read as an edit.
         content.saved_snapshot = content.current_snapshot(cx);
@@ -469,6 +494,7 @@ impl Workspace {
         if let Some(te) = self.task_editor_mut(editor_id) {
             te.branch_validation = validation;
         }
+        self.refill_task_flow_choices(editor_id, window, cx);
         cx.notify();
     }
 
@@ -568,6 +594,20 @@ impl Workspace {
             .and_then(|te| te.task_id.clone())
         {
             self.open_task_chat(&id, window, cx);
+        }
+    }
+
+    pub(super) fn open_editor_task_flow_run(
+        &mut self,
+        editor_id: TaskEditorId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(id) = self
+            .task_editor(editor_id)
+            .and_then(|te| te.task_id.clone())
+        {
+            self.open_task_flow_run(&id, window, cx);
         }
     }
 }

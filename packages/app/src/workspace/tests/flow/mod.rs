@@ -19,6 +19,7 @@ mod ownership;
 mod partial;
 mod report;
 mod run;
+mod task;
 
 use super::*;
 

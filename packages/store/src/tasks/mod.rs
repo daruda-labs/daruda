@@ -40,6 +40,6 @@ pub use prompt_file::{
 pub use store::{ReconcileBlocked, Reconciling, TaskStore, TaskStoreError};
 pub use task::{
     AgentType, SCHEMA_VERSION, SessionEndReason, SubTask, TASK_TOOL_USE_FAILURE_THRESHOLD, Task,
-    TaskAgentSurface, TaskExecution, TaskFilter, TaskId, TaskRunIn, TaskScope, TaskState,
+    TaskAgentSurface, TaskExecution, TaskFilter, TaskFlow, TaskId, TaskRunIn, TaskScope, TaskState,
     TasksState, new_task_id,
 };

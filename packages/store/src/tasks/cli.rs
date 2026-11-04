@@ -15,6 +15,15 @@ pub enum TaskExecutionSource {
         transcript_path: Option<PathBuf>,
         process: CliProcessState,
     },
+    /// A flow run in the lane, whose directory is
+    /// `<cwd>/.daruda/flow-runs/<run_id>`. The id is chosen before the run
+    /// starts, so the run is found again after a restart.
+    Flow {
+        run_id: String,
+        /// The flow's file name, kept with the run so history still says
+        /// which flow it was after the task is edited.
+        flow: String,
+    },
 }
 
 /// What is known about a CLI run's OS process. Only `ExitConfirmed` — the
@@ -58,9 +67,17 @@ impl CliSessionEnd {
 }
 
 impl TaskExecutionSource {
+    /// The flow run's id, for a run that is one.
+    pub fn flow_run_id(&self) -> Option<&str> {
+        match self {
+            Self::Flow { run_id, .. } => Some(run_id),
+            Self::AgentChat | Self::ClaudeCli { .. } => None,
+        }
+    }
+
     pub fn cli_process(&self) -> Option<&CliProcessState> {
         match self {
-            Self::AgentChat => None,
+            Self::AgentChat | Self::Flow { .. } => None,
             Self::ClaudeCli { process, .. } => Some(process),
         }
     }
@@ -68,7 +85,7 @@ impl TaskExecutionSource {
     /// The CLI record behind a run, for the observations that change it.
     pub fn cli_mut(&mut self) -> Option<(&mut Option<PathBuf>, &mut CliProcessState)> {
         match self {
-            Self::AgentChat => None,
+            Self::AgentChat | Self::Flow { .. } => None,
             Self::ClaudeCli {
                 transcript_path,
                 process,

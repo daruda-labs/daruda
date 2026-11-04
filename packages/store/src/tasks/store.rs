@@ -302,6 +302,7 @@ mod tests {
             run_in: Default::default(),
             agent_type: Default::default(),
             agent_surface: Default::default(),
+            flow: None,
             auto_execute: true,
             created_at: chrono::Utc::now(),
         };
@@ -332,6 +333,7 @@ mod tests {
             run_in: Default::default(),
             agent_type: Default::default(),
             agent_surface: Default::default(),
+            flow: None,
             auto_execute: true,
             created_at: chrono::Utc::now(),
         };
