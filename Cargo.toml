@@ -21,8 +21,8 @@ edition = "2024"
 rust-version = "1.98.1"
 license = "AGPL-3.0-only"
 description = "Run multiple AI agents in parallel, each in its own git worktree, from a single macOS terminal window."
-repository = "https://github.com/daruda-labs/daruda"
-homepage = "https://github.com/daruda-labs/daruda"
+repository = "https://github.com/daruda-ai/daruda"
+homepage = "https://github.com/daruda-ai/daruda"
 
 [workspace.dependencies]
 gpui = { git = "https://github.com/zed-industries/zed", package = "gpui", rev = "decd2399b180b64dea2a4182f9ac63545a45e7a3" }

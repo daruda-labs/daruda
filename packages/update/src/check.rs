@@ -11,7 +11,7 @@ use std::io::{self, Read as _};
 use std::path::Path;
 use std::time::Duration;
 
-const RELEASES_LATEST: &str = "https://api.github.com/repos/daruda-labs/daruda/releases/latest";
+const RELEASES_LATEST: &str = "https://api.github.com/repos/daruda-ai/daruda/releases/latest";
 
 /// The GitHub host serving the API and release pages.
 const TRUSTED_HOST: &str = "github.com";
@@ -196,7 +196,7 @@ mod tests {
     #[test]
     fn accepts_github_release_download_url() {
         assert!(is_trusted_host(
-            "https://github.com/daruda-labs/daruda/releases/download/v0.3.0/x.dmg"
+            "https://github.com/daruda-ai/daruda/releases/download/v0.3.0/x.dmg"
         ));
     }
 

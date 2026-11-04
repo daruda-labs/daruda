@@ -66,7 +66,7 @@ current project's worktrees.
 ### Run From Source on macOS
 
 ```bash
-git clone --recurse-submodules https://github.com/daruda-labs/daruda
+git clone --recurse-submodules https://github.com/daruda-ai/daruda
 cd daruda
 
 ./scripts/bootstrap-zig.sh
@@ -84,7 +84,7 @@ cargo run -p daruda
 ### Run From Source on Windows
 
 ```powershell
-git clone --recurse-submodules https://github.com/daruda-labs/daruda
+git clone --recurse-submodules https://github.com/daruda-ai/daruda
 cd daruda
 ./scripts/bootstrap-zig.ps1
 ./scripts/build-windows.ps1

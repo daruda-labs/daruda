@@ -60,7 +60,7 @@ Clone with submodules because the Ghostty VT core is vendored under
 `vendor/ghostty`.
 
 ```bash
-git clone --recurse-submodules https://github.com/daruda-labs/daruda
+git clone --recurse-submodules https://github.com/daruda-ai/daruda
 cd daruda
 
 git submodule update --init --recursive

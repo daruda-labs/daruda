@@ -172,9 +172,9 @@ mod tests {
         \"tag_name\": \"v0.3.0\",\
         \"body\": \"## Changes\\n- fixed things\",\
         \"assets\": [\
-            { \"name\": \"daruda-0.3.0.dmg\", \"browser_download_url\": \"https://github.com/daruda-labs/daruda/releases/download/v0.3.0/daruda-0.3.0.dmg\" },\
+            { \"name\": \"daruda-0.3.0.dmg\", \"browser_download_url\": \"https://github.com/daruda-ai/daruda/releases/download/v0.3.0/daruda-0.3.0.dmg\" },\
             { \"name\": \"something-else.txt\", \"browser_download_url\": \"https://example.com/other\" },\
-            { \"name\": \"SHA256SUMS.txt\", \"browser_download_url\": \"https://github.com/daruda-labs/daruda/releases/download/v0.3.0/SHA256SUMS.txt\" }\
+            { \"name\": \"SHA256SUMS.txt\", \"browser_download_url\": \"https://github.com/daruda-ai/daruda/releases/download/v0.3.0/SHA256SUMS.txt\" }\
         ]\
     }";
 
@@ -292,12 +292,12 @@ mod tests {
             .unwrap();
         assert_eq!(
             info.asset_url,
-            "https://github.com/daruda-labs/daruda/releases/download/v0.3.0/daruda-0.3.0.dmg"
+            "https://github.com/daruda-ai/daruda/releases/download/v0.3.0/daruda-0.3.0.dmg"
         );
         assert_eq!(info.asset_name, "daruda-0.3.0.dmg");
         assert_eq!(
             info.checksums_url,
-            "https://github.com/daruda-labs/daruda/releases/download/v0.3.0/SHA256SUMS.txt"
+            "https://github.com/daruda-ai/daruda/releases/download/v0.3.0/SHA256SUMS.txt"
         );
         assert_eq!(info.version, semver::Version::parse("0.3.0").unwrap());
         assert_eq!(info.tag, "v0.3.0");
@@ -375,7 +375,7 @@ mod tests {
             "prerelease": true,
             "body": "",
             "assets": [
-                { "name": "daruda-0.9.0.dmg", "browser_download_url": "https://github.com/daruda-labs/daruda/releases/download/v0.9.0/daruda-0.9.0.dmg" }
+                { "name": "daruda-0.9.0.dmg", "browser_download_url": "https://github.com/daruda-ai/daruda/releases/download/v0.9.0/daruda-0.9.0.dmg" }
             ]
         }"#;
         let current = semver::Version::parse("0.2.0").unwrap();
@@ -393,7 +393,7 @@ mod tests {
             "draft": true,
             "body": "",
             "assets": [
-                { "name": "daruda-0.9.0.dmg", "browser_download_url": "https://github.com/daruda-labs/daruda/releases/download/v0.9.0/daruda-0.9.0.dmg" }
+                { "name": "daruda-0.9.0.dmg", "browser_download_url": "https://github.com/daruda-ai/daruda/releases/download/v0.9.0/daruda-0.9.0.dmg" }
             ]
         }"#;
         let current = semver::Version::parse("0.2.0").unwrap();

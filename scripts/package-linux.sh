@@ -76,7 +76,7 @@ To add a launcher entry, copy daruda.desktop to ~/.local/share/applications/
 with Exec= pointing at this binary, and icons/ into ~/.local/share/icons/.
 The .deb from the same release does all of that for you.
 Install git to use repositories, shell flows, and ACP agents.
-Source and build instructions: https://github.com/daruda-labs/daruda
+Source and build instructions: https://github.com/daruda-ai/daruda
 EOF
 ARCHIVE="$OUT/$NAME.tar.gz"
 tar -C "$STAGE" --owner=0 --group=0 --numeric-owner -czf "$ARCHIVE" "$NAME"
@@ -116,11 +116,11 @@ Version: $DEB_VERSION
 Section: devel
 Priority: optional
 Architecture: $DEB_ARCH
-Maintainer: daruda-labs <admin@daruda.ai>
+Maintainer: daruda-ai <admin@daruda.ai>
 Installed-Size: $(du -sk "$DEB/usr" | cut -f1)
 Depends: $DEPENDS
 Recommends: mesa-vulkan-drivers, git
-Homepage: https://github.com/daruda-labs/daruda
+Homepage: https://github.com/daruda-ai/daruda
 Description: Run AI coding agents in parallel, each in its own git worktree
  daruda is a desktop workspace that runs several AI coding agents side by
  side, each attached to its own git worktree, with a terminal and an agent

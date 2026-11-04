@@ -66,7 +66,7 @@ daruda $version ($Profile, Windows $($target.Arch))
 Extract the entire ZIP, then run daruda.exe. Keep the runtime DLLs beside it.
 Portable build: $signing. Windows GUI support is experimental.
 Install Git for Windows to use repositories, shell flows, and ACP agents.
-Source and build instructions: https://github.com/daruda-labs/daruda
+Source and build instructions: https://github.com/daruda-ai/daruda
 "@ | Set-Content -LiteralPath (Join-Path $bundle 'README.txt') -Encoding utf8
         $archive = Join-Path $outputRoot "$name.zip"
         Compress-Archive -LiteralPath $bundle -DestinationPath $archive -Force

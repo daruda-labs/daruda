@@ -370,4 +370,4 @@ jobs:
 
             ## Build from source
 
-            See [contributor setup](https://github.com/daruda-labs/daruda/blob/${{ github.ref_name }}/CONTRIBUTING.md#setup).
+            See [contributor setup](https://github.com/daruda-ai/daruda/blob/${{ github.ref_name }}/CONTRIBUTING.md#setup).
